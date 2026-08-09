@@ -12,5 +12,8 @@
     "@muthoy/config": "workspace:*",
     "eslint": "^9.30.0",
     "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "@muthoy/types": "workspace:*"
   }
 }

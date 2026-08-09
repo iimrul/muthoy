@@ -79,7 +79,7 @@ single-file Cursor Pro edit).
 > constraints — implement it as given. Generate the first migration. Write a DB
 > init module that runs migrations safely on every app start."
 
-**Expected Output:** all 23 tables exist locally, matching schema.ts exactly.
+**Expected Output:** all 24 tables exist locally, matching schema.ts exactly.
 
 **Validation:** spot-check 5 tables' columns against schema.ts directly; confirm
 every foreign key has its specified `onDelete` behavior.

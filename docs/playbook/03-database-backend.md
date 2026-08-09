@@ -6,7 +6,7 @@
 ---
 
 ## ER DIAGRAM
-See the ERD delivered earlier in this project (23 tables). Summary of the graph:
+See the ERD delivered earlier in this project (24 tables). Summary of the graph:
 `shops` is the hub every table traces back to (directly or via a parent); the
 FEFO chain is `medicines → batches → inventory_movements`; the sale chain is
 `sales → sale_items → batches`, with `sales_returns` hanging off `sale_items`;
@@ -18,7 +18,7 @@ polymorphically points at `expenses` when `type='expense'`.
 **Use `schema.ts` (SQLite/Drizzle, lives at `apps/mobile/db/schema.ts`) and
 `supabase-schema.sql` (Postgres, lives at `backend/supabase/migrations/`) exactly
 as delivered — do not regenerate them from a fresh prompt, hand them to Cursor
-verbatim.** 23 tables. Every table carries: `id` (device-generated UUID),
+verbatim.** 24 tables. Every table carries: `id` (device-generated UUID),
 `shop_id`, `created_at`, `updated_at`, `is_dirty` (SQLite side), `is_deleted`,
 and on the tables where it matters, `deleted_at`/`deleted_by`. Shared TypeScript
 types derived from this schema live in `packages/types` so `apps/mobile` and

@@ -3,6 +3,8 @@
 // scope lock). The Drizzle schema doesn't exist yet (Day 2) either way —
 // these are signature-only stubs.
 
+import type { Paisa } from '@muthoy/types';
+
 export interface Supplier {
   id: string;
   name: string;
@@ -13,7 +15,7 @@ export interface Supplier {
 }
 
 // TODO(P1): list suppliers with outstanding payable per supplier.
-export async function listSuppliers(_shopId: string): Promise<(Supplier & { payable: number })[]> {
+export async function listSuppliers(_shopId: string): Promise<(Supplier & { payable: Paisa })[]> {
   throw new Error('TODO: implement supplier list query (P1 — post-beta, Volume 4 SUPPLIER)');
 }
 
@@ -24,6 +26,6 @@ export async function createSupplier(_shopId: string, _supplier: Omit<Supplier, 
 // TODO(P1): purchase history + outstanding payables for one supplier
 // (Volume 4 SUPPLIER: "its own detail view showing purchase history and
 // outstanding payables").
-export async function getSupplierDetail(_supplierId: string): Promise<{ supplier: Supplier; payable: number }> {
+export async function getSupplierDetail(_supplierId: string): Promise<{ supplier: Supplier; payable: Paisa }> {
   throw new Error('TODO: implement supplier detail query (P1 — post-beta, Volume 4 SUPPLIER)');
 }

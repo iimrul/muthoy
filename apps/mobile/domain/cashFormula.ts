@@ -10,19 +10,22 @@
 // React/DB imports (DEVELOPMENT_RULES.md) — db/ fetches the raw numbers,
 // this file only does the arithmetic.
 
+import type { Paisa } from '@muthoy/types';
+
 export interface CashFormulaInput {
-  openingCash: number;
-  cashSales: number;
-  creditCollections: number;
-  expenses: number;
-  refunds: number;
-  supplierPayments: number;
-  withdrawals: number;
+  openingCash: Paisa;
+  cashSales: Paisa;
+  creditCollections: Paisa;
+  expenses: Paisa;
+  refunds: Paisa;
+  supplierPayments: Paisa;
+  withdrawals: Paisa;
 }
 
-// TODO(Day 7): implement the fixed formula above exactly. Must have a
-// passing unit test before Day 7 is considered done (Volume 0 Day 7
-// checklist: "Cash formula unit tests pass").
-export function expectedCash(_input: CashFormulaInput): number {
+// TODO(Day 7): implement the fixed formula above exactly, using addPaisa/
+// subtractPaisa from @muthoy/types — integer arithmetic, so no rounding is
+// needed or allowed here. Must have a passing unit test before Day 7 is
+// considered done (Volume 0 Day 7 checklist: "Cash formula unit tests pass").
+export function expectedCash(_input: CashFormulaInput): Paisa {
   throw new Error('TODO: implement the fixed cash formula (Volume 0 Day 7, CLAUDE.md rule 4)');
 }

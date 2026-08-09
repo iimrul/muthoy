@@ -1,4 +1,5 @@
 import { ScrollView, Text, View } from 'react-native';
+import { fromTaka } from '@muthoy/types';
 import { formatMoney, formatNumber } from '@muthoy/utils';
 
 // Day-1 design-system smoke test: confirms brand colors + all three font
@@ -10,7 +11,7 @@ export default function DesignSystemTestScreen() {
       <View className="gap-4 p-6">
         <Text className="font-sans-bold text-2xl text-richBlack">Muthoy POS</Text>
         <Text className="font-bangla text-lg text-richBlack">বাংলায় লেখা — মুথয় পিওএস</Text>
-        <Text className="font-mono text-xl text-brand-green">{formatMoney(1250.5)}</Text>
+        <Text className="font-mono text-xl text-brand-green">{formatMoney(fromTaka(1250.5))}</Text>
         <Text className="font-sans text-base text-midGray">{formatNumber(1234567)} units tracked</Text>
         <View className="rounded-lg bg-brand-green p-4">
           <Text className="font-sans-semibold text-white">Brand green surface</Text>

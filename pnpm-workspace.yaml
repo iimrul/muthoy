@@ -5,6 +5,9 @@ packages:
 allowBuilds:
   # unrs-resolver: transitive dep of Expo's own eslint-config-expo (fast
   # TS-aware module resolution for ESLint). Official Expo tooling, approved.
+  # esbuild: drizzle-kit's bundler, used to read db/schema.ts when generating
+  # migrations. Dev-only tooling, never shipped in the app. Approved.
+  esbuild: true
   unrs-resolver: true
 
 # Deliberately not a wildcard on "apps/*": apps/prototype-web ships its own

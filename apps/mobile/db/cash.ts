@@ -3,12 +3,13 @@
 // schema doesn't exist yet (Day 2), so these are signature-only stubs — no
 // Drizzle import until then.
 
+import type { Paisa } from '@muthoy/types';
 import type { CashFormulaInput } from '../domain/cashFormula';
 
 export interface RecordExpenseInput {
   shopId: string;
   category: string;
-  amount: number;
+  amount: Paisa;
   description: string;
   receiptPhotoUri?: string;
 }
@@ -31,7 +32,7 @@ export async function getCashSummary(_shopId: string, _businessDate: string): Pr
 export interface CloseDayInput {
   shopId: string;
   businessDate: string;
-  countedCash: number;
+  countedCash: Paisa;
   openedBy: string;
   closedBy: string;
 }

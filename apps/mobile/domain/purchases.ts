@@ -5,6 +5,8 @@
 // Volume 4 PURCHASE: "invoice_no auto-generated... COD pays cash
 // immediately, credit updates the supplier payable only."
 
+import type { Paisa } from '@muthoy/types';
+
 export type PurchasePaymentType = 'cod' | 'credit';
 
 // TODO(P1): generate a human-readable, shop-scoped unique invoice number —
@@ -16,6 +18,6 @@ export function generateInvoiceNumber(_shopId: string, _lastInvoiceNumber: strin
 
 // TODO(P1): COD pays cash immediately (cash-drawer effect); credit only
 // updates the supplier payable, no immediate cash-drawer effect.
-export function resolvePaymentEffect(_paymentType: PurchasePaymentType, _amount: number): { cashDrawerDelta: number; payableDelta: number } {
+export function resolvePaymentEffect(_paymentType: PurchasePaymentType, _amount: Paisa): { cashDrawerDelta: Paisa; payableDelta: Paisa } {
   throw new Error('TODO: implement COD/credit payment-effect resolution (P1 — post-beta, Volume 4 PURCHASE)');
 }

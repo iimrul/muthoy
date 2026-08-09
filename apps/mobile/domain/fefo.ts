@@ -5,12 +5,14 @@
 // CLAUDE.md rule 3: sorts by the REAL expiryDate, recomputed at read time —
 // never a stored day-count.
 
+import type { Paisa } from '@muthoy/types';
+
 export interface Batch {
   id: string;
   medicineId: string;
   expiryDate: string; // ISO date — the real date, never a precomputed day-count
   quantityAvailable: number;
-  salePrice: number;
+  salePrice: Paisa;
 }
 
 export interface DeductionResult {

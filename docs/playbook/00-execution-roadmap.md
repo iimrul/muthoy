@@ -30,7 +30,7 @@ gets checked against this table before any code is written.**
 ### P0 — BETA-CRITICAL (must ship in the 15 days, no negotiation)
 ```
 Monorepo foundation, EAS dev build
-Full local SQLite schema (all 23 tables — cheap, already finalized) + WAL
+Full local SQLite schema (all 24 tables — cheap, already finalized) + WAL
 FTS5 medicine search
 Registration + PIN setup/login (local)
 Navigation shell, standardized header, dashboard
@@ -218,7 +218,7 @@ correctly; git repo with an initial commit; an EAS dev build link.
 > start. Also scaffold the sync_queue table structure now, even though the
 > sync engine's logic is built Day 13. Plan first."
 
-**Expected Output:** SQLite initializes with all 23 tables; migration file
+**Expected Output:** SQLite initializes with all 24 tables; migration file
 generated; DB init runs idempotently.
 
 **Validation Checklist**

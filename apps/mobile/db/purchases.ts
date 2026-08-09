@@ -3,12 +3,14 @@
 // scope lock) — Beta ships manual batch entry via Add Medicine instead. The
 // Drizzle schema doesn't exist yet (Day 2) either way — signature-only stubs.
 
+import type { Paisa } from '@muthoy/types';
+
 export interface CreatePurchaseInput {
   shopId: string;
   supplierId: string;
   invoiceNo: string; // from domain/purchases.generateInvoiceNumber
   paymentType: 'cod' | 'credit';
-  lineItems: { medicineId: string; batchNo: string; expiryDate: string; quantity: number; purchasePrice: number; salePrice: number }[];
+  lineItems: { medicineId: string; batchNo: string; expiryDate: string; quantity: number; purchasePrice: Paisa; salePrice: Paisa }[];
 }
 
 // TODO(P1): write `purchases` + `purchase_items` in one transaction; line

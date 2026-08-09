@@ -22,4 +22,8 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
+// Treat .sql as source so Drizzle's generated migration files can be imported
+// (paired with babel.config.js's inline-import plugin).
+config.resolver.sourceExts.push('sql');
+
 module.exports = withNativeWind(config, { input: './global.css' });

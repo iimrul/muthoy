@@ -20,8 +20,15 @@
 ## Local Database (Offline-First) — SQLite
 - SQLite (WAL Mode)
 - SQLite FTS5 (Day One — instant search across 20k+ medicines)
-- SQLCipher (encryption)
+- SQLCipher (encryption) — **still required; not yet enabled.** Deferred on
+  Day 2 because it is a native-build + key-management task. MUST be in place
+  before any real pharmacy/pilot data is stored — see DECISIONS.md.
 - Drizzle ORM
+
+> Money representation: every money value is an INTEGER number of paisa
+> (1 taka = 100 paisa), never a float. Enforced in TypeScript by the branded
+> `Paisa` type in `packages/types`. The Supabase mirror must match — see the
+> Day 12 precondition in DECISIONS.md.
 
 ## State Management & Caching
 - Zustand (in-app UI/session/cart state — not the source of truth)

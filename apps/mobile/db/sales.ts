@@ -3,6 +3,7 @@
 // touches SQLite directly"). The Drizzle schema doesn't exist yet (Day 2),
 // so these are signature-only stubs — no Drizzle import until then.
 
+import type { Paisa } from '@muthoy/types';
 import type { Batch } from '../domain/fefo';
 
 export interface MedicineSearchResult {
@@ -34,7 +35,7 @@ export interface SaleTransactionInput {
     // Pre-resolved by domain/fefo.deduct() — this function persists the
     // plan, it does not decide which batches to use.
     deductions: { batchId: string; quantityDeducted: number }[];
-    unitPrice: number;
+    unitPrice: Paisa;
     discount?: { type: 'percentage' | 'flat'; value: number };
   }[];
 }

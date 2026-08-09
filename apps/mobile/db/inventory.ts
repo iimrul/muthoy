@@ -2,6 +2,7 @@
 // Inventory (DEVELOPMENT_RULES.md). The Drizzle schema doesn't exist yet
 // (Day 2), so these are signature-only stubs — no Drizzle import until then.
 
+import type { Paisa } from '@muthoy/types';
 import type { Batch } from '../domain/fefo';
 
 export interface MedicineListRow {
@@ -30,7 +31,7 @@ export interface CreateMedicineInput {
   requiresPrescription: boolean;
   threshold: number;
   barcode?: string;
-  firstBatch: { batchNo: string; expiryDate: string; quantity: number; purchasePrice: number; salePrice: number };
+  firstBatch: { batchNo: string; expiryDate: string; quantity: number; purchasePrice: Paisa; salePrice: Paisa };
 }
 
 // TODO(Day 8): create a medicine + its first batch in one transaction.

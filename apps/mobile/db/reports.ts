@@ -4,10 +4,12 @@
 // "Reports polish"). The Drizzle schema doesn't exist yet (Day 2) either
 // way — signature-only stubs.
 
+import type { Paisa } from '@muthoy/types';
+
 export interface DateRangeTotals {
-  totalSales: number;
-  totalExpenses: number;
-  profit: number;
+  totalSales: Paisa;
+  totalExpenses: Paisa;
+  profit: Paisa;
 }
 
 export async function getDateRangeTotals(_shopId: string, _startDate: string, _endDate: string): Promise<DateRangeTotals> {
@@ -22,7 +24,7 @@ export interface SalesHistoryRow {
   saleId: string;
   invoiceNo: string;
   createdAt: string;
-  total: number;
+  total: Paisa;
   paymentType: 'cash' | 'credit';
 }
 

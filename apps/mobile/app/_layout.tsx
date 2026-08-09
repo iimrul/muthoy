@@ -17,6 +17,8 @@ import {
   HindSiliguri_700Bold,
 } from '@expo-google-fonts/hind-siliguri';
 import { DMMono_400Regular, DMMono_500Medium } from '@expo-google-fonts/dm-mono';
+import { Text, View } from 'react-native';
+import { useDatabaseMigrations } from '../db';
 import '../global.css';
 
 // Keep the splash screen visible while brand fonts load — CLAUDE.md rule 6
@@ -39,14 +41,35 @@ export default function RootLayout() {
     DMMono_500Medium,
   });
 
+  // Runs pending SQLite migrations once per app start; a no-op if already applied.
+  const { isReady: isDatabaseReady, error: databaseError } = useDatabaseMigrations();
+
+  const isBootComplete = (fontsLoaded || fontError) && (isDatabaseReady || databaseError);
+
   useEffect(() => {
-    if (fontsLoaded || fontError) {
+    if (isBootComplete) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError]);
+  }, [isBootComplete]);
 
-  if (!fontsLoaded && !fontError) {
+  if (!isBootComplete) {
     return null;
+  }
+
+  // A failed migration means the app has no usable local database — every
+  // screen would read empty or throw. Surface it loudly instead of booting
+  // into a silently broken app (Volume 4's "no empty catch blocks that
+  // swallow failures").
+  if (databaseError) {
+    return (
+      <View className="flex-1 items-center justify-center gap-3 bg-errorBg p-6">
+        <Text className="font-sans-bold text-lg text-error">Database setup failed</Text>
+        <Text className="font-sans text-center text-sm text-richBlack">
+          The app cannot start safely. Please report this message:
+        </Text>
+        <Text className="font-mono text-center text-xs text-richBlack">{databaseError.message}</Text>
+      </View>
+    );
   }
 
   return <Stack screenOptions={{ headerShown: false }} />;

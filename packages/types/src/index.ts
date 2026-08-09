@@ -1,4 +1,4 @@
-// Empty scaffold — types generated from backend/supabase's schema land here
-// starting Day 2 (local) / Day 12 (Supabase). Both apps import shared types
-// from here; never redefine the same shape twice (DEVELOPMENT_RULES.md).
-export {};
+// Types generated from / derived for the schema in apps/mobile/db/schema.ts.
+// Both apps import shared types from here; never redefine the same shape twice
+// (DEVELOPMENT_RULES.md).
+export * from './money';
