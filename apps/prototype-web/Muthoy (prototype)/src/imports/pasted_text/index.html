@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "error": "#ba1a1a",
+                    "on-secondary": "#ffffff",
+                    "surface": "#faf8fd",
+                    "secondary-fixed-dim": "#b4cad7",
+                    "inverse-primary": "#89d3d2",
+                    "on-tertiary-fixed-variant": "#713610",
+                    "error-container": "#ffdad6",
+                    "outline-variant": "#bec9c8",
+                    "surface-container-highest": "#e3e2e6",
+                    "inverse-on-surface": "#f2f0f4",
+                    "on-secondary-container": "#526772",
+                    "secondary-fixed": "#cfe6f3",
+                    "primary-fixed": "#a5f0ef",
+                    "on-primary-container": "#8fd9d9",
+                    "on-secondary-fixed": "#071e27",
+                    "surface-bright": "#faf8fd",
+                    "surface-dim": "#dbd9de",
+                    "surface-container-low": "#f5f3f7",
+                    "surface-container-high": "#e9e7ec",
+                    "tertiary-container": "#85461f",
+                    "primary-fixed-dim": "#89d3d2",
+                    "on-tertiary": "#ffffff",
+                    "on-secondary-fixed-variant": "#354a54",
+                    "tertiary-fixed": "#ffdbca",
+                    "on-tertiary-fixed": "#331200",
+                    "primary": "#004747",
+                    "outline": "#6f7979",
+                    "on-error-container": "#93000a",
+                    "secondary-container": "#cfe6f3",
+                    "background": "#faf8fd",
+                    "surface-tint": "#136969",
+                    "on-tertiary-container": "#ffbf9d",
+                    "on-primary-fixed": "#002020",
+                    "on-background": "#1b1b1f",
+                    "surface-variant": "#e3e2e6",
+                    "on-surface": "#1b1b1f",
+                    "on-surface-variant": "#3f4948",
+                    "on-primary-fixed-variant": "#004f4f",
+                    "primary-container": "#006161",
+                    "surface-container-lowest": "#ffffff",
+                    "on-error": "#ffffff",
+                    "tertiary": "#683009",
+                    "inverse-surface": "#303034",
+                    "surface-container": "#efedf2",
+                    "on-primary": "#ffffff",
+                    "tertiary-fixed-dim": "#ffb68e",
+                    "secondary": "#4c616c"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "fontFamily": {
+                    "headline": ["Manrope"],
+                    "body": ["Inter"],
+                    "label": ["Inter"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface font-body text-on-surface selection:bg-primary-fixed-dim">
+<!-- Top Navigation Anchor (Shared Component) -->
+<header class="fixed top-0 w-full z-50 flex items-center justify-between px-6 h-16 bg-[#f9f9fc] dark:bg-gray-950">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-[#006161] dark:text-[#007c7c]">list</span>
+<h1 class="font-headline font-extrabold text-[#006161] dark:text-[#007c7c] tracking-widest uppercase text-lg">PharmaPOS</h1>
+</div>
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-[#006161] dark:text-[#007c7c]">doorbell</span>
+</div>
+</header>
+<main class="pt-16 pb-32">
+<!-- Hero Branding Section -->
+<section class="bg-gradient-to-br from-[#006161] to-[#007c7c] pt-10 pb-20 px-6 rounded-b-[40px]">
+<div class="mb-8">
+<h2 class="font-headline font-bold text-[22px] text-white">Good Morning, Alex</h2>
+<p class="font-body text-sm text-white/70">Monday, October 23rd, 2023</p>
+</div>
+<!-- Summary Strip Cards (Asymmetric/Horizontal Scroll) -->
+<div class="flex gap-4 overflow-x-auto hide-scrollbar -mx-6 px-6">
+<div class="min-w-[160px] bg-white/15 border border-white/20 p-5 rounded-2xl backdrop-blur-md">
+<p class="font-label text-[10px] text-white/70 uppercase tracking-widest mb-1">Today's Sales</p>
+<p class="font-headline font-[800] text-xl text-white">$4,280.50</p>
+</div>
+<div class="min-w-[160px] bg-white/15 border border-white/20 p-5 rounded-2xl backdrop-blur-md">
+<p class="font-label text-[10px] text-white/70 uppercase tracking-widest mb-1">Expected Cash</p>
+<p class="font-headline font-[800] text-xl text-white">$1,140.00</p>
+</div>
+<div class="min-w-[160px] bg-white/15 border border-white/20 p-5 rounded-2xl backdrop-blur-md">
+<p class="font-label text-[10px] text-white/70 uppercase tracking-widest mb-1">Outstanding Credit</p>
+<p class="font-headline font-[800] text-xl text-white">$892.40</p>
+</div>
+<div class="min-w-[160px] bg-white/15 border border-white/20 p-5 rounded-2xl backdrop-blur-md">
+<p class="font-label text-[10px] text-white/70 uppercase tracking-widest mb-1">Low Stock Count</p>
+<p class="font-headline font-[800] text-xl text-white">12 Items</p>
+</div>
+</div>
+</section>
+<!-- Dynamic Alerts Bento -->
+<section class="px-6 -mt-10 grid grid-cols-1 gap-4">
+<!-- Expiry Alert -->
+<div class="bg-tertiary-fixed p-5 rounded-2xl flex items-start gap-4">
+<div class="p-2 bg-white/30 rounded-xl">
+<span class="material-symbols-outlined text-tertiary">info</span>
+</div>
+<div class="flex-1">
+<h3 class="font-headline font-bold text-tertiary text-sm">Critical Expiration</h3>
+<p class="font-body text-tertiary text-xs opacity-80 mt-1">45 units of "Amoxicillin 500mg" expiring within 7 days. Action required.</p>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<!-- Low Stock Alert -->
+<div class="bg-tertiary-fixed p-5 rounded-2xl flex flex-col gap-3">
+<div class="w-10 h-10 flex items-center justify-center bg-white/30 rounded-xl">
+<span class="material-symbols-outlined text-tertiary">vaccines</span>
+</div>
+<div>
+<h3 class="font-headline font-bold text-tertiary text-sm leading-tight">Inventory Shortfall</h3>
+<p class="font-body text-tertiary text-[11px] opacity-80 mt-1">Influenza vaccines below threshold (8 doses left).</p>
+</div>
+</div>
+<!-- Credit Alert -->
+<div class="bg-error-container p-5 rounded-2xl flex flex-col gap-3">
+<div class="w-10 h-10 flex items-center justify-center bg-white/30 rounded-xl">
+<span class="material-symbols-outlined text-on-error-container">info</span>
+</div>
+<div>
+<h3 class="font-headline font-bold text-on-error-container text-sm leading-tight">Overdue Credit</h3>
+<p class="font-body text-on-error-container text-[11px] opacity-80 mt-1">Apex Clinics: $420.00 is now 15 days overdue.</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Quick Access Canvas -->
+<section class="mt-10 px-6">
+<div class="flex items-center justify-between mb-6">
+<h2 class="font-headline font-bold text-lg text-primary tracking-tight">Recent Activity</h2>
+<button class="text-xs font-bold text-[#006161] uppercase tracking-widest">View All</button>
+</div>
+<div class="space-y-4">
+<!-- Activity Item 1 -->
+<div class="bg-surface-container-lowest p-4 rounded-xl flex items-center justify-between">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-xl overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="close-up of pharmacist hand placing medication bottle into a small paper delivery bag in a clinical setting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDxP1FPAEllvjHcHt5wATUcczPMHGMDpPgo2tDuSfv2c7elZ8JkScRC_9wQP84AwJ_sd6LmtHVtHeDn6nHiS1hHU-qj6H0fKJUk5pWKpdkOOjkFFcAH2VhCQ8R2odDw17GzVBeCHZXJuELwCNLdlGiIGe7NeYOiT5p8nkzZe0EAeusxNfjOJAdRYuMUKBly2DS8tnSchcaGs62U42LbIZLgRUuRP-W5pjtM684cbZXu4llATYRahvdhuJE_QmyvlFotlpNpD_NZ-WM"/>
+</div>
+<div>
+<h4 class="font-headline font-bold text-sm">Sale #849201</h4>
+<p class="font-body text-xs text-on-surface-variant">2 mins ago • Dr. Sarah Williams</p>
+</div>
+</div>
+<p class="font-headline font-extrabold text-[#006161]">$124.00</p>
+</div>
+<!-- Activity Item 2 -->
+<div class="bg-surface-container-lowest p-4 rounded-xl flex items-center justify-between">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-xl overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="professional pharmacy inventory shelf with organized white boxes and clinical lighting soft focus" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCbh3e--qDgyh5UiOsw33sEP2ZNIehmswCNNnyfSONqoNbfQ4A-PZLaxtRM4z8stwkdFJQtcVvg9iwzbIDS6ZwDHcIRqFPAozPsHPwXtdFruksyfevKnwE1d_vQ-YttW2-Np5PK8baoIrbRiwbLAuHUk9NHX61pIlb4CZcS0KoAbTnrtWlRL92ve9t1IMKjz7liEMT9lCxGiFlz7cwgBR-odieRxjhHf8jOwiok7AU9OdjMRDCafa5AiLXj_bRoBx5ucimZfElaSHE"/>
+</div>
+<div>
+<h4 class="font-headline font-bold text-sm">Stock Arrival</h4>
+<p class="font-body text-xs text-on-surface-variant">1 hour ago • Central Logistics</p>
+</div>
+</div>
+<span class="bg-secondary-fixed text-on-secondary-fixed px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest">Pending</span>
+</div>
+</div>
+</section>
+</main>
+<!-- Bottom Navigation Bar (Shared Component Anchor) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl rounded-t-[16px] shadow-[0_-4px_20px_rgba(0,0,0,0.06)]">
+<!-- Active Tab: Dashboard -->
+<div class="flex flex-col items-center justify-center bg-gradient-to-br from-[#006161] to-[#007c7c] text-white rounded-xl px-5 py-2 transition-all duration-300 ease-out active:scale-90 cursor-pointer">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">speed</span>
+<span class="font-label font-bold text-[10px] uppercase tracking-wider mt-1">Dashboard</span>
+</div>
+<!-- Inactive Tab: Inventory -->
+<div class="flex flex-col items-center justify-center text-[#1a1c1e]/60 dark:text-gray-400 px-5 py-2 hover:text-[#006161] dark:hover:text-[#007c7c] transition-all duration-300 ease-out active:scale-90 cursor-pointer">
+<span class="material-symbols-outlined">warehouse</span>
+<span class="font-label font-bold text-[10px] uppercase tracking-wider mt-1">Inventory</span>
+</div>
+<!-- Inactive Tab: Orders -->
+<div class="flex flex-col items-center justify-center text-[#1a1c1e]/60 dark:text-gray-400 px-5 py-2 hover:text-[#006161] dark:hover:text-[#007c7c] transition-all duration-300 ease-out active:scale-90 cursor-pointer">
+<span class="material-symbols-outlined">shopping_cart</span>
+<span class="font-label font-bold text-[10px] uppercase tracking-wider mt-1">Orders</span>
+</div>
+<!-- Inactive Tab: Settings -->
+<div class="flex flex-col items-center justify-center text-[#1a1c1e]/60 dark:text-gray-400 px-5 py-2 hover:text-[#006161] dark:hover:text-[#007c7c] transition-all duration-300 ease-out active:scale-90 cursor-pointer">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label font-bold text-[10px] uppercase tracking-wider mt-1">Settings</span>
+</div>
+</nav>
+<!-- Floating Quick Sale Trigger -->
+<div class="fixed bottom-24 right-6 z-40">
+<button class="w-14 h-14 bg-gradient-to-br from-[#006161] to-[#007c7c] rounded-2xl flex items-center justify-center text-white shadow-lg active:scale-95 transition-transform">
+<span class="material-symbols-outlined text-3xl">add</span>
+</button>
+</div>
+</body></html>

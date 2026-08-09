@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+
+<html class="light" lang="bn"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Pharmacy Pro - End of Day Summary</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Hind+Siliguri:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-tertiary-fixed": "#410004",
+                    "error-container": "#ffdad6",
+                    "on-background": "#101e1a",
+                    "surface-variant": "#d5e6df",
+                    "on-surface-variant": "#3d4a42",
+                    "on-primary-fixed": "#002114",
+                    "secondary": "#1b6b51",
+                    "on-primary-fixed-variant": "#005137",
+                    "tertiary-container": "#ba5551",
+                    "background": "#ecfdf5",
+                    "primary": "#006948",
+                    "error": "#ba1a1a",
+                    "primary-container": "#00855d",
+                    "on-primary": "#ffffff",
+                    "primary-fixed-dim": "#68dba9",
+                    "surface-container-low": "#e7f8f0",
+                    "on-tertiary-container": "#fffbff",
+                    "on-secondary-fixed-variant": "#00513b",
+                    "outline-variant": "#bccac0",
+                    "primary-fixed": "#85f8c4",
+                    "surface-tint": "#006c4a",
+                    "on-error": "#ffffff",
+                    "secondary-container": "#a6f2d1",
+                    "surface-container-lowest": "#ffffff",
+                    "on-secondary": "#ffffff",
+                    "on-tertiary": "#ffffff",
+                    "surface-container": "#e1f2ea",
+                    "secondary-fixed-dim": "#8bd6b6",
+                    "on-primary-container": "#f5fff7",
+                    "surface-container-high": "#dbece4",
+                    "outline": "#6d7a72",
+                    "surface-dim": "#cdded6",
+                    "inverse-surface": "#25332e",
+                    "on-surface": "#101e1a",
+                    "inverse-on-surface": "#e4f5ed",
+                    "on-tertiary-fixed-variant": "#7f2928",
+                    "secondary-fixed": "#a6f2d1",
+                    "on-secondary-container": "#237157",
+                    "surface-container-highest": "#d5e6df",
+                    "tertiary-fixed-dim": "#ffb3ae",
+                    "tertiary": "#9b3e3b",
+                    "surface-bright": "#ecfdf5",
+                    "surface": "#ecfdf5",
+                    "inverse-primary": "#68dba9",
+                    "tertiary-fixed": "#ffdad7",
+                    "on-secondary-fixed": "#002116",
+                    "on-error-container": "#93000a"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "fontFamily": {
+                    "headline": ["Plus Jakarta Sans", "Hind Siliguri"],
+                    "body": ["Plus Jakarta Sans", "Hind Siliguri"],
+                    "label": ["Plus Jakarta Sans", "Hind Siliguri"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body { font-family: 'Plus Jakarta Sans', 'Hind Siliguri', sans-serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .tonal-transition {
+            background: linear-gradient(180deg, rgba(231, 248, 240, 1) 0%, rgba(236, 253, 245, 0) 100%);
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface text-on-surface min-h-screen pb-32">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 bg-emerald-50/80 dark:bg-emerald-950/80 backdrop-blur-md shadow-sm dark:shadow-none">
+<div class="flex items-center justify-between px-6 h-16 w-full max-w-screen-2xl mx-auto">
+<div class="flex items-center gap-4">
+<button class="text-emerald-900 dark:text-emerald-100 hover:bg-emerald-100/50 dark:hover:bg-emerald-800/50 transition-colors active:scale-95 duration-200 p-2 rounded-full">
+<span class="material-symbols-outlined">arrow_back</span>
+</button>
+<div class="flex flex-col">
+<h1 class="font-headline text-lg font-bold tracking-tight text-emerald-900 dark:text-emerald-100">আজকের সারসংক্ষেপ</h1>
+<span class="text-[10px] uppercase tracking-widest text-emerald-900/60 dark:text-emerald-100/60 font-bold">Today's Summary • 24 Oct, 2023</span>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="text-emerald-900 dark:text-emerald-100 hover:bg-emerald-100/50 dark:hover:bg-emerald-800/50 transition-colors active:scale-95 duration-200 p-2 rounded-full">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</div>
+</header>
+<main class="pt-20 px-4 max-w-lg mx-auto space-y-6">
+<!-- Hero Card: Total Sales -->
+<section class="relative overflow-hidden bg-primary-container rounded-3xl p-8 shadow-xl text-on-primary-container">
+<div class="absolute top-0 right-0 p-4 opacity-10">
+<span class="material-symbols-outlined text-[120px]" style="font-variation-settings: 'FILL' 1;">analytics</span>
+</div>
+<div class="relative z-10">
+<p class="text-sm font-semibold uppercase tracking-widest mb-1 opacity-90">মোট বিক্রয় (Total Sales)</p>
+<div class="flex items-baseline gap-2 mb-4">
+<span class="text-5xl font-extrabold tracking-tighter">৳ ১৮,৪৫০</span>
+</div>
+<div class="inline-flex items-center gap-2 bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
+<span class="material-symbols-outlined text-sm">trending_up</span>
+<span class="text-xs font-bold uppercase tracking-wide">↑ গতকালের চেয়ে ১২% বেশি</span>
+</div>
+</div>
+</section>
+<!-- Bento Grid Metrics -->
+<div class="grid grid-cols-2 gap-4">
+<div class="bg-surface-container-lowest p-5 rounded-2xl shadow-sm">
+<span class="material-symbols-outlined text-secondary mb-3">receipt_long</span>
+<p class="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">লেনদেন (Transactions)</p>
+<p class="text-2xl font-bold text-on-surface">৮৪</p>
+</div>
+<div class="bg-surface-container-lowest p-5 rounded-2xl shadow-sm">
+<span class="material-symbols-outlined text-secondary mb-3">calculate</span>
+<p class="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider mb-1">গড় বিক্রয় (Avg Sale)</p>
+<p class="text-2xl font-bold text-on-surface">৳ ২১৯</p>
+</div>
+<div class="col-span-2 bg-surface-container-lowest p-5 rounded-2xl shadow-sm flex justify-between items-center">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-tertiary-fixed flex items-center justify-center">
+<span class="material-symbols-outlined text-tertiary">sell</span>
+</div>
+<div>
+<p class="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">মোট ডিসকাউন্ট (Total Discounts)</p>
+<p class="text-xl font-bold text-tertiary">৳ ১,২০৫</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline-variant">chevron_right</span>
+</div>
+</div>
+<!-- Cash in Drawer Section -->
+<section class="bg-secondary-container p-6 rounded-3xl shadow-sm flex justify-between items-end border border-white/40">
+<div>
+<p class="text-[11px] font-bold text-on-secondary-container uppercase tracking-widest mb-2">ড্রয়ারে নগদ (Cash in Drawer)</p>
+<div class="flex flex-col gap-1">
+<span class="text-xs text-on-secondary-container/60 font-medium">প্রত্যাশিত পরিমাণ (Expected)</span>
+<span class="text-3xl font-extrabold text-on-secondary-container">৳ ১৬,২০০</span>
+</div>
+</div>
+<div class="bg-white/40 p-3 rounded-2xl">
+<span class="material-symbols-outlined text-on-secondary-container text-3xl" style="font-variation-settings: 'FILL' 1;">payments</span>
+</div>
+</section>
+<!-- Credit Extended (Collapsed) -->
+<div class="bg-surface-container-low p-4 rounded-2xl border border-outline-variant/10 flex justify-between items-center group active:scale-[0.98] transition-transform">
+<div class="flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-surface-variant flex items-center justify-center">
+<span class="material-symbols-outlined text-on-surface-variant">credit_score</span>
+</div>
+<div>
+<p class="text-sm font-bold text-on-surface">আজকের বাকি (Credit Today)</p>
+<p class="text-xs text-on-surface-variant">৪টি বকেয়া হিসাব</p>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<span class="text-sm font-bold text-on-surface">৳ ২,২৫০</span>
+<span class="material-symbols-outlined text-outline">expand_more</span>
+</div>
+</div>
+<!-- Profit Estimate Card (The Hero of Result) -->
+<section class="bg-surface-container-lowest border-l-4 border-primary p-6 rounded-2xl shadow-sm flex items-center justify-between">
+<div>
+<p class="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">আনুমানিক লাভ (Profit Estimate)</p>
+<p class="text-3xl font-extrabold text-primary tracking-tight">৳ ৩,৬৪০</p>
+</div>
+<div class="bg-primary/5 p-4 rounded-full">
+<img alt="A stylized abstract representation of a rising profit chart in emerald green tones" class="w-12 h-12 rounded-full object-cover" data-alt="close-up of a digital dashboard showing a rising green financial graph with soft bokeh light" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB4BJsl2-apJNUXCRuKrdGxvopjI6hz2uJxJnJWB7iEpNccpkWFEUTpcOFNH2NUjv8IlMMaUHsi1i0yfCKBeapV_GXD069txrapVW8RBzEXtbFeXhmofrQLtaA02-rWUdDafTjRIzZkuA363tDFxI4frfBjr0Hm6w2Ax-vXBCrSU0HAwnioo5N03FDgXXg1490ZLsB7GPUF7BNbrVi0vfku-iUeEVIBKn4E29etJzMJ8qFyroEx_yYkH0OrwsGxpLXPT0amHrLbKRM"/>
+</div>
+</section>
+<!-- Action Strip: Floating Interaction Zone -->
+<div class="fixed bottom-24 left-0 right-0 px-4 pointer-events-none">
+<div class="max-w-md mx-auto bg-white/80 backdrop-blur-xl border border-white/50 p-2 rounded-full shadow-2xl flex items-center justify-around pointer-events-auto">
+<button class="flex flex-col items-center justify-center w-14 h-14 rounded-full text-primary hover:bg-primary/10 transition-colors">
+<span class="material-symbols-outlined">print</span>
+<span class="text-[9px] font-bold uppercase mt-0.5">Printer</span>
+</button>
+<div class="w-px h-8 bg-outline-variant/30"></div>
+<button class="flex flex-col items-center justify-center w-14 h-14 rounded-full text-on-surface-variant hover:bg-surface-variant/30 transition-colors">
+<span class="material-symbols-outlined">csv</span>
+<span class="text-[9px] font-bold uppercase mt-0.5">CSV</span>
+</button>
+<div class="w-px h-8 bg-outline-variant/30"></div>
+<button class="flex flex-col items-center justify-center w-14 h-14 rounded-full text-emerald-600 hover:bg-emerald-50 transition-colors">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">share</span>
+<span class="text-[9px] font-bold uppercase mt-0.5">WhatsApp</span>
+</button>
+<div class="w-2"></div>
+<button class="flex items-center justify-center bg-primary text-on-primary px-6 h-12 rounded-full shadow-lg active:scale-95 transition-transform">
+<span class="font-bold text-sm tracking-wide">রিপোর্ট পাঠান</span>
+</button>
+</div>
+</div>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full flex justify-around items-center px-4 pt-3 pb-6 bg-white/90 dark:bg-emerald-900/90 backdrop-blur-xl z-50 rounded-t-3xl shadow-[0_-4px_24px_-4px_rgba(16,30,26,0.06)]">
+<button class="flex flex-col items-center justify-center text-emerald-900/40 dark:text-emerald-100/40 px-5 py-2 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors active:scale-90 duration-150">
+<span class="material-symbols-outlined">point_of_sale</span>
+<span class="font-plus-jakarta text-[11px] font-semibold uppercase tracking-wider mt-1">Sales</span>
+</button>
+<button class="flex flex-col items-center justify-center text-emerald-900/40 dark:text-emerald-100/40 px-5 py-2 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors active:scale-90 duration-150">
+<span class="material-symbols-outlined">inventory_2</span>
+<span class="font-plus-jakarta text-[11px] font-semibold uppercase tracking-wider mt-1">Inventory</span>
+</button>
+<button class="flex flex-col items-center justify-center text-emerald-900/40 dark:text-emerald-100/40 px-5 py-2 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors active:scale-90 duration-150">
+<span class="material-symbols-outlined">payments</span>
+<span class="font-plus-jakarta text-[11px] font-semibold uppercase tracking-wider mt-1">Credit</span>
+</button>
+<button class="flex flex-col items-center justify-center bg-emerald-100 dark:bg-emerald-800 text-emerald-900 dark:text-emerald-50 rounded-full px-5 py-2 transition-all duration-300 active:scale-90">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">analytics</span>
+<span class="font-plus-jakarta text-[11px] font-semibold uppercase tracking-wider mt-1">Reports</span>
+</button>
+<button class="flex flex-col items-center justify-center text-emerald-900/40 dark:text-emerald-100/40 px-5 py-2 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors active:scale-90 duration-150">
+<span class="material-symbols-outlined">more_horiz</span>
+<span class="font-plus-jakarta text-[11px] font-semibold uppercase tracking-wider mt-1">More</span>
+</button>
+</nav>
+</body></html>

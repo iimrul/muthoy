@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+
+<html class="light" lang="bn"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Expiry Management - Modern Apothecary</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=DM+Mono:wght@400;500&amp;family=Hind+Siliguri:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "secondary-fixed": "#a6f2d1",
+              "tertiary-fixed": "#ffdcc3",
+              "tertiary-container": "#b15f00",
+              "secondary-fixed-dim": "#8bd6b6",
+              "on-surface-variant": "#3d4a42",
+              "on-surface": "#141b2b",
+              "on-primary-fixed-variant": "#005137",
+              "surface-variant": "#dce2f7",
+              "on-tertiary-fixed-variant": "#6e3900",
+              "on-tertiary-fixed": "#2f1500",
+              "surface-container-lowest": "#ffffff",
+              "on-secondary-container": "#237157",
+              "on-secondary-fixed-variant": "#00513b",
+              "secondary-container": "#a6f2d1",
+              "outline-variant": "#bccac0",
+              "on-primary-container": "#f5fff7",
+              "on-background": "#141b2b",
+              "surface-container-low": "#f1f3ff",
+              "tertiary": "#8d4b00",
+              "on-error-container": "#93000a",
+              "inverse-surface": "#293040",
+              "surface": "#f9f9ff",
+              "outline": "#6d7a72",
+              "background": "#f9f9ff",
+              "surface-dim": "#d3daef",
+              "on-tertiary-container": "#fffbff",
+              "on-secondary-fixed": "#002116",
+              "on-secondary": "#ffffff",
+              "surface-container-high": "#e1e8fd",
+              "surface-container": "#e9edff",
+              "surface-bright": "#f9f9ff",
+              "error": "#ba1a1a",
+              "primary-fixed-dim": "#68dba9",
+              "primary": "#006948",
+              "on-primary": "#ffffff",
+              "tertiary-fixed-dim": "#ffb77d",
+              "surface-tint": "#006c4a",
+              "primary-fixed": "#85f8c4",
+              "on-error": "#ffffff",
+              "inverse-primary": "#68dba9",
+              "primary-container": "#00855d",
+              "on-primary-fixed": "#002114",
+              "inverse-on-surface": "#edf0ff",
+              "on-tertiary": "#ffffff",
+              "surface-container-highest": "#dce2f7",
+              "error-container": "#ffdad6",
+              "secondary": "#1b6b51"
+            },
+            fontFamily: {
+              "headline": ["Plus Jakarta Sans", "Hind Siliguri"],
+              "body": ["Plus Jakarta Sans", "Hind Siliguri"],
+              "label": ["Plus Jakarta Sans", "Hind Siliguri"],
+              "mono": ["DM Mono"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "2xl": "1rem", "3xl": "1.5rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+      body {
+        font-family: 'Plus Jakarta Sans', 'Hind Siliguri', sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .mono-text { font-family: 'DM Mono', monospace; }
+      .glass-nav {
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+      }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface text-on-surface min-h-screen pb-32">
+<!-- TopAppBar -->
+<header class="w-full top-0 sticky z-50 bg-[#f9f9ff] dark:bg-slate-950 flex justify-between items-center px-4 py-3 w-full">
+<div class="flex items-center gap-3">
+<button class="material-symbols-outlined text-slate-500 hover:bg-slate-200/50 transition-colors p-2 rounded-full scale-95 duration-150 ease-in-out">menu</button>
+<h1 class="text-xl font-bold tracking-tight text-[#059669] dark:text-[#10b981] font-headline">মেয়াদ ব্যবস্থাপনা</h1>
+</div>
+<div class="flex items-center gap-2">
+<div class="flex items-center bg-surface-container-low px-3 py-1.5 rounded-full gap-2">
+<span class="relative flex h-2 w-2">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+</span>
+<span class="text-[10px] mono-text font-medium text-primary tracking-widest uppercase">Synced</span>
+</div>
+<button class="material-symbols-outlined text-[#059669] dark:text-[#10b981] hover:bg-slate-200/50 transition-colors p-2 rounded-full scale-95 duration-150 ease-in-out">sync</button>
+</div>
+</header>
+<main class="px-4 mt-6 max-w-4xl mx-auto space-y-8">
+<!-- Urgent Section (30 Days) -->
+<section class="space-y-4">
+<div class="flex items-center justify-between px-2">
+<div class="flex items-center gap-2 bg-error-container text-on-error-container px-4 py-2 rounded-2xl">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">error</span>
+<h2 class="font-bold text-sm md:text-base">জরুরি — ৩০ দিনের মধ্যে মেয়াদ শেষ</h2>
+</div>
+<span class="mono-text text-error font-bold bg-error-container/30 px-3 py-1 rounded-lg text-sm">08 ITEMS</span>
+</div>
+<div class="space-y-3">
+<!-- Medicine Row 1 -->
+<div class="bg-surface-container-lowest rounded-2xl p-4 relative overflow-hidden group">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-error"></div>
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+<div class="flex-1">
+<div class="flex items-baseline gap-2">
+<h3 class="text-lg font-bold text-on-surface">Napa Extend 665mg</h3>
+<span class="text-[10px] mono-text bg-surface-container-low text-outline px-2 py-0.5 rounded uppercase">Batch: B2209X</span>
+</div>
+<div class="mt-2 flex flex-wrap gap-x-6 gap-y-1">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-outline">calendar_today</span>
+<span class="mono-text text-sm font-medium">EXP: 25/11/2023</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-outline">inventory_2</span>
+<span class="mono-text text-sm font-bold text-error">QTY: 142</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="flex-1 md:flex-none px-4 py-2 bg-surface-container-high text-on-surface text-sm font-semibold rounded-xl hover:bg-surface-container-highest transition-colors">সরবরাহকারীকে ফেরত</button>
+<button class="flex-1 md:flex-none px-4 py-2 bg-primary text-white text-sm font-bold rounded-xl shadow-sm hover:opacity-90 transition-opacity">ছাড় দিন</button>
+</div>
+</div>
+</div>
+<!-- Medicine Row 2 -->
+<div class="bg-surface-container-lowest rounded-2xl p-4 relative overflow-hidden group">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-error"></div>
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+<div class="flex-1">
+<div class="flex items-baseline gap-2">
+<h3 class="text-lg font-bold text-on-surface">Sergel 20mg</h3>
+<span class="text-[10px] mono-text bg-surface-container-low text-outline px-2 py-0.5 rounded uppercase">Batch: S4410Y</span>
+</div>
+<div class="mt-2 flex flex-wrap gap-x-6 gap-y-1">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-outline">calendar_today</span>
+<span class="mono-text text-sm font-medium">EXP: 02/12/2023</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-outline">inventory_2</span>
+<span class="mono-text text-sm font-bold text-error">QTY: 85</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="flex-1 md:flex-none px-4 py-2 bg-surface-container-high text-on-surface text-sm font-semibold rounded-xl hover:bg-surface-container-highest transition-colors">সরবরাহকারীকে ফেরত</button>
+<button class="flex-1 md:flex-none px-4 py-2 bg-primary text-white text-sm font-bold rounded-xl shadow-sm hover:opacity-90 transition-opacity">ছাড় দিন</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Warning Section (31-60 Days) -->
+<section class="space-y-4">
+<div class="flex items-center justify-between px-2">
+<div class="flex items-center gap-2 bg-tertiary-fixed text-on-tertiary-fixed px-4 py-2 rounded-2xl">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">warning</span>
+<h2 class="font-bold text-sm md:text-base">সতর্কতা — ৬০ দিনের মধ্যে মেয়াদ শেষ</h2>
+</div>
+<span class="mono-text text-tertiary font-bold bg-tertiary-fixed/30 px-3 py-1 rounded-lg text-sm">15 ITEMS</span>
+</div>
+<div class="space-y-3">
+<!-- Medicine Row 3 -->
+<div class="bg-surface-container-lowest rounded-2xl p-4 relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-tertiary"></div>
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+<div class="flex-1">
+<div class="flex items-baseline gap-2">
+<h3 class="text-lg font-bold text-on-surface">Zithrin 500mg</h3>
+<span class="text-[10px] mono-text bg-surface-container-low text-outline px-2 py-0.5 rounded uppercase">Batch: Z001A</span>
+</div>
+<div class="mt-2 flex flex-wrap gap-x-6 gap-y-1">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-outline">calendar_today</span>
+<span class="mono-text text-sm font-medium">EXP: 15/01/2024</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-outline">inventory_2</span>
+<span class="mono-text text-sm font-bold text-tertiary">QTY: 30</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="material-symbols-outlined p-2 text-outline hover:bg-surface-container-low rounded-lg transition-colors">more_vert</button>
+<button class="flex-1 md:flex-none px-6 py-2 bg-secondary-container text-on-secondary-container text-sm font-bold rounded-xl shadow-sm hover:opacity-90 transition-opacity">ছাড় দিন</button>
+</div>
+</div>
+</div>
+<!-- Medicine Row 4 -->
+<div class="bg-surface-container-lowest rounded-2xl p-4 relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-tertiary"></div>
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+<div class="flex-1">
+<div class="flex items-baseline gap-2">
+<h3 class="text-lg font-bold text-on-surface">Monas 10mg</h3>
+<span class="text-[10px] mono-text bg-surface-container-low text-outline px-2 py-0.5 rounded uppercase">Batch: M881B</span>
+</div>
+<div class="mt-2 flex flex-wrap gap-x-6 gap-y-1">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-outline">calendar_today</span>
+<span class="mono-text text-sm font-medium">EXP: 20/01/2024</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-outline">inventory_2</span>
+<span class="mono-text text-sm font-bold text-tertiary">QTY: 210</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="material-symbols-outlined p-2 text-outline hover:bg-surface-container-low rounded-lg transition-colors">more_vert</button>
+<button class="flex-1 md:flex-none px-6 py-2 bg-secondary-container text-on-secondary-container text-sm font-bold rounded-xl shadow-sm hover:opacity-90 transition-opacity">ছাড় দিন</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Bulk Action FAB/Button Area -->
+<div class="fixed bottom-[96px] left-0 w-full px-4 flex justify-center pointer-events-none">
+<button class="pointer-events-auto flex items-center gap-3 px-8 py-4 bg-gradient-to-br from-primary to-primary-container text-white font-bold rounded-full shadow-[0_8px_30px_rgb(0,105,72,0.3)] hover:scale-[1.02] active:scale-95 transition-all">
+<span class="material-symbols-outlined">sell</span>
+<span>সব মেয়াদোত্তীর্ণ আইটেমে ছাড় দিন</span>
+</button>
+</div>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full flex justify-around items-center px-4 pb-6 pt-3 bg-[#f9f9ff]/80 dark:bg-slate-950/80 backdrop-blur-xl z-50 rounded-t-3xl shadow-[0_-4px_24px_rgba(0,0,0,0.06)] glass-nav">
+<!-- Inventory (Active) -->
+<a class="flex flex-col items-center justify-center bg-[#00855d] text-white rounded-2xl px-3 py-1.5 Active: scale-90 transition-transform" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">inventory_2</span>
+<span class="text-[11px] font-semibold font-headline">ইনভেন্টরি</span>
+</a>
+<!-- Expiry -->
+<a class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 px-3 py-1.5 hover:opacity-80 transition-opacity" href="#">
+<span class="material-symbols-outlined">notification_important</span>
+<span class="text-[11px] font-semibold font-headline">মেয়াদ</span>
+</a>
+<!-- Sales -->
+<a class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 px-3 py-1.5 hover:opacity-80 transition-opacity" href="#">
+<span class="material-symbols-outlined">point_of_sale</span>
+<span class="text-[11px] font-semibold font-headline">বিক্রয়</span>
+</a>
+<!-- Credit -->
+<a class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 px-3 py-1.5 hover:opacity-80 transition-opacity" href="#">
+<span class="material-symbols-outlined">payments</span>
+<span class="text-[11px] font-semibold font-headline">বাকি</span>
+</a>
+<!-- More -->
+<a class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 px-3 py-1.5 hover:opacity-80 transition-opacity" href="#">
+<span class="material-symbols-outlined">more_horiz</span>
+<span class="text-[11px] font-semibold font-headline">আরও</span>
+</a>
+</nav>
+</body></html>

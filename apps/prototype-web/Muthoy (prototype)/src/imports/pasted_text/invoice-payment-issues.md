@@ -1,0 +1,26 @@
+What's Actually Broken — Three Separate Problems
+Problem 1 — Partial payment works but invoice history doesn't reflect it correctly
+The PaymentModal in SupplierDetail correctly calls recordPayment() which saves the payment into inv.payments[] inside supplierInvoices localStorage. The invoice status (paid / partial / pending) and remaining balance are calculated correctly from paidForInvoice().
+But the invoice history doesn't show the payment breakdown. A user pays ৳500 of a ৳1200 invoice — the badge correctly shows "আংশিক" and the remaining ৳700 shows. However the user has no way to see what payments have been made — no payment history timeline inside each invoice row. They tap Pay again and have no idea ৳500 was already paid unless they do mental math. The payment history is stored but never displayed.
+Problem 2 — Supplier payments have zero connection to the cash drawer
+This is a complete missing link. When recordPayment() runs in supplierInvoices.ts, it only writes to supplierInvoices in localStorage. It never touches cashWithdrawals, never calls notifyCashUpdated(), never writes anything that getCashBreakdown() can read.
+The result: owner pays ৳5,000 to a supplier from the cash drawer. The supplier's outstanding balance correctly drops by ৳5,000. But the cash drawer still shows the same expected amount — as if ৳5,000 never left. The CashSummarySheet has no "সরবরাহকারী পেমেন্ট" row at all. The CashBreakdown interface doesn't even have a field for it.
+Problem 3 — The "Pay" button only appears on invoices from stats.invoices (formal only)
+From the previous fix, stats.invoices only contains formal invoices (manualBatchEntry !== true). Credit stock additions (manualBatchEntry: true, paymentTerms: "credit") correctly show in the outstanding balance tile — but they never appear in the invoice list, so there's no Pay button for them. The owner sees ৳8,000 outstanding but can only pay invoices that don't account for most of it.
+
+The Fix Direction
+Fix 1 — Payment history inside each invoice row
+In SupplierDetail, each invoice row in the history list currently shows: date | items count | total | due amount | Pay button.
+It needs to also show a collapsible payment log. Each payment in inv.payments[] should render as a small row: date paid + amount paid + optional note. This is purely a UI addition — the data is already in inv.payments[], it's just never rendered.
+The invoice row should expand/collapse on tap (not navigate away). When expanded: show each payment as a line with date and amount in green, then show remaining due at the bottom if any.
+Fix 2 — Wire supplier payments into the cash drawer
+This needs changes in three places:
+In cashCalculation.ts: Add a new function getTodaySupplierPayments(target) that reads supplierInvoices from localStorage, loops through all invoices, loops through each inv.payments[], filters to payments made on the target date, and sums them. Add supplierPayments as a new field to CashBreakdown. Update getCashBreakdown() to call this function and subtract supplierPayments from expected (supplier payments go out of the drawer, same as expenses and withdrawals). The formula becomes:
+expected = openingCash + cashSales + creditCollections 
+         - expenses - withdrawals - supplierPayments
+In CashSummarySheet.tsx: Add a new row to the rows array — label "সরবরাহকারী পেমেন্ট" (Supplier Payments), value summary.supplierPayments, tone "out". Only show this row when summary.supplierPayments > 0 (no point showing ৳0 if no payments made today).
+In SupplierDetail PaymentModal — after onSaved: The modal currently calls onSaved() which calls refresh(). Also call notifyCashUpdated() after a successful payment so the cash summary card on the dashboard and cash summary page reactively refresh. Import notifyCashUpdated from cashCalculation and call it inside the submit function right after onSaved().
+Fix 3 — Pay button for credit stock additions
+The stats.invoices array (formal invoices only) drives the invoice list. But stats.outstanding now includes credit from manualBatchEntry placeholder invoices too (from the last fix). This creates a UI gap — the owner sees outstanding balance but no payable invoice for it.
+The cleanest solution: add a second section below the formal invoice history called "স্টক যোগের বাকি" (Stock Addition Credit) that shows a consolidated row per supplier for all manualBatchEntry: true, paymentTerms: "credit" invoices. This row shows total credit amount, total paid so far, remaining due, and a single Pay button that opens a payment modal targeting all unpaid credit additions for that supplier as a group rather than per-invoice. Under the hood, the payment is distributed oldest-first across the credit placeholder invoices.
+Alternatively — and simpler — surface each credit stock addition as a row in the invoice history with a label "[ঔষধ নাম] স্টক" and the date it was added. This requires stats.invoices to include credit manualBatchEntry invoices for payment purposes while excluding COD ones. Filter: all.filter(inv => !inv.voidedAt && (inv.manualBatchEntry !== true || inv.paymentTerms === "credit")).

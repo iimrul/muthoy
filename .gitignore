@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Turborepo
+.turbo/
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Build artifacts
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+
+# Testing
+coverage/
+
+# Supabase local CLI
+backend/supabase/.branches/
+backend/supabase/.temp/
+
+# EAS local cache
+.eas/

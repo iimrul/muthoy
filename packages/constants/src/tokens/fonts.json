@@ -1,0 +1,20 @@
+{
+  "plusJakartaSans": {
+    "light": "PlusJakartaSans_300Light",
+    "regular": "PlusJakartaSans_400Regular",
+    "medium": "PlusJakartaSans_500Medium",
+    "semiBold": "PlusJakartaSans_600SemiBold",
+    "bold": "PlusJakartaSans_700Bold",
+    "extraBold": "PlusJakartaSans_800ExtraBold"
+  },
+  "hindSiliguri": {
+    "light": "HindSiliguri_300Light",
+    "regular": "HindSiliguri_400Regular",
+    "semiBold": "HindSiliguri_600SemiBold",
+    "bold": "HindSiliguri_700Bold"
+  },
+  "dmMono": {
+    "regular": "DMMono_400Regular",
+    "medium": "DMMono_500Medium"
+  }
+}

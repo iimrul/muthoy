@@ -1,0 +1,12 @@
+packages:
+  - "apps/mobile"
+  - "apps/admin"
+  - "packages/*"
+allowBuilds:
+  # unrs-resolver: transitive dep of Expo's own eslint-config-expo (fast
+  # TS-aware module resolution for ESLint). Official Expo tooling, approved.
+  unrs-resolver: true
+
+# Deliberately not a wildcard on "apps/*": apps/prototype-web ships its own
+# independent pnpm-workspace.yaml/package.json (Vite + React 18 + Tailwind v4)
+# and must never be folded into this workspace's install.

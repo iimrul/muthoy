@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+
+<html class="light" lang="bn"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Modern Apothecary - Inventory Management</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=DM+Mono:wght@400;500&amp;family=Hind+Siliguri:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "secondary-fixed-dim": "#8bd6b6",
+              "on-primary-fixed": "#002114",
+              "tertiary-container": "#b15f00",
+              "on-background": "#141b2b",
+              "surface": "#f9f9ff",
+              "primary-container": "#00855d",
+              "error": "#ba1a1a",
+              "on-secondary-container": "#237157",
+              "inverse-on-surface": "#edf0ff",
+              "secondary-container": "#a6f2d1",
+              "outline": "#6d7a72",
+              "surface-container-low": "#f1f3ff",
+              "on-tertiary": "#ffffff",
+              "error-container": "#ffdad6",
+              "surface-dim": "#d3daef",
+              "on-primary-fixed-variant": "#005137",
+              "primary": "#006948",
+              "tertiary-fixed-dim": "#ffb77d",
+              "inverse-primary": "#68dba9",
+              "on-tertiary-container": "#fffbff",
+              "surface-container": "#e9edff",
+              "secondary-fixed": "#a6f2d1",
+              "on-tertiary-fixed": "#2f1500",
+              "on-primary-container": "#f5fff7",
+              "on-tertiary-fixed-variant": "#6e3900",
+              "inverse-surface": "#293040",
+              "on-error": "#ffffff",
+              "surface-tint": "#006c4a",
+              "surface-container-high": "#e1e8fd",
+              "on-secondary-fixed-variant": "#00513b",
+              "on-surface-variant": "#3d4a42",
+              "primary-fixed": "#85f8c4",
+              "on-surface": "#141b2b",
+              "surface-container-lowest": "#ffffff",
+              "on-error-container": "#93000a",
+              "surface-variant": "#dce2f7",
+              "surface-bright": "#f9f9ff",
+              "background": "#f9f9ff",
+              "outline-variant": "#bccac0",
+              "on-secondary": "#ffffff",
+              "primary-fixed-dim": "#68dba9",
+              "tertiary-fixed": "#ffdcc3",
+              "tertiary": "#8d4b00",
+              "on-primary": "#ffffff",
+              "secondary": "#1b6b51",
+              "surface-container-highest": "#dce2f7",
+              "on-secondary-fixed": "#002116"
+            },
+            fontFamily: {
+              "headline": ["Plus Jakarta Sans", "Hind Siliguri"],
+              "body": ["Plus Jakarta Sans", "Hind Siliguri"],
+              "label": ["Plus Jakarta Sans", "Hind Siliguri"],
+              "mono": ["DM Mono"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        body { font-family: 'Plus Jakarta Sans', 'Hind Siliguri', sans-serif; }
+        .mono-text { font-family: 'DM Mono', monospace; }
+        .glass-nav { backdrop-filter: blur(32px); }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface text-on-surface min-h-screen pb-32">
+<!-- Top Navigation Shell -->
+<header class="bg-[#f9f9ff]/80 dark:bg-slate-950/80 backdrop-blur-xl sticky top-0 z-50 flex justify-between items-center w-full px-4 h-16 shadow-[0_8px_24px_rgba(0,0,0,0.06)]">
+<div class="flex items-center gap-3">
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-[#f1f3ff] transition-colors active:scale-95 duration-150">
+<span class="material-symbols-outlined text-[#059669]">menu</span>
+</button>
+<h1 class="text-[#059669] font-['Plus_Jakarta_Sans'] font-extrabold tracking-tight text-lg">ইনভেন্টরি</h1>
+</div>
+<div class="flex items-center gap-2">
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-[#f1f3ff] transition-colors active:scale-95 duration-150">
+<span class="material-symbols-outlined text-slate-500">filter_list</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-[#f1f3ff] transition-colors active:scale-95 duration-150">
+<span class="material-symbols-outlined text-slate-500">sync</span>
+</button>
+</div>
+</header>
+<main class="px-4 pt-6 max-w-2xl mx-auto">
+<!-- Filter Bar -->
+<div class="flex gap-2 mb-8 overflow-x-auto pb-2 scrollbar-hide">
+<button class="whitespace-nowrap px-6 py-2.5 rounded-full bg-primary-container text-white font-semibold text-sm shadow-md active:scale-95 transition-all">সব</button>
+<button class="whitespace-nowrap px-6 py-2.5 rounded-full bg-surface-container-low text-on-surface-variant font-medium text-sm hover:bg-surface-container transition-all">স্টক কম</button>
+<button class="whitespace-nowrap px-6 py-2.5 rounded-full bg-surface-container-low text-on-surface-variant font-medium text-sm hover:bg-surface-container transition-all">মেয়াদ শেষ</button>
+</div>
+<!-- Inventory Summary Tonal Card -->
+<div class="mb-8 grid grid-cols-2 gap-4">
+<div class="bg-surface-container-low p-5 rounded-3xl border-l-4 border-primary">
+<p class="text-xs font-bold text-primary uppercase tracking-wider mb-1">মোট আইটেম</p>
+<p class="mono-text text-2xl font-bold text-on-surface">১২৪০</p>
+</div>
+<div class="bg-surface-container-low p-5 rounded-3xl border-l-4 border-error">
+<p class="text-xs font-bold text-error uppercase tracking-wider mb-1">রি-অর্ডার প্রয়োজন</p>
+<p class="mono-text text-2xl font-bold text-on-surface">১৪</p>
+</div>
+</div>
+<!-- Medicine List -->
+<div class="space-y-4">
+<!-- Healthy Stock Item -->
+<div class="bg-surface-container-lowest p-5 rounded-3xl flex items-center justify-between shadow-sm hover:shadow-md transition-shadow group">
+<div class="flex gap-4 items-center">
+<div class="w-12 h-12 rounded-2xl bg-secondary-container flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined">medication</span>
+</div>
+<div>
+<h3 class="font-bold text-on-surface text-lg">Napa Extend</h3>
+<p class="text-sm text-on-surface-variant">Paracetamol 665mg</p>
+</div>
+</div>
+<div class="text-right">
+<div class="flex items-center justify-end gap-2 mb-1">
+<span class="mono-text font-bold text-primary-container text-xl">৪৫০</span>
+<span class="text-[10px] font-bold text-primary-container bg-primary-fixed/30 px-1.5 py-0.5 rounded">পিস</span>
+</div>
+<div class="flex items-center justify-end gap-1 text-[10px] font-semibold text-slate-400">
+<span class="material-symbols-outlined text-[14px]">event</span>
+<span>২৪ মাস বাকি</span>
+</div>
+</div>
+</div>
+<!-- Low Stock Item -->
+<div class="bg-surface-container-lowest p-5 rounded-3xl flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
+<div class="flex gap-4 items-center">
+<div class="w-12 h-12 rounded-2xl bg-tertiary-fixed flex items-center justify-center text-tertiary">
+<span class="material-symbols-outlined">pill</span>
+</div>
+<div>
+<h3 class="font-bold text-on-surface text-lg">Sergel 20</h3>
+<p class="text-sm text-on-surface-variant">Esomeprazole</p>
+</div>
+</div>
+<div class="text-right">
+<div class="flex items-center justify-end gap-2 mb-1">
+<span class="mono-text font-bold text-tertiary text-xl">১২</span>
+<span class="text-[10px] font-bold text-tertiary bg-tertiary-fixed/30 px-1.5 py-0.5 rounded">পিস</span>
+</div>
+<div class="flex items-center justify-end gap-1 text-[10px] font-semibold text-tertiary">
+<span class="material-symbols-outlined text-[14px]">warning</span>
+<span>স্টক কম</span>
+</div>
+</div>
+</div>
+<!-- Expiring Soon Item -->
+<div class="bg-surface-container-lowest p-5 rounded-3xl flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
+<div class="flex gap-4 items-center">
+<div class="w-12 h-12 rounded-2xl bg-error-container flex items-center justify-center text-error">
+<span class="material-symbols-outlined">science</span>
+</div>
+<div>
+<h3 class="font-bold text-on-surface text-lg">Zithrin 500</h3>
+<p class="text-sm text-on-surface-variant">Azithromycin</p>
+</div>
+</div>
+<div class="text-right">
+<div class="flex items-center justify-end gap-2 mb-1">
+<span class="mono-text font-bold text-primary-container text-xl">৮৫</span>
+<span class="text-[10px] font-bold text-primary-container bg-primary-fixed/30 px-1.5 py-0.5 rounded">পিস</span>
+</div>
+<div class="flex items-center justify-end gap-1 text-[10px] font-bold text-on-error-container bg-error-container px-2 py-0.5 rounded-full">
+<span>৩০ দিন বাকি</span>
+</div>
+</div>
+</div>
+<!-- Regular Stock Item -->
+<div class="bg-surface-container-lowest p-5 rounded-3xl flex items-center justify-between shadow-sm hover:shadow-md transition-shadow">
+<div class="flex gap-4 items-center">
+<div class="w-12 h-12 rounded-2xl bg-secondary-container flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined">vaccines</span>
+</div>
+<div>
+<h3 class="font-bold text-on-surface text-lg">Fexo 120</h3>
+<p class="text-sm text-on-surface-variant">Fexofenadine</p>
+</div>
+</div>
+<div class="text-right">
+<div class="flex items-center justify-end gap-2 mb-1">
+<span class="mono-text font-bold text-primary-container text-xl">১২০</span>
+<span class="text-[10px] font-bold text-primary-container bg-primary-fixed/30 px-1.5 py-0.5 rounded">পিস</span>
+</div>
+<div class="flex items-center justify-end gap-1 text-[10px] font-semibold text-slate-400">
+<span class="material-symbols-outlined text-[14px]">event</span>
+<span>১৮ মাস বাকি</span>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- FAB -->
+<button class="fixed bottom-24 right-6 w-16 h-16 bg-[#00855d] text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-transform duration-200 z-50">
+<span class="material-symbols-outlined text-3xl">add</span>
+</button>
+<!-- Bottom Navigation Shell -->
+<nav class="fixed bottom-0 left-0 w-full bg-[#f9f9ff]/80 dark:bg-slate-950/80 backdrop-blur-3xl flex justify-around items-center px-4 pb-4 pt-2 z-50 rounded-t-3xl shadow-[0_-4px_24px_rgba(0,0,0,0.06)]">
+<a class="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 px-5 py-1.5 hover:text-[#059669] transition-all" href="#">
+<span class="material-symbols-outlined">point_of_sale</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[10px] font-semibold uppercase tracking-wider mt-1">Sale</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-[#00855d] text-white rounded-2xl px-5 py-1.5 scale-95" href="#">
+<span class="material-symbols-outlined" data-weight="fill">inventory_2</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[10px] font-semibold uppercase tracking-wider mt-1">Inventory</span>
+</a>
+<a class="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 px-5 py-1.5 hover:text-[#059669] transition-all" href="#">
+<span class="material-symbols-outlined">group</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[10px] font-semibold uppercase tracking-wider mt-1">Patients</span>
+</a>
+<a class="flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 px-5 py-1.5 hover:text-[#059669] transition-all" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[10px] font-semibold uppercase tracking-wider mt-1">Reports</span>
+</a>
+</nav>
+</body></html>

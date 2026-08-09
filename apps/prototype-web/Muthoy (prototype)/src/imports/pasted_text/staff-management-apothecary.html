@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+
+<html lang="bn"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Staff Management - Apothecary</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=DM+Mono:wght@400;500&amp;family=Hind+Siliguri:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "secondary-container": "#a6f2d1",
+              "on-tertiary-fixed": "#2f1500",
+              "primary-fixed": "#85f8c4",
+              "outline": "#6d7a72",
+              "surface-tint": "#006c4a",
+              "on-error-container": "#93000a",
+              "on-primary": "#ffffff",
+              "error-container": "#ffdad6",
+              "on-tertiary-fixed-variant": "#6e3900",
+              "secondary": "#1b6b51",
+              "on-error": "#ffffff",
+              "surface-container": "#e9edff",
+              "inverse-primary": "#68dba9",
+              "primary-container": "#00855d",
+              "surface-bright": "#f9f9ff",
+              "surface": "#f9f9ff",
+              "on-primary-fixed": "#002114",
+              "secondary-fixed": "#a6f2d1",
+              "on-tertiary-container": "#fffbff",
+              "tertiary-fixed": "#ffdcc3",
+              "on-secondary-container": "#237157",
+              "on-primary-fixed-variant": "#005137",
+              "on-surface-variant": "#3d4a42",
+              "surface-container-high": "#e1e8fd",
+              "on-primary-container": "#f5fff7",
+              "background": "#f9f9ff",
+              "primary-fixed-dim": "#68dba9",
+              "on-secondary": "#ffffff",
+              "outline-variant": "#bccac0",
+              "tertiary": "#8d4b00",
+              "secondary-fixed-dim": "#8bd6b6",
+              "primary": "#006948",
+              "on-secondary-fixed": "#002116",
+              "on-background": "#141b2b",
+              "error": "#ba1a1a",
+              "inverse-surface": "#293040",
+              "tertiary-fixed-dim": "#ffb77d",
+              "tertiary-container": "#b15f00",
+              "surface-container-lowest": "#ffffff",
+              "surface-container-low": "#f1f3ff",
+              "surface-dim": "#d3daef",
+              "on-tertiary": "#ffffff",
+              "inverse-on-surface": "#edf0ff",
+              "surface-container-highest": "#dce2f7",
+              "on-surface": "#141b2b",
+              "on-secondary-fixed-variant": "#00513b",
+              "surface-variant": "#dce2f7"
+            },
+            fontFamily: {
+              "headline": ["Plus Jakarta Sans", "Hind Siliguri"],
+              "body": ["Plus Jakarta Sans", "Hind Siliguri"],
+              "label": ["Plus Jakarta Sans", "Hind Siliguri"],
+              "mono": ["DM Mono"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        body { font-family: 'Plus Jakarta Sans', 'Hind Siliguri', sans-serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .bengali-text { font-family: 'Hind Siliguri', sans-serif; line-height: 1.4; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-[#ECFDF5] text-on-surface min-h-screen pb-32">
+<!-- TopAppBar -->
+<header class="bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-xl docked full-width top-0 sticky z-50 shadow-[0_8px_24px_rgba(0,0,0,0.06)]">
+<div class="flex justify-between items-center w-full px-6 py-4 max-w-none">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-full bg-primary-container flex items-center justify-center text-white font-bold overflow-hidden shadow-inner">
+<img alt="Pharmacist Profile" class="w-full h-full object-cover" data-alt="Close up portrait of a professional pharmacist in a clinical setting with soft natural lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDzKzPPJOTfYmzVlvlEJHJ8XjaHT9EF_M6akA4rYQXjd9P8tiUhtPWzlewCgBBXANgW9IEhy0k_PK6IFlPSlhr7t0EouXM6jNzJW6-YJoeor4d1xWPbLm82qnzWzsH3QBfo-x-PLHC8zU3VyJ_q8yIqBtl0qyfcU5XxRM2kiy5IlZ18_35dm_zTjMaxRhkTrQJoFPw1wCckFL8ISBJDNxzPbz1C2i3cGqKLXYkiEuPB_gkerBYgNZMTooLOiVvwdsUNBEnMVIDq1A"/>
+</div>
+<h1 class="font-['Plus_Jakarta_Sans'] font-bold text-2xl tracking-tight text-emerald-700 bengali-text">স্টাফ ব্যবস্থাপনা</h1>
+</div>
+<div class="flex items-center gap-4">
+<button class="w-10 h-10 rounded-full flex items-center justify-center bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors active:scale-95 duration-200">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+</button>
+<button class="text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors active:scale-95 duration-200">
+<span class="material-symbols-outlined" data-icon="sync">sync</span>
+</button>
+</div>
+</div>
+</header>
+<main class="px-4 py-6 max-w-4xl mx-auto space-y-6">
+<!-- Summary Stats Section -->
+<div class="grid grid-cols-2 gap-4 mb-8">
+<div class="bg-surface-container-lowest p-5 rounded-[24px] shadow-sm border-l-4 border-primary">
+<p class="text-on-surface-variant text-sm font-semibold uppercase tracking-wider bengali-text">মোট স্টাফ</p>
+<h2 class="text-3xl font-mono font-bold text-primary mt-1">08</h2>
+</div>
+<div class="bg-surface-container-lowest p-5 rounded-[24px] shadow-sm border-l-4 border-tertiary">
+<p class="text-on-surface-variant text-sm font-semibold uppercase tracking-wider bengali-text">অনলাইন</p>
+<h2 class="text-3xl font-mono font-bold text-tertiary mt-1">03</h2>
+</div>
+</div>
+<!-- Staff List -->
+<div class="space-y-4">
+<!-- Staff Card 1 -->
+<div class="bg-surface-container-lowest p-4 rounded-[24px] flex items-center justify-between group cursor-pointer hover:bg-emerald-50 transition-all duration-300">
+<div class="flex items-center gap-4">
+<div class="relative">
+<div class="w-14 h-14 rounded-2xl bg-primary-fixed flex items-center justify-center text-primary font-bold text-lg tracking-tight">
+                            RK
+                        </div>
+<div class="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 border-4 border-white rounded-full"></div>
+</div>
+<div>
+<h3 class="text-lg font-bold text-on-surface bengali-text">রাকিব হাসান</h3>
+<div class="flex items-center gap-2 mt-0.5">
+<span class="px-2 py-0.5 bg-primary-container/10 text-primary text-[10px] font-bold rounded-full uppercase tracking-widest">Admin</span>
+<span class="text-xs text-on-surface-variant/70 font-mono">Last active: Just now</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-white transition-colors">
+<span class="material-symbols-outlined" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+</div>
+<!-- Staff Card 2 -->
+<div class="bg-surface-container-lowest p-4 rounded-[24px] flex items-center justify-between group cursor-pointer hover:bg-emerald-50 transition-all duration-300">
+<div class="flex items-center gap-4">
+<div class="relative">
+<div class="w-14 h-14 rounded-2xl bg-secondary-fixed flex items-center justify-center text-secondary font-bold text-lg tracking-tight">
+                            SA
+                        </div>
+<div class="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 border-4 border-white rounded-full"></div>
+</div>
+<div>
+<h3 class="text-lg font-bold text-on-surface bengali-text">সুমাইয়া আক্তার</h3>
+<div class="flex items-center gap-2 mt-0.5">
+<span class="px-2 py-0.5 bg-secondary-container/30 text-secondary text-[10px] font-bold rounded-full uppercase tracking-widest">Cashier</span>
+<span class="text-xs text-on-surface-variant/70 font-mono">Last active: 5m ago</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-white transition-colors">
+<span class="material-symbols-outlined" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+</div>
+<!-- Permission Detail Expandable (TapRow effect) -->
+<div class="bg-surface-container-lowest rounded-[24px] overflow-hidden shadow-md ring-2 ring-primary/20">
+<div class="p-4 flex items-center justify-between border-b border-outline-variant/10">
+<div class="flex items-center gap-4">
+<div class="relative">
+<div class="w-14 h-14 rounded-2xl bg-tertiary-fixed flex items-center justify-center text-tertiary font-bold text-lg tracking-tight">
+                                AA
+                            </div>
+<div class="absolute -bottom-1 -right-1 w-4 h-4 bg-slate-300 border-4 border-white rounded-full"></div>
+</div>
+<div>
+<h3 class="text-lg font-bold text-on-surface bengali-text">আব্দুল্লাহ আল মাসুম</h3>
+<div class="flex items-center gap-2 mt-0.5">
+<span class="px-2 py-0.5 bg-secondary-container/30 text-secondary text-[10px] font-bold rounded-full uppercase tracking-widest">Cashier</span>
+<span class="text-xs text-on-surface-variant/70 font-mono">Last active: 2h ago</span>
+</div>
+</div>
+</div>
+<button class="w-10 h-10 rounded-full flex items-center justify-center text-primary bg-primary-container/10">
+<span class="material-symbols-outlined" data-icon="expand_less">expand_less</span>
+</button>
+</div>
+<div class="p-5 bg-surface-container-low grid grid-cols-2 gap-3">
+<div class="flex items-center gap-3 p-3 bg-white rounded-xl">
+<span class="material-symbols-outlined text-emerald-600 text-sm" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<span class="text-sm font-semibold bengali-text">বিক্রয় এন্ট্রি</span>
+</div>
+<div class="flex items-center gap-3 p-3 bg-white rounded-xl">
+<span class="material-symbols-outlined text-emerald-600 text-sm" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+<span class="text-sm font-semibold bengali-text">ইনভেন্টরি ভিউ</span>
+</div>
+<div class="flex items-center gap-3 p-3 bg-white/50 rounded-xl opacity-60">
+<span class="material-symbols-outlined text-slate-400 text-sm" data-icon="cancel">cancel</span>
+<span class="text-sm font-semibold bengali-text">রিপোর্ট এক্সেস</span>
+</div>
+<div class="flex items-center gap-3 p-3 bg-white/50 rounded-xl opacity-60">
+<span class="material-symbols-outlined text-slate-400 text-sm" data-icon="cancel">cancel</span>
+<span class="text-sm font-semibold bengali-text">স্টাফ এডিট</span>
+</div>
+<div class="col-span-2 mt-2">
+<button class="w-full py-3 bg-primary text-white rounded-xl font-bold flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
+<span class="material-symbols-outlined text-lg" data-icon="edit">edit</span>
+<span class="bengali-text">অনুমতি পরিবর্তন করুন</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Staff Card 3 -->
+<div class="bg-surface-container-lowest p-4 rounded-[24px] flex items-center justify-between group cursor-pointer hover:bg-emerald-50 transition-all duration-300">
+<div class="flex items-center gap-4">
+<div class="relative">
+<div class="w-14 h-14 rounded-2xl bg-outline-variant/30 flex items-center justify-center text-on-surface-variant font-bold text-lg tracking-tight">
+                            TH
+                        </div>
+<div class="absolute -bottom-1 -right-1 w-4 h-4 bg-slate-300 border-4 border-white rounded-full"></div>
+</div>
+<div>
+<h3 class="text-lg font-bold text-on-surface bengali-text">তানভীর হোসেন</h3>
+<div class="flex items-center gap-2 mt-0.5">
+<span class="px-2 py-0.5 bg-secondary-container/30 text-secondary text-[10px] font-bold rounded-full uppercase tracking-widest">Cashier</span>
+<span class="text-xs text-on-surface-variant/70 font-mono">Last active: Yesterday</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="w-10 h-10 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-white transition-colors">
+<span class="material-symbols-outlined" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Add New Staff Floating Hint -->
+<div class="bg-primary-container p-6 rounded-[32px] text-white flex items-center gap-6 mt-12 relative overflow-hidden shadow-lg shadow-primary-container/30">
+<div class="flex-1 z-10">
+<h4 class="text-xl font-bold bengali-text">নতুন স্টাফ যোগ করুন</h4>
+<p class="text-white/80 text-sm mt-1 bengali-text">টিম বড় করুন এবং দায়িত্ব ভাগ করে দিন।</p>
+</div>
+<button class="w-14 h-14 bg-white text-primary rounded-full flex items-center justify-center z-10 shadow-xl active:scale-90 transition-all">
+<span class="material-symbols-outlined text-3xl font-bold" data-icon="add">add</span>
+</button>
+<!-- Decorative circle -->
+<div class="absolute -right-8 -top-8 w-32 h-32 bg-white/10 rounded-full"></div>
+</div>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-2xl rounded-t-[32px] shadow-[0_-8px_24px_rgba(0,0,0,0.04)]">
+<a class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 px-4 py-2 hover:text-emerald-600 dark:hover:text-emerald-300 transition-all active:scale-90 duration-300 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="pill">pill</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[11px] font-semibold uppercase tracking-wider mt-1">Inventory</span>
+</a>
+<a class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 px-4 py-2 hover:text-emerald-600 dark:hover:text-emerald-300 transition-all active:scale-90 duration-300 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="receipt_long">receipt_long</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[11px] font-semibold uppercase tracking-wider mt-1">Sales</span>
+</a>
+<a class="flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 px-4 py-2 hover:text-emerald-600 dark:hover:text-emerald-300 transition-all active:scale-90 duration-300 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[11px] font-semibold uppercase tracking-wider mt-1">Staff</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-gradient-to-br from-emerald-600 to-emerald-800 text-white rounded-full px-6 py-2 shadow-lg shadow-emerald-900/20 active:scale-90 duration-300 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="settings" style="font-variation-settings: 'FILL' 1;">settings</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[11px] font-semibold uppercase tracking-wider mt-1">Settings</span>
+</a>
+</nav>
+</body></html>

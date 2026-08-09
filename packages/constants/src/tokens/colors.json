@@ -1,0 +1,14 @@
+{
+  "brandGreen": "#059669",
+  "deepGreen": "#065F46",
+  "softGreen": "#ECFDF5",
+  "richBlack": "#111827",
+  "midGray": "#6B7280",
+  "white": "#FFFFFF",
+  "success": "#059669",
+  "error": "#DC2626",
+  "warning": "#D97706",
+  "warningBg": "#FEF3C7",
+  "errorBg": "#FEF2F2",
+  "info": "#2563EB"
+}

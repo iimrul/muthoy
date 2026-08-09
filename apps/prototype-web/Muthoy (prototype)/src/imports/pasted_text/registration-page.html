@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+
+<html lang="bn"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Portable POS - Registration</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Hind+Siliguri:wght@400;500;600;700&amp;family=DM+Mono:wght@400;500&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-secondary-fixed": "#002116",
+                        "inverse-surface": "#293040",
+                        "surface-container-highest": "#dce2f7",
+                        "error-container": "#ffdad6",
+                        "surface-container-high": "#e1e8fd",
+                        "on-secondary": "#ffffff",
+                        "tertiary-fixed-dim": "#ffb77d",
+                        "primary-fixed": "#85f8c4",
+                        "tertiary-container": "#b15f00",
+                        "secondary": "#1b6b51",
+                        "secondary-fixed-dim": "#8bd6b6",
+                        "surface-variant": "#dce2f7",
+                        "on-tertiary-container": "#fffbff",
+                        "primary": "#006948",
+                        "on-tertiary-fixed-variant": "#6e3900",
+                        "inverse-on-surface": "#edf0ff",
+                        "surface": "#f9f9ff",
+                        "on-primary-fixed-variant": "#005137",
+                        "surface-tint": "#006c4a",
+                        "surface-container-lowest": "#ffffff",
+                        "background": "#f9f9ff",
+                        "on-surface": "#141b2b",
+                        "on-primary-fixed": "#002114",
+                        "on-primary-container": "#f5fff7",
+                        "on-tertiary": "#ffffff",
+                        "surface-bright": "#f9f9ff",
+                        "on-surface-variant": "#3d4a42",
+                        "secondary-container": "#a6f2d1",
+                        "outline": "#6d7a72",
+                        "surface-dim": "#d3daef",
+                        "primary-fixed-dim": "#68dba9",
+                        "on-error": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "outline-variant": "#bccac0",
+                        "surface-container": "#e9edff",
+                        "on-secondary-container": "#237157",
+                        "error": "#ba1a1a",
+                        "on-background": "#141b2b",
+                        "primary-container": "#00855d",
+                        "on-error-container": "#93000a",
+                        "tertiary-fixed": "#ffdcc3",
+                        "surface-container-low": "#f1f3ff",
+                        "tertiary": "#8d4b00",
+                        "inverse-primary": "#68dba9",
+                        "on-tertiary-fixed": "#2f1500",
+                        "secondary-fixed": "#a6f2d1",
+                        "on-secondary-fixed-variant": "#00513b"
+                    },
+                    fontFamily: {
+                        "plus-jakarta-sans": ["Plus Jakarta Sans", "sans-serif"],
+                        "hind-siliguri": ["Hind Siliguri", "sans-serif"],
+                        "dm-mono": ["DM Mono", "monospace"],
+                        "headline": ["Plus Jakarta Sans"],
+                        "body": ["Plus Jakarta Sans"],
+                        "label": ["Plus Jakarta Sans"]
+                    },
+                    borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            font-family: 'Plus Jakarta Sans', 'Hind Siliguri', sans-serif;
+            background-color: #f9f9ff;
+        }
+        .editorial-shadow {
+            box-shadow: 0 8px 24px rgba(20, 27, 43, 0.06);
+        }
+        .gradient-cta {
+            background: linear-gradient(135deg, #006948 0%, #00855d 100%);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface min-h-screen flex flex-col items-center overflow-x-hidden">
+<!-- Registration Content Shell (Suppresses TopAppBar/BottomNavBar per instructions) -->
+<main class="w-full max-w-md min-h-screen px-6 py-12 flex flex-col justify-between">
+<!-- Top Section: Brand Identity -->
+<div class="flex flex-col items-center mt-8">
+<!-- Brand Wordmark -->
+<div class="flex items-center space-x-1">
+<span class="text-3xl font-extrabold tracking-tight text-[#111827] font-plus-jakarta-sans">Portable</span>
+<span class="text-3xl font-extrabold tracking-tight text-[#059669] font-plus-jakarta-sans">POS</span>
+</div>
+<!-- Tagline -->
+<p class="mt-2 text-[15px] font-medium text-[#6B7280] font-hind-siliguri">
+                আপনার দোকানের বিশ্বস্ত সাথী
+            </p>
+<!-- Pharmacy-themed Illustration -->
+<div class="mt-12 w-full flex justify-center">
+<div class="relative w-48 h-48 bg-surface-container-low rounded-full flex items-center justify-center">
+<!-- Decorative Background Element -->
+<div class="absolute inset-0 opacity-10 bg-primary-container rounded-full blur-2xl"></div>
+<!-- Medicine Themed Illustration Placeholder -->
+<div class="relative z-10 p-4">
+<img alt="Modern minimalist pharmacy illustration" class="w-32 h-32 object-cover rounded-2xl editorial-shadow" data-alt="Modern minimalist pharmacy illustration with soft focus medicine bottles and clean white medical laboratory aesthetic with green accents" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBCudgDi08Otu-iYNG6B1uUENvj8x9V-FQFf_FpADLNgk7qTzbP8gvW6IMRPRCsUSZIVMTHMoKVbx3we6ECRTkAk-i66Tmn36LaATIfRe6IlseA-F9-QCHA_IyxDE3n14HbZgJVlGmUlbnjXtpjS2QfeoX6EvRwKZRlW21c_6VA9f94eMXY-XRsUN9tyPEKwKkIbWcAupqLh0r0aqtPQgxtJ7MhZsd-GPPiupf6ISzHoRwssRZpnBUFsFb97Z7gg37F_hnl3jTZdQ"/>
+</div>
+</div>
+</div>
+</div>
+<!-- Middle Section: Registration Form -->
+<div class="flex-1 mt-12 flex flex-col space-y-6">
+<!-- Shop Name Input -->
+<div class="space-y-1.5">
+<div class="relative flex items-center">
+<span class="material-symbols-outlined absolute left-4 text-outline" data-icon="storefront">storefront</span>
+<input class="w-full h-12 pl-12 pr-4 bg-surface-container-lowest border-none rounded-lg text-on-surface placeholder:text-outline/60 font-hind-siliguri focus:ring-2 focus:ring-primary-container transition-all editorial-shadow" placeholder="দোকানের নাম" type="text"/>
+</div>
+</div>
+<!-- Phone Number Input -->
+<div class="space-y-1.5">
+<div class="relative flex items-center">
+<span class="material-symbols-outlined absolute left-4 text-outline" data-icon="call">call</span>
+<div class="absolute left-12 flex items-center border-r border-outline-variant/30 pr-2 mr-2">
+<span class="text-on-surface-variant font-dm-mono text-sm">+৮৮০</span>
+</div>
+<input class="w-full h-12 pl-24 pr-4 bg-surface-container-lowest border-none rounded-lg text-on-surface placeholder:text-outline/60 font-dm-mono focus:ring-2 focus:ring-primary-container transition-all editorial-shadow" placeholder="ফোন নম্বর" type="tel"/>
+</div>
+</div>
+<!-- Primary CTA -->
+<button class="w-full h-12 gradient-cta text-white font-bold text-lg rounded-full shadow-lg active:scale-95 transition-transform font-hind-siliguri">
+                শুরু করুন
+            </button>
+<!-- Support/Help Quick Link (Secondary Content) -->
+<div class="pt-4 text-center">
+<button class="text-primary font-semibold text-sm font-hind-siliguri hover:underline">
+                    ইতিমধ্যে অ্যাকাউন্ট আছে? লগইন করুন
+                </button>
+</div>
+</div>
+<!-- Footer Section: Terms & Conditions -->
+<footer class="mt-8 text-center px-4">
+<p class="text-[11px] leading-relaxed text-outline font-hind-siliguri">
+                রেজিস্ট্রেশন করে আপনি আমাদের <a class="underline font-medium text-on-surface-variant" href="#">শর্তাবলী</a> এবং <a class="underline font-medium text-on-surface-variant" href="#">গোপনীয়তা নীতিতে</a> সম্মত হচ্ছেন
+            </p>
+</footer>
+</main>
+<!-- Visual Polish: Floating Sync Status (Subtle Brand Identity Element) -->
+<div class="fixed top-6 right-6 flex items-center space-x-2 bg-white/40 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/20 shadow-sm">
+<div class="relative flex items-center justify-center">
+<span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+<span class="absolute w-2 h-2 rounded-full bg-primary opacity-20 animate-ping"></span>
+</div>
+<span class="text-[10px] font-bold text-primary font-plus-jakarta-sans uppercase tracking-wider">Cloud Ready</span>
+</div>
+</body></html>
