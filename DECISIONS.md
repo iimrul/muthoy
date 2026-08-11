@@ -197,3 +197,212 @@ database that already holds a live shop's data means migrating that data;
 right now the database is empty, so the change is nearly free. The `muthoy.db`
 file created today is unencrypted — during development that is fine and can be
 deleted and recreated at will.
+
+---
+
+## 2026-08-10 (Days 4-5/11) — Native bcrypt binding, not pure-JS
+
+`react-native-bcrypt-cpp` was chosen over pure-JS options (`bcryptjs`,
+`react-native-bcrypt`) for two verified reasons, not a stylistic preference:
+
+1. **Security**: React Native's `crypto.getRandomValues` falls back to
+   `Math.random()` unless explicitly polyfilled. Pure-JS bcrypt libraries
+   depend on that source for salt generation — an insecure PRNG produces
+   guessable salts, defeating the point of hashing at all.
+2. **Performance**: pure-JS bcrypt is 3-50x slower than native C++ bindings.
+   PROJECT_CONTEXT.md targets a 2GB-RAM Samsung Galaxy A14-class phone, and a
+   PIN is entered on every app open — not a rare path. The chosen package's
+   own published benchmark: ~14s (JS) vs ~0.3s (native, multithreaded) for
+   the same hash.
+
+`bcrypt-react-native` (a same-named, older alternative) was ruled out
+specifically: last published 2022, before React Native's New Architecture
+became the default — a real compatibility risk against RN 0.86.
+
+**Requires New Architecture.** No `newArchEnabled: false` override exists in
+`app.json`, and Expo SDK 57 defaults to it, so this should already be
+satisfied — but unlike Day 2's schema work, this can't be proven from a
+terminal. **The first EAS dev build after this change is the actual
+confirmation point**; if linking fails, that is the signal New Architecture
+isn't active.
+
+Cost factor: 12 (a standard modern default). Native + multithreaded, so this
+doesn't reintroduce the UI-blocking risk pure-JS bcrypt would have had at the
+same cost factor.
+
+> **REVERSED the same day — see "Reverted to bcryptjs" below.** The package
+> turned out not to work on Android at all, for reasons no amount of reading
+> its README could have revealed. The reasoning above was sound; one of its
+> two premises (the `Math.random` claim) was also simply out of date.
+
+---
+
+## 2026-08-10 (Days 4-5/11) — Reverted to bcryptjs; the native package was broken upstream
+
+The dev build failed at runtime with
+`TurboModuleRegistry.getEnforcing('BcryptCpp') could not be found`. Root cause,
+established by reading the package's own source rather than guessing:
+**`react-native-bcrypt-cpp` ships no Android JNI registration whatsoever.** Its
+iOS side has a working `ios/onLoad.mm` calling
+`registerCxxModuleToGlobalModuleMap`; Android has no equivalent file, and its
+`BcryptCppPackage.kt` is a stub whose `getModule()` returns `null` and whose
+`getReactModuleInfoProvider()` returns an empty map. The C++ was compiled but
+never connected to anything JS could reach — so it could never have worked on
+Android, on any build, for anyone. (npm confirms the package was abandoned 8
+days after first publish.) Nothing about this project's setup caused it.
+
+Writing the missing bridge was attempted and got genuinely close: 8 distinct
+build-configuration defects were found and fixed across 8 EAS builds (missing
+`find_package(ReactAndroid)`, missing `prefab true`, static-vs-shared STL,
+un-namespaced CMake targets, `react_nativemodule_core` not existing under
+plain CONFIG mode, C++17-vs-C++20, codegen output never pulled in via
+`add_subdirectory`, and `REACT_NATIVE_DIR` not being an ambient Gradle
+property). Each fix was verified against real working packages in this repo
+(gesture-handler, reanimated, nitro-modules) and each build got measurably
+further. That work is preserved, **unreferenced and no longer applied**, at
+`patches/react-native-bcrypt-cpp@0.2.3.patch`.
+
+It was abandoned not because it was failing but because the remaining unknown
+count wasn't zero and — critically — **even a successful compile would not
+have proven the JNI registration actually works at runtime**, which was the
+original bug. Maintaining a hand-written JNI bridge for an abandoned package
+is also a long-term liability for a solo-founder project.
+
+**The security premise for rejecting pure-JS was out of date.** `bcryptjs` v3
+sources salt entropy from Web Crypto, then Node crypto, and **throws** if
+neither is available — it does *not* silently fall back to `Math.random()`.
+That was v2 behaviour, and it is the reason pure-JS bcrypt earned its bad
+reputation. `native/crypto.ts` sets `setRandomFallback()` to `expo-crypto`'s
+`getRandomBytes()` (the platform CSPRNG — `SecRandomCopyBytes`/`SecureRandom`),
+so salts come from the OS secure source, exactly as the native module would
+have. Without that line RN would throw, not silently weaken — the failure mode
+is loud.
+
+**The performance premise was real, and is handled by lowering the cost factor
+from 12 to 10.** Cost 12 in JS is roughly 1-3s on the target Galaxy A14-class
+hardware — too slow for a POS login on every app open; cost 10 is ~300-600ms.
+The `hash`/`compare` async variants are used (not `hashSync`/`compareSync`)
+because bcryptjs chunks async work across ticks instead of hard-blocking the
+JS thread. Note that for a **4-digit** PIN the real defence against an attacker
+holding the database is the 10,000-combination keyspace, not the cost factor —
+that is addressed by attempt rate-limiting and by SQLCipher at rest (already
+tracked above as a pre-pilot requirement), not by bcrypt tuning.
+
+Because `db/auth.ts` and `db/staff.ts` only ever call `hashPin`/`verifyPinHash`
+and never bcrypt directly, this swap changed exactly one file plus docs — no
+SQL, no schema, no screens. The hash format is standard bcrypt in both cases,
+so any hash already written remains verifiable.
+
+---
+
+## 2026-08-10 (Days 4-5/11) — Two stub signatures corrected against the real schema
+
+Tracing the approved auth work against Day 2's actual `schema.ts` (not just
+Volume 4's prose) surfaced two places where the original skeleton-phase stub
+signatures couldn't actually implement the required flow:
+
+**`users.pin_hash` is `NOT NULL`, but Registration and PIN Setup are separate
+screens** (Volume 0 Day 4). The owner's `users` row is created during
+`createShopAndOwner` with a placeholder hash — `hashPin()` of a freshly
+generated random UUID, never a 4-digit string, so it can never match a real
+PIN attempt through `verifyPin`. `setOwnerPin` overwrites it once PIN Setup
+completes. This keeps the original two-call shape
+(`createShopAndOwner` → `setOwnerPin`) intact rather than restructuring it
+into one combined write.
+
+**`verifyPin(userId, rawPin)` couldn't work as originally stubbed** — PIN
+Login has no username step (Volume 4 AUTHENTICATION describes PIN-only
+entry), so there is no `userId` to check against until AFTER a match is
+found. Corrected to `verifyPin(rawPin)`: checks the PIN against every active
+local user's hash and returns whichever one matched. Assumes one shop per
+device (Volume 0's P0 scope — multi-shop is P1); revisit this function when
+multi-shop ships.
+
+---
+
+## 2026-08-10 (Days 4-5/11) — Owner's `users.name` defaults to the shop name
+
+**Flagged for founder review, not silently decided.** Volume 0 Day 4 is
+explicit that Registration collects "shop name + phone only" — there is no
+field for the owner's personal name. But `users.name` is `NOT NULL`. Rather
+than add an unrequested field to the Registration form, `createShopAndOwner`
+defaults the owner's `users.name` to the shop name. One-line change in
+`db/auth.ts` if an owner-name field should exist instead.
+
+---
+
+## 2026-08-10 (Days 4-5/11) — react-native-mmkv v4's API is not `new MMKV()`
+
+Caught by `tsc`, not assumed correct: v4 is rebuilt on Nitro Modules.
+`MMKV` is now a TYPE only; instances come from `createMMKV(config)`.
+Key removal is `remove(key)`, not the `delete(key)` used in v2/v3.
+`state/sessionStore.ts` uses the v4 API throughout.
+
+---
+
+## 2026-08-10 (Days 4-5/11) — MMKV holds session only, never a PIN or its hash
+
+Volume 4 STATE MANAGEMENT says "MMKV for PIN hash + session" — read as loose
+phrasing for "the fast-storage layer used around PIN auth," not a literal
+second copy of the hash living outside SQLite. `state/sessionStore.ts`
+persists only `{ shopId, userId, role }`. CLAUDE.md rule 1 makes SQLite the
+sole source of truth; duplicating a security-sensitive hash across two
+stores needs a reason, and none was found. Flagged explicitly in the
+approved plan before implementation — say so if a literal second copy was
+actually intended.
+
+---
+
+## 2026-08-10 (Days 4-5/11) — `listStaff` returns staff only, not the owner
+
+Volume 0 Day 11: "List existing staff with active/deactivated status." The
+first implementation queried all users joined to roles and only excluded
+`manager`, which meant the owner appeared in their own staff list. Caught
+before wiring the screen: query now filters to `role.name = 'staff'`
+directly in SQL, matching the function's name and the screen's actual intent.
+
+---
+
+## 2026-08-10 (Days 4-5/11) — react-hooks/set-state-in-effect (React Compiler)
+
+Expo SDK 57 runs with React Compiler enabled, which flagged two real
+patterns via `react-hooks/set-state-in-effect`:
+
+- `PinPad.tsx`'s `usePinEntry` called `setPin('')` immediately after
+  `onComplete(pin)` inside a `useEffect` watching `pin` — two `setState`
+  calls chained from one effect run. **Fixed properly**, not suppressed: the
+  complete-and-reset logic moved into `handleDigitPress` itself (an event
+  handler, not an effect), where React just batches the two calls. No
+  external system was being synchronized with, so an effect was never the
+  right tool here.
+- `app/staff/management.tsx` loads the staff list on mount via
+  `useEffect(() => { reloadStaff(); }, [reloadStaff])`. This one keeps a
+  scoped, commented `eslint-disable` — Volume 4 STATE MANAGEMENT explicitly
+  rules out TanStack Query for local reads ("never used to fetch what a
+  screen displays"), so there is no fetching-library hook to delegate a
+  load-on-mount to; a plain effect is the correct tool, and the lint rule's
+  heuristic (tracing through an async `useCallback` to the eventual
+  `setState`) is overly broad for this specific, unavoidable pattern.
+
+---
+
+## 2026-08-10 (Days 4-5/11) — Auth verified in Node without importing db/auth.ts directly
+
+`db/auth.ts` imports `expo-sqlite` (via `db/client.ts`) and the native
+bcrypt binding — neither loads in plain Node, so it can't be `import`-tested
+the way Day 2 tested raw migration SQL directly. Rather than add a new test
+framework or a Node-side SQLite driver (`better-sqlite3`) to work around
+this — outside the approved scope — verification mirrors the SAME SQL
+operations `db/auth.ts`/`db/staff.ts` perform against a real `node:sqlite`
+in-memory database (Day 2's pattern), plus the `verifyPin` search-for-a-match
+algorithm proven independent of which library computes the hash. 22/22
+checks pass: all 6 Zod schemas (valid/invalid BD phone, PIN shape, all three
+confirm-match refinements), shop+3-roles+owner created atomically, `owner_id`
+confirmed to have no FK (the placeholder-hash creation order actually works,
+not just in theory), staff-role attachment creates no new role row,
+`listStaff` returns staff only, deactivation flips `is_active` without
+deleting the row, and an audit-log row's `action`/`target`/`meta` fields
+contain no PIN-shaped value. **What this does NOT verify**: the actual
+native bcrypt call, or the exact SDK-native `expo-sqlite`/Drizzle wiring —
+both remain device-only checks (Volume 0 Day 4's own checklist: "PIN is
+stored hashed (inspect the DB row directly)").

@@ -17,12 +17,20 @@ SQLite is the app's single source of truth (CLAUDE.md rule 1).
   migration (DEVELOPMENT_RULES.md).
 - `index.ts` — the public surface other layers import from.
 
+- `auth.ts` (Days 4-5) — `createShopAndOwner`, `setOwnerPin`, `verifyPin`,
+  `getShopRoleId`. PIN hashing goes through `native/crypto.ts` exclusively;
+  this file never sees a raw PIN outside that one call.
+- `staff.ts` (Day 11) — `listStaff` (staff only, not the owner),
+  `createStaff`, `resetStaffPin`, `deactivateStaff`, `writeAuditLog`. Every
+  PIN change/deactivation writes an audit_logs row with no PIN-shaped value.
+- `settings.ts`'s `changeOwnPin` (Day 11's P0 slice) — the rest of that file
+  (`getShopProfile`/`updateShopProfile`/`restoreFromBackupKey`) is still a stub.
+
 ## Still stubs
 Every query file below throws `TODO: ...` until its day:
-`auth.ts` (Day 4-5), `sales.ts` (Day 6-7), `inventory.ts` (Day 8),
-`customers.ts` (Day 9), `cash.ts` (Day 10), `staff.ts` (Day 11),
-`suppliers.ts` + `purchases.ts` (P1), `reports.ts` (P1),
-`notifications.ts` (P1), `settings.ts` (P0 slice: change-own-PIN).
+`sales.ts` (Day 6-7), `inventory.ts` (Day 8), `customers.ts` (Day 9),
+`cash.ts` (Day 10), `suppliers.ts` + `purchases.ts` (P1), `reports.ts` (P1),
+`notifications.ts` (P1).
 
 ## Not built yet
 - FTS5 virtual table + triggers (Day 3, as migration `0001`).

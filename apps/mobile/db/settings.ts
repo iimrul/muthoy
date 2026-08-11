@@ -1,6 +1,12 @@
 // db/settings.ts — the ONLY file that will touch Drizzle/SQLite for
-// Settings (DEVELOPMENT_RULES.md). The Drizzle schema doesn't exist yet
-// (Day 2), so these are signature-only stubs — no Drizzle import until then.
+// Settings (DEVELOPMENT_RULES.md). getShopProfile/updateShopProfile/
+// restoreFromBackupKey remain stubs — out of the Days 4-5/11 auth scope.
+
+import { eq } from 'drizzle-orm';
+import { db } from './client';
+import { users } from './schema';
+import { hashPin, verifyPinHash } from '../native/crypto';
+import { writePinChangeAuditLog } from './staff';
 
 export interface ShopProfile {
   id: string;
@@ -18,11 +24,26 @@ export async function updateShopProfile(_shopId: string, _profile: Partial<Omit<
   throw new Error('TODO: implement shop profile update (Volume 4 SETTINGS)');
 }
 
-// TODO(P0 slice): bcrypt-hash the new PIN before writing (CLAUDE.md rule 8
-// — never logged or stored in plain text). Must verify the CURRENT PIN
-// first, reusing db/auth.ts's verifyPin.
-export async function changeOwnPin(_userId: string, _currentRawPin: string, _newRawPin: string): Promise<void> {
-  throw new Error('TODO: implement owner PIN change (Volume 4 SETTINGS, CLAUDE.md rule 8)');
+// P0 slice (Volume 4 SETTINGS: "security... change own PIN — P0"). Checks
+// the CURRENT PIN against this specific user's hash directly — not
+// db/auth.ts's verifyPin, which searches every active user and is for login,
+// where the identity isn't known yet. Here it already is.
+export async function changeOwnPin(userId: string, currentRawPin: string, newRawPin: string): Promise<void> {
+  const [user] = await db.select({ shopId: users.shopId, pinHash: users.pinHash }).from(users).where(eq(users.id, userId));
+  if (!user) {
+    throw new Error(`No user found with id ${userId}`);
+  }
+
+  const currentPinMatches = await verifyPinHash(currentRawPin, user.pinHash);
+  if (!currentPinMatches) {
+    throw new Error('Current PIN is incorrect');
+  }
+
+  const newPinHash = await hashPin(newRawPin);
+  await db.transaction(async (tx) => {
+    await tx.update(users).set({ pinHash: newPinHash, updatedAt: new Date().toISOString() }).where(eq(users.id, userId));
+  });
+  await writePinChangeAuditLog(user.shopId, userId);
 }
 
 // TODO(P1): backup key restore-on-new-phone (Volume 4 SETTINGS: "backup key

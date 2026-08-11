@@ -1,0 +1,313 @@
+diff --git a/android/CMakeLists.txt b/android/CMakeLists.txt
+index 4cefed7cc48edfe75e33bbaa3fe5ed638cf3b359..01dc3cecc9511b4e262d1a156638560a2700e7d3 100644
+--- a/android/CMakeLists.txt
++++ b/android/CMakeLists.txt
+@@ -3,10 +3,17 @@ project(BcryptCpp)
+ 
+ set(CMAKE_VERBOSE_MAKEFILE ON)
+ 
++# PATCHED (not upstream): c++17 -> c++20. RN 0.86's own Prefab-exported
++# headers (e.g. react/bridging/Base.h) use C++20 concepts syntax (the
++# `requires` keyword) unconditionally - confirmed by a real compile error:
++# "unknown type name 'requires'" inside that header, compiled at -std=c++17.
++# react-native-gesture-handler's CMakeLists.txt sets C++20 for any RN minor
++# version >= 73 for the same reason; this project pins RN 0.86.2 directly, so
++# there's no older-version case to branch on. See ../../DECISIONS.md.
+ add_compile_options(
+         -fexceptions
+         -frtti
+-        -std=c++17
++        -std=c++20
+ )
+ 
+ # Add bcrypt library
+@@ -16,8 +23,14 @@ add_library(bcrypt STATIC
+         ../cpp/bcrypt/node_blf.h
+         ../cpp/bcrypt/openbsd.h)
+ 
+-add_library(react-native-bcrypt-cpp STATIC
+-            ../cpp/NativeBcryptCppTurboModule.cpp)
++# PATCHED (not upstream): STATIC -> SHARED, and added src/main/cpp/OnLoad.cpp.
++# A static library is never independently loaded by Android's dynamic
++# linker, so JNI_OnLoad (in the newly-added OnLoad.cpp) could never run
++# against a STATIC build — Android has no mechanism to invoke it. See
++# src/main/cpp/OnLoad.cpp and ../../DECISIONS.md for the full explanation.
++add_library(react-native-bcrypt-cpp SHARED
++            ../cpp/NativeBcryptCppTurboModule.cpp
++            src/main/cpp/OnLoad.cpp)
+ 
+ target_include_directories(bcrypt
+         PUBLIC
+@@ -28,9 +41,93 @@ target_include_directories(react-native-bcrypt-cpp
+         ../cpp
+ )
+ 
++# PATCHED (not upstream): fbjni wasn't declared at all, but OnLoad.cpp's
++# facebook::jni::initialize() requires it. Pattern (find_package + the
++# fbjni::fbjni imported target) matches react-native-gesture-handler's
++# CMakeLists.txt, a real working package using the same dependency.
++#
++# find_package(ReactAndroid ...) MUST come first, even though nothing here
++# links against it directly: it's what primes CMake's Prefab search path
++# (CMAKE_FIND_ROOT_PATH) so find_package(fbjni ...) can find fbjni's config
++# at all. Confirmed by a real build failure without this line:
++# "CMake Error: Could not find a package configuration file provided by
++# fbjni" — gesture-handler's CMakeLists.txt calls both, in this order, for
++# the same reason.
++find_package(ReactAndroid REQUIRED CONFIG)
++find_package(fbjni REQUIRED CONFIG)
++
++# PATCHED (not upstream): upstream never pulled in its own codegen output.
++# The `react { libraryName = "BcryptCpp" }` block in build.gradle makes RN's
++# codegen Gradle task emit a JNI spec (defining the NativeBcryptCppCxxSpec
++# template target_link_libraries below needs) to this module's OWN
++# android/build/generated/source/codegen/jni/CMakeLists.txt - the standard
++# per-module codegen output path (confirmed via @react-native/gradle-plugin's
++# own test fixtures, which show this exact path pattern for a real RN
++# reference package). That generated CMakeLists.txt defines the target
++# react_codegen_RNBcryptCppSpec referenced below... but this module's OWN
++# CMakeLists.txt is a separate, independently-configured CMake project
++# (see `project(BcryptCpp)` above) - CMake targets are scoped per-project,
++# so nothing makes that target visible here unless this file pulls it in
++# itself, the same way RN's own app-level autolinking task add_subdirectory()s
++# every module's generated codegen dir into the app's build. Confirmed by a
++# real error: "no template named 'NativeBcryptCppCxxSpec'" and "use of
++# undeclared identifier 'jsInvoker_'" (both defined by the generated spec).
++# See ../../DECISIONS.md.
++#
++# The generated CMakeLists.txt itself calls target_compile_reactnative_options(),
++# a custom CMake function it doesn't define - it's defined in RN's own
++# ReactCommon/cmake-utils/react-native-flags.cmake, normally include()'d by
++# RN's app-level ReactNative-application.cmake template before that template
++# add_subdirectory()s the (app-level) codegen output into the SAME scope.
++# Since this file is doing the equivalent add_subdirectory() for a
++# THIRD-PARTY module instead, it has to include() that same flags file
++# itself first - CMake's add_subdirectory() gives the child scope a copy of
++# the parent's function/macro table as of the call, so defining the function
++# here makes it visible inside the generated codegen CMakeLists.txt too.
++# Confirmed by a real error: 'Unknown CMake command
++# "target_compile_reactnative_options"' at build/generated/source/codegen/jni/CMakeLists.txt:28.
++# REACT_NATIVE_DIR itself comes from build.gradle's -DREACT_NATIVE_DIR=...
++# argument (see ../../DECISIONS.md) - pnpm's content-addressable store means
++# a relative path guess from this file's real on-disk location can't be
++# trusted to reach node_modules/react-native.
++set(REACT_ANDROID_DIR "${REACT_NATIVE_DIR}/ReactAndroid")
++set(REACT_COMMON_DIR "${REACT_ANDROID_DIR}/../ReactCommon")
++include("${REACT_COMMON_DIR}/cmake-utils/react-native-flags.cmake")
++
++add_subdirectory(
++        "${CMAKE_CURRENT_SOURCE_DIR}/build/generated/source/codegen/jni"
++        codegen_build
++)
++
++# PATCHED (not upstream): upstream linked bare `jsi` and `react_nativemodule_core`,
++# which aren't real CMake target names - Prefab exposes them namespaced under
++# the package find_package(ReactAndroid) imports. CMake silently treats an
++# unrecognized target_link_libraries name as a raw linker flag instead of
++# erroring at configure time, so this only surfaced at actual compilation:
++# "jsi/jsi.h file not found" and "ReactCommon/CxxTurboModuleUtils.h file not
++# found".
++#
++# ReactAndroid::jsi is correct (confirmed: no longer errors). But
++# ReactAndroid::react_nativemodule_core is NOT a real Prefab target in plain
++# CONFIG mode - confirmed by a real CMake generate-time error: 'Target
++# "react-native-bcrypt-cpp" links to target "ReactAndroid::react_nativemodule_core"
++# but the target was not found.' react-native-nitro-modules/android/CMakeLists.txt
++# references that exact name, but it resolves via a nonstandard
++# find_package(... REQUIRED NitroConfig) - a custom Find*.cmake nitro ships
++# itself, not plain Prefab CONFIG resolution - so it isn't a valid comparison
++# for a package using find_package(ReactAndroid REQUIRED CONFIG) like this one.
++# react-native-gesture-handler and react-native-reanimated both use plain
++# CONFIG mode (matching this package) and both link only ReactAndroid::reactnative
++# for this - no separate react_nativemodule_core target at all. ReactCommon/
++# CxxTurboModuleUtils.h physically lives under ReactCommon/react/nativemodule/
++# core/ReactCommon/ in the react-native package, and "reactnative" is Prefab's
++# umbrella module covering all of ReactCommon's exported headers, which is
++# consistent with gesture-handler/reanimated compiling against that header
++# tree via ReactAndroid::reactnative alone. See ../../DECISIONS.md.
+ target_link_libraries(react-native-bcrypt-cpp
+         bcrypt
+-        jsi
+-        react_nativemodule_core
++        ReactAndroid::reactnative
++        ReactAndroid::jsi
++        fbjni::fbjni
+         react_codegen_RNBcryptCppSpec
+ )
+diff --git a/android/build.gradle b/android/build.gradle
+index d5a1e02a06a2beac7e702394952795418a89cae7..72f950ace64f01786c5defbb3fa73ef8fe772432 100644
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -19,6 +19,37 @@ def reactNativeArchitectures() {
+   return value ? value.split(",") : ["armeabi-v7a", "x86", "x86_64", "arm64-v8a"]
+ }
+ 
++// PATCHED (not upstream): REACT_NATIVE_DIR isn't an ambient Gradle property -
++// referencing it bare failed with "Could not get unknown property
++// 'REACT_NATIVE_DIR'". react-native-gesture-handler's build.gradle defines
++// this itself via the identical resolveReactNativeDirectory() function
++// below (checked first for rootProject.ext.REACT_NATIVE_NODE_MODULES_DIR,
++// then falls back to asking Node's own module resolver - not a relative
++// path guess, which pnpm's content-addressable store can't be trusted with).
++// See ../../DECISIONS.md.
++def resolveReactNativeDirectory() {
++  def reactNativeLocation = rootProject.ext.has("REACT_NATIVE_NODE_MODULES_DIR") \
++      ? rootProject.ext.get("REACT_NATIVE_NODE_MODULES_DIR") : null
++  if (reactNativeLocation != null) {
++    return file(reactNativeLocation)
++  }
++
++  def reactNativePackage = file(
++      providers.exec {
++        workingDir(rootDir)
++        commandLine("node", "--print", "require.resolve('react-native/package.json')")
++      }.standardOutput.asText.get().trim()
++  )
++
++  if (reactNativePackage.exists()) {
++    return reactNativePackage.parentFile
++  }
++
++  throw new Exception("[react-native-bcrypt-cpp] Unable to resolve react-native location")
++}
++
++def REACT_NATIVE_DIR = resolveReactNativeDirectory()
++
+ def isNewArchitectureEnabled() {
+   return rootProject.hasProperty("newArchEnabled") && rootProject.getProperty("newArchEnabled") == "true"
+ }
+@@ -69,6 +100,25 @@ android {
+     externalNativeBuild {
+       cmake {
+         cppFlags "-O2 -frtti -fexceptions -Wall -fstack-protector-all"
++        // PATCHED (not upstream): without an explicit ANDROID_STL argument,
++        // CMake/NDK defaults to a static STL. The Prefab-provided ReactAndroid
++        // package (specifically its hermestooling module) is built against
++        // the shared STL and rejects any consumer that isn't, too - confirmed
++        // via a real build error: "[CXX1212] User is using a static STL but
++        // library requires a shared STL [//ReactAndroid/hermestooling]".
++        // react-native-gesture-handler's build.gradle passes this same flag
++        // for the same reason. See ../../DECISIONS.md.
++        //
++        // REACT_NATIVE_DIR: without this, CMakeLists.txt has no reliable way
++        // to locate node_modules/react-native (pnpm's content-addressable
++        // store means a naive relative "../../react-native" traversal from
++        // this module's real on-disk location doesn't point at it). This is
++        // NOT an ambient Gradle property - see resolveReactNativeDirectory()
++        // above, which computes it the same way gesture-handler's
++        // build.gradle does, and defines the REACT_NATIVE_DIR variable
++        // referenced just below.
++        arguments "-DANDROID_STL=c++_shared",
++                "-DREACT_NATIVE_DIR=${REACT_NATIVE_DIR}"
+         abiFilters (*reactNativeArchitectures())
+       }
+     }
+@@ -82,6 +132,16 @@ android {
+ 
+   buildFeatures {
+     buildConfig true
++    // PATCHED (not upstream): without this, AGP never generates Prefab CMake
++    // config files or wires CMAKE_FIND_ROOT_PATH/CMAKE_PREFIX_PATH into the
++    // native build at all, so CMakeLists.txt's find_package(ReactAndroid)
++    // and find_package(fbjni) calls fail with "Could not find a package
++    // configuration file" no matter what CMakeLists.txt itself says -
++    // confirmed via a real build log (the emitted cmake invocation had zero
++    // CMAKE_FIND_ROOT_PATH/CMAKE_PREFIX_PATH flags). react-native-gesture-
++    // handler's build.gradle sets this for the identical find_package
++    // pattern. See ../../DECISIONS.md.
++    prefab true
+   }
+ 
+   buildTypes {
+@@ -90,6 +150,21 @@ android {
+     }
+   }
+ 
++  // PATCHED (not upstream): react-native-bcrypt-cpp now links the Prefab-
++  // imported fbjni::fbjni, ReactAndroid::jsi, and ReactAndroid::reactnative
++  // targets (see CMakeLists.txt) into a SHARED library, same as
++  // react-native-gesture-handler. Without excluding these, Android's
++  // native-lib merge step can find the same .so bundled by more than one
++  // module (each Prefab-linking module packages its own copy) and fail with
++  // a duplicate-file error - gesture-handler's build.gradle excludes the
++  // same four files for the same reason.
++  packagingOptions {
++    exclude "**/libjsi.so"
++    exclude "**/libc++_shared.so"
++    exclude "**/libfbjni.so"
++    exclude "**/libreactnative.so"
++  }
++
+   lintOptions {
+     disable "GradleCompatible"
+   }
+diff --git a/android/src/main/cpp/OnLoad.cpp b/android/src/main/cpp/OnLoad.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..c1c36bcf504a30084bc3472d41db09e7b579dfa3
+--- /dev/null
++++ b/android/src/main/cpp/OnLoad.cpp
+@@ -0,0 +1,31 @@
++#include <fbjni/fbjni.h>
++#include <ReactCommon/CxxTurboModuleUtils.h>
++#include "NativeBcryptCppTurboModule.h"
++
++// PATCH (not upstream): the Android equivalent of ../../../../ios/onLoad.mm.
++//
++// Upstream shipped a working iOS registration (onLoad.mm, which calls
++// registerCxxModuleToGlobalModuleMap — a cross-platform React Native core
++// API) but no Android equivalent at all. Android's only native-registration
++// file was android/src/main/java/.../BcryptCppPackage.kt, a TurboReactPackage
++// stub whose getModule()/getReactModuleInfoProvider() are both no-ops. That
++// left the real C++ implementation (cpp/NativeBcryptCppTurboModule.cpp,
++// cpp/bcrypt/*) compiled but never connected to anything JS could reach —
++// TurboModuleRegistry.getEnforcing('BcryptCpp') found nothing, on every
++// build, unconditionally. Root cause and evidence trail in ../../DECISIONS.md.
++//
++// This file mirrors the iOS call exactly, via Android's JNI entry point
++// instead of Objective-C's +load. JNI_OnLoad only runs once Android's loader
++// actually loads this shared library — see BcryptCppPackage.kt's
++// SoLoader.loadLibrary call, and CMakeLists.txt's STATIC->SHARED change
++// (a static library is never independently loaded, so JNI_OnLoad could never
++// have fired even if this file had existed upstream without that change too).
++JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *) {
++  return facebook::jni::initialize(vm, [] {
++    facebook::react::registerCxxModuleToGlobalModuleMap(
++        std::string(facebook::react::NativeBcryptCppTurboModule::kModuleName),
++        [](std::shared_ptr<facebook::react::CallInvoker> jsInvoker) {
++          return std::make_shared<facebook::react::NativeBcryptCppTurboModule>(jsInvoker);
++        });
++  });
++}
+diff --git a/android/src/main/java/com/bcryptcpp/BcryptCppPackage.kt b/android/src/main/java/com/bcryptcpp/BcryptCppPackage.kt
+index b5c78faa21b8af0ca2d5aadf5d03afda15ed14b1..433abcbf17ba84f57a21f73a55064536d641c30d 100644
+--- a/android/src/main/java/com/bcryptcpp/BcryptCppPackage.kt
++++ b/android/src/main/java/com/bcryptcpp/BcryptCppPackage.kt
+@@ -5,10 +5,27 @@ import com.facebook.react.bridge.NativeModule
+ import com.facebook.react.bridge.ReactApplicationContext
+ import com.facebook.react.module.model.ReactModuleInfo
+ import com.facebook.react.module.model.ReactModuleInfoProvider
+-import java.util.Collections
++import com.facebook.soloader.SoLoader
+ import java.util.HashMap
+ 
++// PATCHED (not upstream): getModule()/getReactModuleInfoProvider() below are
++// left as no-ops deliberately, not an oversight carried over from the
++// original bug. The C++ TurboModule registers itself directly into React
++// Native's global Cxx module map (see the newly-added
++// android/src/main/cpp/OnLoad.cpp) — the same cross-platform mechanism
++// ios/onLoad.mm already used successfully. TurboModuleManager finds a
++// module registered that way directly; it never calls
++// getModule()/getReactModuleInfoProvider() for it. What was actually
++// missing is the companion object below: nothing ever loaded the shared
++// library, so JNI_OnLoad (and therefore that registration) never ran. Full
++// root-cause trail in ../../../../../../../DECISIONS.md.
+ class CryptoCppPackage : TurboReactPackage() {
++  companion object {
++    init {
++      SoLoader.loadLibrary("react-native-bcrypt-cpp")
++    }
++  }
++
+   override fun getModule(name: String, reactContext: ReactApplicationContext): NativeModule? {
+     return null;
+   }
