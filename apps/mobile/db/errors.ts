@@ -19,6 +19,24 @@ export class DuplicateBatchError extends Error {
   }
 }
 
+export class BatchExpiryMismatchError extends Error {
+  readonly medicineId: string;
+  readonly batchNo: string;
+  constructor(medicineId: string, batchNo: string) {
+    super(`Batch "${batchNo}" already exists with a different expiry date.`);
+    this.name = 'BatchExpiryMismatchError';
+    this.medicineId = medicineId;
+    this.batchNo = batchNo;
+  }
+}
+
+export class NotAuthorizedError extends Error {
+  constructor() {
+    super('Owner access only.');
+    this.name = 'NotAuthorizedError';
+  }
+}
+
 // expo-sqlite surfaces a plain Error with no `.code` — detection is by
 // message text. SQLite's own wording: 'UNIQUE constraint failed:
 // batches.shop_id, batches.medicine_id, batches.batch_no'. Used as a backstop

@@ -44,16 +44,43 @@ already real PIN hashes; existing owners resume PIN Setup once.
   backstop, both mapping to `errors.ts`'s typed `DuplicateBatchError`) —
   `createMedicineWithBatch`'s first batch can never hit it, since its
   medicineId is always freshly generated.
-- `errors.ts` (Day 8) — `DuplicateBatchError`, `isUniqueConstraintViolation`.
-  First typed db/ error in the app; every prior write threw a bare `Error`.
+- `errors.ts` — typed write errors including `DuplicateBatchError`,
+  `BatchExpiryMismatchError`, and `NotAuthorizedError`.
+
+### Suppliers and purchases
+
+`suppliers.ts` and `purchases.ts` are live. Although this feature is classified
+P1/post-beta, it was explicitly approved and implemented early. Supplier and
+purchase screens require an owner session; the DB functions independently
+revalidate the active owner from SQLite (including the active shop) rather than
+trusting the UI. Every operation is shop-scoped.
+
+Purchase invoice numbers use `PUR-{YYYY}-{6-digit-seq}`. Purchase creation is
+one atomic transaction covering the header, items, batch stock, inventory
+movements, and—when COD—the supplier payment and cash-drawer recomputation.
+
+- COD sets `paid_amount = total`, records a cash `supplier_payment`, and reduces
+  expected drawer cash through the fixed cash formula.
+- Credit sets `paid_amount = 0` and creates no immediate payment/cash movement.
+  Supplier payable is derived as `SUM(purchases.total - purchases.paid_amount)`;
+  a future supplier-payment/pay-down flow must update `paid_amount`, not merely
+  insert a `payments` row.
+- Existing active batch with matching batch number and expiry: increment stock
+  only; preserve the stored purchase and sale prices.
+- Existing active batch with a different expiry: reject with
+  `BatchExpiryMismatchError` so FEFO identity is not corrupted.
+- Matching soft-deleted batch: reject with `DuplicateBatchError`; never revive
+  or overwrite its stock, prices, or expiry.
+
+Purchase medicine lookup reuses the local `medicines_fts` FTS5 index, remains
+shop-scoped and soft-delete-safe, and intentionally permits medicines with zero
+stock because this is a stock-in workflow.
 
 ## Still stubs
-Every query file below throws `TODO: ...` until its day:
-`sales.ts` (Day 6-7), `customers.ts` (Day 9), `cash.ts` (Day 10),
-`suppliers.ts` + `purchases.ts` (P1), `reports.ts` (P1), `notifications.ts` (P1).
+Unimplemented APIs remain in `cash.ts`, `customers.ts`, `settings.ts`,
+`reports.ts`, and `notifications.ts`; verify individual exports in source.
 
 ## Not built yet
-- FTS5 virtual table + triggers (Day 3, as migration `0001`).
 - The shared `updated_at` write helper Volume 3 requires — add it with the
   first real write, so it is never duplicated per call site. Still not built
   as of Day 8 — `inventory.ts` doesn't need it yet (no update-in-place path),

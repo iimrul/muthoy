@@ -1,23 +1,17 @@
 // domain/purchases.ts — pure, framework-free purchase-invoice logic. Zero
-// React/DB imports (DEVELOPMENT_RULES.md). P1 (post-beta fast-follow,
-// Volume 0's scope lock) — Beta ships manual batch entry via Add Medicine
-// instead; do not implement before Day 15.
+// React/DB imports (DEVELOPMENT_RULES.md).
 // Volume 4 PURCHASE: "invoice_no auto-generated... COD pays cash
 // immediately, credit updates the supplier payable only."
 
-import type { Paisa } from '@muthoy/types';
+import { ZERO_PAISA, subtractPaisa, type Paisa } from '@muthoy/types';
 
 export type PurchasePaymentType = 'cod' | 'credit';
 
-// TODO(P1): generate a human-readable, shop-scoped unique invoice number —
-// exact format not specced in Volume 4; confirm with the founder before
-// implementing (CLAUDE.md rule 11) rather than inventing a convention here.
-export function generateInvoiceNumber(_shopId: string, _lastInvoiceNumber: string | undefined): string {
-  throw new Error('TODO: implement invoice number generation (P1 — post-beta, Volume 4 PURCHASE)');
-}
-
-// TODO(P1): COD pays cash immediately (cash-drawer effect); credit only
-// updates the supplier payable, no immediate cash-drawer effect.
-export function resolvePaymentEffect(_paymentType: PurchasePaymentType, _amount: Paisa): { cashDrawerDelta: Paisa; payableDelta: Paisa } {
-  throw new Error('TODO: implement COD/credit payment-effect resolution (P1 — post-beta, Volume 4 PURCHASE)');
+export function resolvePaymentEffect(
+  paymentType: PurchasePaymentType,
+  amount: Paisa,
+): { cashDrawerDelta: Paisa; payableDelta: Paisa } {
+  return paymentType === 'cod'
+    ? { cashDrawerDelta: subtractPaisa(ZERO_PAISA, amount), payableDelta: ZERO_PAISA }
+    : { cashDrawerDelta: ZERO_PAISA, payableDelta: amount };
 }

@@ -14,6 +14,8 @@ export interface FormFieldProps<TFieldValues extends FieldValues> {
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
   /** TextInput always produces a string; numeric fields convert to/from Number for RHF/Zod. */
   numeric?: boolean;
+  /** Money inputs use the required DM Mono token. */
+  money?: boolean;
 }
 
 export function FormField<TFieldValues extends FieldValues>({
@@ -24,6 +26,7 @@ export function FormField<TFieldValues extends FieldValues>({
   keyboardType,
   autoCapitalize,
   numeric = false,
+  money = false,
 }: FormFieldProps<TFieldValues>) {
   return (
     <View className="gap-2">
@@ -41,7 +44,7 @@ export function FormField<TFieldValues extends FieldValues>({
               keyboardType={keyboardType ?? (numeric ? 'decimal-pad' : undefined)}
               autoCapitalize={autoCapitalize}
               accessibilityLabel={label}
-              className="rounded-lg border border-midGray bg-white px-4 py-3 font-sans text-base text-richBlack"
+              className={`rounded-lg border border-midGray bg-white px-4 py-3 text-base text-richBlack ${money ? 'font-mono' : 'font-sans'}`}
             />
             {error ? <Text className="font-sans text-sm text-error">{error.message}</Text> : null}
           </>

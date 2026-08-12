@@ -427,3 +427,22 @@ set `pin_set_at` with the hash, preserving the Day 11 staff PIN-login flow.
 
 `verifyPin` ignores users whose marker is null. `role-select` remains
 unreachable/deferred; owner and staff continue using the same PIN-only login.
+
+---
+
+## 2026-08-12 — Purchases shipped early with owner-only financial access
+
+The full supplier/purchase-invoice feature remains classified P1/post-beta in
+the roadmap, but the founder explicitly approved implementing it early. This is
+a deliberate scope exception, not a change to the general P0/P1/P2 rule.
+
+Supplier details, payables, and purchase creation are owner-only. The UI guards
+all three supplier routes, and every supplier/purchase DB operation that exposes
+financial data independently revalidates the active owner against local SQLite;
+all reads and writes remain shop-scoped. Purchase invoices use
+`PUR-{YYYY}-{6-digit-seq}`.
+
+COD purchases are fully paid at creation, record a cash supplier payment, and
+recompute the cash drawer. Credit purchases create no immediate cash movement;
+their outstanding supplier payable is derived from
+`purchases.total - purchases.paid_amount`, never cached separately.
