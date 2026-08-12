@@ -4,17 +4,18 @@
 // Volume 4 CUSTOMER: "credit sales create a credits row; collections reduce
 // the balance."
 
-import type { Paisa } from '@muthoy/types';
+import { ZERO_PAISA, addPaisa, subtractPaisa, type Paisa } from '@muthoy/types';
 
 export interface CreditLedgerEntry {
   type: 'credit_sale' | 'collection';
   amount: Paisa;
 }
 
-// TODO(Day 9): sum credit_sale amounts minus collection amounts to get the
-// customer's current outstanding balance, using addPaisa/subtractPaisa from
-// @muthoy/types. Must have a passing unit test — this is money logic
-// (CLAUDE.md rule 10's spirit).
-export function remainingBalance(_entries: CreditLedgerEntry[]): Paisa {
-  throw new Error('TODO: implement credit ledger balance calculation (Volume 0 Day 9)');
+export function remainingBalance(entries: CreditLedgerEntry[]): Paisa {
+  return entries.reduce(
+    (balance, entry) => entry.type === 'credit_sale'
+      ? addPaisa(balance, entry.amount)
+      : subtractPaisa(balance, entry.amount),
+    ZERO_PAISA,
+  );
 }

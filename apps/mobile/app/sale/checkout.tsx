@@ -5,7 +5,7 @@ import { fromTaka, subtractPaisa, type Paisa } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
 import { checkoutCustomerSchema, tenderedAmountSchema } from '@muthoy/validation';
 import { StandardHeader } from '../../components/ui/StandardHeader';
-import { listCustomers, type Customer } from '../../db/customers';
+import { listCustomers, type CustomerListItem } from '../../db/customers';
 import { listBatchesForMedicine } from '../../db/inventory';
 import { createSaleTransaction } from '../../db/sales';
 import { deduct, InsufficientStockError } from '../../domain/fefo';
@@ -21,7 +21,7 @@ export default function CheckoutScreen() {
   const clearCart = useCartStore((state) => state.clear);
   const [paymentType, setPaymentType] = useState<PaymentType>('cash');
   const [amountTendered, setAmountTendered] = useState('');
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customers, setCustomers] = useState<CustomerListItem[]>([]);
   const [customerQuery, setCustomerQuery] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [isNewCustomer, setIsNewCustomer] = useState(false);

@@ -1,18 +1,151 @@
-import { Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { fromTaka } from '@muthoy/types';
+import { formatMoney } from '@muthoy/utils';
+import { StandardHeader } from '../../components/ui/StandardHeader';
+import {
+  collectPayment,
+  getCustomer,
+  getCustomerCreditLedger,
+  type CreditLedgerRow,
+  type Customer,
+} from '../../db/customers';
+import { remainingBalance } from '../../domain/credit';
+import { useSessionStore } from '../../state/sessionStore';
 
-// Customer Detail — Volume 4 CUSTOMER, Volume 0 Day 9.
-// TODO(Day 9): credit ledger view for this customer (db/customers.ts's
-//   getCustomerCreditLedger) — every credit sale and every collection,
-//   running balance via domain/credit.ts's remainingBalance.
-// TODO(Day 9): "collect payment" action — calls db/customers.ts's
-//   collectPayment, which reduces the balance AND adds to the cash drawer
-//   as a CreditCollection (feeds domain/cashFormula's creditCollections
-//   input). Collecting must actually touch cash, unlike the original credit
-//   sale (Volume 0 Day 9 checklist).
 export default function CustomerDetailScreen() {
+  const { customerId } = useLocalSearchParams<{ customerId: string }>();
+  const session = useSessionStore((state) => state.session);
+  const [customer, setCustomer] = useState<Customer | null>(null);
+  const [ledgerRows, setLedgerRows] = useState<CreditLedgerRow[]>([]);
+  const [amountText, setAmountText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!session || !customerId) {
+      return;
+    }
+    try {
+      const [customerRow, history] = await Promise.all([
+        getCustomer(session.shopId, customerId),
+        getCustomerCreditLedger(session.shopId, customerId),
+      ]);
+      setCustomer(customerRow);
+      setLedgerRows(history);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Customer details failed to load.');
+    }
+  }, [customerId, session]);
+
+  useEffect(() => {
+    // SQLite load-on-mount; TanStack Query is reserved for sync.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void reload();
+  }, [reload]);
+
+  const balance = useMemo(() => remainingBalance(ledgerRows), [ledgerRows]);
+
+  const handleCollect = useCallback(async () => {
+    if (!session || !customerId) {
+      return;
+    }
+    const taka = Number(amountText.trim());
+    if (!amountText.trim() || !Number.isFinite(taka) || taka <= 0) {
+      setError('Enter a valid collection amount.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await collectPayment({
+        shopId: session.shopId,
+        staffId: session.userId,
+        customerId,
+        amount: fromTaka(taka),
+      });
+      setAmountText('');
+      await reload();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Payment could not be collected.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [amountText, customerId, reload, session]);
+
+  if (!session) {
+    return (
+      <View className="flex-1 items-center justify-center bg-brand-softGreen p-6">
+        <Text className="font-sans-semibold text-base text-error">Active session required.</Text>
+      </View>
+    );
+  }
+
+  if (!customerId) {
+    return (
+      <View className="flex-1 items-center justify-center bg-brand-softGreen p-6">
+        <Text className="font-sans text-base text-error">Customer is missing.</Text>
+      </View>
+    );
+  }
+
   return (
-    <View>
-      <Text>TODO: Customer Detail — credit ledger + collect payment (Volume 0 Day 9)</Text>
+    <View className="flex-1 bg-brand-softGreen">
+      <StandardHeader title={customer?.name ?? 'Customer'} onBackPress={() => router.back()} />
+      <ScrollView contentContainerClassName="gap-4 p-4" keyboardShouldPersistTaps="handled">
+        {error ? <Text className="font-sans text-sm text-error">{error}</Text> : null}
+
+        {customer ? (
+          <View className="gap-2 rounded-lg bg-white p-4">
+            <Text className="font-sans-bold text-lg text-richBlack">{customer.name}</Text>
+            {customer.phone ? <Text className="font-sans text-sm text-richBlack">{customer.phone}</Text> : null}
+            {customer.address ? <Text className="font-sans text-sm text-midGray">{customer.address}</Text> : null}
+            {customer.notes ? <Text className="font-sans text-sm text-midGray">{customer.notes}</Text> : null}
+            <View className="mt-2 flex-row items-center justify-between border-t border-midGray pt-3">
+              <Text className="font-sans-medium text-sm text-richBlack">Outstanding balance</Text>
+              <Text className="font-mono text-lg text-error">{formatMoney(balance)}</Text>
+            </View>
+          </View>
+        ) : null}
+
+        <View className="gap-3 rounded-lg bg-white p-4">
+          <Text className="font-sans-bold text-base text-richBlack">Collect payment</Text>
+          <Text className="font-sans-medium text-sm text-richBlack">Amount (৳)</Text>
+          <TextInput
+            value={amountText}
+            onChangeText={setAmountText}
+            keyboardType="decimal-pad"
+            accessibilityLabel="Collection amount"
+            placeholder="0.00"
+            className="rounded-lg border border-midGray px-4 py-3 font-mono text-base text-richBlack"
+          />
+          <Pressable
+            onPress={handleCollect}
+            disabled={isSubmitting}
+            className="items-center rounded-lg bg-brand-green py-3 disabled:opacity-50"
+          >
+            <Text className="font-sans-semibold text-white">{isSubmitting ? 'Collecting…' : 'Collect cash'}</Text>
+          </Pressable>
+        </View>
+
+        <Text className="font-sans-bold text-base text-richBlack">Credit ledger</Text>
+        {ledgerRows.length === 0 ? (
+          <Text className="py-6 text-center font-sans text-midGray">No credit activity yet.</Text>
+        ) : ledgerRows.map((row) => (
+          <View key={row.id} className="gap-2 rounded-lg bg-white p-4">
+            <View className="flex-row items-center justify-between">
+              <Text className="font-sans-medium text-sm text-richBlack">
+                {row.type === 'credit_sale' ? 'Credit sale' : 'Collection'}
+              </Text>
+              <Text className="font-mono text-base text-richBlack">{formatMoney(row.amount)}</Text>
+            </View>
+            <Text className="font-sans text-xs text-midGray">{new Date(row.createdAt).toLocaleDateString()}</Text>
+          </View>
+        ))}
+      </ScrollView>
     </View>
   );
 }
