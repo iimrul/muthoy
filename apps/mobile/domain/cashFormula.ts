@@ -10,7 +10,7 @@
 // React/DB imports (DEVELOPMENT_RULES.md) — db/ fetches the raw numbers,
 // this file only does the arithmetic.
 
-import type { Paisa } from '@muthoy/types';
+import { addPaisa, subtractPaisa, type Paisa } from '@muthoy/types';
 
 export interface CashFormulaInput {
   openingCash: Paisa;
@@ -22,10 +22,9 @@ export interface CashFormulaInput {
   withdrawals: Paisa;
 }
 
-// TODO(Day 7): implement the fixed formula above exactly, using addPaisa/
-// subtractPaisa from @muthoy/types — integer arithmetic, so no rounding is
-// needed or allowed here. Must have a passing unit test before Day 7 is
-// considered done (Volume 0 Day 7 checklist: "Cash formula unit tests pass").
-export function expectedCash(_input: CashFormulaInput): Paisa {
-  throw new Error('TODO: implement the fixed cash formula (Volume 0 Day 7, CLAUDE.md rule 4)');
+// Uses branded integer-paisa helpers only; no rounding is needed or allowed.
+export function expectedCash(input: CashFormulaInput): Paisa {
+  const cashIn = addPaisa(input.openingCash, input.cashSales, input.creditCollections);
+  const cashOut = addPaisa(input.expenses, input.refunds, input.supplierPayments, input.withdrawals);
+  return subtractPaisa(cashIn, cashOut);
 }

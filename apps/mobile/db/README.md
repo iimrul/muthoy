@@ -20,19 +20,47 @@ SQLite is the app's single source of truth (CLAUDE.md rule 1).
 - `auth.ts` (Days 4-5) — `createShopAndOwner`, `setOwnerPin`, `verifyPin`,
   `getShopRoleId`. PIN hashing goes through `native/crypto.ts` exclusively;
   this file never sees a raw PIN outside that one call.
+
+### Auth registration state
+
+`users.pin_set_at` is the deterministic PIN-completion marker. The newest
+applicable owner row routes as follows:
+- none → `/register`
+- incomplete (`pin_set_at IS NULL`) → `/pin-setup`
+- complete → validate the persisted session, then Dashboard or `/pin-login`
+
+Migration `0002` backfilled existing staff markers because staff hashes were
+already real PIN hashes; existing owners resume PIN Setup once.
+
 - `staff.ts` (Day 11) — `listStaff` (staff only, not the owner),
   `createStaff`, `resetStaffPin`, `deactivateStaff`, `writeAuditLog`. Every
   PIN change/deactivation writes an audit_logs row with no PIN-shaped value.
 - `settings.ts`'s `changeOwnPin` (Day 11's P0 slice) — the rest of that file
   (`getShopProfile`/`updateShopProfile`/`restoreFromBackupKey`) is still a stub.
+- `inventory.ts` (Day 8) — `listMedicines`, `createMedicineWithBatch`,
+  `addBatchToMedicine`, `getMedicine`, `listBatchesForMedicine`. The
+  UNIQUE(shop_id, medicine_id, batch_no) constraint is enforced by
+  `addBatchToMedicine` (a pre-check SELECT plus a constraint-violation
+  backstop, both mapping to `errors.ts`'s typed `DuplicateBatchError`) —
+  `createMedicineWithBatch`'s first batch can never hit it, since its
+  medicineId is always freshly generated.
+- `errors.ts` (Day 8) — `DuplicateBatchError`, `isUniqueConstraintViolation`.
+  First typed db/ error in the app; every prior write threw a bare `Error`.
 
 ## Still stubs
 Every query file below throws `TODO: ...` until its day:
-`sales.ts` (Day 6-7), `inventory.ts` (Day 8), `customers.ts` (Day 9),
-`cash.ts` (Day 10), `suppliers.ts` + `purchases.ts` (P1), `reports.ts` (P1),
-`notifications.ts` (P1).
+`sales.ts` (Day 6-7), `customers.ts` (Day 9), `cash.ts` (Day 10),
+`suppliers.ts` + `purchases.ts` (P1), `reports.ts` (P1), `notifications.ts` (P1).
 
 ## Not built yet
 - FTS5 virtual table + triggers (Day 3, as migration `0001`).
 - The shared `updated_at` write helper Volume 3 requires — add it with the
-  first real write, so it is never duplicated per call site.
+  first real write, so it is never duplicated per call site. Still not built
+  as of Day 8 — `inventory.ts` doesn't need it yet (no update-in-place path),
+  but the debt applies the moment one is added.
+- The `sync_queue` outbox writer (Day 13, P0 per CLAUDE.md rule 12). No write
+  anywhere in `db/` enqueues an outbox row yet, including Day 8's
+  `createMedicineWithBatch` / `addBatchToMedicine` — matches the existing
+  `auth.ts` / `staff.ts` precedent. Day 13 must build the shared enqueue
+  helper once and backfill every write site (`auth`, `staff`, `inventory`,
+  and whatever else has landed by then) together, not just the newest one.

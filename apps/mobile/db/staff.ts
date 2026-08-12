@@ -40,6 +40,7 @@ export async function createStaff(shopId: string, name: string, rawPin: string):
   }
 
   const pinHash = await hashPin(rawPin);
+  const pinSetAt = new Date().toISOString();
   const userId = generateId();
 
   await db.insert(users).values({
@@ -47,6 +48,7 @@ export async function createStaff(shopId: string, name: string, rawPin: string):
     shopId,
     name,
     pinHash,
+    pinSetAt,
     roleId: staffRoleId,
     isActive: true,
   });
@@ -58,13 +60,14 @@ export async function createStaff(shopId: string, name: string, rawPin: string):
 // entry — never the raw PIN, only which staff member was affected.
 export async function resetStaffPin(staffId: string, newRawPin: string, performedByUserId: string): Promise<void> {
   const pinHash = await hashPin(newRawPin);
+  const pinSetAt = new Date().toISOString();
   const [staff] = await db.select({ shopId: users.shopId }).from(users).where(eq(users.id, staffId));
   if (!staff) {
     throw new Error(`No user found with id ${staffId}`);
   }
 
   await db.transaction(async (tx) => {
-    await tx.update(users).set({ pinHash, updatedAt: new Date().toISOString() }).where(eq(users.id, staffId));
+    await tx.update(users).set({ pinHash, pinSetAt, updatedAt: pinSetAt }).where(eq(users.id, staffId));
     await tx.insert(auditLogs).values({
       id: generateId(),
       shopId: staff.shopId,

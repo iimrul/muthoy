@@ -97,6 +97,7 @@ export const users = sqliteTable("users", {
   name: text("name").notNull(),
   phone: text("phone"), // owner only
   pinHash: text("pin_hash").notNull(), // bcrypt — NEVER plain text
+  pinSetAt: text("pin_set_at"), // null only while owner registration is incomplete
   roleId: text("role_id").notNull().references(() => roles.id, { onDelete: "restrict" }),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
 }, (t) => ({
@@ -124,7 +125,7 @@ export const medicines = sqliteTable("medicines", {
 }));
 
 // FTS5 virtual table — created via raw SQL migration (Drizzle doesn't model
-// virtual tables natively). See migrations/0002_fts5.sql:
+// virtual tables natively). See migrations/0001_medicines_fts.sql:
 //   CREATE VIRTUAL TABLE medicines_fts USING fts5(name, generic, content='medicines', content_rowid='rowid');
 //   + triggers to keep it in sync on insert/update/delete of medicines.
 

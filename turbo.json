@@ -12,6 +12,12 @@
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "outputs": []
+    },
+    "test": {
+      "outputs": []
+    },
+    "//#test": {
+      "cache": false
     }
   }
 }

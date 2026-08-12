@@ -10,7 +10,10 @@ import type { Paisa } from '@muthoy/types';
 export interface Batch {
   id: string;
   medicineId: string;
-  expiryDate: string; // ISO date — the real date, never a precomputed day-count
+  // ISO date — the real date, never a precomputed day-count. Null means no
+  // expiry recorded (db/schema.ts's batches.expiry_date is nullable) and
+  // sorts LAST, per Volume 7: "including a null-expiry batch (must sort last)".
+  expiryDate: string | null;
   quantityAvailable: number;
   salePrice: Paisa;
 }
@@ -20,17 +23,69 @@ export interface DeductionResult {
   quantityDeducted: number;
 }
 
-// TODO(Day 6): return the batch with the earliest expiryDate that still has
-// quantityAvailable > 0, for Sale Entry's search-result price display
-// (Volume 4 SALES: "each result showing the medicine's ACTIVE batch...").
-export function activeBatch(_medicineId: string, _batches: Batch[]): Batch | undefined {
-  throw new Error('TODO: implement FEFO active-batch resolution (Volume 0 Day 6)');
+export class InsufficientStockError extends Error {
+  readonly medicineId: string;
+  readonly requested: number;
+  readonly available: number;
+
+  constructor(medicineId: string, requested: number, available: number) {
+    super(`Insufficient stock for ${medicineId}: requested ${requested}, available ${available}`);
+    this.name = 'InsufficientStockError';
+    this.medicineId = medicineId;
+    this.requested = requested;
+    this.available = available;
+  }
 }
 
-// TODO(Day 7): deduct `quantity` starting from the earliest-expiry batch,
-// spilling over to the next batch once one empties (Volume 0 Day 7
-// validation: "sell across a batch boundary — spill-over confirmed via
-// inventory_movements"). Must have a passing unit test before Day 7 is done.
-export function deduct(_medicineId: string, _quantity: number, _batches: Batch[]): DeductionResult[] {
-  throw new Error('TODO: implement FEFO deduction with spill-over (Volume 0 Day 7)');
+// Ascending FEFO order: earliest real expiryDate first, null last (Volume 7:
+// "including a null-expiry batch, must sort last"). Recomputed from the real
+// date every call (CLAUDE.md rule 3) — never a stored day-count. Shared by
+// activeBatch() below and by db/inventory.ts's batch-detail listing, so the
+// ordering rule lives in exactly one place. Generic over T so a caller can
+// pass a richer row (e.g. one that also carries batchNo for display) without
+// losing those extra fields through the return type.
+export function sortByExpiry<T extends Batch>(batches: T[]): T[] {
+  return [...batches].sort((a, b) => {
+    if (a.expiryDate === null) {
+      return b.expiryDate === null ? 0 : 1;
+    }
+    if (b.expiryDate === null) {
+      return -1;
+    }
+    return a.expiryDate.localeCompare(b.expiryDate);
+  });
+}
+
+// Returns the batch with the earliest expiryDate that still has
+// quantityAvailable > 0, for Sale Entry's search-result price display
+// (Volume 4 SALES: "each result showing the medicine's ACTIVE batch...").
+export function activeBatch(medicineId: string, batches: Batch[]): Batch | undefined {
+  const candidates = batches.filter((b) => b.medicineId === medicineId && b.quantityAvailable > 0);
+  return sortByExpiry(candidates)[0];
+}
+
+// Resolve `quantity` earliest-expiry-first, spilling into later batches.
+export function deduct(medicineId: string, quantity: number, batches: Batch[]): DeductionResult[] {
+  const candidates = sortByExpiry(
+    batches.filter((batch) => batch.medicineId === medicineId && batch.quantityAvailable > 0),
+  );
+  const available = candidates.reduce((sum, batch) => sum + batch.quantityAvailable, 0);
+
+  if (quantity > available) {
+    throw new InsufficientStockError(medicineId, quantity, available);
+  }
+
+  let remaining = quantity;
+  const result: DeductionResult[] = [];
+
+  for (const batch of candidates) {
+    if (remaining === 0) {
+      break;
+    }
+    const quantityDeducted = Math.min(remaining, batch.quantityAvailable);
+    result.push({ batchId: batch.id, quantityDeducted });
+    remaining -= quantityDeducted;
+  }
+
+  return result;
 }

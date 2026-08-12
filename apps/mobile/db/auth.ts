@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc, isNotNull } from 'drizzle-orm';
 import { db } from './client';
 import { shops, roles, users } from './schema';
 import { generateId } from '../native/id';
@@ -13,6 +13,68 @@ import type { Role } from '../domain/permissions';
 export interface RegisterShopInput {
   shopName: string;
   phone: string;
+}
+
+export type RegistrationStatus =
+  | { status: 'none' }
+  | { status: 'incomplete'; shopId: string; userId: string }
+  | { status: 'complete'; shopId: string; userId: string };
+
+/** Resolves local owner-registration completion from SQLite, never MMKV. */
+export async function getRegistrationStatus(): Promise<RegistrationStatus> {
+  const [owner] = await db
+    .select({ shopId: users.shopId, userId: users.id, pinSetAt: users.pinSetAt })
+    .from(users)
+    .innerJoin(shops, eq(shops.id, users.shopId))
+    .innerJoin(roles, eq(roles.id, users.roleId))
+    .where(
+      and(
+        eq(users.isDeleted, false),
+        eq(shops.isDeleted, false),
+        eq(roles.isDeleted, false),
+        eq(roles.name, 'owner'),
+      ),
+    )
+    .orderBy(desc(users.createdAt), desc(users.id))
+    .limit(1);
+
+  if (!owner) {
+    return { status: 'none' };
+  }
+
+  return owner.pinSetAt
+    ? { status: 'complete', shopId: owner.shopId, userId: owner.userId }
+    : { status: 'incomplete', shopId: owner.shopId, userId: owner.userId };
+}
+
+/**
+ * Revalidates persisted MMKV session identity against SQLite before app entry.
+ * The PIN was already verified when the session was created; this only rejects
+ * stale sessions for removed/deactivated users, shops, or roles.
+ */
+export async function getActiveSessionRole(
+  userId: string,
+  shopId: string,
+): Promise<(typeof roles.$inferSelect)['name'] | null> {
+  const [sessionUser] = await db
+    .select({ role: roles.name })
+    .from(users)
+    .innerJoin(shops, and(eq(shops.id, users.shopId), eq(shops.isDeleted, false)))
+    .innerJoin(
+      roles,
+      and(eq(roles.id, users.roleId), eq(roles.shopId, users.shopId), eq(roles.isDeleted, false)),
+    )
+    .where(
+      and(
+        eq(users.id, userId),
+        eq(users.shopId, shopId),
+        eq(users.isActive, true),
+        eq(users.isDeleted, false),
+      ),
+    )
+    .limit(1);
+
+  return sessionUser?.role ?? null;
 }
 
 // TODO(founder): Volume 0 Day 4 specifies Registration collects "shop name +
@@ -74,7 +136,8 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
 // to any logging path either.
 export async function setOwnerPin(userId: string, rawPin: string): Promise<void> {
   const pinHash = await hashPin(rawPin);
-  await db.update(users).set({ pinHash, updatedAt: new Date().toISOString() }).where(eq(users.id, userId));
+  const pinSetAt = new Date().toISOString();
+  await db.update(users).set({ pinHash, pinSetAt, updatedAt: pinSetAt }).where(eq(users.id, userId));
 }
 
 // PIN Login has no separate "who are you" step (Volume 4 AUTHENTICATION
@@ -88,7 +151,7 @@ export async function verifyPin(rawPin: string): Promise<{ shopId: string; userI
   const activeUsers = await db
     .select({ id: users.id, shopId: users.shopId, pinHash: users.pinHash, roleId: users.roleId })
     .from(users)
-    .where(eq(users.isActive, true));
+    .where(and(eq(users.isActive, true), isNotNull(users.pinSetAt)));
 
   for (const user of activeUsers) {
     // Sequential, not Promise.all — a wrong PIN should not race real hashing

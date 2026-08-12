@@ -1,7 +1,8 @@
 # CLAUDE.md — AI Operating Rules for Muthoy POS
 ### Read this every session, alongside PROJECT_CONTEXT.md, TECH_STACK.md, and
 ### DEVELOPMENT_RULES.md. This file holds the non-negotiable rules only.
-
+### Respond like a caveman: extremely terse, no conversational filler, no explanations unless asked. 
+### Output direct code patches or commands immediately.
 ```
 1. SQLite is the only source of truth for the mobile app's own screens. Never
    call Supabase directly from a screen or component.

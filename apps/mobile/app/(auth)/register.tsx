@@ -18,7 +18,7 @@ export default function RegisterScreen() {
       // non-hardcoded shop id every call — a new owner on this device never
       // inherits a previous owner's shop.
       const { shopId, userId } = await createShopAndOwner(input);
-      router.push({ pathname: '/(auth)/pin-setup', params: { shopId, userId } });
+      router.replace({ pathname: '/(auth)/pin-setup', params: { shopId, userId } });
     } catch {
       Alert.alert('Registration failed', 'Please check your details and try again.');
     } finally {

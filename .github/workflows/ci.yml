@@ -33,3 +33,6 @@ jobs:
 
       - name: Typecheck
         run: pnpm turbo run typecheck
+
+      - name: Test
+        run: pnpm turbo run test

@@ -1,39 +1,50 @@
-// state/cartStore.ts — cart state shape, per Volume 2's Cart/CartLine class
-// diagram. Zustand isn't installed yet (Volume 0 Day 3: "set up a Zustand
-// store for cart/session/active-shop state" — not built until Day 3), so
-// this file defines the shape only, without reaching into Day 3's setup
-// scope. Once Day 3 lands, replace the throwing stub below with
-// `export const useCartStore = create<CartState>(...)`.
-//
-// In-memory UI state only, never the source of truth (SQLite is) — cleared
-// after a successful checkout write.
+import { create } from 'zustand';
+import { addPaisa, ZERO_PAISA, type Paisa } from '@muthoy/types';
+import { applyDiscount, type Discount } from '../domain/discounts';
 
+// In-memory checkout state only. SQLite remains the source of truth and the
+// cart clears only after createSaleTransaction succeeds.
 export interface CartLine {
   medicineId: string;
+  medicineName: string;
   batchId: string;
   quantity: number;
-  unitPrice: number;
-  discount?: { type: 'percentage' | 'flat'; value: number };
+  unitPrice: Paisa;
+  discount?: Discount;
 }
 
 export interface CartState {
   items: CartLine[];
-  // TODO(Day 6): add a line (or increment quantity if the same batch is
-  // already in the cart).
   addItem: (line: CartLine) => void;
-  // TODO(Day 6): cart screen's qty steppers call this; remove the line
-  // entirely when quantity reaches 0.
   updateQuantity: (batchId: string, quantity: number) => void;
-  // TODO(Day 7): called after Checkout's sale transaction succeeds.
   clear: () => void;
-  // TODO(Day 6): running total shown on the Cart screen — sum of each
-  // line's (unitPrice * quantity), passed through domain/discounts.ts's
-  // applyDiscount when a line has a discount set.
-  total: () => number;
+  total: () => Paisa;
 }
 
-// TODO(Day 3): replace with a real Zustand store once zustand is installed.
-// TODO(Day 6): implement addItem/updateQuantity/total's actual logic.
-export function useCartStore(): CartState {
-  throw new Error('TODO: wire the Zustand cart store (Volume 0 Day 3 + Day 6)');
-}
+export const useCartStore = create<CartState>((set, get) => ({
+  items: [],
+  addItem: (line) =>
+    set((state) => {
+      const existing = state.items.find((item) => item.batchId === line.batchId);
+      return existing
+        ? {
+            items: state.items.map((item) =>
+              item.batchId === line.batchId ? { ...item, quantity: item.quantity + line.quantity } : item,
+            ),
+          }
+        : { items: [...state.items, line] };
+    }),
+  updateQuantity: (batchId, quantity) =>
+    set((state) => ({
+      items:
+        quantity <= 0
+          ? state.items.filter((item) => item.batchId !== batchId)
+          : state.items.map((item) => (item.batchId === batchId ? { ...item, quantity } : item)),
+    })),
+  clear: () => set({ items: [] }),
+  total: () =>
+    get().items.reduce(
+      (sum, line) => addPaisa(sum, applyDiscount(line.unitPrice, line.quantity, line.discount).lineTotal),
+      ZERO_PAISA,
+    ),
+}));

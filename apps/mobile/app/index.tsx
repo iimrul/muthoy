@@ -1,31 +1,112 @@
-import { ScrollView, Text, View } from 'react-native';
-import { fromTaka } from '@muthoy/types';
-import { formatMoney, formatNumber } from '@muthoy/utils';
+import { useEffect, useState } from 'react';
+import { Redirect } from 'expo-router';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { colors } from '@muthoy/constants';
+import { getActiveSessionRole, getRegistrationStatus } from '../db/auth';
+import { useSessionStore } from '../state/sessionStore';
 
-// Day-1 design-system smoke test: confirms brand colors + all three font
-// families render, and that @muthoy/utils resolves through the pnpm/Metro
-// monorepo wiring. Replaced Day 4-5 by the real Registration/Dashboard screens.
-export default function DesignSystemTestScreen() {
-  return (
-    <ScrollView className="flex-1 bg-brand-softGreen">
-      <View className="gap-4 p-6">
-        <Text className="font-sans-bold text-2xl text-richBlack">Muthoy POS</Text>
-        <Text className="font-bangla text-lg text-richBlack">বাংলায় লেখা — মুথয় পিওএস</Text>
-        <Text className="font-mono text-xl text-brand-green">{formatMoney(fromTaka(1250.5))}</Text>
-        <Text className="font-sans text-base text-midGray">{formatNumber(1234567)} units tracked</Text>
-        <View className="rounded-lg bg-brand-green p-4">
-          <Text className="font-sans-semibold text-white">Brand green surface</Text>
-        </View>
-        <View className="rounded-lg bg-error p-4">
-          <Text className="font-sans-semibold text-white">Error surface</Text>
-        </View>
-        <View className="rounded-lg bg-warning p-4">
-          <Text className="font-sans-semibold text-richBlack">Warning surface</Text>
-        </View>
-        <View className="rounded-lg bg-info p-4">
-          <Text className="font-sans-semibold text-white">Info surface</Text>
-        </View>
+type RootDestination =
+  | '/(auth)/register'
+  | '/(auth)/pin-login'
+  | '/(tabs)/dashboard'
+  | { pathname: '/(auth)/pin-setup'; params: { shopId: string; userId: string } };
+
+export default function RootSessionGate() {
+  const session = useSessionStore((state) => state.session);
+  const logout = useSessionStore((state) => state.logout);
+  const [destination, setDestination] = useState<RootDestination | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    async function resolveDestination() {
+      setDestination(null);
+      setError(null);
+
+      try {
+        const registration = await getRegistrationStatus();
+
+        if (registration.status === 'none') {
+          logout();
+          if (isCurrent) {
+            setDestination('/(auth)/register');
+          }
+          return;
+        }
+
+        if (registration.status === 'incomplete') {
+          logout();
+          if (isCurrent) {
+            setDestination({
+              pathname: '/(auth)/pin-setup',
+              params: { shopId: registration.shopId, userId: registration.userId },
+            });
+          }
+          return;
+        }
+
+        if (!session) {
+          if (isCurrent) {
+            setDestination('/(auth)/pin-login');
+          }
+          return;
+        }
+
+        const activeRole = await getActiveSessionRole(session.userId, session.shopId);
+        if (activeRole !== session.role) {
+          logout();
+          if (isCurrent) {
+            setDestination('/(auth)/pin-login');
+          }
+          return;
+        }
+
+        if (isCurrent) {
+          setDestination('/(tabs)/dashboard');
+        }
+      } catch (cause) {
+        if (isCurrent) {
+          setError(cause instanceof Error ? cause.message : 'Unknown startup error');
+        }
+      }
+    }
+
+    void resolveDestination();
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [attempt, logout, session]);
+
+  const handleRetry = () => {
+    setAttempt((currentAttempt) => currentAttempt + 1);
+  };
+
+  if (error) {
+    return (
+      <View className="flex-1 items-center justify-center gap-3 bg-errorBg p-6">
+        <Text className="font-sans-bold text-lg text-error">Startup check failed</Text>
+        <Text className="font-mono text-center text-xs text-richBlack">{error}</Text>
+        <Pressable
+          accessibilityRole="button"
+          className="rounded-lg bg-brand-green px-5 py-3"
+          onPress={handleRetry}
+        >
+          <Text className="font-sans-semibold text-white">Retry</Text>
+        </Pressable>
       </View>
-    </ScrollView>
-  );
+    );
+  }
+
+  if (!destination) {
+    return (
+      <View className="flex-1 items-center justify-center bg-brand-softGreen">
+        <ActivityIndicator color={colors.brandGreen} />
+      </View>
+    );
+  }
+
+  return <Redirect href={destination} />;
 }

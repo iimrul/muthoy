@@ -5,7 +5,7 @@
 // looks like: apps/prototype-web's DiscountModal.tsx — see the Prototype
 // Rule in CLAUDE.md rule 15 before touching that file.
 
-import type { Paisa } from '@muthoy/types';
+import { asPaisa, fromTaka, multiplyPaisa, subtractPaisa, type Paisa } from '@muthoy/types';
 
 export type DiscountType = 'percentage' | 'flat';
 
@@ -21,11 +21,22 @@ export interface Discount {
   value: number;
 }
 
-// TODO(Day 7): resolve a cart line's final price after its discount
-// (percentage or flat), returning integer paisa. A percentage can produce a
+// Resolves a cart line's final price after its discount. A percentage can produce a
 // fractional paisa — use multiplyPaisa from @muthoy/types, which rounds once,
 // at that single point. Called by Checkout before domain/cashFormula, so the
 // cash formula's cashSales figure reflects post-discount totals.
-export function applyDiscount(_unitPrice: Paisa, _quantity: number, _discount: Discount | undefined): Paisa {
-  throw new Error('TODO: implement percentage/flat discount resolution (Volume 4 SALES)');
+export interface DiscountResult {
+  discountAmount: Paisa;
+  lineTotal: Paisa;
+}
+
+export function applyDiscount(unitPrice: Paisa, quantity: number, discount?: Discount): DiscountResult {
+  const subtotal = multiplyPaisa(unitPrice, quantity);
+  const rawDiscount = discount
+    ? discount.type === 'percentage'
+      ? multiplyPaisa(subtotal, discount.value / 100)
+      : fromTaka(discount.value)
+    : asPaisa(0);
+  const discountAmount = asPaisa(Math.min(subtotal, Math.max(0, rawDiscount)));
+  return { discountAmount, lineTotal: subtractPaisa(subtotal, discountAmount) };
 }

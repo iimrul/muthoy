@@ -406,3 +406,24 @@ contain no PIN-shaped value. **What this does NOT verify**: the actual
 native bcrypt call, or the exact SDK-native `expo-sqlite`/Drizzle wiring —
 both remain device-only checks (Volume 0 Day 4's own checklist: "PIN is
 stored hashed (inspect the DB row directly)").
+
+---
+
+## 2026-08-11 — Explicit PIN completion marker recovers interrupted registration
+
+`users.pin_set_at` is a nullable completion marker. Owner registration writes
+the shop/user with the existing unmatchable placeholder hash and leaves the
+marker null; `setOwnerPin` replaces the hash and sets the marker in one write.
+The root gate can therefore resume an interrupted registration at PIN Setup
+with the original `shop_id`/`user_id`, instead of sending the owner to an
+impossible PIN Login.
+
+Migration `0002_furry_celestials.sql` is additive: it adds one nullable column
+and deletes or replaces no existing rows or hashes. Existing owner rows remain
+null and complete PIN Setup once. Existing staff rows are backfilled from
+`updated_at` because staff creation has always stored a real PIN hash directly
+and never used the owner placeholder. New staff creation and staff PIN reset
+set `pin_set_at` with the hash, preserving the Day 11 staff PIN-login flow.
+
+`verifyPin` ignores users whose marker is null. `role-select` remains
+unreachable/deferred; owner and staff continue using the same PIN-only login.
