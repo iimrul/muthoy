@@ -4,6 +4,7 @@ import { shops, roles, users } from './schema';
 import { generateId } from '../native/id';
 import { hashPin, verifyPinHash } from '../native/crypto';
 import type { Role } from '../domain/permissions';
+import { NotAuthorizedError } from './errors';
 
 // db/auth.ts — the ONLY file that will touch Drizzle/SQLite for auth
 // (DEVELOPMENT_RULES.md). Hashing itself never happens here — that's
@@ -75,6 +76,12 @@ export async function getActiveSessionRole(
     .limit(1);
 
   return sessionUser?.role ?? null;
+}
+
+export async function requireOwner(shopId: string, actorUserId: string): Promise<void> {
+  if (await getActiveSessionRole(actorUserId, shopId) !== 'owner') {
+    throw new NotAuthorizedError();
+  }
 }
 
 // TODO(founder): Volume 0 Day 4 specifies Registration collects "shop name +

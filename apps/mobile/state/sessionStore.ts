@@ -30,6 +30,21 @@ export interface Session {
   role: Role;
 }
 
+/** Headless-context read only; components must use useSessionStore. */
+export function readPersistedSessionSync(): Session | null {
+  const serialized = sessionStorage.getString('session');
+  if (!serialized) {
+    return null;
+  }
+
+  try {
+    const persisted = JSON.parse(serialized) as { state?: { session?: Session | null } };
+    return persisted.state?.session ?? null;
+  } catch {
+    return null;
+  }
+}
+
 interface SessionState {
   session: Session | null;
   login: (session: Session) => void;

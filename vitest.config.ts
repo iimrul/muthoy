@@ -1,13 +1,16 @@
 import { defineConfig } from 'vitest/config';
 
-// Root Vitest config for the product's pure, framework-free code: apps/mobile's
-// domain/ layer and every packages/*/src. None of these import React Native, so
-// no jest-expo / RN transform is needed here — apps/mobile's component/screen
-// code is exercised via real-device testing instead (CLAUDE.md's HUMAN REVIEW
-// WORKFLOW), not this runner.
+// Root Vitest config for pure framework-free code plus real node:sqlite DB
+// verification. None import React Native, so no jest-expo transform is needed;
+// component/screen code remains real-device validated.
 export default defineConfig({
   test: {
-    include: ['apps/mobile/domain/**/*.test.ts', 'apps/mobile/db/errors.test.ts', 'packages/*/src/**/*.test.ts'],
+    include: [
+      'apps/mobile/domain/**/*.test.ts',
+      'apps/mobile/db/errors.test.ts',
+      'apps/mobile/db/notifications.sqlite.test.ts',
+      'packages/*/src/**/*.test.ts',
+    ],
     environment: 'node',
   },
 });

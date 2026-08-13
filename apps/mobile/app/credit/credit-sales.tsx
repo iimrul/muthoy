@@ -13,9 +13,11 @@ import { FormField } from '../../components/forms/FormField';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createCustomer, listCustomersWithBalance } from '../../db/customers';
 import { useSessionStore } from '../../state/sessionStore';
+import { useUnreadCount } from '../../state/useUnreadCount';
 
 export default function CreditSalesScreen() {
   const session = useSessionStore((state) => state.session);
+  const unreadCount = useUnreadCount(session?.shopId, session?.userId);
   const [customerRows, setCustomerRows] = useState<Awaited<ReturnType<typeof listCustomersWithBalance>>>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -71,7 +73,12 @@ export default function CreditSalesScreen() {
 
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title="Customer credit" onBackPress={() => router.back()} />
+      <StandardHeader
+        title="Customer credit"
+        onBackPress={() => router.back()}
+        onBellPress={() => router.push('/notifications')}
+        unreadCount={unreadCount}
+      />
       <ScrollView contentContainerClassName="gap-4 p-4" keyboardShouldPersistTaps="handled">
         <Pressable
           onPress={() => setIsAdding((current) => !current)}

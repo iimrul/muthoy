@@ -22,6 +22,13 @@
       "when": 1786449600001,
       "tag": "0002_furry_celestials",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1786546521884,
+      "tag": "0003_curious_wild_pack",
+      "breakpoints": true
     }
   ]
 }

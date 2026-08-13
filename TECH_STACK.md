@@ -41,6 +41,7 @@
 - Expo Camera
 - expo-notifications
 - expo-background-task
+- expo-task-manager
 - expo-local-authentication
 - expo-location
 

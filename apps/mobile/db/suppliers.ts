@@ -3,9 +3,8 @@
 
 import { asPaisa, type Paisa } from '@muthoy/types';
 import { generateId } from '../native/id';
-import { getActiveSessionRole } from './auth';
+import { requireOwner } from './auth';
 import { db, sqliteConnection } from './client';
-import { NotAuthorizedError } from './errors';
 import { suppliers } from './schema';
 
 export interface Supplier {
@@ -25,12 +24,6 @@ interface SupplierPayableRow {
   email: string | null;
   contactPerson: string | null;
   payable: number;
-}
-
-async function requireOwner(shopId: string, actorUserId: string): Promise<void> {
-  if (await getActiveSessionRole(actorUserId, shopId) !== 'owner') {
-    throw new NotAuthorizedError();
-  }
 }
 
 function mapSupplier(row: SupplierPayableRow): Supplier & { payable: Paisa } {

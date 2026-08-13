@@ -15,6 +15,9 @@ not Expo Go (see TECH_STACK.md).
   bcrypt directly — which is what let the implementation swap without
   touching any SQL.
 
-`scanner.ts` (OCR + barcode, one ML Kit engine) and `notifications.ts`
-(local low-stock/expiry/daily-summary scheduling) currently hold
-signature-only stubs — both are P1 (post-beta fast-follow).
+`scanner.ts` (OCR + barcode, one ML Kit engine) remains a signature-only P1
+stub. `notifications.ts` is live and owns local low-stock, expiry, and daily
+summary checks plus OS delivery. Authenticated foreground startup initializes
+notification permission and the Android channel; the channel is also ensured
+before every post. Successful sales trigger checks after commit without
+awaiting them, so notification failure cannot affect the completed sale.

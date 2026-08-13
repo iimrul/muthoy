@@ -12,7 +12,7 @@ import {
 import { resolvePaymentEffect, type PurchasePaymentType } from '../domain/purchases';
 import { expectedCash } from '../domain/cashFormula';
 import { generateId } from '../native/id';
-import { getActiveSessionRole } from './auth';
+import { requireOwner } from './auth';
 import { getCashSummarySync } from './cash';
 import { db, sqliteConnection } from './client';
 import { BatchExpiryMismatchError, DuplicateBatchError, NotAuthorizedError } from './errors';
@@ -73,12 +73,6 @@ function localBusinessDate(now: Date): string {
 function toFtsPrefixQuery(query: string): string {
   return query.trim().split(/\s+/).filter(Boolean)
     .map((term) => `"${term.replace(/"/g, '""')}"*`).join(' AND ');
-}
-
-async function requireOwner(shopId: string, actorUserId: string): Promise<void> {
-  if (await getActiveSessionRole(actorUserId, shopId) !== 'owner') {
-    throw new NotAuthorizedError();
-  }
 }
 
 export async function searchMedicinesForPurchase(

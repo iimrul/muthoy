@@ -77,8 +77,8 @@ shop-scoped and soft-delete-safe, and intentionally permits medicines with zero
 stock because this is a stock-in workflow.
 
 ## Still stubs
-Unimplemented APIs remain in `cash.ts`, `customers.ts`, `settings.ts`,
-`reports.ts`, and `notifications.ts`; verify individual exports in source.
+Unimplemented APIs remain in `cash.ts`, `customers.ts`, `settings.ts`, and
+`reports.ts`; verify individual exports in source.
 
 ## Not built yet
 - The shared `updated_at` write helper Volume 3 requires — add it with the

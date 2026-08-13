@@ -20,6 +20,7 @@ export interface MedicineListRow {
   medicineId: string;
   name: string;
   generic: string | null;
+  threshold: number;
   totalStock: number;
   batchCount: number;
   activeBatch: Batch | undefined;
@@ -31,7 +32,7 @@ export interface MedicineListRow {
 // query style. Never reads a soft-deleted medicine or batch.
 export async function listMedicines(shopId: string): Promise<MedicineListRow[]> {
   const medicineRows = await db
-    .select({ id: medicines.id, name: medicines.name, generic: medicines.generic })
+    .select({ id: medicines.id, name: medicines.name, generic: medicines.generic, threshold: medicines.threshold })
     .from(medicines)
     .where(and(eq(medicines.shopId, shopId), eq(medicines.isDeleted, false)))
     .orderBy(medicines.name);
@@ -63,6 +64,7 @@ export async function listMedicines(shopId: string): Promise<MedicineListRow[]> 
       medicineId: medicine.id,
       name: medicine.name,
       generic: medicine.generic,
+      threshold: medicine.threshold,
       totalStock: medicineBatches.reduce((sum, b) => sum + b.quantityAvailable, 0),
       batchCount: medicineBatches.length,
       activeBatch: activeBatch(medicine.id, medicineBatches),

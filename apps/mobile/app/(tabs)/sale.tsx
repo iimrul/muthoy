@@ -7,9 +7,11 @@ import { StandardHeader } from '../../components/ui/StandardHeader';
 import { searchMedicinesForSale, type MedicineSearchResult } from '../../db/sales';
 import { useCartStore } from '../../state/cartStore';
 import { useSessionStore } from '../../state/sessionStore';
+import { useUnreadCount } from '../../state/useUnreadCount';
 
 export default function SaleEntryScreen() {
   const session = useSessionStore((state) => state.session);
+  const unreadCount = useUnreadCount(session?.shopId, session?.userId);
   const addItem = useCartStore((state) => state.addItem);
   const cartCount = useCartStore((state) => state.items.reduce((sum, item) => sum + item.quantity, 0));
   const [query, setQuery] = useState('');
@@ -52,7 +54,7 @@ export default function SaleEntryScreen() {
 
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title="Sale" />
+      <StandardHeader title="Sale" onBellPress={() => router.push('/notifications')} unreadCount={unreadCount} />
       <View className="flex-row gap-3 p-4 pb-2">
         <TextInput
           value={query}

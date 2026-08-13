@@ -9,6 +9,7 @@ import { listCustomers, type CustomerListItem } from '../../db/customers';
 import { listBatchesForMedicine } from '../../db/inventory';
 import { createSaleTransaction } from '../../db/sales';
 import { deduct, InsufficientStockError } from '../../domain/fefo';
+import { runNotificationChecks } from '../../native/notifications';
 import { useCartStore } from '../../state/cartStore';
 import { useSessionStore } from '../../state/sessionStore';
 
@@ -122,6 +123,10 @@ export default function CheckoutScreen() {
         lines,
       });
 
+      // The sale is already committed. Notification failures must not affect it.
+      void runNotificationChecks(session.shopId).catch((error: unknown) => {
+        console.warn('Post-sale notification check failed', error);
+      });
       clearCart();
       router.replace({
         pathname: './confirmation',

@@ -6,6 +6,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { listMedicines, type MedicineListRow } from '../../db/inventory';
 import { useSessionStore } from '../../state/sessionStore';
+import { useUnreadCount } from '../../state/useUnreadCount';
 
 // Inventory (list) — Volume 4 INVENTORY, Volume 0 Day 8. Lists medicines —
 // name, current total stock, batch count, active-batch expiry countdown
@@ -14,6 +15,7 @@ import { useSessionStore } from '../../state/sessionStore';
 // the FAB opens app/inventory/add-medicine.tsx.
 export default function InventoryScreen() {
   const session = useSessionStore((s) => s.session);
+  const unreadCount = useUnreadCount(session?.shopId, session?.userId);
   const [medicines, setMedicines] = useState<MedicineListRow[]>([]);
 
   const reloadMedicines = useCallback(async () => {
@@ -35,7 +37,11 @@ export default function InventoryScreen() {
 
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title="Inventory" />
+      <StandardHeader
+        title="Inventory"
+        onBellPress={() => router.push('/notifications')}
+        unreadCount={unreadCount}
+      />
       <FlatList
         data={medicines}
         keyExtractor={(item) => item.medicineId}

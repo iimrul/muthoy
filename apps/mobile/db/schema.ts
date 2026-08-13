@@ -361,6 +361,7 @@ export const notifications = sqliteTable("notifications", {
   body: text("body").notNull(),
   isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
   refId: text("ref_id"),
+  resolvedAt: text("resolved_at"), // Low-stock hysteresis re-arm marker; system-set only.
 }, (t) => ({
   shopReadIdx: index("notifications_shop_read_idx").on(t.shopId, t.isRead),
 }));

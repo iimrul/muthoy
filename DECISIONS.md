@@ -446,3 +446,35 @@ COD purchases are fully paid at creation, record a cash supplier payment, and
 recompute the cash drawer. Credit purchases create no immediate cash movement;
 their outstanding supplier payable is derived from
 `purchases.total - purchases.paid_amount`, never cached separately.
+
+---
+
+## 2026-08-12 — Notifications shipped early; device-local and fail-closed
+
+Notifications remain classified P1/post-beta, but the founder explicitly
+approved implementing them early as a scope exception. Low-stock alerts use a
+resolved marker for threshold-crossing hysteresis; expiry alerts always compute
+from the real batch expiry date. Notification history stays device-local and is
+excluded from the sync outbox.
+
+One shared OS background task runs all checks, with foreground activation as a
+self-heal. Delivery near 8 PM is best-effort because Android Doze and OEM task
+killing control actual wake time. Daily cash summaries require a persisted owner
+session plus fresh SQLite owner validation; staff sessions cannot create, count,
+or list those rows. If staff is last logged in, that day's summary is skipped.
+
+No custom notification icon exists yet. Expo's default remains in use until a
+real design asset is supplied. Adding the native modules requires a fresh EAS
+development-client build before device validation.
+
+Successful sales start a fire-and-forget notification check only after the sale
+transaction commits. Notification failures therefore cannot fail or roll back
+the completed sale. Low-stock semantics remain unchanged: stock below the
+threshold creates one unresolved alert, recovery at or above the threshold
+resolves it, and a later drop can alert again.
+
+Notification permission and channel initialization runs from normal,
+authenticated foreground app startup; opening Notification Center is not a
+prerequisite. Android also ensures the channel immediately before posting. If
+OS permission is denied, the system banner is suppressed, but the in-app row
+created before delivery may still exist in Notification Center.
