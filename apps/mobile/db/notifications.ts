@@ -109,6 +109,15 @@ export async function findUnresolvedLowStockAlert(shopId: string, medicineId: st
   return row ?? null;
 }
 
+export async function findUnresolvedSyncAlert(shopId: string): Promise<{ id: string } | null> {
+  const [row] = await db.select({ id: notifications.id }).from(notifications).where(and(
+    eq(notifications.shopId, shopId),
+    eq(notifications.type, 'sync'),
+    isNull(notifications.resolvedAt),
+    eq(notifications.isDeleted, false),
+  )).limit(1);
+  return row ?? null;
+}
 export async function resolveLowStockAlert(notificationId: string): Promise<void> {
   const now = new Date().toISOString();
   await db

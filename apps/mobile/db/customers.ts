@@ -1,6 +1,6 @@
 // SQLite-backed customer directory, credit ledger, and collections.
 
-import { and, eq, like, or, sql } from 'drizzle-orm';
+import { and, eq, like, or } from 'drizzle-orm';
 import { ZERO_PAISA, asPaisa, type Paisa } from '@muthoy/types';
 import { expectedCash } from '../domain/cashFormula';
 import { remainingBalance } from '../domain/credit';
@@ -8,6 +8,7 @@ import { generateId } from '../native/id';
 import { getCashSummarySync } from './cash';
 import { db, sqliteConnection } from './client';
 import { cashDrawer, customers, payments, users } from './schema';
+import { recordChange, stampUpdatedAt } from './sync-helpers';
 
 export interface CustomerListItem {
   id: string;
@@ -59,7 +60,12 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
     address: input.address ?? null,
     notes: input.notes ?? null,
   };
-  db.insert(customers).values({ ...customer, shopId: input.shopId }).run();
+  db.transaction((tx) => {
+    const now = new Date().toISOString();
+    const values = { ...customer, shopId: input.shopId, createdAt: now, updatedAt: now };
+    tx.insert(customers).values(values).run();
+    recordChange(tx, { shopId: input.shopId, table: 'customers', rowId: customer.id, op: 'insert', payload: values });
+  });
   return customer;
 }
 
@@ -222,16 +228,21 @@ export async function collectPayment(input: CollectPaymentInput): Promise<void> 
       throw new Error('Collection amount exceeds outstanding balance');
     }
 
-    tx.insert(payments).values({
-      id: generateId(),
+    const paymentId = generateId();
+    const paymentNow = new Date().toISOString();
+    const paymentValues = {
+      id: paymentId,
       shopId: input.shopId,
-      type: 'customer_payment',
+      type: 'customer_payment' as const,
       partyId: input.customerId,
       amount: input.amount,
       method,
       refId: null,
       createdBy: input.staffId,
-    }).run();
+      createdAt: paymentNow, updatedAt: paymentNow,
+    };
+    tx.insert(payments).values(paymentValues).run();
+    recordChange(tx, { shopId: input.shopId, table: 'payments', rowId: paymentId, op: 'insert', payload: paymentValues });
 
     if (method !== 'cash') {
       return;
@@ -247,24 +258,25 @@ export async function collectPayment(input: CollectPaymentInput): Promise<void> 
     }
     const drawerId = existingDrawer?.id ?? generateId();
     if (!existingDrawer) {
-      tx.insert(cashDrawer).values({
+      const drawerValues = {
         id: drawerId,
         shopId: input.shopId,
         businessDate,
         openingCash: ZERO_PAISA,
         openedBy: input.staffId,
-        openedAt: now.toISOString(),
-      }).run();
+        openedAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString(),
+      };
+      tx.insert(cashDrawer).values(drawerValues).run();
+      recordChange(tx, { shopId: input.shopId, table: 'cash_drawer', rowId: drawerId, op: 'insert', payload: drawerValues });
     }
 
     const closingExpected = expectedCash(getCashSummarySync(input.shopId, businessDate));
-    const drawerUpdate = tx.update(cashDrawer).set({
-      closingExpected,
-      updatedAt: sql`current_timestamp`,
-      isDirty: true,
-    }).where(and(eq(cashDrawer.id, drawerId), eq(cashDrawer.shopId, input.shopId))).run();
+    const drawerValues = stampUpdatedAt({ closingExpected, isDirty: true });
+    const drawerUpdate = tx.update(cashDrawer).set(drawerValues)
+      .where(and(eq(cashDrawer.id, drawerId), eq(cashDrawer.shopId, input.shopId))).run();
     if (drawerUpdate.changes !== 1) {
       throw new Error('Cash drawer could not be updated');
     }
+    recordChange(tx, { shopId: input.shopId, table: 'cash_drawer', rowId: drawerId, op: 'update', payload: drawerValues });
   });
 }

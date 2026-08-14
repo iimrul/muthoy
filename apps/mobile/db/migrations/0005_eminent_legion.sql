@@ -1,0 +1,1 @@
+ALTER TABLE `shops` ADD `cloud_linked_at` text;

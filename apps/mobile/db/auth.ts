@@ -5,6 +5,7 @@ import { generateId } from '../native/id';
 import { hashPin, verifyPinHash } from '../native/crypto';
 import type { Role } from '../domain/permissions';
 import { NotAuthorizedError } from './errors';
+import { recordChange, stampUpdatedAt } from './sync-helpers';
 
 // db/auth.ts — the ONLY file that will touch Drizzle/SQLite for auth
 // (DEVELOPMENT_RULES.md). Hashing itself never happens here — that's
@@ -18,13 +19,20 @@ export interface RegisterShopInput {
 
 export type RegistrationStatus =
   | { status: 'none' }
+  | { status: 'link_pending'; shopId: string; userId: string; phone: string }
   | { status: 'incomplete'; shopId: string; userId: string }
   | { status: 'complete'; shopId: string; userId: string };
 
 /** Resolves local owner-registration completion from SQLite, never MMKV. */
 export async function getRegistrationStatus(): Promise<RegistrationStatus> {
   const [owner] = await db
-    .select({ shopId: users.shopId, userId: users.id, pinSetAt: users.pinSetAt })
+    .select({
+      shopId: users.shopId,
+      userId: users.id,
+      phone: shops.phone,
+      pinSetAt: users.pinSetAt,
+      cloudLinkedAt: shops.cloudLinkedAt,
+    })
     .from(users)
     .innerJoin(shops, eq(shops.id, users.shopId))
     .innerJoin(roles, eq(roles.id, users.roleId))
@@ -41,6 +49,14 @@ export async function getRegistrationStatus(): Promise<RegistrationStatus> {
 
   if (!owner) {
     return { status: 'none' };
+  }
+  if (!owner.cloudLinkedAt) {
+    return {
+      status: 'link_pending',
+      shopId: owner.shopId,
+      userId: owner.userId,
+      phone: owner.phone,
+    };
   }
 
   return owner.pinSetAt
@@ -78,6 +94,18 @@ export async function getActiveSessionRole(
   return sessionUser?.role ?? null;
 }
 
+
+/** Marks local cloud-link completion without enqueueing a sync row. */
+export async function markShopCloudLinked(shopId: string): Promise<void> {
+  const result = await db
+    .update(shops)
+    .set({ cloudLinkedAt: new Date().toISOString() })
+    .where(eq(shops.id, shopId))
+    .run();
+  if (result.changes !== 1) {
+    throw new Error(`No shop found with id ${shopId}`);
+  }
+}
 export async function requireOwner(shopId: string, actorUserId: string): Promise<void> {
   if (await getActiveSessionRole(actorUserId, shopId) !== 'owner') {
     throw new NotAuthorizedError();
@@ -103,28 +131,35 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
   const placeholderPinHash = await hashPin(generateId());
 
   await db.transaction(async (tx) => {
+    const timestamp = new Date().toISOString();
     // shops.owner_id is intentionally NOT a foreign key (same reason as
     // base.deletedBy — avoids a shops<->users creation cycle), so it can be
     // set to the not-yet-inserted owner's id here.
-    await tx.insert(shops).values({
+    const shopValues = {
       id: shopId,
       ownerId: userId,
       name: input.shopName,
       phone: input.phone,
       // CLAUDE.md rule 7: a fresh, unique, non-hardcoded id every time —
       // generateId() above, never reused or derived from device identity.
-    });
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await tx.insert(shops).values(shopValues);
+    recordChange(tx, { shopId, table: 'shops', rowId: shopId, op: 'insert', payload: shopValues });
 
     // All three system roles are created now, even though Manager is unused
     // until the full permission matrix ships (P1) — avoids a backfill
     // migration later. See DECISIONS.md.
-    await tx.insert(roles).values([
-      { id: ownerRoleId, shopId, name: 'owner', isSystem: true },
-      { id: managerRoleId, shopId, name: 'manager', isSystem: true },
-      { id: staffRoleId, shopId, name: 'staff', isSystem: true },
-    ]);
+    const roleValues = [
+      { id: ownerRoleId, shopId, name: 'owner' as const, isSystem: true, createdAt: timestamp, updatedAt: timestamp },
+      { id: managerRoleId, shopId, name: 'manager' as const, isSystem: true, createdAt: timestamp, updatedAt: timestamp },
+      { id: staffRoleId, shopId, name: 'staff' as const, isSystem: true, createdAt: timestamp, updatedAt: timestamp },
+    ];
+    await tx.insert(roles).values(roleValues);
+    roleValues.forEach((role) => recordChange(tx, { shopId, table: 'roles', rowId: role.id, op: 'insert', payload: role }));
 
-    await tx.insert(users).values({
+    const userValues = stampUpdatedAt({
       id: userId,
       shopId,
       name: input.shopName,
@@ -133,6 +168,9 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
       roleId: ownerRoleId,
       isActive: true,
     });
+    const completeUserValues = { ...userValues, createdAt: userValues.updatedAt };
+    await tx.insert(users).values(completeUserValues);
+    recordChange(tx, { shopId, table: 'users', rowId: userId, op: 'insert', payload: completeUserValues });
   });
 
   return { shopId, userId };
@@ -143,8 +181,13 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
 // to any logging path either.
 export async function setOwnerPin(userId: string, rawPin: string): Promise<void> {
   const pinHash = await hashPin(rawPin);
-  const pinSetAt = new Date().toISOString();
-  await db.update(users).set({ pinHash, pinSetAt, updatedAt: pinSetAt }).where(eq(users.id, userId));
+  const values = stampUpdatedAt({ pinHash, pinSetAt: new Date().toISOString() });
+  await db.transaction(async (tx) => {
+    const user = await tx.select({ shopId: users.shopId }).from(users).where(eq(users.id, userId)).get();
+    if (!user) throw new Error(`No user found with id ${userId}`);
+    await tx.update(users).set(values).where(eq(users.id, userId));
+    recordChange(tx, { shopId: user.shopId, table: 'users', rowId: userId, op: 'update', payload: values });
+  });
 }
 
 // PIN Login has no separate "who are you" step (Volume 4 AUTHENTICATION

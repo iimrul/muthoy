@@ -1,6 +1,10 @@
 # backend/supabase/migrations/
 
-`supabase-schema.sql` and every migration after it, applied via the Supabase
-CLI, in order. Migration files are never edited after being committed — a
-schema change is always a new migration (DEVELOPMENT_RULES.md). Populated
-starting Day 12.
+Apply timestamped files in order with the Supabase CLI.
+
+The initial schema mirrors 21 SQLite business tables with native UUIDs,
+BIGINT paisa, explicit FK deletion behavior, and shop-isolating RLS. Sync RPCs
+preserve client `updated_at` values for Beta LWW and are executable only by
+`service_role`.
+
+Committed migrations are immutable; later changes require a new migration.

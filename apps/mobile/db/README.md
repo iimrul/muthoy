@@ -76,18 +76,35 @@ Purchase medicine lookup reuses the local `medicines_fts` FTS5 index, remains
 shop-scoped and soft-delete-safe, and intentionally permits medicines with zero
 stock because this is a stock-in workflow.
 
-## Still stubs
-Unimplemented APIs remain in `cash.ts`, `customers.ts`, `settings.ts`, and
-`reports.ts`; verify individual exports in source.
+### Customers and credit ledger
 
-## Not built yet
-- The shared `updated_at` write helper Volume 3 requires — add it with the
-  first real write, so it is never duplicated per call site. Still not built
-  as of Day 8 — `inventory.ts` doesn't need it yet (no update-in-place path),
-  but the debt applies the moment one is added.
-- The `sync_queue` outbox writer (Day 13, P0 per CLAUDE.md rule 12). No write
-  anywhere in `db/` enqueues an outbox row yet, including Day 8's
-  `createMedicineWithBatch` / `addBatchToMedicine` — matches the existing
-  `auth.ts` / `staff.ts` precedent. Day 13 must build the shared enqueue
-  helper once and backfill every write site (`auth`, `staff`, `inventory`,
-  and whatever else has landed by then) together, not just the newest one.
+`customers.ts` is live and shop-scoped. Customer records store name, phone,
+address, and notes; checkout's `listCustomers` deliberately returns only
+id/name/phone, while detail and balance reads use the full customer shape.
+
+Outstanding credit is always derived as credit-sale amounts minus customer
+collections. Collections above the outstanding balance are rejected. Cash
+collections recompute today's expected cash drawer; non-cash collections reduce
+credit only and never touch the drawer. `collectPayment` keeps its transaction
+callback synchronous/no-await so the balance check and payment write remain in
+one uninterrupted transaction.
+
+Standalone `recordCreditSale` remains an intentional stub/out of scope. Checkout
+already creates sale-backed credit rows atomically.
+
+## Still stubs
+Unimplemented APIs remain in `cash.ts`, `settings.ts`, and `reports.ts`;
+`customers.ts` retains only the intentionally out-of-scope
+`recordCreditSale` stub. Verify individual exports in source.
+
+## Sync outbox (Day 13)
+
+`sync-helpers.ts` owns the SQLite/Supabase boundary: canonical ISO timestamps,
+snake/camel case conversion, persisted-row outbox payloads, monotonic `seq`
+ordering, retry status, and strict LWW hydration. `audit_logs` remains append-only
+on pull (`ON CONFLICT DO NOTHING`). Pulled rows never enqueue outbox rows.
+
+Every live business write in auth, staff, inventory, sales, purchases, customers,
+suppliers, and settings now records its outbox row inside the same SQLite
+transaction. Notifications remain device-local; sync failures use one unresolved
+`sync` alert per shop.

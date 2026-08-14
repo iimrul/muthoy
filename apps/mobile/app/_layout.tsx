@@ -25,6 +25,8 @@ import {
   runNotificationChecks,
 } from '../native/notifications';
 import { useSessionStore } from '../state/sessionStore';
+import { handleAppStateChangeForAuthRefresh } from '../sync/supabaseClient';
+import { startSyncEngine, stopSyncEngine } from '../sync';
 import '../global.css';
 
 const FOREGROUND_CHECK_DEBOUNCE_MS = 60_000;
@@ -83,11 +85,15 @@ export default function RootLayout() {
   }, [isDatabaseReady]);
 
   useEffect(() => {
-    if (!isDatabaseReady || !session) {
+    if (!isDatabaseReady) {
       return;
     }
+    handleAppStateChangeForAuthRefresh(AppState.currentState);
+    if (session) {
+      startSyncEngine(session.shopId);
+    }
     const checkIfDue = () => {
-      if (AppState.currentState !== 'active') {
+      if (!session || AppState.currentState !== 'active') {
         return;
       }
       const now = Date.now();
@@ -101,11 +107,15 @@ export default function RootLayout() {
     };
     checkIfDue();
     const subscription = AppState.addEventListener('change', (state) => {
+      handleAppStateChangeForAuthRefresh(state);
       if (state === 'active') {
         checkIfDue();
       }
     });
-    return () => subscription.remove();
+    return () => {
+      subscription.remove();
+      stopSyncEngine();
+    };
   }, [isDatabaseReady, session]);
 
   if (!isBootComplete) {

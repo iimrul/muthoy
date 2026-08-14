@@ -29,6 +29,20 @@
       "when": 1786546521884,
       "tag": "0003_curious_wild_pack",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786624684663,
+      "tag": "0004_deep_boomer",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786636210767,
+      "tag": "0005_eminent_legion",
+      "breakpoints": true
     }
   ]
 }

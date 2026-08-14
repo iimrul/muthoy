@@ -17,6 +17,7 @@ import {
 } from '../../db/inventory';
 import { DuplicateBatchError } from '../../db/errors';
 import { useSessionStore } from '../../state/sessionStore';
+import { triggerSyncNow } from '../../sync';
 
 // Medicine detail: batch list + Add Batch — Volume 4 INVENTORY, Volume 0 Day
 // 8. This is the path that adds a batch to an EXISTING medicine, which is
@@ -77,6 +78,7 @@ export default function BatchDetailScreen() {
           purchasePrice: fromTaka(input.purchasePrice),
           salePrice: fromTaka(input.salePrice),
         });
+        void triggerSyncNow(session.shopId);
         reset();
         setIsAdding(false);
         await reload();

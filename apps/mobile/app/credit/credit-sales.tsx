@@ -14,6 +14,7 @@ import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createCustomer, listCustomersWithBalance } from '../../db/customers';
 import { useSessionStore } from '../../state/sessionStore';
 import { useUnreadCount } from '../../state/useUnreadCount';
+import { triggerSyncNow } from '../../sync';
 
 export default function CreditSalesScreen() {
   const session = useSessionStore((state) => state.session);
@@ -53,6 +54,7 @@ export default function CreditSalesScreen() {
     setError(null);
     try {
       await createCustomer({ shopId: session.shopId, ...values });
+      void triggerSyncNow(session.shopId);
       reset();
       setIsAdding(false);
       await reload();

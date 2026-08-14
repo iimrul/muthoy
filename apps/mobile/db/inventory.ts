@@ -13,6 +13,7 @@ import { batches, medicines } from './schema';
 import { generateId } from '../native/id';
 import { activeBatch, sortByExpiry, type Batch } from '../domain/fefo';
 import { DuplicateBatchError, isUniqueConstraintViolation } from './errors';
+import { recordChange } from './sync-helpers';
 
 const BATCH_UNIQUE_COLUMNS = ['shop_id', 'medicine_id', 'batch_no'];
 
@@ -99,7 +100,8 @@ export async function createMedicineWithBatch(
   const batchId = generateId();
 
   await db.transaction(async (tx) => {
-    await tx.insert(medicines).values({
+    const now = new Date().toISOString();
+    const medicineValues = {
       id: medicineId,
       shopId: input.shopId,
       name: input.name,
@@ -111,9 +113,12 @@ export async function createMedicineWithBatch(
       requiresPrescription: input.requiresPrescription,
       threshold: input.threshold,
       barcode: input.barcode ?? null,
-    });
+      createdAt: now, updatedAt: now,
+    };
+    await tx.insert(medicines).values(medicineValues);
+    recordChange(tx, { shopId: input.shopId, table: 'medicines', rowId: medicineId, op: 'insert', payload: medicineValues });
 
-    await tx.insert(batches).values({
+    const batchValues = {
       id: batchId,
       shopId: input.shopId,
       medicineId,
@@ -122,7 +127,10 @@ export async function createMedicineWithBatch(
       stock: input.firstBatch.quantity,
       purchasePrice: input.firstBatch.purchasePrice,
       salePrice: input.firstBatch.salePrice,
-    });
+      createdAt: now, updatedAt: now,
+    };
+    await tx.insert(batches).values(batchValues);
+    recordChange(tx, { shopId: input.shopId, table: 'batches', rowId: batchId, op: 'insert', payload: batchValues });
   });
 
   return { medicineId, batchId };
@@ -143,46 +151,31 @@ export interface AddBatchInput {
 // 8: "Duplicate batch number for the same medicine shows a friendly error" —
 // never a raw crash.
 export async function addBatchToMedicine(input: AddBatchInput): Promise<{ batchId: string }> {
-  // Pre-check deliberately ignores is_deleted: the unique index does NOT
-  // include is_deleted, so a soft-deleted batch still occupies the
-  // (shop, medicine, batch_no) slot and would otherwise crash past this
-  // check straight into the raw SQLite constraint.
-  const [existing] = await db
-    .select({ id: batches.id })
-    .from(batches)
-    .where(
-      and(eq(batches.shopId, input.shopId), eq(batches.medicineId, input.medicineId), eq(batches.batchNo, input.batchNo)),
-    );
-
-  if (existing) {
-    throw new DuplicateBatchError(input.medicineId, input.batchNo);
-  }
-
   const batchId = generateId();
-
   try {
-    await db.insert(batches).values({
-      id: batchId,
-      shopId: input.shopId,
-      medicineId: input.medicineId,
-      batchNo: input.batchNo,
-      expiryDate: input.expiryDate ?? null,
-      stock: input.quantity,
-      purchasePrice: input.purchasePrice,
-      salePrice: input.salePrice,
+    await db.transaction(async (tx) => {
+      const existing = await tx.select({ id: batches.id }).from(batches).where(and(
+        eq(batches.shopId, input.shopId), eq(batches.medicineId, input.medicineId), eq(batches.batchNo, input.batchNo),
+      )).get();
+      if (existing) throw new DuplicateBatchError(input.medicineId, input.batchNo);
+      const now = new Date().toISOString();
+      const values = {
+        id: batchId, shopId: input.shopId, medicineId: input.medicineId,
+        batchNo: input.batchNo, expiryDate: input.expiryDate ?? null,
+        stock: input.quantity, purchasePrice: input.purchasePrice, salePrice: input.salePrice,
+        createdAt: now, updatedAt: now,
+      };
+      await tx.insert(batches).values(values);
+      recordChange(tx, { shopId: input.shopId, table: 'batches', rowId: batchId, op: 'insert', payload: values });
     });
   } catch (err) {
-    // Backstop for the race between the SELECT above and this INSERT — the
-    // pre-check is not atomic with the write.
-    if (isUniqueConstraintViolation(err, 'batches', BATCH_UNIQUE_COLUMNS)) {
+    if (err instanceof DuplicateBatchError || isUniqueConstraintViolation(err, 'batches', BATCH_UNIQUE_COLUMNS)) {
       throw new DuplicateBatchError(input.medicineId, input.batchNo);
     }
     throw err;
   }
-
   return { batchId };
 }
-
 export interface MedicineDetail {
   id: string;
   name: string;

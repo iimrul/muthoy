@@ -13,6 +13,7 @@ import { FormField } from '../../components/forms/FormField';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createSupplier, listSuppliers } from '../../db/suppliers';
 import { useSessionStore } from '../../state/sessionStore';
+import { triggerSyncNow } from '../../sync';
 
 export default function SupplierListScreen() {
   const session = useSessionStore((state) => state.session);
@@ -51,6 +52,7 @@ export default function SupplierListScreen() {
     setError(null);
     try {
       await createSupplier(session.shopId, session.userId, values);
+      void triggerSyncNow(session.shopId);
       reset();
       setIsAdding(false);
       await reload();

@@ -13,6 +13,7 @@ import {
 } from '../../db/customers';
 import { remainingBalance } from '../../domain/credit';
 import { useSessionStore } from '../../state/sessionStore';
+import { triggerSyncNow } from '../../sync';
 
 export default function CustomerDetailScreen() {
   const { customerId } = useLocalSearchParams<{ customerId: string }>();
@@ -67,6 +68,7 @@ export default function CustomerDetailScreen() {
         customerId,
         amount: fromTaka(taka),
       });
+      void triggerSyncNow(session.shopId);
       setAmountText('');
       await reload();
     } catch (caught) {

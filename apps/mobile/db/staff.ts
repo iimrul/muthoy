@@ -4,6 +4,7 @@ import { users, roles, auditLogs } from './schema';
 import { generateId } from '../native/id';
 import { hashPin } from '../native/crypto';
 import { getShopRoleId } from './auth';
+import { recordChange, stampUpdatedAt } from './sync-helpers';
 import type { Role } from '../domain/permissions';
 
 // db/staff.ts — the ONLY file that will touch Drizzle/SQLite for Staff
@@ -40,17 +41,12 @@ export async function createStaff(shopId: string, name: string, rawPin: string):
   }
 
   const pinHash = await hashPin(rawPin);
-  const pinSetAt = new Date().toISOString();
   const userId = generateId();
-
-  await db.insert(users).values({
-    id: userId,
-    shopId,
-    name,
-    pinHash,
-    pinSetAt,
-    roleId: staffRoleId,
-    isActive: true,
+  const now = new Date().toISOString();
+  const values = { id: userId, shopId, name, pinHash, pinSetAt: now, roleId: staffRoleId, isActive: true, createdAt: now, updatedAt: now };
+  await db.transaction(async (tx) => {
+    await tx.insert(users).values(values);
+    recordChange(tx, { shopId, table: 'users', rowId: userId, op: 'insert', payload: values });
   });
 
   return { id: userId, name, role: 'staff', isActive: true };
@@ -67,15 +63,14 @@ export async function resetStaffPin(staffId: string, newRawPin: string, performe
   }
 
   await db.transaction(async (tx) => {
-    await tx.update(users).set({ pinHash, pinSetAt, updatedAt: pinSetAt }).where(eq(users.id, staffId));
-    await tx.insert(auditLogs).values({
-      id: generateId(),
-      shopId: staff.shopId,
-      actorId: performedByUserId,
-      action: 'pin_reset',
-      target: staffId,
-      meta: null,
-    });
+    const userValues = stampUpdatedAt({ pinHash, pinSetAt });
+    await tx.update(users).set(userValues).where(eq(users.id, staffId));
+    recordChange(tx, { shopId: staff.shopId, table: 'users', rowId: staffId, op: 'update', payload: userValues });
+    const auditId = generateId();
+    const now = new Date().toISOString();
+    const auditValues = { id: auditId, shopId: staff.shopId, actorId: performedByUserId, action: 'pin_reset', target: staffId, meta: null, createdAt: now, updatedAt: now };
+    await tx.insert(auditLogs).values(auditValues);
+    recordChange(tx, { shopId: staff.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
   });
 }
 
@@ -86,15 +81,14 @@ export async function deactivateStaff(staffId: string, performedByUserId: string
   }
 
   await db.transaction(async (tx) => {
-    await tx.update(users).set({ isActive: false, updatedAt: new Date().toISOString() }).where(eq(users.id, staffId));
-    await tx.insert(auditLogs).values({
-      id: generateId(),
-      shopId: staff.shopId,
-      actorId: performedByUserId,
-      action: 'staff_deactivated',
-      target: staffId,
-      meta: null,
-    });
+    const userValues = stampUpdatedAt({ isActive: false });
+    await tx.update(users).set(userValues).where(eq(users.id, staffId));
+    recordChange(tx, { shopId: staff.shopId, table: 'users', rowId: staffId, op: 'update', payload: userValues });
+    const auditId = generateId();
+    const now = new Date().toISOString();
+    const auditValues = { id: auditId, shopId: staff.shopId, actorId: performedByUserId, action: 'staff_deactivated', target: staffId, meta: null, createdAt: now, updatedAt: now };
+    await tx.insert(auditLogs).values(auditValues);
+    recordChange(tx, { shopId: staff.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
   });
 }
 
@@ -103,12 +97,12 @@ export async function deactivateStaff(staffId: string, performedByUserId: string
 // Volume 0 Day 11 checklist: "audit_logs never contains a raw PIN anywhere"
 // — this file's own callers above only ever pass `null`, by construction).
 export async function writeAuditLog(shopId: string, actorUserId: string, action: string, detail: string | null): Promise<void> {
-  await db.insert(auditLogs).values({
-    id: generateId(),
-    shopId,
-    actorId: actorUserId,
-    action,
-    meta: detail,
+  const id = generateId();
+  const now = new Date().toISOString();
+  const values = { id, shopId, actorId: actorUserId, action, meta: detail, createdAt: now, updatedAt: now };
+  await db.transaction(async (tx) => {
+    await tx.insert(auditLogs).values(values);
+    recordChange(tx, { shopId, table: 'audit_logs', rowId: id, op: 'insert', payload: values });
   });
 }
 

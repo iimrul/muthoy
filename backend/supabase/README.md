@@ -1,7 +1,9 @@
 # backend/supabase/
 
-The cloud schema and Edge Functions (Volume 2). Empty today by design:
-`supabase-schema.sql` lands in `migrations/` on Day 12, the sync + payment-
-webhook Edge Functions land in `functions/` on Day 12-13. See
-`docs/playbook/03-database-backend.md` and `00-execution-roadmap.md`'s Day
-12-13 for the full spec.
+Supabase cloud mirror and Edge Functions.
+
+- `migrations/`: 21-table PostgreSQL mirror, RLS, and service-role-only sync RPCs.
+- `functions/sync/`: authenticated push, pull, and device-link actions.
+
+SQLite remains the mobile source of truth. Notifications and the local sync/conflict
+queues are intentionally not mirrored.

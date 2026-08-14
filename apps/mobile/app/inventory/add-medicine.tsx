@@ -9,6 +9,7 @@ import { FormField } from '../../components/forms/FormField';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createMedicineWithBatch } from '../../db/inventory';
 import { useSessionStore } from '../../state/sessionStore';
+import { triggerSyncNow } from '../../sync';
 
 // Add Medicine — Volume 4 INVENTORY, Volume 0 Day 8. React Hook Form + Zod
 // (addMedicineSchema, packages/validation): name, generic, manufacturer,
@@ -62,6 +63,7 @@ export default function AddMedicineScreen() {
             salePrice: fromTaka(input.firstBatch.salePrice),
           },
         });
+        void triggerSyncNow(session.shopId);
         router.back();
       } catch {
         Alert.alert('Something went wrong', 'Please try again.');

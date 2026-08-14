@@ -1,4 +1,7 @@
 # backend/supabase/functions/
 
-Edge Functions: the sync endpoint (Day 13, P0) and the payment webhook (P1,
-post-beta). Populated starting Day 12-13.
+`sync/` exposes one authenticated Edge Function with three POST actions:
+`push`, `pull`, and `link-device`. It verifies the caller's JWT and shop claim
+before using service-role-only RPCs.
+
+The payment webhook remains P1/post-beta.

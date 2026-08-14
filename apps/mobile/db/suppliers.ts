@@ -6,6 +6,7 @@ import { generateId } from '../native/id';
 import { requireOwner } from './auth';
 import { db, sqliteConnection } from './client';
 import { suppliers } from './schema';
+import { recordChange } from './sync-helpers';
 
 export interface Supplier {
   id: string;
@@ -66,14 +67,13 @@ export async function createSupplier(
 ): Promise<Supplier> {
   await requireOwner(shopId, actorUserId);
   const id = generateId();
-  await db.insert(suppliers).values({
-    id,
-    shopId,
-    name: supplier.name,
-    phone: supplier.phone ?? null,
-    address: supplier.address ?? null,
-    email: supplier.email ?? null,
-    contactPerson: supplier.contactPerson ?? null,
+  const now = new Date().toISOString();
+  const values = { id, shopId, name: supplier.name, phone: supplier.phone ?? null,
+    address: supplier.address ?? null, email: supplier.email ?? null,
+    contactPerson: supplier.contactPerson ?? null, createdAt: now, updatedAt: now };
+  await db.transaction(async (tx) => {
+    await tx.insert(suppliers).values(values);
+    recordChange(tx, { shopId, table: 'suppliers', rowId: id, op: 'insert', payload: values });
   });
   return { id, ...supplier };
 }

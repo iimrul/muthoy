@@ -3,6 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 import { PinPad, usePinEntry, useConfirmedPinEntry } from '../../components/ui/PinPad';
 import { changeOwnPin } from '../../db/settings';
 import { useSessionStore } from '../../state/sessionStore';
+import { triggerSyncNow } from '../../sync';
 
 // Settings — Volume 4 SETTINGS. Mixed scope: shop profile + security
 // (change own PIN) are P0; backup-key restore-on-new-phone and the
@@ -30,7 +31,7 @@ export default function SettingsScreen() {
       <View className="gap-3 rounded-lg bg-white p-4">
         <Text className="font-sans-medium text-base text-richBlack">Security</Text>
         {isChangingPin ? (
-          <ChangeOwnPinFlow userId={session.userId} onDone={() => setIsChangingPin(false)} onCancel={() => setIsChangingPin(false)} />
+          <ChangeOwnPinFlow shopId={session.shopId} userId={session.userId} onDone={() => setIsChangingPin(false)} onCancel={() => setIsChangingPin(false)} />
         ) : (
           <Pressable onPress={() => setIsChangingPin(true)}>
             <Text className="font-sans-medium text-sm text-brand-green">Change my PIN</Text>
@@ -42,6 +43,7 @@ export default function SettingsScreen() {
 }
 
 interface ChangeOwnPinFlowProps {
+  shopId: string;
   userId: string;
   onDone: () => void;
   onCancel: () => void;
@@ -49,7 +51,7 @@ interface ChangeOwnPinFlowProps {
 
 type ChangePinStep = 'current' | 'new';
 
-function ChangeOwnPinFlow({ userId, onDone, onCancel }: ChangeOwnPinFlowProps) {
+function ChangeOwnPinFlow({ shopId, userId, onDone, onCancel }: ChangeOwnPinFlowProps) {
   const [step, setStep] = useState<ChangePinStep>('current');
   const [currentPin, setCurrentPin] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +71,7 @@ function ChangeOwnPinFlow({ userId, onDone, onCancel }: ChangeOwnPinFlowProps) {
         // changeOwnPin, which verifies the current hash and bcrypt-hashes
         // the new one — never logged.
         await changeOwnPin(userId, currentPin, newPin);
+        void triggerSyncNow(shopId);
         onDone();
       } catch {
         setError('Current PIN is incorrect');
@@ -76,7 +79,7 @@ function ChangeOwnPinFlow({ userId, onDone, onCancel }: ChangeOwnPinFlowProps) {
         setCurrentPin('');
       }
     },
-    [userId, currentPin, onDone],
+    [shopId, userId, currentPin, onDone],
   );
 
   const newEntry = useConfirmedPinEntry(handleNewConfirmed, () => setError('New PINs did not match — start over'));

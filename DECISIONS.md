@@ -449,6 +449,24 @@ their outstanding supplier payable is derived from
 
 ---
 
+## 2026-08-12 — Customer credit balance is derived; collections are atomic
+
+Customer records retain name, phone, address, and notes, while checkout's picker
+reads only id/name/phone. All customer, credit, payment, and drawer operations
+are shop-scoped.
+
+Outstanding balance is derived as credit sales minus collections; it is never
+maintained as a mutable cached total. Over-collection is rejected. Cash
+collections recompute today's expected cash drawer, while non-cash collections
+reduce the credit balance without touching the drawer.
+
+`collectPayment` deliberately uses a synchronous/no-await transaction callback:
+the balance check and payment insert must remain within one uninterrupted SQLite
+transaction. Standalone `recordCreditSale` remains intentionally out of scope;
+checkout already creates sale-backed credit rows atomically.
+
+---
+
 ## 2026-08-12 — Notifications shipped early; device-local and fail-closed
 
 Notifications remain classified P1/post-beta, but the founder explicitly
@@ -478,3 +496,37 @@ authenticated foreground app startup; opening Notification Center is not a
 prerequisite. Android also ensures the channel immediately before posting. If
 OS permission is denied, the system banner is suppressed, but the in-app row
 created before delivery may still exist in Notification Center.
+
+---
+
+## 2026-08-13 — Beta sync uses row-level last-write-wins
+
+The Beta sync engine resolves every competing row version, including stock,
+using updated_at last-write-wins. conflict_queue and stock delta-merge stay P1
+and must ship before any multi-device shop pilot. Beta remains one active device
+per shop.
+
+---
+
+## 2026-08-13 — Synced Postgres rows preserve client edit timestamps
+
+The Postgres mirror does not attach a generic updated_at trigger to synced
+tables. Sync writes preserve the canonical client edit timestamp because
+replacing it with server arrival time would corrupt LWW ordering.
+
+---
+
+## 2026-08-13 — Supabase shop identity lives in app metadata
+
+Cloud isolation reads app_metadata.shop_id, not client-writable user metadata.
+RLS protects direct table access; the Edge Function independently verifies the
+same claim for service-role sync calls; sync RPC execution is restricted to the
+service role.
+
+---
+
+## 2026-08-13 — Synced SQLite timestamps use canonical ISO strings
+
+All synced write sites stamp created_at and updated_at with Date.toISOString().
+Local LWW comparisons parse timestamps to epoch milliseconds instead of
+comparing mixed SQLite and ISO strings.

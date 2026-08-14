@@ -21,6 +21,7 @@ import {
 import { listSuppliers } from '../../db/suppliers';
 import type { PurchasePaymentType } from '../../domain/purchases';
 import { useSessionStore } from '../../state/sessionStore';
+import { triggerSyncNow } from '../../sync';
 
 interface DraftLine {
   medicine: PurchaseMedicineSearchResult;
@@ -165,6 +166,7 @@ export default function PurchaseCreateScreen() {
           salePrice: fromTaka(line.fields.salePrice),
         })),
       });
+      void triggerSyncNow(session.shopId);
       router.replace({ pathname: '/suppliers/detail', params: { supplierId: selectedSupplierId } });
     } catch (caught) {
       if (caught instanceof BatchExpiryMismatchError || caught instanceof DuplicateBatchError) {

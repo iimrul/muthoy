@@ -4,9 +4,10 @@
 
 import { eq } from 'drizzle-orm';
 import { db } from './client';
-import { users } from './schema';
+import { auditLogs, users } from './schema';
 import { hashPin, verifyPinHash } from '../native/crypto';
-import { writePinChangeAuditLog } from './staff';
+import { generateId } from '../native/id';
+import { recordChange, stampUpdatedAt } from './sync-helpers';
 
 export interface ShopProfile {
   id: string;
@@ -41,9 +42,15 @@ export async function changeOwnPin(userId: string, currentRawPin: string, newRaw
 
   const newPinHash = await hashPin(newRawPin);
   await db.transaction(async (tx) => {
-    await tx.update(users).set({ pinHash: newPinHash, updatedAt: new Date().toISOString() }).where(eq(users.id, userId));
+    const userValues = stampUpdatedAt({ pinHash: newPinHash });
+    await tx.update(users).set(userValues).where(eq(users.id, userId));
+    recordChange(tx, { shopId: user.shopId, table: 'users', rowId: userId, op: 'update', payload: userValues });
+    const auditId = generateId();
+    const now = new Date().toISOString();
+    const auditValues = { id: auditId, shopId: user.shopId, actorId: userId, action: 'pin_changed', meta: null, createdAt: now, updatedAt: now };
+    await tx.insert(auditLogs).values(auditValues);
+    recordChange(tx, { shopId: user.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
   });
-  await writePinChangeAuditLog(user.shopId, userId);
 }
 
 // TODO(P1): backup key restore-on-new-phone (Volume 4 SETTINGS: "backup key

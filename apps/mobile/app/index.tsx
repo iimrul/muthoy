@@ -9,6 +9,10 @@ type RootDestination =
   | '/(auth)/register'
   | '/(auth)/pin-login'
   | '/(tabs)/dashboard'
+  | {
+      pathname: '/(auth)/otp-verify';
+      params: { phone: string; resumeShopId: string };
+    }
   | { pathname: '/(auth)/pin-setup'; params: { shopId: string; userId: string } };
 
 export default function RootSessionGate() {
@@ -32,6 +36,20 @@ export default function RootSessionGate() {
           logout();
           if (isCurrent) {
             setDestination('/(auth)/register');
+          }
+          return;
+        }
+
+        if (registration.status === 'link_pending') {
+          logout();
+          if (isCurrent) {
+            setDestination({
+              pathname: '/(auth)/otp-verify',
+              params: {
+                phone: registration.phone,
+                resumeShopId: registration.shopId,
+              },
+            });
           }
           return;
         }

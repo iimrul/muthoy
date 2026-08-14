@@ -12,6 +12,7 @@ import { deduct, InsufficientStockError } from '../../domain/fefo';
 import { runNotificationChecks } from '../../native/notifications';
 import { useCartStore } from '../../state/cartStore';
 import { useSessionStore } from '../../state/sessionStore';
+import { triggerSyncNow } from '../../sync';
 
 type PaymentType = 'cash' | 'credit';
 
@@ -122,6 +123,7 @@ export default function CheckoutScreen() {
         newCustomer,
         lines,
       });
+      void triggerSyncNow(session.shopId);
 
       // The sale is already committed. Notification failures must not affect it.
       void runNotificationChecks(session.shopId).catch((error: unknown) => {

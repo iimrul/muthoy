@@ -3,7 +3,7 @@ import { Alert, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import type { RegisterInput } from '@muthoy/validation';
 import { RegistrationForm } from '../../components/forms/RegistrationForm';
-import { createShopAndOwner } from '../../db/auth';
+import { sendOtp } from '../../sync/otp';
 
 // Registration — Volume 4 AUTHENTICATION, Volume 0 Day 4. No StandardHeader
 // on this screen (Volume 4 NAVIGATION: header applies to every screen except
@@ -14,13 +14,13 @@ export default function RegisterScreen() {
   const handleSubmit = useCallback(async (input: RegisterInput) => {
     setIsSubmitting(true);
     try {
-      // CLAUDE.md rule 7: createShopAndOwner generates a fresh, unique,
-      // non-hardcoded shop id every call — a new owner on this device never
-      // inherits a previous owner's shop.
-      const { shopId, userId } = await createShopAndOwner(input);
-      router.replace({ pathname: '/(auth)/pin-setup', params: { shopId, userId } });
+      await sendOtp(input.phone);
+      router.push({
+        pathname: '/(auth)/otp-verify',
+        params: { phone: input.phone, shopName: input.shopName },
+      });
     } catch {
-      Alert.alert('Registration failed', 'Please check your details and try again.');
+      Alert.alert('OTP could not be sent', 'Check your connection and phone number, then try again.');
     } finally {
       setIsSubmitting(false);
     }

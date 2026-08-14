@@ -17,7 +17,7 @@ function applyMigration(fileName: string): void {
   sqlite.exec(readFileSync(resolve('apps/mobile/db/migrations', fileName), 'utf8'));
 }
 
-function insertNotification(id: string, shopId: string, type: 'low_stock' | 'daily_summary', refId: string): void {
+function insertNotification(id: string, shopId: string, type: 'low_stock' | 'daily_summary' | 'sync', refId: string): void {
   sqlite
     .prepare(
       `INSERT INTO notifications
@@ -70,6 +70,8 @@ describe('notification DB queries on real SQLite', () => {
     applyMigration('0001_medicines_fts.sql');
     applyMigration('0002_furry_celestials.sql');
     applyMigration('0003_curious_wild_pack.sql');
+    applyMigration('0004_deep_boomer.sql');
+    applyMigration('0005_eminent_legion.sql');
     sqlite.prepare('INSERT INTO shops (id, owner_id, name, phone) VALUES (?, ?, ?, ?)').run('shop-1', 'owner-1', 'Shop One', '01700000001');
     sqlite.prepare('INSERT INTO shops (id, owner_id, name, phone) VALUES (?, ?, ?, ?)').run('shop-2', 'owner-2', 'Shop Two', '01700000002');
   });
@@ -96,6 +98,18 @@ describe('notification DB queries on real SQLite', () => {
     expect(findUnresolved.get('shop-1', 'medicine-1')).toMatchObject({ id: 'low-2' });
   });
 
+  it('deduplicates unresolved sync alerts and has ordered queue migration', () => {
+    insertNotification('sync-1', 'shop-1', 'sync', 'sync');
+    const unresolved = sqlite.prepare(`SELECT id FROM notifications
+      WHERE shop_id = ? AND type = 'sync' AND resolved_at IS NULL AND is_deleted = 0 LIMIT 1`);
+    expect(unresolved.get('shop-1')).toMatchObject({ id: 'sync-1' });
+    expect(unresolved.get('shop-2')).toBeUndefined();
+
+    const columns = sqlite.prepare("PRAGMA table_info('sync_queue')").all() as { name: string; notnull: number }[];
+    expect(columns).toContainEqual(expect.objectContaining({ name: 'seq', notnull: 1 }));
+    const indexes = sqlite.prepare("PRAGMA index_info('sync_queue_shop_status_idx')").all() as { name: string }[];
+    expect(indexes.map((row) => row.name)).toEqual(['shop_id', 'status', 'seq']);
+  });
   it('excludes daily summaries from staff list, unread, and read paths', () => {
     insertNotification('low-1', 'shop-1', 'low_stock', 'medicine-1');
     insertNotification('daily-1', 'shop-1', 'daily_summary', '2026-08-12');

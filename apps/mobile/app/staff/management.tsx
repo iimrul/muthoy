@@ -4,6 +4,7 @@ import { createStaffSchema } from '@muthoy/validation';
 import { PinPad, useConfirmedPinEntry } from '../../components/ui/PinPad';
 import { createStaff, deactivateStaff, listStaff, resetStaffPin, type StaffMember } from '../../db/staff';
 import { useSessionStore } from '../../state/sessionStore';
+import { triggerSyncNow } from '../../sync';
 
 type Mode = 'list' | 'add' | 'reset';
 
@@ -48,6 +49,7 @@ export default function StaffManagementScreen() {
         style: 'destructive',
         onPress: async () => {
           await deactivateStaff(staffId, session.userId);
+          void triggerSyncNow(session.shopId);
           await reloadStaff();
         },
       },
@@ -105,6 +107,7 @@ export default function StaffManagementScreen() {
 
       {mode === 'reset' && resetTargetId ? (
         <ResetStaffPinFlow
+          shopId={session.shopId}
           staffId={resetTargetId}
           performedByUserId={session.userId}
           onDone={async () => {
@@ -158,6 +161,7 @@ function AddStaffFlow({ shopId, onDone, onCancel }: AddStaffFlowProps) {
         // CLAUDE.md rule 8: the raw PIN is only ever passed to createStaff,
         // which bcrypt-hashes it before it reaches SQLite.
         await createStaff(shopId, result.data.name, result.data.pin);
+        void triggerSyncNow(shopId);
         onDone();
       } catch {
         Alert.alert('Something went wrong', 'Please try again.');
@@ -205,13 +209,14 @@ function AddStaffFlow({ shopId, onDone, onCancel }: AddStaffFlowProps) {
 }
 
 interface ResetStaffPinFlowProps {
+  shopId: string;
   staffId: string;
   performedByUserId: string;
   onDone: () => void;
   onCancel: () => void;
 }
 
-function ResetStaffPinFlow({ staffId, performedByUserId, onDone, onCancel }: ResetStaffPinFlowProps) {
+function ResetStaffPinFlow({ shopId, staffId, performedByUserId, onDone, onCancel }: ResetStaffPinFlowProps) {
   const [error, setError] = useState<string | null>(null);
 
   const handleConfirmed = useCallback(
@@ -221,12 +226,13 @@ function ResetStaffPinFlow({ staffId, performedByUserId, onDone, onCancel }: Res
         // resetStaffPin, which bcrypt-hashes it before it reaches SQLite,
         // and writes an audit_logs entry containing no PIN value.
         await resetStaffPin(staffId, pin, performedByUserId);
+        void triggerSyncNow(shopId);
         onDone();
       } catch {
         Alert.alert('Something went wrong', 'Please try again.');
       }
     },
-    [staffId, performedByUserId, onDone],
+    [shopId, staffId, performedByUserId, onDone],
   );
 
   const { pin, step, handleDigitPress, handleBackspace } = useConfirmedPinEntry(handleConfirmed, () =>

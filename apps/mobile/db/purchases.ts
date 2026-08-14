@@ -29,6 +29,7 @@ import {
   suppliers,
   users,
 } from './schema';
+import { recordChange, stampUpdatedAt } from './sync-helpers';
 
 const SEARCH_LIMIT = 50;
 const INVOICE_SEQUENCE_WIDTH = 6;
@@ -173,15 +174,12 @@ export async function createPurchase(
     const invoiceNo = `PUR-${year}-${String(yearlyCount + 1).padStart(INVOICE_SEQUENCE_WIDTH, '0')}`;
     const purchaseId = generateId();
 
-    tx.insert(purchases).values({
-      id: purchaseId,
-      shopId: input.shopId,
-      invoiceNo,
-      supplierId: input.supplierId,
-      total,
-      paymentTerms: input.paymentType,
-      paidAmount,
-    }).run();
+    const purchaseNow = new Date().toISOString();
+    const purchaseValues = { id: purchaseId, shopId: input.shopId, invoiceNo,
+      supplierId: input.supplierId, total, paymentTerms: input.paymentType,
+      paidAmount, createdAt: purchaseNow, updatedAt: purchaseNow };
+    tx.insert(purchases).values(purchaseValues).run();
+    recordChange(tx, { shopId: input.shopId, table: 'purchases', rowId: purchaseId, op: 'insert', payload: purchaseValues });
 
     input.lineItems.forEach((line) => {
       const medicine = tx.select({ id: medicines.id }).from(medicines).where(and(
@@ -197,6 +195,7 @@ export async function createPurchase(
         id: batches.id,
         expiryDate: batches.expiryDate,
         isDeleted: batches.isDeleted,
+        stock: batches.stock,
       }).from(batches).where(and(
         eq(batches.shopId, input.shopId),
         eq(batches.medicineId, line.medicineId),
@@ -212,11 +211,8 @@ export async function createPurchase(
           throw new BatchExpiryMismatchError(line.medicineId, line.batchNo);
         }
         batchId = existingBatch.id;
-        const update = tx.update(batches).set({
-          stock: sql`${batches.stock} + ${line.quantity}`,
-          updatedAt: sql`current_timestamp`,
-          isDirty: true,
-        }).where(and(
+        const batchValues = stampUpdatedAt({ stock: existingBatch.stock + line.quantity, isDirty: true });
+        const update = tx.update(batches).set(batchValues).where(and(
           eq(batches.id, batchId), eq(batches.shopId, input.shopId),
           eq(batches.medicineId, line.medicineId), eq(batches.isDeleted, false),
           eq(batches.expiryDate, line.expiryDate),
@@ -224,39 +220,44 @@ export async function createPurchase(
         if (update.changes !== 1) {
           throw new Error(`Batch changed before purchase save for medicine ${line.medicineId}`);
         }
+        recordChange(tx, { shopId: input.shopId, table: 'batches', rowId: batchId, op: 'update', payload: batchValues });
+
       } else {
         batchId = generateId();
-        tx.insert(batches).values({
-          id: batchId,
-          shopId: input.shopId,
-          medicineId: line.medicineId,
-          batchNo: line.batchNo,
-          expiryDate: line.expiryDate,
-          stock: line.quantity,
-          purchasePrice: line.purchasePrice,
-          salePrice: line.salePrice,
-        }).run();
+        const batchNow = new Date().toISOString();
+        const batchValues = { id: batchId, shopId: input.shopId, medicineId: line.medicineId,
+          batchNo: line.batchNo, expiryDate: line.expiryDate, stock: line.quantity,
+          purchasePrice: line.purchasePrice, salePrice: line.salePrice,
+          createdAt: batchNow, updatedAt: batchNow };
+        tx.insert(batches).values(batchValues).run();
+        recordChange(tx, { shopId: input.shopId, table: 'batches', rowId: batchId, op: 'insert', payload: batchValues });
       }
 
-      tx.insert(purchaseItems).values({
-        id: generateId(), shopId: input.shopId, purchaseId,
-        medicineId: line.medicineId, batchNo: line.batchNo,
-        expiryDate: line.expiryDate, qty: line.quantity,
-        purchasePrice: line.purchasePrice, salePrice: line.salePrice,
-      }).run();
-      tx.insert(inventoryMovements).values({
-        id: generateId(), shopId: input.shopId, batchId,
-        changeQty: line.quantity, reason: 'purchase', refId: purchaseId,
-        createdBy: input.staffId,
-      }).run();
+      const itemId = generateId();
+      const itemNow = new Date().toISOString();
+      const itemValues = { id: itemId, shopId: input.shopId, purchaseId,
+        medicineId: line.medicineId, batchNo: line.batchNo, expiryDate: line.expiryDate,
+        qty: line.quantity, purchasePrice: line.purchasePrice, salePrice: line.salePrice,
+        createdAt: itemNow, updatedAt: itemNow };
+      tx.insert(purchaseItems).values(itemValues).run();
+      recordChange(tx, { shopId: input.shopId, table: 'purchase_items', rowId: itemId, op: 'insert', payload: itemValues });
+      const movementId = generateId();
+      const movementNow = new Date().toISOString();
+      const movementValues = { id: movementId, shopId: input.shopId, batchId,
+        changeQty: line.quantity, reason: 'purchase' as const, refId: purchaseId,
+        createdBy: input.staffId, createdAt: movementNow, updatedAt: movementNow };
+      tx.insert(inventoryMovements).values(movementValues).run();
+      recordChange(tx, { shopId: input.shopId, table: 'inventory_movements', rowId: movementId, op: 'insert', payload: movementValues });
     });
 
     if (input.paymentType === 'cod') {
-      tx.insert(payments).values({
-        id: generateId(), shopId: input.shopId, type: 'supplier_payment',
-        partyId: input.supplierId, amount: total, method: 'cash',
-        refId: purchaseId, createdBy: input.staffId,
-      }).run();
+      const paymentId = generateId();
+      const paymentNow = new Date().toISOString();
+      const paymentValues = { id: paymentId, shopId: input.shopId, type: 'supplier_payment' as const,
+        partyId: input.supplierId, amount: total, method: 'cash' as const,
+        refId: purchaseId, createdBy: input.staffId, createdAt: paymentNow, updatedAt: paymentNow };
+      tx.insert(payments).values(paymentValues).run();
+      recordChange(tx, { shopId: input.shopId, table: 'payments', rowId: paymentId, op: 'insert', payload: paymentValues });
 
       const existingDrawer = tx.select({ id: cashDrawer.id, isDeleted: cashDrawer.isDeleted })
         .from(cashDrawer).where(and(
@@ -267,18 +268,22 @@ export async function createPurchase(
       }
       const drawerId = existingDrawer?.id ?? generateId();
       if (!existingDrawer) {
-        tx.insert(cashDrawer).values({
-          id: drawerId, shopId: input.shopId, businessDate,
+        const drawerNow = new Date().toISOString();
+        const drawerValues = { id: drawerId, shopId: input.shopId, businessDate,
           openingCash: ZERO_PAISA, openedBy: input.staffId, openedAt: now.toISOString(),
-        }).run();
+          createdAt: drawerNow, updatedAt: drawerNow };
+        tx.insert(cashDrawer).values(drawerValues).run();
+        recordChange(tx, { shopId: input.shopId, table: 'cash_drawer', rowId: drawerId, op: 'insert', payload: drawerValues });
       }
       const closingExpected = expectedCash(getCashSummarySync(input.shopId, businessDate));
-      const drawerUpdate = tx.update(cashDrawer).set({
-        closingExpected, updatedAt: sql`current_timestamp`, isDirty: true,
-      }).where(and(eq(cashDrawer.id, drawerId), eq(cashDrawer.shopId, input.shopId))).run();
+      const drawerValues = stampUpdatedAt({ closingExpected, isDirty: true });
+      const drawerUpdate = tx.update(cashDrawer).set(drawerValues)
+        .where(and(eq(cashDrawer.id, drawerId), eq(cashDrawer.shopId, input.shopId))).run();
       if (drawerUpdate.changes !== 1) {
         throw new Error('Cash drawer could not be updated');
       }
+      recordChange(tx, { shopId: input.shopId, table: 'cash_drawer', rowId: drawerId, op: 'update', payload: drawerValues });
+
     }
 
     return { purchaseId, invoiceNo, total };

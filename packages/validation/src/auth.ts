@@ -14,6 +14,9 @@ export const bdPhoneSchema = z
 // dots+keypad pattern assumes a fixed-length PIN).
 export const pinDigitsSchema = z.string().regex(/^\d{4}$/, 'PIN must be exactly 4 digits');
 
+// Supabase phone verification codes are exactly six numeric digits.
+export const otpCodeSchema = z.string().regex(/^\d{6}$/, 'Verification code must be exactly 6 digits');
+
 export const registerSchema = z.object({
   shopName: z.string().trim().min(2, 'Shop name is too short'),
   phone: bdPhoneSchema,

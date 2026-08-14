@@ -42,6 +42,8 @@ export const shops = sqliteTable("shops", {
   thana: text("thana"),
   district: text("district"),
   locationCapturedAt: text("location_captured_at"),
+  // Device-local cloud-link checkpoint. Never included in sync payloads.
+  cloudLinkedAt: text("cloud_linked_at"),
   // CACHED current plan for fast reads (gating checks happen constantly).
   // subscriptions below is the SOURCE OF TRUTH / billing history — this field
   // is kept in sync whenever a subscription changes (trigger or app logic).
@@ -382,6 +384,7 @@ export const auditLogs = sqliteTable("audit_logs", {
 // ── sync_queue (the outbox) ──────────────────────────────────────────────
 export const syncQueue = sqliteTable("sync_queue", {
   id: text("id").primaryKey(),
+  seq: integer("seq").notNull().default(0),
   shopId: text("shop_id").notNull(),
   tableName: text("table_name").notNull(),
   rowId: text("row_id").notNull(),
@@ -392,7 +395,7 @@ export const syncQueue = sqliteTable("sync_queue", {
   lastError: text("last_error"),
   status: text("status", { enum: ["pending", "sent", "failed"] }).notNull().default("pending"),
 }, (t) => ({
-  shopStatusIdx: index("sync_queue_shop_status_idx").on(t.shopId, t.status),
+  shopStatusIdx: index("sync_queue_shop_status_idx").on(t.shopId, t.status, t.seq),
 }));
 
 // ── conflict_queue (true sync conflicts, surfaced to the owner) ────────
