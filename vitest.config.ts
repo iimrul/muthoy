@@ -2,8 +2,11 @@ import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 // Root Vitest config for pure framework-free code plus real node:sqlite DB
-// verification. None import React Native, so no jest-expo transform is needed;
-// component/screen code remains real-device validated.
+// verification. Screen code remains real-device validated; the one exception
+// is the scanner modal's permission/error/Settings branches, which run under
+// jsdom with React Native primitives stubbed at the module boundary (that
+// file opts in via its own `@vitest-environment jsdom` docblock, so the
+// default node environment below still applies everywhere else).
 export default defineConfig({
   resolve: {
     alias: {
@@ -16,6 +19,9 @@ export default defineConfig({
     server: { deps: { inline: ['expo-sqlite', 'expo-crypto'] } },
     include: [
       'apps/mobile/domain/**/*.test.ts',
+      'apps/mobile/components/scanner/*.test.tsx',
+      // ⚠️ TEMPORARY — remove with apps/mobile/dev/ (see dev/README.md).
+      'apps/mobile/dev/*.test.ts',
       'apps/mobile/db/errors.test.ts',
       'apps/mobile/db/notifications.sqlite.test.ts',
       'apps/mobile/db/sync-helpers.order.test.ts',

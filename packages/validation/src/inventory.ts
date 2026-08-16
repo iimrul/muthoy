@@ -16,7 +16,7 @@ import { z } from 'zod';
 // would type the field's form-input shape as `unknown` instead of
 // `string | undefined` and break RHF's Resolver typing (see the Input/Output
 // split note below).
-const isoDateSchema = z
+export const isoDateSchema = z
   .string()
   .refine((value) => value === '' || /^\d{4}-\d{2}-\d{2}$/.test(value), 'Enter a valid date (YYYY-MM-DD)')
   .refine((value) => {

@@ -3,6 +3,8 @@ import { Alert, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import type { RegisterInput } from '@muthoy/validation';
 import { RegistrationForm } from '../../components/forms/RegistrationForm';
+// ⚠️ TEMPORARY import — remove with the dev auth bypass (see dev/README.md).
+import { DevSkipOtpButton } from '../../dev/DevSkipOtpButton';
 import { sendOtp } from '../../sync/otp';
 
 // Registration — Volume 4 AUTHENTICATION, Volume 0 Day 4. No StandardHeader
@@ -33,6 +35,8 @@ export default function RegisterScreen() {
         <Text className="font-sans text-sm text-midGray">Takes less than a minute.</Text>
       </View>
       <RegistrationForm onSubmit={handleSubmit} isSubmitting={isSubmitting} />
+      {/* ⚠️ TEMPORARY — dev-only auth entry. Delete this line to remove. */}
+      {__DEV__ ? <DevSkipOtpButton /> : null}
     </View>
   );
 }

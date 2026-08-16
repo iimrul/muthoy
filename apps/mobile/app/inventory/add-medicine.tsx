@@ -3,11 +3,13 @@ import { Alert, Pressable, ScrollView, Switch, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { addMedicineSchema, type AddMedicineInput, type AddMedicineOutput } from '@muthoy/validation';
+import { addMedicineSchema, isoDateSchema, type AddMedicineInput, type AddMedicineOutput } from '@muthoy/validation';
 import { fromTaka } from '@muthoy/types';
+import { MedicineTextScanner } from '../../components/scanner/MedicineTextScanner';
 import { FormField } from '../../components/forms/FormField';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createMedicineWithBatch } from '../../db/inventory';
+import { parseScannedMedicineStrip } from '../../domain/ocrText';
 import { useSessionStore } from '../../state/sessionStore';
 import { triggerSyncNow } from '../../sync';
 
@@ -25,8 +27,10 @@ import { triggerSyncNow } from '../../sync';
 export default function AddMedicineScreen() {
   const session = useSessionStore((s) => s.session);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isScannerVisible, setIsScannerVisible] = useState(false);
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
 
-  const { control, handleSubmit } = useForm<AddMedicineInput, unknown, AddMedicineOutput>({
+  const { control, handleSubmit, getValues, setValue } = useForm<AddMedicineInput, unknown, AddMedicineOutput>({
     resolver: zodResolver(addMedicineSchema),
     defaultValues: {
       name: '',
@@ -36,6 +40,37 @@ export default function AddMedicineScreen() {
       firstBatch: { batchNo: '', quantity: 0, purchasePrice: 0, salePrice: 0 },
     },
   });
+
+  // Prefills only fields the user hasn't already typed into, and only after
+  // the scanned date passes isoDateSchema — a malformed or past-dated
+  // candidate (e.g. OCR mistaking a printed MFG date for EXP) is silently
+  // dropped rather than shown as a pre-populated validation error. Every
+  // field stays fully editable; Save remains the only commit path (never
+  // auto-saves a scanned value — docs/plans/ocr.md).
+  const handleScanResult = (recognizedText: string) => {
+    const parsed = parseScannedMedicineStrip(recognizedText);
+    let prefilledAny = false;
+
+    if (parsed.name && !getValues('name')) {
+      setValue('name', parsed.name, { shouldDirty: true });
+      prefilledAny = true;
+    }
+    if (parsed.batchNo && !getValues('firstBatch.batchNo')) {
+      setValue('firstBatch.batchNo', parsed.batchNo, { shouldDirty: true });
+      prefilledAny = true;
+    }
+    if (parsed.expiryDate && !getValues('firstBatch.expiryDate')) {
+      const checked = isoDateSchema.safeParse(parsed.expiryDate);
+      if (checked.success && checked.data) {
+        setValue('firstBatch.expiryDate', checked.data, { shouldDirty: true });
+        prefilledAny = true;
+      }
+    }
+
+    setScanNotice(
+      prefilledAny ? 'Prefilled from scan — review before saving.' : 'Nothing recognized. Fill in manually.',
+    );
+  };
 
   const onSubmit = useCallback(
     async (input: AddMedicineOutput) => {
@@ -78,6 +113,17 @@ export default function AddMedicineScreen() {
     <View className="flex-1 bg-brand-softGreen">
       <StandardHeader title="Add medicine" onBackPress={() => router.back()} />
       <ScrollView contentContainerClassName="gap-5 p-6" keyboardShouldPersistTaps="handled">
+        <Pressable
+          onPress={() => setIsScannerVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Scan medicine strip to prefill"
+          className="flex-row items-center justify-center gap-2 rounded-lg border border-brand-green bg-white py-3 active:opacity-80"
+        >
+          <Text className="text-lg">📷</Text>
+          <Text className="font-sans-semibold text-sm text-brand-green">Scan strip to prefill</Text>
+        </Pressable>
+        {scanNotice ? <Text className="font-sans text-sm text-midGray">{scanNotice}</Text> : null}
+
         <FormField control={control} name="name" label="Medicine name" placeholder="e.g. Napa Extra" />
         <FormField control={control} name="generic" label="Generic name" placeholder="e.g. Paracetamol" />
         <FormField control={control} name="manufacturer" label="Manufacturer" placeholder="e.g. Beximco" />
@@ -117,6 +163,12 @@ export default function AddMedicineScreen() {
           <Text className="font-sans-semibold text-base text-white">{isSubmitting ? 'Saving…' : 'Save medicine'}</Text>
         </Pressable>
       </ScrollView>
+      <MedicineTextScanner
+        visible={isScannerVisible}
+        mode="prefill"
+        onClose={() => setIsScannerVisible(false)}
+        onTextRecognized={handleScanResult}
+      />
     </View>
   );
 }

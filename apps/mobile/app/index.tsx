@@ -3,6 +3,8 @@ import { Redirect } from 'expo-router';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { colors } from '@muthoy/constants';
 import { getActiveSessionRole, getRegistrationStatus } from '../db/auth';
+// ⚠️ TEMPORARY import — remove with the dev auth bypass (see dev/README.md).
+import { isDevPlaceholderPhone } from '../dev/devAnonAuth';
 import { useSessionStore } from '../state/sessionStore';
 
 type RootDestination =
@@ -42,6 +44,17 @@ export default function RootSessionGate() {
 
         if (registration.status === 'link_pending') {
           logout();
+          // ⚠️ TEMPORARY (dev/README.md): a dev anonymous registration whose
+          // device-link did not finish carries a PLACEHOLDER phone, never a
+          // verified identity — sending it to otp-verify would start a real
+          // SMS OTP flow against a fake number. Route back to Registration,
+          // where "Dev: Skip OTP" resumes the link. Delete with the dev entry.
+          if (__DEV__ && isDevPlaceholderPhone(registration.phone)) {
+            if (isCurrent) {
+              setDestination('/(auth)/register');
+            }
+            return;
+          }
           if (isCurrent) {
             setDestination({
               pathname: '/(auth)/otp-verify',
