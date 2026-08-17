@@ -4,6 +4,7 @@ import {
   EXPIRY_CRITICAL_DAYS_DEFAULT,
   EXPIRY_WINDOW_DAYS_DEFAULT,
   expirySeverity,
+  expiryStatus,
   isBatchInExpiryWindow,
   isLowStockCrossing,
   isStockRecovered,
@@ -93,5 +94,34 @@ describe('expiry severity', () => {
     { days: EXPIRY_WINDOW_DAYS_DEFAULT, severity: 'warning' },
   ] as const)('returns $severity at $days days', ({ days, severity }) => {
     expect(expirySeverity(days)).toBe(severity);
+  });
+});
+
+describe('expiry status', () => {
+  it('is expired for a past date', () => {
+    expect(expiryStatus(-1)).toBe('expired');
+  });
+
+  it('is critical inside the critical sub-window', () => {
+    expect(expiryStatus(0)).toBe('critical');
+    expect(expiryStatus(EXPIRY_CRITICAL_DAYS_DEFAULT)).toBe('critical');
+  });
+
+  it('is warning inside the wider window but past the critical cutoff', () => {
+    expect(expiryStatus(EXPIRY_CRITICAL_DAYS_DEFAULT + 1)).toBe('warning');
+    expect(expiryStatus(EXPIRY_WINDOW_DAYS_DEFAULT)).toBe('warning');
+  });
+
+  it('is ok outside the configured window', () => {
+    expect(expiryStatus(EXPIRY_WINDOW_DAYS_DEFAULT + 1)).toBe('ok');
+  });
+
+  it('is unknown for a null (no-expiry-recorded) batch', () => {
+    expect(expiryStatus(null)).toBe('unknown');
+  });
+
+  it('honors a caller-supplied window, matching isBatchInExpiryWindow', () => {
+    expect(expiryStatus(14, 14)).toBe('warning');
+    expect(expiryStatus(15, 14)).toBe('ok');
   });
 });

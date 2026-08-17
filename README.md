@@ -34,7 +34,7 @@ pnpm install
 ```
 apps/
   mobile/           React Native (Expo) — the production app
-  admin/            Next.js admin panel (empty until Day 14)
+  admin/            Next.js admin panel — Day 14 P0: dashboard + pharmacy list
   prototype-web/    Figma Make export — REFERENCE ONLY, never built/imported
 backend/
   supabase/         Postgres schema, RLS policies, Edge Functions

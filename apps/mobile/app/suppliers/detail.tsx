@@ -3,21 +3,22 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { subtractPaisa } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
+import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { listPurchasesForSupplier, type PurchaseListRow } from '../../db/purchases';
 import { getSupplierDetail, type Supplier } from '../../db/suppliers';
-import { useSessionStore } from '../../state/sessionStore';
+import { usePermission } from '../../state/usePermission';
 
 export default function SupplierDetailScreen() {
   const { supplierId } = useLocalSearchParams<{ supplierId: string }>();
-  const session = useSessionStore((state) => state.session);
+  const { session, isAllowed } = usePermission('inventory_write');
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [payable, setPayable] = useState<Awaited<ReturnType<typeof getSupplierDetail>>['payable'] | null>(null);
   const [purchaseRows, setPurchaseRows] = useState<PurchaseListRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
-    if (!session || session.role !== 'owner' || !supplierId) {
+    if (!session || !isAllowed || !supplierId) {
       return;
     }
     try {
@@ -32,7 +33,7 @@ export default function SupplierDetailScreen() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Supplier details failed to load.');
     }
-  }, [session, supplierId]);
+  }, [isAllowed, session, supplierId]);
 
   useEffect(() => {
     // SQLite load-on-mount; TanStack Query is reserved for sync.
@@ -40,12 +41,8 @@ export default function SupplierDetailScreen() {
     void reload();
   }, [reload]);
 
-  if (!session || session.role !== 'owner') {
-    return (
-      <View className="flex-1 items-center justify-center bg-brand-softGreen p-6">
-        <Text className="font-sans-semibold text-base text-error">Owner access only.</Text>
-      </View>
-    );
+  if (!session || !isAllowed) {
+    return <AccessDenied />;
   }
 
   if (!supplierId) {

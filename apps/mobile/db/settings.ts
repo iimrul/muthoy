@@ -2,9 +2,10 @@
 // Settings (DEVELOPMENT_RULES.md). getShopProfile/updateShopProfile/
 // restoreFromBackupKey remain stubs — out of the Days 4-5/11 auth scope.
 
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
+import { requirePermission } from './auth';
 import { db } from './client';
-import { auditLogs, users } from './schema';
+import { auditLogs, shops, users } from './schema';
 import { hashPin, verifyPinHash } from '../native/crypto';
 import { generateId } from '../native/id';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
@@ -17,12 +18,34 @@ export interface ShopProfile {
 }
 
 // P0 slice (Volume 4 SETTINGS: "security... change own PIN — P0").
-export async function getShopProfile(_shopId: string): Promise<ShopProfile> {
+//
+// Still TODO stubs, but gated NOW so they can never ship an unguarded owner
+// surface: a non-owner gets the friendly denial rather than the TODO error,
+// and the guard is already in place for whoever implements the body.
+export async function getShopProfile(shopId: string, actorUserId: string): Promise<ShopProfile> {
+  await requirePermission(shopId, actorUserId, 'settings_manage');
   throw new Error('TODO: implement shop profile query (Volume 4 SETTINGS)');
 }
 
-export async function updateShopProfile(_shopId: string, _profile: Partial<Omit<ShopProfile, 'id'>>): Promise<void> {
+export async function updateShopProfile(
+  shopId: string,
+  actorUserId: string,
+  _profile: Partial<Omit<ShopProfile, 'id'>>,
+): Promise<void> {
+  await requirePermission(shopId, actorUserId, 'settings_manage');
   throw new Error('TODO: implement shop profile update (Volume 4 SETTINGS)');
+}
+
+// Volume 0 Day 5: MorningDashboard is "a shell showing shop name and a
+// greeting". Just the one field that shell needs — getShopProfile above stays
+// a TODO because its own Settings slice needs phone/address plus edit
+// semantics, none of which the dashboard reads.
+export async function getShopName(shopId: string): Promise<string | null> {
+  const [shop] = await db
+    .select({ name: shops.name })
+    .from(shops)
+    .where(and(eq(shops.id, shopId), eq(shops.isDeleted, false)));
+  return shop?.name ?? null;
 }
 
 // P0 slice (Volume 4 SETTINGS: "security... change own PIN — P0"). Checks
@@ -34,6 +57,14 @@ export async function changeOwnPin(userId: string, currentRawPin: string, newRaw
   if (!user) {
     throw new Error(`No user found with id ${userId}`);
   }
+
+  // Volume 0 Day 11 scopes PIN handling to "the owner's ability to reset a
+  // staff PIN or change their own PIN" — a Staff login is sales +
+  // inventory-view only, and its PIN is changed BY THE OWNER through
+  // db/staff.ts's resetStaffPin. Checked BEFORE the current PIN is verified
+  // or the new one hashed, so a denied caller touches native/crypto.ts with
+  // neither value and leaves no row, audit entry, or outbox item behind.
+  await requirePermission(user.shopId, userId, 'settings_manage');
 
   const currentPinMatches = await verifyPinHash(currentRawPin, user.pinHash);
   if (!currentPinMatches) {

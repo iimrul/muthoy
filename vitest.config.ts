@@ -22,11 +22,22 @@ export default defineConfig({
       'apps/mobile/components/scanner/*.test.tsx',
       // ⚠️ TEMPORARY — remove with apps/mobile/dev/ (see dev/README.md).
       'apps/mobile/dev/*.test.ts',
+      'apps/mobile/db/cash.sqlite.test.ts',
+      'apps/mobile/db/closed-day-guard.sqlite.test.ts',
       'apps/mobile/db/errors.test.ts',
+      'apps/mobile/db/inventory-expiry.sqlite.test.ts',
       'apps/mobile/db/notifications.sqlite.test.ts',
+      'apps/mobile/db/permissions.sqlite.test.ts',
       'apps/mobile/db/sync-helpers.order.test.ts',
       'apps/mobile/db/sync-helpers.sqlite.test.ts',
       'apps/mobile/sync/**/*.test.ts',
+      // Reads the edge-function sources and migration SQL as text to check that
+      // every direct PostgREST read has a matching grant. Named file, not a
+      // backend/** glob: the rest of that directory is Deno and will not load.
+      'backend/supabase/functions/sync/grants.test.ts',
+      // apps/admin's pure logic + service-role exposure guards. Framework-free:
+      // nothing here imports Next or opens a Supabase connection.
+      'apps/admin/lib/**/*.test.ts',
       'packages/*/src/**/*.test.ts',
     ],
     environment: 'node',

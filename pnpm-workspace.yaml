@@ -7,7 +7,11 @@ allowBuilds:
   # TS-aware module resolution for ESLint). Official Expo tooling, approved.
   # esbuild: drizzle-kit's bundler, used to read db/schema.ts when generating
   # migrations. Dev-only tooling, never shipped in the app. Approved.
+  # sharp: transitive dep of Next.js, used only by next/image optimization.
+  # apps/admin renders no images, so its native build is deliberately skipped
+  # rather than left as an undeclared ignored build.
   esbuild: true
+  sharp: false
   unrs-resolver: true
 minimumReleaseAgeExclude:
   - '@expo/cli@57.0.15'

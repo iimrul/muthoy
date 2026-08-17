@@ -1,0 +1,34 @@
+-- Day 14 Basic Admin Panel: the minimum table privileges its two read-only
+-- pages need. Volume 0 Day 14 / Volume 5 P0.
+--
+-- ROOT CAUSE this migration fixes
+-- 20260813000000_initial_schema.sql creates all 21 business tables but issues
+-- no table-level GRANT for any of them — only shop_claims and the sync
+-- functions get explicit grants. Supabase's service_role carries BYPASSRLS,
+-- which skips row-level POLICIES but confers no table privileges: PostgREST
+-- still runs `set role service_role`, so every statement is checked against
+-- the table ACL first. With an empty ACL each admin read failed with SQLSTATE
+-- 42501, "permission denied for table shops".
+--
+-- Sync was unaffected because it goes through the SECURITY DEFINER functions
+-- sync_apply_row / sync_pull_changes, which execute with the definer's
+-- privileges and already hold explicit GRANT EXECUTE. That is also why this
+-- migration does not need to touch them.
+--
+-- SCOPE — deliberately the narrowest grant that makes Day 14 work:
+--   * SELECT only. The admin panel never writes, so no INSERT/UPDATE/DELETE.
+--   * Only the two tables apps/admin/lib/queries.ts reads: shops (pharmacy
+--     list + shop count) and sales (today's platform total). No other table is
+--     joined or referenced by those queries.
+--   * service_role only. anon and authenticated are untouched, so no
+--     browser-reachable role gains anything.
+--   * No policy is added, dropped, or altered; RLS stays enabled exactly as
+--     the initial migration left it. shop_claims' revoke/grant and the sync
+--     RPC EXECUTE lockdown are untouched.
+--
+-- Deliberately NOT using ALTER DEFAULT PRIVILEGES: that would silently grant
+-- service_role access to every future table, which is broader than Day 14
+-- needs. New tables must opt in with their own explicit grant.
+
+grant select on table public.shops to service_role;
+grant select on table public.sales to service_role;

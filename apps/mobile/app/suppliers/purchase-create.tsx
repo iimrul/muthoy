@@ -11,6 +11,7 @@ import {
 import { addPaisa, fromTaka, multiplyPaisa, type Paisa } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
 import { FormField } from '../../components/forms/FormField';
+import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { BatchExpiryMismatchError, DuplicateBatchError } from '../../db/errors';
 import {
@@ -20,7 +21,7 @@ import {
 } from '../../db/purchases';
 import { listSuppliers } from '../../db/suppliers';
 import type { PurchasePaymentType } from '../../domain/purchases';
-import { useSessionStore } from '../../state/sessionStore';
+import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
 interface DraftLine {
@@ -34,7 +35,7 @@ function lineTotal(line: DraftLine): Paisa {
 
 export default function PurchaseCreateScreen() {
   const params = useLocalSearchParams<{ supplierId?: string }>();
-  const session = useSessionStore((state) => state.session);
+  const { session, isAllowed } = usePermission('inventory_write');
   const [supplierRows, setSupplierRows] = useState<Awaited<ReturnType<typeof listSuppliers>>>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState(params.supplierId ?? '');
   const [paymentType, setPaymentType] = useState<PurchasePaymentType>('cod');
@@ -55,7 +56,7 @@ export default function PurchaseCreateScreen() {
   });
 
   useEffect(() => {
-    if (!session || session.role !== 'owner') {
+    if (!session || !isAllowed) {
       return;
     }
     let isCurrent = true;
@@ -76,13 +77,13 @@ export default function PurchaseCreateScreen() {
     return () => {
       isCurrent = false;
     };
-  }, [session]);
+  }, [isAllowed, session]);
 
   const handleMedicineQueryChange = useCallback((value: string) => {
     setMedicineQuery(value);
     setSelectedMedicine(null);
     const requestId = ++medicineRequestId.current;
-    if (!session || session.role !== 'owner' || !value.trim()) {
+    if (!session || !isAllowed || !value.trim()) {
       setMedicineResults([]);
       return;
     }
@@ -97,7 +98,7 @@ export default function PurchaseCreateScreen() {
           setErrorMessage('Medicine search failed.');
         }
       });
-  }, [session]);
+  }, [isAllowed, session]);
 
   const handleSelectMedicine = useCallback((medicine: PurchaseMedicineSearchResult) => {
     medicineRequestId.current += 1;
@@ -138,7 +139,7 @@ export default function PurchaseCreateScreen() {
   }, [lines, reset, setError]);
 
   const handleSave = useCallback(async () => {
-    if (!session || session.role !== 'owner') {
+    if (!session || !isAllowed) {
       return;
     }
     if (!selectedSupplierId) {
@@ -177,14 +178,10 @@ export default function PurchaseCreateScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [lines, paymentType, restoreFailedLine, selectedSupplierId, session]);
+  }, [isAllowed, lines, paymentType, restoreFailedLine, selectedSupplierId, session]);
 
-  if (!session || session.role !== 'owner') {
-    return (
-      <View className="flex-1 items-center justify-center bg-brand-softGreen p-6">
-        <Text className="font-sans-semibold text-base text-error">Owner access only.</Text>
-      </View>
-    );
+  if (!session || !isAllowed) {
+    return <AccessDenied />;
   }
 
   return (

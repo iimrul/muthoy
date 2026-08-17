@@ -3,6 +3,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { fromTaka } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
+import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import {
   collectPayment,
@@ -12,12 +13,14 @@ import {
   type Customer,
 } from '../../db/customers';
 import { remainingBalance } from '../../domain/credit';
-import { useSessionStore } from '../../state/sessionStore';
+import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
 export default function CustomerDetailScreen() {
   const { customerId } = useLocalSearchParams<{ customerId: string }>();
-  const session = useSessionStore((state) => state.session);
+  // Volume 0 Day 11: same owner-only surface as credit-sales.tsx — collecting
+  // a payment mutates both the credit ledger and (for cash) the drawer.
+  const { session, isAllowed } = usePermission('credit_management');
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [ledgerRows, setLedgerRows] = useState<CreditLedgerRow[]>([]);
   const [amountText, setAmountText] = useState('');
@@ -25,7 +28,9 @@ export default function CustomerDetailScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
-    if (!session || !customerId) {
+    // A denied role reads nothing: this customer's balance and ledger are
+    // exactly what this screen is protecting.
+    if (!session || !isAllowed || !customerId) {
       return;
     }
     try {
@@ -39,7 +44,7 @@ export default function CustomerDetailScreen() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Customer details failed to load.');
     }
-  }, [customerId, session]);
+  }, [customerId, isAllowed, session]);
 
   useEffect(() => {
     // SQLite load-on-mount; TanStack Query is reserved for sync.
@@ -50,7 +55,7 @@ export default function CustomerDetailScreen() {
   const balance = useMemo(() => remainingBalance(ledgerRows), [ledgerRows]);
 
   const handleCollect = useCallback(async () => {
-    if (!session || !customerId) {
+    if (!session || !isAllowed || !customerId) {
       return;
     }
     const taka = Number(amountText.trim());
@@ -76,14 +81,17 @@ export default function CustomerDetailScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [amountText, customerId, reload, session]);
+  }, [amountText, customerId, isAllowed, reload, session]);
 
   if (!session) {
-    return (
-      <View className="flex-1 items-center justify-center bg-brand-softGreen p-6">
-        <Text className="font-sans-semibold text-base text-error">Active session required.</Text>
-      </View>
-    );
+    return <AccessDenied message="Active session required." />;
+  }
+
+  // Volume 0 Day 11 checklist: "A Staff-role login cannot access owner-only
+  // screens." Arriving here by direct navigation renders this instead, and
+  // db/customers.ts rejects collectPayment independently.
+  if (!isAllowed) {
+    return <AccessDenied />;
   }
 
   if (!customerId) {

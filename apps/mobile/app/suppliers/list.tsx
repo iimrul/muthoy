@@ -10,13 +10,17 @@ import {
 } from '@muthoy/validation';
 import { formatMoney } from '@muthoy/utils';
 import { FormField } from '../../components/forms/FormField';
+import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createSupplier, listSuppliers } from '../../db/suppliers';
-import { useSessionStore } from '../../state/sessionStore';
+import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
 export default function SupplierListScreen() {
-  const session = useSessionStore((state) => state.session);
+  // Supplier/purchase management is owner-only (already enforced in
+  // db/suppliers.ts). The route check now resolves through the same grant
+  // table instead of comparing the role string here.
+  const { session, isAllowed } = usePermission('inventory_write');
   const [supplierRows, setSupplierRows] = useState<Awaited<ReturnType<typeof listSuppliers>>>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -27,7 +31,7 @@ export default function SupplierListScreen() {
   });
 
   const reload = useCallback(async () => {
-    if (!session || session.role !== 'owner') {
+    if (!session || !isAllowed) {
       return;
     }
     try {
@@ -36,7 +40,7 @@ export default function SupplierListScreen() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Supplier list failed to load.');
     }
-  }, [session]);
+  }, [isAllowed, session]);
 
   useEffect(() => {
     // SQLite load-on-mount; TanStack Query is reserved for sync.
@@ -45,7 +49,7 @@ export default function SupplierListScreen() {
   }, [reload]);
 
   const handleCreate = useCallback(async (values: SupplierFieldsOutput) => {
-    if (!session || session.role !== 'owner') {
+    if (!session || !isAllowed) {
       return;
     }
     setIsSubmitting(true);
@@ -61,14 +65,10 @@ export default function SupplierListScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [reload, reset, session]);
+  }, [isAllowed, reload, reset, session]);
 
-  if (!session || session.role !== 'owner') {
-    return (
-      <View className="flex-1 items-center justify-center bg-brand-softGreen p-6">
-        <Text className="font-sans-semibold text-base text-error">Owner access only.</Text>
-      </View>
-    );
+  if (!session || !isAllowed) {
+    return <AccessDenied />;
   }
 
   return (

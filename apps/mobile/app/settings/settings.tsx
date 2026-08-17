@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { AccessDenied } from '../../components/ui/AccessDenied';
 import { PinPad, usePinEntry, useConfirmedPinEntry } from '../../components/ui/PinPad';
 import { changeOwnPin } from '../../db/settings';
-import { useSessionStore } from '../../state/sessionStore';
+import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
 // Settings — Volume 4 SETTINGS. Mixed scope: shop profile + security
@@ -17,11 +18,15 @@ import { triggerSyncNow } from '../../sync';
 // TODO(P1 slice): plan/billing entry point — components/ui/PlanBadge.tsx,
 //   links to app/settings/plans.tsx.
 export default function SettingsScreen() {
-  const session = useSessionStore((s) => s.session);
+  // Volume 0 Day 11: PIN management belongs to the owner (their own PIN, and
+  // resetting a staff PIN). Staff is sales + inventory-view only, so this
+  // whole screen is owner-only — direct-navigating here renders the denial,
+  // and db/settings.ts rejects the change independently.
+  const { session, isAllowed } = usePermission('settings_manage');
   const [isChangingPin, setIsChangingPin] = useState(false);
 
-  if (!session) {
-    return null;
+  if (!session || !isAllowed) {
+    return <AccessDenied />;
   }
 
   return (

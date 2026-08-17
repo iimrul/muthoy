@@ -25,7 +25,8 @@ import {
 import { activeBatch, type Batch } from '../domain/fefo';
 import { applyDiscount, type Discount } from '../domain/discounts';
 import { expectedCash } from '../domain/cashFormula';
-import { getCashSummarySync } from './cash';
+import { requirePermission } from './auth';
+import { assertBusinessDateOpen, getCashSummarySync } from './cash';
 import { generateId } from '../native/id';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
 
@@ -171,6 +172,13 @@ function localBusinessDate(now: Date): string {
 }
 
 export async function createSaleTransaction(input: SaleTransactionInput): Promise<SaleTransactionResult> {
+  // Volume 0 Day 11: selling is exactly what a Staff login IS for, so this
+  // gate normally passes for both roles. It is still resolved through the one
+  // grant table rather than assumed, so an unassigned/withdrawn role (the P1
+  // 'manager' rows that already exist in every shop) can never sell by
+  // default, and the allow path has the same single source as every denial.
+  await requirePermission(input.shopId, input.staffId, 'sales');
+
   if (input.lines.length === 0) {
     throw new Error('Cannot create a sale with an empty cart');
   }
@@ -211,6 +219,11 @@ export async function createSaleTransaction(input: SaleTransactionInput): Promis
     if (!staff) {
       throw new Error('Active staff session does not belong to this shop');
     }
+
+    // Codex-flagged gap: totalSales/cogs/creditSales/newCreditGiven in a
+    // closed day's EOD snapshot all come from today's sales — cash AND
+    // credit both must be blocked, not just the cash-drawer-touching path.
+    assertBusinessDateOpen(tx, input.shopId, businessDate);
 
     let resolvedCustomerId: string | null = null;
     if (input.paymentType === 'credit') {

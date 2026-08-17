@@ -3,7 +3,7 @@ import { db } from './client';
 import { users, roles, auditLogs } from './schema';
 import { generateId } from '../native/id';
 import { hashPin } from '../native/crypto';
-import { getShopRoleId } from './auth';
+import { getShopRoleId, requirePermission } from './auth';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
 import type { Role } from '../domain/permissions';
 
@@ -20,7 +20,13 @@ export interface StaffMember {
 
 // Staff only — the owner viewing this list isn't "staff" (Volume 0 Day 11:
 // "List existing staff with active/deactivated status").
-export async function listStaff(shopId: string): Promise<StaffMember[]> {
+//
+// `actorUserId` is required so the roster itself is owner-only: who works at
+// the shop, and who is deactivated, is not something a Staff login gets to
+// enumerate by navigating straight to the screen.
+export async function listStaff(shopId: string, actorUserId: string): Promise<StaffMember[]> {
+  await requirePermission(shopId, actorUserId, 'staff_management');
+
   const rows = await db
     .select({ id: users.id, name: users.name, isActive: users.isActive })
     .from(users)
@@ -34,7 +40,16 @@ export async function listStaff(shopId: string): Promise<StaffMember[]> {
 // log the raw PIN. Attaches to the shop's existing "staff" system role
 // (created once at registration, see db/auth.ts's createShopAndOwner) rather
 // than creating a new role row per staff member.
-export async function createStaff(shopId: string, name: string, rawPin: string): Promise<StaffMember> {
+export async function createStaff(
+  shopId: string,
+  actorUserId: string,
+  name: string,
+  rawPin: string,
+): Promise<StaffMember> {
+  // Volume 0 Day 11: only an owner can add a login to the shop. Gated before
+  // the PIN is hashed or any row is written.
+  await requirePermission(shopId, actorUserId, 'staff_management');
+
   const staffRoleId = await getShopRoleId(shopId, 'staff');
   if (!staffRoleId) {
     throw new Error(`No 'staff' role found for shop ${shopId} — registration should have created it`);
@@ -52,15 +67,20 @@ export async function createStaff(shopId: string, name: string, rawPin: string):
   return { id: userId, name, role: 'staff', isActive: true };
 }
 
-// TODO(Day 11): owner resets a staff member's PIN. Writes an audit_logs
-// entry — never the raw PIN, only which staff member was affected.
+// Owner resets a staff member's PIN. Writes an audit_logs entry — never the
+// raw PIN, only which staff member was affected.
 export async function resetStaffPin(staffId: string, newRawPin: string, performedByUserId: string): Promise<void> {
-  const pinHash = await hashPin(newRawPin);
-  const pinSetAt = new Date().toISOString();
   const [staff] = await db.select({ shopId: users.shopId }).from(users).where(eq(users.id, staffId));
   if (!staff) {
     throw new Error(`No user found with id ${staffId}`);
   }
+  // Volume 0 Day 11: resetting someone else's PIN is owner-only. Checked
+  // against the TARGET's shop and BEFORE the new PIN is hashed, so a denied
+  // caller never reaches native/crypto.ts with a raw PIN at all.
+  await requirePermission(staff.shopId, performedByUserId, 'staff_management');
+
+  const pinHash = await hashPin(newRawPin);
+  const pinSetAt = new Date().toISOString();
 
   await db.transaction(async (tx) => {
     const userValues = stampUpdatedAt({ pinHash, pinSetAt });
@@ -79,6 +99,7 @@ export async function deactivateStaff(staffId: string, performedByUserId: string
   if (!staff) {
     throw new Error(`No user found with id ${staffId}`);
   }
+  await requirePermission(staff.shopId, performedByUserId, 'staff_management');
 
   await db.transaction(async (tx) => {
     const userValues = stampUpdatedAt({ isActive: false });

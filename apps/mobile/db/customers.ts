@@ -5,7 +5,8 @@ import { ZERO_PAISA, asPaisa, type Paisa } from '@muthoy/types';
 import { expectedCash } from '../domain/cashFormula';
 import { remainingBalance } from '../domain/credit';
 import { generateId } from '../native/id';
-import { getCashSummarySync } from './cash';
+import { requirePermission } from './auth';
+import { assertBusinessDateOpen, getCashSummarySync } from './cash';
 import { db, sqliteConnection } from './client';
 import { cashDrawer, customers, payments, users } from './schema';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
@@ -46,6 +47,7 @@ export async function listCustomers(shopId: string, query?: string): Promise<Cus
 
 export interface CreateCustomerInput {
   shopId: string;
+  actorUserId: string;
   name: string;
   phone?: string;
   address?: string;
@@ -53,6 +55,10 @@ export interface CreateCustomerInput {
 }
 
 export async function createCustomer(input: CreateCustomerInput): Promise<Customer> {
+  // Standalone customer creation lives on the same owner-only admin surface as
+  // the rest of app/credit/* — checked before any row is written.
+  await requirePermission(input.shopId, input.actorUserId, 'credit_management');
+
   const customer: Customer = {
     id: generateId(),
     name: input.name,
@@ -193,6 +199,13 @@ function localBusinessDate(now: Date): string {
 }
 
 export async function collectPayment(input: CollectPaymentInput): Promise<void> {
+  // Owner-only (Volume 0 Day 11 P0: Staff is sales + inventory-view only).
+  // Checked before the transaction opens and against SQLite's role, not the
+  // session store, so a Staff/Manager login reaching this by direct
+  // navigation writes no payment row, touches no cash drawer, and enqueues
+  // nothing to the outbox.
+  await requirePermission(input.shopId, input.staffId, 'credit_management');
+
   if (!Number.isInteger(input.amount) || input.amount <= ZERO_PAISA) {
     throw new Error('Collection amount must be a positive whole number of paisa');
   }
@@ -222,6 +235,11 @@ export async function collectPayment(input: CollectPaymentInput): Promise<void> 
     if (!staff) {
       throw new Error('Active staff session does not belong to this shop');
     }
+
+    // Codex-flagged gap: creditCollected in a closed day's EOD snapshot sums
+    // ALL payment methods for the business date, so a non-cash collection
+    // must be blocked too, not just the cash-drawer-touching branch below.
+    assertBusinessDateOpen(tx, input.shopId, businessDate);
 
     const balance = remainingBalance(getCustomerLedgerRowsSync(input.shopId, input.customerId));
     if (input.amount > balance) {

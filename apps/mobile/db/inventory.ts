@@ -8,10 +8,13 @@
 
 import { and, eq } from 'drizzle-orm';
 import type { Paisa } from '@muthoy/types';
+import { daysUntilExpiry } from '@muthoy/utils';
 import { db } from './client';
 import { batches, medicines } from './schema';
 import { generateId } from '../native/id';
 import { activeBatch, sortByExpiry, type Batch } from '../domain/fefo';
+import { expiryStatus, type ExpiryStatus } from '../domain/notificationRules';
+import { requirePermission } from './auth';
 import { DuplicateBatchError, isUniqueConstraintViolation } from './errors';
 import { recordChange } from './sync-helpers';
 
@@ -75,6 +78,8 @@ export async function listMedicines(shopId: string): Promise<MedicineListRow[]> 
 
 export interface CreateMedicineInput {
   shopId: string;
+  /** Logged-in user performing the write — checked against `inventory_write`. */
+  actorUserId: string;
   name: string;
   generic?: string;
   manufacturer?: string;
@@ -96,6 +101,11 @@ export interface CreateMedicineInput {
 export async function createMedicineWithBatch(
   input: CreateMedicineInput,
 ): Promise<{ medicineId: string; batchId: string }> {
+  // Volume 0 Day 11: Staff is inventory-VIEW only. Reads below stay open to
+  // both roles; every stock-changing write is gated here, before the
+  // transaction, so a denial writes nothing.
+  await requirePermission(input.shopId, input.actorUserId, 'inventory_write');
+
   const medicineId = generateId();
   const batchId = generateId();
 
@@ -138,6 +148,8 @@ export async function createMedicineWithBatch(
 
 export interface AddBatchInput {
   shopId: string;
+  /** Logged-in user performing the write — checked against `inventory_write`. */
+  actorUserId: string;
   medicineId: string;
   batchNo: string;
   expiryDate?: string;
@@ -151,6 +163,8 @@ export interface AddBatchInput {
 // 8: "Duplicate batch number for the same medicine shows a friendly error" —
 // never a raw crash.
 export async function addBatchToMedicine(input: AddBatchInput): Promise<{ batchId: string }> {
+  await requirePermission(input.shopId, input.actorUserId, 'inventory_write');
+
   const batchId = generateId();
   try {
     await db.transaction(async (tx) => {
@@ -242,4 +256,66 @@ export async function listBatchesForMedicine(shopId: string, medicineId: string)
   }));
 
   return sortByExpiry(mapped);
+}
+
+// domain/fefo.ts's Batch plus the medicine's display name and the derived
+// (never stored — CLAUDE.md rule 3) days-to-expiry/status for one row of the
+// Expiry Management screen (Volume 0 Day 9).
+export interface ExpiryListRow extends Batch {
+  medicineName: string;
+  batchNo: string;
+  daysUntilExpiry: number | null;
+  status: ExpiryStatus;
+}
+
+// Every non-deleted batch across the whole shop, nearest-real-expiry-first
+// (null-expiry last), for the Expiry Management screen. Sort order comes
+// from domain/fefo.ts's sortByExpiry — the same function the FEFO deduction
+// path uses — never a second hand-rolled sort. `now` defaults to the current
+// time but is overridable so callers (tests) can pin it; the days/status are
+// always recomputed from the real expiryDate, never persisted.
+//
+// Shop isolation (CLAUDE.md rule 7) is enforced on BOTH sides of the join:
+// the ON clause requires the medicine to belong to the same shop, so a batch
+// row whose medicine_id points at another shop's medicine — a corrupted or
+// hostile sync payload — matches nothing and is dropped, rather than
+// rendering that other shop's medicine name. Filtering only batches.shop_id
+// would leak it.
+//
+// TODO(settings): the expiry window is the shared repo-wide default
+// (domain/notificationRules.ts's EXPIRY_WINDOW_DAYS_DEFAULT, also used by
+// the Notifications expiry job). There is no per-shop persisted threshold in
+// the schema yet — making it configurable needs a real Settings slice
+// (Volume 4 SETTINGS) and is deliberately NOT invented here. `expiryStatus`
+// already takes a windowDays argument, so wiring a stored value later is a
+// one-line change at this call site.
+export async function listBatchesByExpiry(shopId: string, now: Date = new Date()): Promise<ExpiryListRow[]> {
+  const rows = await db
+    .select({
+      id: batches.id,
+      medicineId: batches.medicineId,
+      medicineName: medicines.name,
+      batchNo: batches.batchNo,
+      expiryDate: batches.expiryDate,
+      stock: batches.stock,
+      salePrice: batches.salePrice,
+    })
+    .from(batches)
+    .innerJoin(medicines, and(eq(batches.medicineId, medicines.id), eq(medicines.shopId, shopId)))
+    .where(and(eq(batches.shopId, shopId), eq(batches.isDeleted, false), eq(medicines.isDeleted, false)));
+
+  const mapped = rows.map((row) => ({
+    id: row.id,
+    medicineId: row.medicineId,
+    medicineName: row.medicineName,
+    batchNo: row.batchNo,
+    expiryDate: row.expiryDate,
+    quantityAvailable: row.stock,
+    salePrice: row.salePrice,
+  }));
+
+  return sortByExpiry(mapped).map((batch) => {
+    const days = daysUntilExpiry(batch.expiryDate, now);
+    return { ...batch, daysUntilExpiry: days, status: expiryStatus(days) };
+  });
 }

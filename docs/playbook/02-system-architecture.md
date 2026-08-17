@@ -286,8 +286,9 @@ at a time → plan → approve → build → test on device → commit → next.
 9. apps/prototype-web (the Figma Make export copied in, + its README/SCREENS/ANALYSIS)
 10. apps/mobile (Expo init, then app/, components/, db/, state/, domain/, sync/,
     native/, assets/ in that order)
-11. apps/admin — created but left empty until Day 14 (Basic Admin, P0);
-    the Full Admin build-out (P1) happens post-beta in the same folder
+11. apps/admin — Basic Admin (P0) built Day 14: two server-only read pages,
+    dashboard + pharmacy list. The Full Admin build-out (P1) happens post-beta
+    in the same folder
 12. docs/playbook (this playbook's Volumes 0-10 copied in)
 13. .github/, .vscode/
 ```

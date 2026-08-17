@@ -10,14 +10,17 @@ import {
 } from '@muthoy/validation';
 import { formatMoney } from '@muthoy/utils';
 import { FormField } from '../../components/forms/FormField';
+import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createCustomer, listCustomersWithBalance } from '../../db/customers';
-import { useSessionStore } from '../../state/sessionStore';
+import { usePermission } from '../../state/usePermission';
 import { useUnreadCount } from '../../state/useUnreadCount';
 import { triggerSyncNow } from '../../sync';
 
 export default function CreditSalesScreen() {
-  const session = useSessionStore((state) => state.session);
+  // Volume 0 Day 11: standalone customer credit management is owner-only —
+  // Staff still makes credit SALES at checkout (db/sales.ts), just not here.
+  const { session, isAllowed } = usePermission('credit_management');
   const unreadCount = useUnreadCount(session?.shopId, session?.userId);
   const [customerRows, setCustomerRows] = useState<Awaited<ReturnType<typeof listCustomersWithBalance>>>([]);
   const [isAdding, setIsAdding] = useState(false);
@@ -29,7 +32,9 @@ export default function CreditSalesScreen() {
   });
 
   const reload = useCallback(async () => {
-    if (!session) {
+    // A denied role reads nothing: standalone credit balances are exactly
+    // what this screen is protecting.
+    if (!session || !isAllowed) {
       return;
     }
     try {
@@ -38,7 +43,7 @@ export default function CreditSalesScreen() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Customer list failed to load.');
     }
-  }, [session]);
+  }, [isAllowed, session]);
 
   useEffect(() => {
     // SQLite load-on-mount; TanStack Query is reserved for sync.
@@ -47,13 +52,13 @@ export default function CreditSalesScreen() {
   }, [reload]);
 
   const handleCreate = useCallback(async (values: CustomerFieldsOutput) => {
-    if (!session) {
+    if (!session || !isAllowed) {
       return;
     }
     setIsSubmitting(true);
     setError(null);
     try {
-      await createCustomer({ shopId: session.shopId, ...values });
+      await createCustomer({ shopId: session.shopId, actorUserId: session.userId, ...values });
       void triggerSyncNow(session.shopId);
       reset();
       setIsAdding(false);
@@ -63,14 +68,17 @@ export default function CreditSalesScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [reload, reset, session]);
+  }, [isAllowed, reload, reset, session]);
 
   if (!session) {
-    return (
-      <View className="flex-1 items-center justify-center bg-brand-softGreen p-6">
-        <Text className="font-sans-semibold text-base text-error">Active session required.</Text>
-      </View>
-    );
+    return <AccessDenied message="Active session required." />;
+  }
+
+  // Volume 0 Day 11 checklist: "A Staff-role login cannot access owner-only
+  // screens." Arriving here by direct navigation renders this instead, and
+  // db/customers.ts rejects the writes independently.
+  if (!isAllowed) {
+    return <AccessDenied />;
   }
 
   return (

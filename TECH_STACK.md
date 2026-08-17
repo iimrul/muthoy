@@ -62,6 +62,11 @@
 - Leaflet (shop map, using captured lat/long — a dedicated map library instead
   of forcing one charting library to do both jobs)
 
+> **Current state (Day 14, P0):** `apps/admin` runs on Next.js 15 + Tailwind
+> only. shadcn/ui, Recharts and Leaflet are **not installed** — they arrive with
+> the P1 Full Admin build-out (Volume 5), since the P0 panel has no charts and
+> no map by design.
+
 ## DevOps & Deployment
 - GitHub
 - GitHub Actions

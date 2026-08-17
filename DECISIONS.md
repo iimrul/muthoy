@@ -530,3 +530,317 @@ service role.
 All synced write sites stamp created_at and updated_at with Date.toISOString().
 Local LWW comparisons parse timestamps to epoch milliseconds instead of
 comparing mixed SQLite and ISO strings.
+
+---
+
+## 2026-08-16 — Day 5 Morning Dashboard and navigation shell are complete (backfilled)
+
+Volume 0 Day 5's navigation shell, PIN login loop, and MorningDashboard shell
+all ship. `app/(tabs)/_layout.tsx` is a minimal 3-tab bar (Dashboard, Sale,
+Inventory); MorningDashboard shows the shop-name greeting plus a
+permission-filtered tile list (`hasPermissionForRoleName`, see the Day 11
+entry below) routing to every implemented P0 screen — this functional P0
+navigation is done and exercised by every screen built since.
+
+`StandardHeader` is live and used by most Day 6+ transactional/detail screens
+(Sale's cart/checkout/confirmation, Inventory's tab/add-medicine/batches/
+expiry, Cash Summary/Expenses/End of Day, Credit, Suppliers, Notifications).
+MorningDashboard and Registration are documented in-code as deliberately
+exempt (Volume 4 Navigation). Several other screens built since — Settings,
+Staff Management, the PIN/OTP auth flow, Reports — do not yet call it; Volume
+4's "every screen" framing describes the intended end state, not verified
+current coverage.
+
+Visual/UX parity with `apps/prototype-web`'s Figma-level polish is a separate
+question from the above. CLAUDE.md rule 15 already keeps the prototype
+reference-only for layout/UX ideas — its React Web architecture, styling, and
+state management are never ported into React Native, on any timeline, not
+just "for now." Beyond that permanent architectural boundary, no day in
+`docs/playbook/00-execution-roadmap.md` commits to a specific visual-polish
+pass, and neither does the P1/P2 list in that same volume.
+
+**Audit note:** this entry was written in response to a request to also
+record that prototype-level UI parity is "deferred to Days 26–28." That
+figure does not appear anywhere in this repo — not in `docs/playbook/`, not
+in `apps/prototype-web/`. It is not recorded here because it cannot be
+verified against the live docs; if it is a real commitment made outside this
+repo, it should be added explicitly with its source, not inferred.
+
+---
+
+## 2026-08-16 — Day 9 Expiry Management is complete; batch/medicine reads are join-isolated per shop (backfilled)
+
+`app/inventory/expiry.tsx` lists every non-deleted batch shop-wide, nearest
+real expiry date first, via `db/inventory.ts`'s `listBatchesByExpiry` —
+sorted through the same `domain/fefo.ts` `sortByExpiry` the checkout
+deduction path uses, never a second hand-rolled sort (CLAUDE.md rule 3: the
+real `expiryDate`, recomputed at read time, never a stored day-count).
+
+**Security decision:** the batch→medicine join enforces shop isolation on
+BOTH sides. The `INNER JOIN`'s ON clause requires `medicines.shop_id =
+shopId`, not only a later `WHERE` on `batches.shop_id`. A batch row whose
+`medicine_id` points at another shop's medicine — a corrupted or hostile sync
+payload — matches nothing and is dropped, instead of rendering that other
+shop's medicine name under this shop's batch row. Filtering only
+`batches.shop_id` would have leaked it (CLAUDE.md rule 7: one shop can never
+see another's data).
+
+The "Soon" threshold uses the shared repo-wide default
+(`domain/notificationRules.ts`'s `EXPIRY_WINDOW_DAYS_DEFAULT = 30`), the same
+window the Notifications expiry job alerts on, so the badge on this screen
+and the alert the owner receives always agree. A per-shop configurable
+threshold does not exist in the schema and needs a real Settings slice
+(Volume 4 SETTINGS) before it can be built — intentionally deferred, not
+started.
+
+---
+
+## 2026-08-16 — Day 10 Expenses/Cash Summary/End of Day are complete (backfilled)
+
+`db/cash.ts` implements the full Day 10 slice: `recordExpense` (one
+transaction writing both the `expenses` row and its `payments` row,
+type='expense'), `setOpeningCash` (CLAUDE.md rule 5 — defaults to 0, set by
+the user, written only against the business date passed in, never inherited
+from yesterday), `getCashSummary`/`listExpenses`/`getEndOfDaySummary` (every
+figure derived from `domain/cashFormula.ts`'s fixed formula — CLAUDE.md rule
+4, never re-derived here), and `closeDay` (locks `cash_drawer`, recomputing
+`closing_expected` from the ledger rather than trusting whatever the screen
+last rendered, and storing `closing_counted` plus the resulting variance).
+Money stays integer paisa throughout, consistent with the Day 2 decision.
+
+**Closed-day guard:** `assertBusinessDateOpen` runs first, inside the same
+transaction, for every write that could still affect an already-closed
+date's locked snapshot — expenses, opening cash, sales (cash and credit),
+customer credit collections, and supplier purchases (both COD and
+credit-terms; a credit-terms purchase's stock write is blocked too, not just
+its payment). A write against a closed date throws `DayClosedError` before
+touching any row, so the transaction rolls back with zero partial rows or
+outbox entries (proven in `db/closed-day-guard.sqlite.test.ts`).
+
+Receipt-photo capture UI (camera/attach flow) remains deferred;
+`recordExpense` accepts a `receiptPhotoUri` string today, but no screen
+produces one yet.
+
+**Verification on record:** automated coverage (`db/cash.sqlite.test.ts`,
+`db/closed-day-guard.sqlite.test.ts`, `domain/cashFormula.test.ts`) runs a
+full simulated day — opening cash, multiple cash/credit sales, an expense, a
+credit collection, close — and asserts every Day 10 Validation Checklist line
+by hand-calculated value; it is green. Volume 0's required real-device human
+verification pass (Human Review Workflow, CLAUDE.md) for Day 10 is not
+evidenced anywhere in this repo and should not be read as done from this
+entry — automated test coverage is not a substitute for it
+(DEVELOPMENT_RULES.md: "'AI said it works' is NOT done").
+
+---
+
+## 2026-08-16 — Day 11's centralized P0 permission model is complete (backfilled; supersedes the (Days 4-5/11) fragments above)
+
+The SIMPLE two-role model Volume 0 Day 11 specifies (Owner = everything,
+Staff = `sales` + `inventory_view` only; the full Owner/Manager/Staff matrix
+stays P1) is implemented as one grant table, `domain/permissions.ts`:
+`hasPermission(role, permission)` for code already holding a narrowed `Role`,
+and `hasPermissionForRoleName(roleName, permission)` — the fail-closed entry
+point for code holding a raw/untrusted role string (a persisted MMKV
+session, or a `roles.name` read back from SQLite). The latter denies every
+permission for anything `toRole` cannot narrow to exactly `'owner'` or
+`'staff'`, including the P1 `manager` role every shop already carries from
+registration, and any unknown/null/empty value.
+
+Enforcement is two-layer, and both layers resolve through the same table so
+they cannot disagree:
+- Route guards (`state/usePermission.ts`) decide what renders; a denied role
+  sees `components/ui/AccessDenied.tsx`, never a crash.
+- Action guards (`db/auth.ts`'s `requirePermission`/`requireOwner`) re-derive
+  the actor's role from SQLite — never from the session store — and run
+  FIRST, before any query or transaction opens, so a denied direct-navigation
+  write leaves zero rows and zero outbox entries. Proven in
+  `db/permissions.sqlite.test.ts` by calling the `db/` actions directly, with
+  no screen involved.
+
+Fail-closed for manager/unknown extends to login itself: `verifyPin`
+resolves the matched user's role through `toRole` and skips a manager/unknown
+match entirely — such a PIN mints no session at all, rather than a session
+whose role every downstream guard would then have to keep rejecting.
+
+Current P0 permission keys, all owner-only except `sales`/`inventory_view`:
+`staff_management`, `cash_management`, `settings_manage`, `credit_management`,
+`inventory_write`. This covers cash/expenses/EOD, staff management and PIN
+reset, Settings (including an owner's own PIN change — staff self-service PIN
+change is NOT allowed; only an owner-driven `resetStaffPin`), and the
+early-shipped supplier/purchase surface (still gated via `requireOwner`,
+having no P0 permission key of its own) plus standalone customer-credit
+management (`credit_management` is deliberately separate from `sales` — a
+Staff-made credit SALE at checkout still works, because `createSaleTransaction`
+writes the credit row itself). Cash-sensitive and Settings reads are gated at
+the API (`getCashSummary`, `listExpenses`, `getEndOfDaySummary`,
+`getShopProfile`), not just behind a hidden route — hiding a tile is
+convenience, the API call is the enforcement.
+
+Owner-configurable per-staff permissions and the full Manager matrix remain
+P1 and are not implemented — `toRole` denying `'manager'` outright is the
+explicit placeholder until that matrix ships.
+
+**Verification on record:** automated coverage (`domain/permissions.test.ts`,
+`db/permissions.sqlite.test.ts`, plus the permission assertions folded into
+`db/cash.sqlite.test.ts` and `db/closed-day-guard.sqlite.test.ts`) proves
+owner-allowed / staff-denied / manager-denied / unknown-role-denied for every
+P0 permission, with zero side effects on denial, across direct db/-action
+calls (the direct-navigation-bypass case) — 289 tests green as of this entry.
+As with Day 10 above, Volume 0's required real-device human verification pass
+is not evidenced in this repo and is not claimed here.
+
+---
+
+## 2026-08-17 (Day 14) — Basic Admin Panel ships as a server-only Next.js app
+
+`apps/admin` implements Volume 0 Day 14 / Volume 5's P0 scope and nothing more:
+**exactly two read-only pages**, both server components.
+
+| Route         | Shows                                                      |
+| ------------- | ---------------------------------------------------------- |
+| `/`           | Total shops, total sales today (all shops, Asia/Dhaka day) |
+| `/pharmacies` | Shop name, phone, registration date, plan                  |
+
+Next.js 15 App Router, TypeScript strict, Tailwind v3. **Zero `'use client'`
+files exist in the app** — that is the architecture, not a coincidence: a page
+that cannot run in the browser cannot leak a server credential through a hook,
+a prop, or a serialized RSC payload. Brand colors/radii come from
+`@muthoy/constants` JSON tokens, money renders through `@muthoy/utils`'
+`formatMoney` on branded `Paisa` values, and fonts bind through `next/font` CSS
+variables (CLAUDE.md rule 6) rather than hardcoded family names.
+
+Deliberately absent, per Volume 5's P1 line: charts/Recharts, maps/Leaflet,
+subscription management, MRR/revenue, analytics, audit-log views, reports,
+search/filter, per-shop drill-down, admin Users/role management, admin
+settings. Note that TECH_STACK.md's Admin Panel section lists shadcn/ui,
+Recharts and Leaflet — those are the P1 end state; none are installed today.
+
+### The credential model
+
+Volume 5's one governing rule is that the service-role key lives in server-side
+code only. Four independent mechanisms enforce it rather than one:
+
+1. `lib/env.ts` is the **only** module naming `SUPABASE_SERVICE_ROLE_KEY`, and
+   the variable is deliberately not `NEXT_PUBLIC_`-prefixed, so Next never
+   inlines it into client JavaScript.
+2. `lib/env.ts`, `lib/supabaseAdmin.ts` and `lib/queries.ts` each open with
+   `import 'server-only'` — importing any of them from a client component is a
+   **build failure**, not a runtime surprise.
+3. No client components exist to import them from.
+4. `lib/errors.ts` sanitises failures: the browser gets a fixed sentence, the
+   detail goes to the server log, so a Postgres error can never carry schema or
+   connection detail into the page.
+
+`lib/serviceRoleExposure.test.ts` asserts 1-3 on every test run by scanning the
+app's own source, so the guarantee degrades loudly rather than silently.
+
+### Basic Auth is a temporary P0 gate, not the P1 auth feature
+
+`middleware.ts` puts HTTP Basic auth (constant-time comparison) in front of
+every route and **fails closed** — with `ADMIN_BASIC_AUTH_USER` /
+`ADMIN_BASIC_AUTH_PASSWORD` unset, every route returns 503 rather than serving.
+
+This was added because Volume 0 Day 14 specifies no authentication at all for
+the admin panel, and a deployed admin URL with no gate publishes every
+pharmacy's name and phone number to anyone who finds it. A single shared
+credential is the minimum that closes that hole inside P0 scope.
+
+**It is explicitly not production admin authentication.** Real admin identity
+(individual accounts), RBAC (Volume 5's P1 super-admin vs support-read-only
+split), MFA, session management, and audit of admin access all remain **future
+hardening** — none is implemented, and Basic Auth should be replaced rather
+than extended when they land.
+
+### Live Supabase verification: FAILED FIRST, fix written, NOT yet re-verified
+
+Run against the live Supabase project, both pages failed:
+`permission denied for table shops` (SQLSTATE 42501), and the dashboard's
+shop-count query failed the same way.
+
+**Root cause:** `service_role` carries `BYPASSRLS`, which skips row-level
+*policies* but confers **no table privileges**. PostgREST still runs
+`set role service_role`, so every statement is checked against the table ACL
+first — and `20260813000000_initial_schema.sql` creates all 21 business tables
+while issuing no table-level `GRANT` for any of them. Only `shop_claims` and
+the four sync functions ever received explicit grants. Sync was unaffected
+precisely because it goes through the `SECURITY DEFINER` functions
+`sync_apply_row` / `sync_pull_changes`, which execute with the definer's
+privileges.
+
+**This is corrected by two new additive migrations. Neither edits the applied
+initial schema.**
+
+`20260817000000_admin_read_grants.sql`
+```sql
+grant select on table public.shops to service_role;
+grant select on table public.sales to service_role;
+```
+Why: `shops` backs the pharmacy list and the shop count; `sales` backs today's
+platform total. Those are the only two tables `lib/queries.ts` touches, and it
+joins nothing. Least-privilege scope: `SELECT` only (the panel never writes),
+those two tables only, `service_role` only — `anon` and `authenticated` gain
+nothing. `ALTER DEFAULT PRIVILEGES` was deliberately **not** used: it would
+silently grant `service_role` access to every future table. New tables must opt
+in explicitly.
+
+`20260817000100_sync_roles_read_grant.sql`
+```sql
+grant select on table public.roles to service_role;
+```
+Why: auditing the same failure class across the repo found a second instance
+outside the admin panel. `functions/sync/push.ts` authorizes an incoming
+`permissions` row by reading the owning role's shop **directly** through
+PostgREST (`.from("roles").select("shop_id")`) — the one sync database access
+that does not go through a `SECURITY DEFINER` function, so it runs as
+`service_role` and hits the same empty ACL. Its failure mode is worse than a
+visible error: `authorizeRow` maps the error to a *transient* rejection and
+`push` then sets `halted = true`, so the permissions row never applies and
+every later row in the batch is skipped — the batch retries forever instead of
+failing loudly. Least-privilege scope: `SELECT` only, `roles` only,
+`service_role` only. A column-level `grant select (id, shop_id)` was considered
+and rejected — `roles` holds no sensitive column and `service_role` can already
+read every column of it via `sync_apply_row`, so it would buy no
+confidentiality while breaking silently the moment that SELECT list changes. A
+new `SECURITY DEFINER` lookup function was also rejected as larger, not
+smaller: it adds a privileged function to review and requires editing `push.ts`.
+
+Neither migration adds, drops, or alters any policy; RLS stays exactly as the
+initial migration left it, as do the `shop_claims` revoke and the sync RPC
+`EXECUTE` lockdown. Neither grants any write privilege.
+
+**Status, stated plainly: the migrations are written but NOT deployed.** The
+live "permission denied" failure has therefore not been re-tested and the admin
+panel is not yet known to work against live Supabase. Deploy with
+`supabase db push --dry-run` then `supabase db push` from `backend/`, then
+re-run the pages before treating Day 14 as verified.
+
+### Verification actually performed — and what was not
+
+Performed:
+- 48 automated tests across `lib/platformStats.test.ts` (14),
+  `lib/basicAuth.test.ts` (15), `lib/serviceRoleExposure.test.ts` (8) and
+  `lib/adminGrants.test.ts` (11), plus `backend/.../sync/grants.test.ts` (12)
+  guarding the sync grant. The two grant guards were checked against the
+  pre-fix migration set to confirm they actually fail without the fix, rather
+  than passing vacuously.
+- `next build`, typecheck and lint clean; production server started and both
+  pages loaded.
+- Key-exposure check with a **sentinel (fake) credential**: its value appears
+  nowhere in `.next/static`, anywhere else in the `.next` output, or in any
+  HTTP response body, on both pages, authenticated and unauthenticated.
+- Basic Auth fail-closed confirmed (503 with the variables unset).
+
+**NOT performed — do not read this entry as claiming any of it:**
+- Volume 0 Day 14's own Human Review item: the founder checking devtools'
+  network tab personally, **with the real production key**. The sentinel check
+  proves the mechanism, not the deployed secret.
+- Day 14's Testing Checklist item: register a test shop on the mobile app, sync
+  it, confirm it appears in the admin panel within one sync cycle.
+- Any run against live Supabase after the grant migrations (see above).
+- Any deployment of `apps/admin` to Vercel.
+
+One unrelated pre-existing test is red and was left alone as out of scope:
+`db/permissions.sqlite.test.ts`'s "refuses to log a manager in at all" times
+out at 5000ms under full-suite parallel load (it passes alone at ~2.5s, already
+half its budget). Confirmed pre-existing — it fails identically with the Day 14
+test files excluded.

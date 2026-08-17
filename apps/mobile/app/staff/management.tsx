@@ -1,26 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { createStaffSchema } from '@muthoy/validation';
+import { AccessDenied } from '../../components/ui/AccessDenied';
 import { PinPad, useConfirmedPinEntry } from '../../components/ui/PinPad';
 import { createStaff, deactivateStaff, listStaff, resetStaffPin, type StaffMember } from '../../db/staff';
-import { useSessionStore } from '../../state/sessionStore';
+import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
 type Mode = 'list' | 'add' | 'reset';
 
 // Staff Management — Volume 0 Day 11. Owner-only.
 export default function StaffManagementScreen() {
-  const session = useSessionStore((s) => s.session);
+  const { session, isAllowed } = usePermission('staff_management');
   const [mode, setMode] = useState<Mode>('list');
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [resetTargetId, setResetTargetId] = useState<string | null>(null);
 
   const reloadStaff = useCallback(async () => {
-    if (!session) {
+    // Gated here too, not only at the render below: a denied role must issue
+    // no roster read at all, and db/staff.ts's listStaff would reject it
+    // anyway.
+    if (!session || !isAllowed) {
       return;
     }
-    setStaff(await listStaff(session.shopId));
-  }, [session]);
+    setStaff(await listStaff(session.shopId, session.userId));
+  }, [isAllowed, session]);
 
   useEffect(() => {
     // Load-once-on-mount from SQLite. Volume 4 STATE MANAGEMENT: TanStack
@@ -32,13 +36,11 @@ export default function StaffManagementScreen() {
   }, [reloadStaff]);
 
   // Volume 0 Day 11 checklist: "A Staff-role login cannot access owner-only
-  // screens." This screen is exactly that.
-  if (!session || session.role !== 'owner') {
-    return (
-      <View className="flex-1 items-center justify-center bg-brand-softGreen p-6">
-        <Text className="font-sans text-base text-richBlack">Owner access only.</Text>
-      </View>
-    );
+  // screens." This screen is exactly that. The role comparison itself lives in
+  // domain/permissions.ts — reaching this route directly renders the denial,
+  // and every action below is independently gated in db/staff.ts.
+  if (!session || !isAllowed) {
+    return <AccessDenied />;
   }
 
   const handleDeactivate = (staffId: string) => {
@@ -97,6 +99,7 @@ export default function StaffManagementScreen() {
       {mode === 'add' ? (
         <AddStaffFlow
           shopId={session.shopId}
+          actorUserId={session.userId}
           onDone={async () => {
             setMode('list');
             await reloadStaff();
@@ -130,11 +133,12 @@ export default function StaffManagementScreen() {
 
 interface AddStaffFlowProps {
   shopId: string;
+  actorUserId: string;
   onDone: () => void;
   onCancel: () => void;
 }
 
-function AddStaffFlow({ shopId, onDone, onCancel }: AddStaffFlowProps) {
+function AddStaffFlow({ shopId, actorUserId, onDone, onCancel }: AddStaffFlowProps) {
   const [step, setStep] = useState<'name' | 'pin'>('name');
   const [name, setName] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
@@ -160,14 +164,14 @@ function AddStaffFlow({ shopId, onDone, onCancel }: AddStaffFlowProps) {
       try {
         // CLAUDE.md rule 8: the raw PIN is only ever passed to createStaff,
         // which bcrypt-hashes it before it reaches SQLite.
-        await createStaff(shopId, result.data.name, result.data.pin);
+        await createStaff(shopId, actorUserId, result.data.name, result.data.pin);
         void triggerSyncNow(shopId);
         onDone();
       } catch {
         Alert.alert('Something went wrong', 'Please try again.');
       }
     },
-    [shopId, name, onDone],
+    [shopId, actorUserId, name, onDone],
   );
 
   const { pin, step: pinStep, handleDigitPress, handleBackspace } = useConfirmedPinEntry(handleConfirmed, () =>

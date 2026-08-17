@@ -3,7 +3,7 @@ import { db } from './client';
 import { shops, roles, users } from './schema';
 import { generateId } from '../native/id';
 import { hashPin, verifyPinHash } from '../native/crypto';
-import type { Role } from '../domain/permissions';
+import { hasPermission, toRole, type Permission, type Role } from '../domain/permissions';
 import { NotAuthorizedError } from './errors';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
 
@@ -106,8 +106,35 @@ export async function markShopCloudLinked(shopId: string): Promise<void> {
     throw new Error(`No shop found with id ${shopId}`);
   }
 }
+/**
+ * The action-level permission gate (Volume 0 Day 11). Re-derives the actor's
+ * role from SQLite — the source of truth — never from the MMKV session, so a
+ * Staff login that reaches a write path by direct navigation, or through a
+ * stale/edited persisted session, is still rejected. Route guards only hide a
+ * screen; this is what actually stops the write.
+ *
+ * Every guarded db/ action calls this FIRST, before opening its transaction,
+ * so a denial leaves no partial rows and no outbox entries.
+ */
+export async function requirePermission(
+  shopId: string,
+  actorUserId: string,
+  permission: Permission,
+): Promise<void> {
+  const role = toRole(await getActiveSessionRole(actorUserId, shopId));
+  if (!role || !hasPermission(role, permission)) {
+    throw new NotAuthorizedError();
+  }
+}
+
+/**
+ * Owner-role gate for the flows that have no P0 Permission key of their own
+ * (supplier/purchase management, and the daily-summary notification's
+ * owner-only visibility). Role normalization still runs through
+ * domain/permissions.toRole, so a 'manager' row can never pass as an owner.
+ */
 export async function requireOwner(shopId: string, actorUserId: string): Promise<void> {
-  if (await getActiveSessionRole(actorUserId, shopId) !== 'owner') {
+  if (toRole(await getActiveSessionRole(actorUserId, shopId)) !== 'owner') {
     throw new NotAuthorizedError();
   }
 }
@@ -209,11 +236,16 @@ export async function verifyPin(rawPin: string): Promise<{ shopId: string; userI
     // fast even sequentially (native/crypto.ts's binding is non-blocking).
     const matches = await verifyPinHash(rawPin, user.pinHash);
     if (matches) {
-      const [role] = await db.select({ name: roles.name }).from(roles).where(eq(roles.id, user.roleId));
+      const [roleRow] = await db.select({ name: roles.name }).from(roles).where(eq(roles.id, user.roleId));
+      // Fail closed on a role this Beta does not assign — the P1 'manager'
+      // rows every shop already carries, or anything unrecognised. Such a
+      // user gets NO session at all rather than one whose role the guards
+      // would then have to keep rejecting screen by screen.
+      const role = toRole(roleRow?.name);
       if (!role) {
         continue;
       }
-      return { shopId: user.shopId, userId: user.id, role: role.name as Role };
+      return { shopId: user.shopId, userId: user.id, role };
     }
   }
 

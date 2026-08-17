@@ -19,7 +19,8 @@ SQLite is the app's single source of truth (CLAUDE.md rule 1).
 
 - `auth.ts` (Days 4-5) — `createShopAndOwner`, `setOwnerPin`, `verifyPin`,
   `getShopRoleId`. PIN hashing goes through `native/crypto.ts` exclusively;
-  this file never sees a raw PIN outside that one call.
+  this file never sees a raw PIN outside that one call. Also owns Day 11's
+  action-level permission gates — see "Permissions" below.
 
 ### Auth registration state
 
@@ -31,6 +32,36 @@ applicable owner row routes as follows:
 
 Migration `0002` backfilled existing staff markers because staff hashes were
 already real PIN hashes; existing owners resume PIN Setup once.
+
+### Permissions (Day 11)
+
+The P0 model is the SIMPLE two-role check Volume 0 specifies: Owner = every
+permission, Staff = `sales` + `inventory_view` only. `domain/permissions.ts`
+is the app's one grant table; this file's `requirePermission(shopId,
+actorUserId, permission)` and `requireOwner(shopId, actorUserId)` are its
+action-level half — both re-derive the actor's role from SQLite (never the
+session store) and are called FIRST, before any query or transaction opens,
+so a denied write leaves zero rows and zero outbox entries. Route guards
+(`state/usePermission.ts`, rendering `components/ui/AccessDenied.tsx`) only
+decide what's shown; these are the actual enforcement, proven directly
+against a real SQLite engine in `permissions.sqlite.test.ts` by calling the
+`db/` actions with no screen involved (the direct-navigation-bypass case).
+
+A P1 `manager` role row exists in every shop from registration but is denied
+outright (`domain/permissions.ts`'s `toRole`), never silently granted staff
+or owner access, and never mints a session at all if its PIN is used
+(`verifyPin` skips a manager match). The full Owner/Manager/Staff matrix and
+owner-configurable per-staff permissions remain P1.
+
+Current owner-only permission keys: `staff_management` (`staff.ts`),
+`cash_management` (`cash.ts`, including its reads — see "Cash" below),
+`settings_manage` (`settings.ts`, including an owner's own PIN change —
+staff self-service PIN change is not allowed, only an owner-driven
+`resetStaffPin`), `credit_management` (`customers.ts`'s standalone
+credit-management screens/actions — separate from `sales`, since a Staff-made
+credit SALE at checkout still works through `sales.ts`), and `inventory_write`
+(`inventory.ts`). Suppliers/purchases (shipped early, P1) independently gate
+on `requireOwner` — see "Suppliers and purchases" below.
 
 - `staff.ts` (Day 11) — `listStaff` (staff only, not the owner),
   `createStaff`, `resetStaffPin`, `deactivateStaff`, `writeAuditLog`. Every
@@ -46,6 +77,27 @@ already real PIN hashes; existing owners resume PIN Setup once.
   medicineId is always freshly generated.
 - `errors.ts` — typed write errors including `DuplicateBatchError`,
   `BatchExpiryMismatchError`, and `NotAuthorizedError`.
+
+### Expiry Management (Day 9)
+
+`inventory.ts`'s `listBatchesByExpiry` backs `app/inventory/expiry.tsx`: every
+non-deleted batch shop-wide, nearest REAL expiry date first (CLAUDE.md rule 3
+— recomputed at read time via `domain/fefo.ts`'s `sortByExpiry`, never a
+stored day-count), open to any signed-in role (Staff has `inventory_view`).
+
+Security decision: the batch→medicine join enforces shop isolation on BOTH
+sides — the `INNER JOIN`'s ON clause requires `medicines.shop_id = shopId`,
+not only a later `WHERE` on `batches.shop_id`. A batch row whose
+`medicine_id` points at another shop's medicine (a corrupted or hostile sync
+payload) matches nothing and is dropped, instead of rendering that other
+shop's medicine name under this shop's batch — filtering only
+`batches.shop_id` would have leaked it.
+
+The "Soon" threshold uses the shared repo-wide default
+(`domain/notificationRules.ts`'s `EXPIRY_WINDOW_DAYS_DEFAULT = 30`), the same
+window the Notifications expiry job alerts on. A per-shop configurable
+threshold does not exist in the schema; it needs a real Settings slice
+(Volume 4 SETTINGS) and is intentionally not built here yet.
 
 ### Suppliers and purchases
 
@@ -92,10 +144,47 @@ one uninterrupted transaction.
 Standalone `recordCreditSale` remains an intentional stub/out of scope. Checkout
 already creates sale-backed credit rows atomically.
 
+Standalone credit management (`createCustomer`, `collectPayment` — the
+`app/credit/*` screens) is owner-only (Day 11's `credit_management`
+permission), checked before any row is written or transaction opens. This is
+separate from a Staff-made credit SALE at checkout, which still works via
+`sales.ts` under the `sales` grant.
+
+### Cash — Expenses, Cash Summary, End of Day (Day 10)
+
+`cash.ts` is live and shop-scoped, gated owner-only (`cash_management`) on
+every write and every read: `recordExpense` (one transaction writing both the
+`expenses` row and its `payments` row, type='expense'), `setOpeningCash`
+(CLAUDE.md rule 5 — defaults to 0, set by the user, written only against the
+business date passed in, never inherited from yesterday), `listExpenses`,
+`getCashSummary`/`getEndOfDaySummary` (every figure derived from
+`domain/cashFormula.ts`'s fixed formula — CLAUDE.md rule 4, never re-derived
+here), and `closeDay` (locks `cash_drawer`, recomputing `closing_expected`
+from the ledger rather than trusting the screen, and storing
+`closing_counted` plus the resulting variance).
+
+The internal synchronous `getCashSummarySync` is deliberately NOT
+permission-gated — its only callers are mid-transaction drawer refreshes in
+this file, `sales.ts`, `customers.ts`, and `purchases.ts`, all after that
+transaction's own actor is already authorized. Screens must use the gated
+`getCashSummary`/`getEndOfDaySummary` above.
+
+`assertBusinessDateOpen` is the closed-day guard: called first, inside the
+same transaction, by every write that could still affect an already-closed
+date's locked snapshot (expenses, opening cash, sales, credit collections,
+and supplier purchases — both COD and credit-terms; a credit-terms
+purchase's stock write is blocked too, not just its payment). A write
+against a closed date throws `DayClosedError` before touching any row.
+Proven in `closed-day-guard.sqlite.test.ts`.
+
+Receipt-photo capture UI remains deferred — `recordExpense` accepts a
+`receiptPhotoUri` string today, but no screen produces one yet.
+
 ## Still stubs
-Unimplemented APIs remain in `cash.ts`, `settings.ts`, and `reports.ts`;
-`customers.ts` retains only the intentionally out-of-scope
-`recordCreditSale` stub. Verify individual exports in source.
+Unimplemented APIs remain in `settings.ts` (`getShopProfile`,
+`updateShopProfile`, `restoreFromBackupKey`) and `reports.ts`; `customers.ts`
+retains only the intentionally out-of-scope `recordCreditSale` stub. Verify
+individual exports in source.
 
 ## Sync outbox (Day 13)
 

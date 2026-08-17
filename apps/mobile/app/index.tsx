@@ -3,6 +3,7 @@ import { Redirect } from 'expo-router';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { colors } from '@muthoy/constants';
 import { getActiveSessionRole, getRegistrationStatus } from '../db/auth';
+import { toRole } from '../domain/permissions';
 // ⚠️ TEMPORARY import — remove with the dev auth bypass (see dev/README.md).
 import { isDevPlaceholderPhone } from '../dev/devAnonAuth';
 import { useSessionStore } from '../state/sessionStore';
@@ -85,8 +86,11 @@ export default function RootSessionGate() {
           return;
         }
 
-        const activeRole = await getActiveSessionRole(session.userId, session.shopId);
-        if (activeRole !== session.role) {
+        // toRole first: a persisted session naming a role Beta does not
+        // assign (the P1 'manager', or a tampered MMKV value) must send the
+        // user back to PIN login, not be compared as-is and let through.
+        const activeRole = toRole(await getActiveSessionRole(session.userId, session.shopId));
+        if (activeRole === null || activeRole !== session.role) {
           logout();
           if (isCurrent) {
             setDestination('/(auth)/pin-login');

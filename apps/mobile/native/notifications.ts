@@ -6,6 +6,7 @@ import { daysUntilExpiry, formatMoney, formatNumber } from '@muthoy/utils';
 import { expectedCash } from '../domain/cashFormula';
 import { sortByExpiry } from '../domain/fefo';
 import { expirySeverity, isBatchInExpiryWindow, isLowStockCrossing, isStockRecovered } from '../domain/notificationRules';
+import { hasPermissionForRoleName } from '../domain/permissions';
 import { getActiveSessionRole } from '../db/auth';
 import { getCashSummary } from '../db/cash';
 import { listBatchesForMedicine, listMedicines } from '../db/inventory';
@@ -98,17 +99,28 @@ async function runExpiryCheck(shopId: string, now: Date): Promise<void> {
 
 async function runDailySummaryCheck(shopId: string, now: Date): Promise<void> {
   const session = readPersistedSessionSync();
-  if (!session || session.shopId !== shopId || session.role !== 'owner' || now.getHours() < 20) {
+  // Cheap pre-filter off the persisted session, then the authoritative SQLite
+  // re-read. Both route through domain/permissions so a P1 'manager' or an
+  // unknown persisted role fails closed here exactly as it does everywhere
+  // else, instead of being compared against the literal 'owner'.
+  if (
+    !session ||
+    session.shopId !== shopId ||
+    !hasPermissionForRoleName(session.role, 'cash_management') ||
+    now.getHours() < 20
+  ) {
     return;
   }
-  if ((await getActiveSessionRole(session.userId, shopId)) !== 'owner') {
+  if (!hasPermissionForRoleName(await getActiveSessionRole(session.userId, shopId), 'cash_management')) {
     return;
   }
   const businessDate = localBusinessDate(now);
   if (await hasDailySummaryToday(shopId, businessDate)) {
     return;
   }
-  const cash = expectedCash(await getCashSummary(shopId, businessDate));
+  // The owner check above already ran against SQLite; getCashSummary re-checks
+  // it as the single gate on this read.
+  const cash = expectedCash(await getCashSummary(shopId, session.userId, businessDate));
   const title = `Cash summary — ${businessDate}`;
   const body = `Expected cash in drawer: ${formatMoney(cash)}`;
   await createDailySummaryNotification(shopId, session.userId, title, body, businessDate);

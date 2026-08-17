@@ -1,0 +1,43 @@
+-- Sync permission-row authorization: the one table privilege the push path
+-- needs but never received.
+--
+-- ROOT CAUSE
+-- backend/supabase/functions/sync/push.ts authorizes an incoming `permissions`
+-- row by reading the owning role's shop directly through PostgREST:
+--
+--   supabaseAdmin.from("roles").select("shop_id").eq("id", payload.role_id)
+--
+-- Unlike every other database access in sync, that read does NOT go through the
+-- SECURITY DEFINER functions sync_apply_row / sync_pull_changes, so it executes
+-- as service_role itself. service_role carries BYPASSRLS, which skips row-level
+-- POLICIES but confers no table privileges, and 20260813000000_initial_schema.sql
+-- issues no GRANT on public.roles. The read therefore fails with SQLSTATE 42501,
+-- "permission denied for table roles".
+--
+-- IMPACT
+-- authorizeRow() maps that error to a *transient* rejection and push() then sets
+-- halted = true, so the permissions row never applies and every later row in the
+-- same batch is skipped. The batch retries forever instead of failing loudly.
+--
+-- SCOPE — the narrowest grant that restores the authorization check:
+--   * SELECT only. push.ts only reads here; all writes still go through
+--     sync_apply_row, which already holds its own EXECUTE grant.
+--   * public.roles only. It is the sole table the edge functions read directly
+--     without a grant — shop_claims already has one (initial schema line 22) and
+--     everything else is reached via RPC.
+--   * service_role only. anon and authenticated are untouched, so nothing
+--     client-reachable gains access.
+--   * No policy is added, dropped, or altered. RLS stays exactly as the initial
+--     migration left it, as do the shop_claims revoke and the sync RPC EXECUTE
+--     lockdown.
+--
+-- The same-shop check itself is unchanged: push.ts still compares the fetched
+-- roles.shop_id against the caller's shop and rejects a mismatch as permanent.
+-- This grant only lets that comparison read the value it was always meant to read.
+--
+-- Column-level GRANT (id, shop_id) was considered and rejected: roles holds no
+-- sensitive column, and service_role can already read every column of it through
+-- sync_apply_row, so narrowing to columns buys no confidentiality while breaking
+-- silently at runtime the moment that SELECT list changes.
+
+grant select on table public.roles to service_role;

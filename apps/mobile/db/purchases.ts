@@ -13,7 +13,7 @@ import { resolvePaymentEffect, type PurchasePaymentType } from '../domain/purcha
 import { expectedCash } from '../domain/cashFormula';
 import { generateId } from '../native/id';
 import { requireOwner } from './auth';
-import { getCashSummarySync } from './cash';
+import { assertBusinessDateOpen, getCashSummarySync } from './cash';
 import { db, sqliteConnection } from './client';
 import { BatchExpiryMismatchError, DuplicateBatchError, NotAuthorizedError } from './errors';
 import {
@@ -157,6 +157,12 @@ export async function createPurchase(
     if (!owner) {
       throw new NotAuthorizedError();
     }
+
+    // Codex-flagged gap: a COD purchase writes a supplier_payment that feeds
+    // supplierPayments in the cash formula; a credit-terms purchase changes
+    // stock for the same locked business date. Both are blocked here rather
+    // than only guarding the COD branch below.
+    assertBusinessDateOpen(tx, input.shopId, businessDate);
 
     const supplier = tx.select({ id: suppliers.id }).from(suppliers).where(and(
       eq(suppliers.id, input.supplierId),

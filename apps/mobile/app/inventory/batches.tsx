@@ -16,7 +16,7 @@ import {
   type MedicineDetail,
 } from '../../db/inventory';
 import { DuplicateBatchError } from '../../db/errors';
-import { useSessionStore } from '../../state/sessionStore';
+import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
 // Medicine detail: batch list + Add Batch — Volume 4 INVENTORY, Volume 0 Day
@@ -28,7 +28,10 @@ import { triggerSyncNow } from '../../sync';
 // rendered inline under the batch-number field below, never an Alert.
 export default function BatchDetailScreen() {
   const { medicineId } = useLocalSearchParams<{ medicineId: string }>();
-  const session = useSessionStore((s) => s.session);
+  // Mixed screen: the batch LIST is inventory-view, which Staff keeps
+  // (Volume 0 Day 11). Only the Add Batch half is gated on inventory_write,
+  // so the route itself is not blocked for Staff — the write is.
+  const { session, isAllowed: canWriteInventory } = usePermission('inventory_write');
   const [medicine, setMedicine] = useState<MedicineDetail | null>(null);
   const [batches, setBatches] = useState<BatchDetailRow[]>([]);
   const [isAdding, setIsAdding] = useState(false);
@@ -64,13 +67,14 @@ export default function BatchDetailScreen() {
 
   const onSubmit = useCallback(
     async (input: AddBatchOutput) => {
-      if (!session || !medicineId) {
+      if (!session || !medicineId || !canWriteInventory) {
         return;
       }
       setIsSubmitting(true);
       try {
         await addBatchToMedicine({
           shopId: session.shopId,
+          actorUserId: session.userId,
           medicineId,
           batchNo: input.batchNo,
           expiryDate: input.expiryDate,
@@ -92,7 +96,7 @@ export default function BatchDetailScreen() {
         setIsSubmitting(false);
       }
     },
-    [session, medicineId, reset, reload, setError],
+    [session, medicineId, canWriteInventory, reset, reload, setError],
   );
 
   if (!session || !medicineId) {
@@ -107,7 +111,7 @@ export default function BatchDetailScreen() {
           <BatchRow key={batch.id} batch={batch} />
         ))}
 
-        {isAdding ? (
+        {!canWriteInventory ? null : isAdding ? (
           <View className="gap-4 rounded-lg bg-white p-4">
             <Text className="font-sans-bold text-base text-richBlack">Add batch</Text>
             <FormField control={control} name="batchNo" label="Batch number" placeholder="e.g. B-2024-02" />

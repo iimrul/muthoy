@@ -7,10 +7,11 @@ import { addMedicineSchema, isoDateSchema, type AddMedicineInput, type AddMedici
 import { fromTaka } from '@muthoy/types';
 import { MedicineTextScanner } from '../../components/scanner/MedicineTextScanner';
 import { FormField } from '../../components/forms/FormField';
+import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createMedicineWithBatch } from '../../db/inventory';
 import { parseScannedMedicineStrip } from '../../domain/ocrText';
-import { useSessionStore } from '../../state/sessionStore';
+import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
 // Add Medicine — Volume 4 INVENTORY, Volume 0 Day 8. React Hook Form + Zod
@@ -25,7 +26,9 @@ import { triggerSyncNow } from '../../sync';
 // (app/inventory/batches.tsx), the path that adds a batch to a medicine that
 // already exists.
 export default function AddMedicineScreen() {
-  const session = useSessionStore((s) => s.session);
+  // Volume 0 Day 11: Staff is inventory-VIEW only, so creating a medicine and
+  // its first batch is owner-only. Browsing inventory stays open to both.
+  const { session, isAllowed } = usePermission('inventory_write');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isScannerVisible, setIsScannerVisible] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
@@ -74,13 +77,14 @@ export default function AddMedicineScreen() {
 
   const onSubmit = useCallback(
     async (input: AddMedicineOutput) => {
-      if (!session) {
+      if (!session || !isAllowed) {
         return;
       }
       setIsSubmitting(true);
       try {
         await createMedicineWithBatch({
           shopId: session.shopId,
+          actorUserId: session.userId,
           name: input.name,
           generic: input.generic,
           manufacturer: input.manufacturer,
@@ -106,8 +110,14 @@ export default function AddMedicineScreen() {
         setIsSubmitting(false);
       }
     },
-    [session],
+    [isAllowed, session],
   );
+
+  // Volume 0 Day 11 checklist: a Staff-role login reaching this route
+  // directly gets the denial, and db/inventory.ts rejects the write anyway.
+  if (!session || !isAllowed) {
+    return <AccessDenied />;
+  }
 
   return (
     <View className="flex-1 bg-brand-softGreen">
