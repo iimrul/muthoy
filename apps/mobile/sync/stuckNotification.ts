@@ -17,3 +17,16 @@ export async function notifyIfSyncIsStuck(shopId: string): Promise<void> {
     `${failedCount} change(s) could not reach the cloud yet`,
   );
 }
+
+export async function notifySyncHalted(shopId: string, message: string): Promise<void> {
+  if (await findUnresolvedSyncAlert(shopId)) {
+    return;
+  }
+  await createNotification(
+    shopId,
+    'sync',
+    'warning',
+    'Sync stopped',
+    message,
+  );
+}

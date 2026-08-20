@@ -8,6 +8,7 @@
 // unaffected.
 
 import { readFileSync } from 'node:fs';
+import { ALWAYS_LIVE } from './errors';
 import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { asPaisa, ZERO_PAISA } from '@muthoy/types';
@@ -15,7 +16,7 @@ import { sqlite } from './test/expo-sqlite';
 
 const { db } = await import('./client');
 const schema = await import('./schema');
-const { batches, customers, medicines, roles, shops, suppliers, users } = schema;
+const { batches, inventoryMovements, customers, medicines, roles, shops, suppliers, users } = schema;
 const { closeDay, currentBusinessDate } = await import('./cash');
 const { createSaleTransaction } = await import('./sales');
 const { collectPayment } = await import('./customers');
@@ -67,14 +68,17 @@ function seedShop(): Fixture {
   db.insert(users).values({ id: fixture.ownerId, shopId: fixture.shopId, name: `Owner ${shop}`, pinHash: 'hash', pinSetAt: now, roleId: ownerRoleId, isActive: true, createdAt: now, updatedAt: now }).run();
   db.insert(users).values({ id: fixture.staffId, shopId: fixture.shopId, name: `Staff ${shop}`, pinHash: 'hash', pinSetAt: now, roleId: staffRoleId, isActive: true, createdAt: now, updatedAt: now }).run();
   db.insert(medicines).values({ id: fixture.medicineId, shopId: fixture.shopId, name: 'Napa', createdAt: now, updatedAt: now }).run();
-  db.insert(batches).values({ id: fixture.batchId, shopId: fixture.shopId, medicineId: fixture.medicineId, batchNo: 'B1', expiryDate: '2027-01-31', stock: 100, purchasePrice: asPaisa(600), salePrice: asPaisa(1000), createdAt: now, updatedAt: now }).run();
+  db.insert(batches).values({ id: fixture.batchId, shopId: fixture.shopId, medicineId: fixture.medicineId, batchNo: 'B1', expiryDate: '2027-01-31', stock: 0, purchasePrice: asPaisa(600), salePrice: asPaisa(1000), createdAt: now, updatedAt: now }).run();
+  // Opening quantity is a movement, never a directly-written absolute —
+  // the ledger triggers in migration 0006 reject the latter outright.
+  db.insert(inventoryMovements).values({ id: fixtureId(shop, 12), shopId: fixture.shopId, batchId: fixture.batchId, changeQty: 100, reason: 'purchase', createdBy: fixture.ownerId, createdAt: now, updatedAt: now }).run();
   db.insert(customers).values({ id: fixture.customerId, shopId: fixture.shopId, name: `Customer ${shop}`, createdAt: now, updatedAt: now }).run();
   db.insert(suppliers).values({ id: fixture.supplierId, shopId: fixture.shopId, name: `Supplier ${shop}`, createdAt: now, updatedAt: now }).run();
   return fixture;
 }
 
 async function closeToday(fixture: Fixture): Promise<void> {
-  await closeDay({
+  await closeDay({ isStillActive: ALWAYS_LIVE,
     shopId: fixture.shopId, businessDate: BUSINESS_DATE,
     countedCash: ZERO_PAISA, closedBy: fixture.ownerId,
   });
@@ -105,6 +109,8 @@ beforeAll(() => {
   applyMigration('0003_curious_wild_pack.sql');
   applyMigration('0004_deep_boomer.sql');
   applyMigration('0005_eminent_legion.sql');
+  applyMigration('0006_inventory_movement_ledger.sql');
+  applyMigration('0007_staff_device_login.sql');
 });
 
 describe('closed-day mutation guard', () => {
@@ -112,7 +118,7 @@ describe('closed-day mutation guard', () => {
     it('still succeeds before the day is closed', async () => {
       const fixture = seedShop();
 
-      const result = await createSaleTransaction({
+      const result = await createSaleTransaction({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, staffId: fixture.staffId, paymentType: 'cash',
         lines: [{ medicineId: fixture.medicineId, deductions: [{ batchId: fixture.batchId, quantityDeducted: 2 }], unitPrice: asPaisa(1000) }],
       });
@@ -128,7 +134,7 @@ describe('closed-day mutation guard', () => {
       const queueBefore = queuedCount(fixture.shopId);
 
       await expect(
-        createSaleTransaction({
+        createSaleTransaction({ isStillActive: ALWAYS_LIVE,
           shopId: fixture.shopId, staffId: fixture.staffId, paymentType: 'cash',
           lines: [{ medicineId: fixture.medicineId, deductions: [{ batchId: fixture.batchId, quantityDeducted: 2 }], unitPrice: asPaisa(1000) }],
         }),
@@ -136,7 +142,9 @@ describe('closed-day mutation guard', () => {
 
       expect(countRows('sales', fixture.shopId)).toBe(0);
       expect(countRows('sale_items', fixture.shopId)).toBe(0);
-      expect(countRows('inventory_movements', fixture.shopId)).toBe(0);
+      // 1, not 0: the fixture's opening-stock movement. The rejected sale
+      // must not have appended a second one.
+      expect(countRows('inventory_movements', fixture.shopId)).toBe(1);
       expect(batchStock(fixture.batchId)).toBe(100);
       expect(queuedCount(fixture.shopId)).toBe(queueBefore);
     });
@@ -146,7 +154,7 @@ describe('closed-day mutation guard', () => {
       await closeToday(fixture);
 
       await expect(
-        createSaleTransaction({
+        createSaleTransaction({ isStillActive: ALWAYS_LIVE,
           shopId: fixture.shopId, staffId: fixture.staffId, paymentType: 'credit', customerId: fixture.customerId,
           lines: [{ medicineId: fixture.medicineId, deductions: [{ batchId: fixture.batchId, quantityDeducted: 1 }], unitPrice: asPaisa(1000) }],
         }),
@@ -160,14 +168,14 @@ describe('closed-day mutation guard', () => {
   describe('customer credit collections', () => {
     it('still succeeds before the day is closed', async () => {
       const fixture = seedShop();
-      await createSaleTransaction({
+      await createSaleTransaction({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, staffId: fixture.staffId, paymentType: 'credit', customerId: fixture.customerId,
         lines: [{ medicineId: fixture.medicineId, deductions: [{ batchId: fixture.batchId, quantityDeducted: 1 }], unitPrice: asPaisa(1000) }],
       });
 
       // collectPayment is owner-only (credit_management) — the staff actor
       // above only exercises the credit SALE half of this flow.
-      await collectPayment({
+      await collectPayment({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, staffId: fixture.ownerId, customerId: fixture.customerId, amount: asPaisa(500),
       });
 
@@ -176,7 +184,7 @@ describe('closed-day mutation guard', () => {
 
     it('rejects a collection after close — including non-cash methods — leaving no partial rows', async () => {
       const fixture = seedShop();
-      await createSaleTransaction({
+      await createSaleTransaction({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, staffId: fixture.staffId, paymentType: 'credit', customerId: fixture.customerId,
         lines: [{ medicineId: fixture.medicineId, deductions: [{ batchId: fixture.batchId, quantityDeducted: 1 }], unitPrice: asPaisa(1000) }],
       });
@@ -184,7 +192,7 @@ describe('closed-day mutation guard', () => {
       const queueBefore = queuedCount(fixture.shopId);
 
       await expect(
-        collectPayment({
+        collectPayment({ isStillActive: ALWAYS_LIVE,
           shopId: fixture.shopId, staffId: fixture.ownerId, customerId: fixture.customerId,
           amount: asPaisa(500), method: 'bkash',
         }),
@@ -199,7 +207,7 @@ describe('closed-day mutation guard', () => {
     it('still succeeds before the day is closed (COD)', async () => {
       const fixture = seedShop();
 
-      const result = await createPurchase({
+      const result = await createPurchase({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, supplierId: fixture.supplierId, staffId: fixture.ownerId, paymentType: 'cod',
         lineItems: [{ medicineId: fixture.medicineId, batchNo: 'PB1', expiryDate: '2028-01-01', quantity: 10, purchasePrice: asPaisa(500), salePrice: asPaisa(900) }],
       });
@@ -215,7 +223,7 @@ describe('closed-day mutation guard', () => {
       const queueBefore = queuedCount(fixture.shopId);
 
       await expect(
-        createPurchase({
+        createPurchase({ isStillActive: ALWAYS_LIVE,
           shopId: fixture.shopId, supplierId: fixture.supplierId, staffId: fixture.ownerId, paymentType: 'cod',
           lineItems: [{ medicineId: fixture.medicineId, batchNo: 'PB2', expiryDate: '2028-01-01', quantity: 10, purchasePrice: asPaisa(500), salePrice: asPaisa(900) }],
         }),
@@ -236,7 +244,7 @@ describe('closed-day mutation guard', () => {
       await closeToday(fixture);
 
       await expect(
-        createPurchase({
+        createPurchase({ isStillActive: ALWAYS_LIVE,
           shopId: fixture.shopId, supplierId: fixture.supplierId, staffId: fixture.ownerId, paymentType: 'credit',
           lineItems: [{ medicineId: fixture.medicineId, batchNo: 'PB3', expiryDate: '2028-01-01', quantity: 5, purchasePrice: asPaisa(500), salePrice: asPaisa(900) }],
         }),

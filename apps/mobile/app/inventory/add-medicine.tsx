@@ -11,6 +11,7 @@ import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createMedicineWithBatch } from '../../db/inventory';
 import { parseScannedMedicineStrip } from '../../domain/ocrText';
+import { captureSessionFor } from '../../state/sessionGuard';
 import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
@@ -80,11 +81,18 @@ export default function AddMedicineScreen() {
       if (!session || !isAllowed) {
         return;
       }
+      // react-hook-form awaits its resolver before this handler runs, and the
+      // write below is a stock mutation stamped with an actor id.
+      const guard = captureSessionFor(session);
+      if (!guard) {
+        return;
+      }
       setIsSubmitting(true);
       try {
         await createMedicineWithBatch({
           shopId: session.shopId,
           actorUserId: session.userId,
+          isStillActive: guard.isStillActive,
           name: input.name,
           generic: input.generic,
           manufacturer: input.manufacturer,
@@ -103,9 +111,11 @@ export default function AddMedicineScreen() {
           },
         });
         void triggerSyncNow(session.shopId);
-        router.back();
+        // Navigating back is the outgoing user's continuation; after a
+        // handover app/index.tsx's gate owns where the device goes next.
+        guard.ifLive(() => router.back());
       } catch {
-        Alert.alert('Something went wrong', 'Please try again.');
+        guard.ifLive(() => Alert.alert('Something went wrong', 'Please try again.'));
       } finally {
         setIsSubmitting(false);
       }

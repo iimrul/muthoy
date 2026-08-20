@@ -16,7 +16,6 @@ import {
   cashDrawer,
   credits,
   customers,
-  inventoryMovements,
   medicines,
   saleItems,
   sales,
@@ -24,14 +23,16 @@ import {
 } from './schema';
 import { activeBatch, type Batch } from '../domain/fefo';
 import { applyDiscount, type Discount } from '../domain/discounts';
+import { buildSaleInvoiceNo } from '../domain/invoice';
 import { expectedCash } from '../domain/cashFormula';
 import { requirePermission } from './auth';
+import { assertSessionLive } from './errors';
 import { assertBusinessDateOpen, getCashSummarySync } from './cash';
 import { generateId } from '../native/id';
+import { deductStock } from './stockLedger';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
 
 const SEARCH_LIMIT = 50;
-const INVOICE_SEQUENCE_WIDTH = 6;
 
 export interface MedicineSearchResult {
   medicineId: string;
@@ -145,6 +146,15 @@ export async function getActiveBatchForMedicine(shopId: string, medicineId: stri
 export interface SaleTransactionInput {
   shopId: string;
   staffId: string;
+  /**
+   * Device-handover liveness check (Volume 0 Days 5/11). Re-evaluated INSIDE
+   * the transaction, which is synchronous — so nothing can switch users
+   * between the check and the writes. Without it there is a real gap: this
+   * function awaits requirePermission before opening the transaction, and a
+   * caller that checked liveness just before calling has already lost its
+   * guarantee by the time the permission read resolves.
+   */
+  isStillActive: () => boolean;
   paymentType: 'cash' | 'credit';
   amountTendered?: Paisa;
   customerId?: string;
@@ -204,6 +214,7 @@ export async function createSaleTransaction(input: SaleTransactionInput): Promis
   const year = now.getFullYear();
 
   return db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
     const staff = tx
       .select({ id: users.id })
       .from(users)
@@ -260,8 +271,12 @@ export async function createSaleTransaction(input: SaleTransactionInput): Promis
       .where(and(eq(sales.shopId, input.shopId), sql`strftime('%Y', ${sales.createdAt}, 'localtime') = ${String(year)}`))
       .get();
     const yearlyCount = yearlyCountRow?.value ?? 0;
-    const invoiceNo = `INV-${year}-${String(yearlyCount + 1).padStart(INVOICE_SEQUENCE_WIDTH, '0')}`;
+    // saleId first: the invoice's uniqueness rides on this UUID's tail. The
+    // count above is per-DEVICE, so two phones both reach sale 11 and both
+    // would mint INV-2026-000011 — the cloud's sales_shop_invoice_unique then
+    // rejects the second as a permanent 23505 and that sale never syncs.
     const saleId = generateId();
+    const invoiceNo = buildSaleInvoiceNo(year, yearlyCount + 1, saleId);
     const change = input.paymentType === 'cash' ? subtractPaisa(tendered, total) : ZERO_PAISA;
 
     const saleNow = new Date().toISOString();
@@ -282,7 +297,7 @@ export async function createSaleTransaction(input: SaleTransactionInput): Promis
 
       line.deductions.forEach((deduction) => {
         const batch = tx
-          .select({ purchasePrice: batches.purchasePrice, stock: batches.stock })
+          .select({ purchasePrice: batches.purchasePrice })
           .from(batches)
           .where(
             and(
@@ -297,24 +312,19 @@ export async function createSaleTransaction(input: SaleTransactionInput): Promis
           throw new Error(`Batch ${deduction.batchId} is unavailable for this shop`);
         }
 
-        const batchValues = stampUpdatedAt({ stock: batch.stock - deduction.quantityDeducted, isDirty: true });
-        const updateResult = tx
-          .update(batches)
-          .set(batchValues)
-          .where(
-            and(
-              eq(batches.id, deduction.batchId),
-              eq(batches.shopId, input.shopId),
-              eq(batches.medicineId, line.medicineId),
-              eq(batches.isDeleted, false),
-              gte(batches.stock, deduction.quantityDeducted),
-            ),
-          )
-          .run();
-        if (updateResult.changes !== 1) {
-          throw new Error(`Stock changed before checkout for medicine ${line.medicineId}`);
-        }
-        recordChange(tx, { shopId: input.shopId, table: 'batches', rowId: deduction.batchId, op: 'update', payload: batchValues });
+        // One immutable -qty delta. `batches.stock` is moved by the ledger
+        // trigger, and the batch row is NOT enqueued: two phones selling the
+        // same batch used to each push a whole-row absolute, and whole-row LWW
+        // kept only the later one — 5 - 2 - 2 landed on 3 instead of 1. Deltas
+        // commute, so both sales now survive whatever order they arrive in.
+        deductStock(tx, {
+          shopId: input.shopId,
+          batchId: deduction.batchId,
+          quantity: deduction.quantityDeducted,
+          reason: 'sale',
+          refId: saleId,
+          createdBy: input.staffId,
+        });
 
 
         cumulativeQuantity += deduction.quantityDeducted;
@@ -336,14 +346,6 @@ export async function createSaleTransaction(input: SaleTransactionInput): Promis
           createdAt: itemNow, updatedAt: itemNow };
         tx.insert(saleItems).values(itemValues).run();
         recordChange(tx, { shopId: input.shopId, table: 'sale_items', rowId: itemId, op: 'insert', payload: itemValues });
-
-        const movementId = generateId();
-        const movementNow = new Date().toISOString();
-        const movementValues = { id: movementId, shopId: input.shopId, batchId: deduction.batchId,
-          changeQty: -deduction.quantityDeducted, reason: 'sale' as const,
-          refId: saleId, createdBy: input.staffId, createdAt: movementNow, updatedAt: movementNow };
-        tx.insert(inventoryMovements).values(movementValues).run();
-        recordChange(tx, { shopId: input.shopId, table: 'inventory_movements', rowId: movementId, op: 'insert', payload: movementValues });
       });
     });
 

@@ -58,7 +58,8 @@ function foreignKeyEdges(): ForeignKeyEdge[] {
 describe("HYDRATION_TABLE_ORDER", () => {
   it("contains every syncable table exactly once", () => {
     const order = hydrationOrder();
-    expect(order).toHaveLength(21);
+    // 22 since migration 0007 added user_permissions.
+    expect(order).toHaveLength(22);
     expect(new Set(order).size).toBe(order.length);
     expect(new Set(order)).toEqual(new Set(syncedSchemaTables()));
   });

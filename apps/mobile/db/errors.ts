@@ -32,6 +32,44 @@ export class BatchExpiryMismatchError extends Error {
   }
 }
 
+// Thrown by db/staff.ts's createStaff when the phone number is already used by
+// another live user — the partial UNIQUE index at db/schema.ts's
+// users_phone_unique (migration 0007). Phone is the login identifier a FRESH
+// device types before it holds any local rows, so it has to resolve to exactly
+// one account; a duplicate is refused at entry rather than discovered later as
+// an ambiguous login. Screens render this inline under the phone field, like
+// DuplicateBatchError above — never an Alert.
+export class DuplicatePhoneError extends Error {
+  readonly phone: string;
+
+  constructor(phone: string) {
+    super('That phone number is already used by someone at this shop.');
+    this.name = 'DuplicatePhoneError';
+    this.phone = phone;
+  }
+}
+
+/**
+ * Thrown when a PIN is already in use by another live user of this device.
+ *
+ * PIN Login has no "who are you" step — Volume 4 scopes Beta to one shop per
+ * device, so db/auth.ts's verifyPin compares the typed PIN against EVERY live
+ * user's hash and returns the FIRST match. Two people sharing a PIN therefore
+ * means one of them silently signs in as the other; if the collision is with
+ * the owner, a staff member is handed owner access by typing their own PIN.
+ *
+ * Refused at the point the PIN is CHOSEN — the only place it can be refused
+ * without locking somebody out later. Screens render this inline under the PIN
+ * field, like DuplicatePhoneError above. It deliberately carries no digits:
+ * CLAUDE.md rule 8 keeps a raw PIN out of every message and log.
+ */
+export class DuplicatePinError extends Error {
+  constructor() {
+    super('That PIN is already used by someone at this shop. Choose another.');
+    this.name = 'DuplicatePinError';
+  }
+}
+
 // Thrown by db/auth.ts's requirePermission/requireOwner when the actor's role
 // — re-read from SQLite, never trusted from the session store — does not grant
 // the action. Screens render the same friendly denial text, so a blocked
@@ -58,6 +96,55 @@ export class DayClosedError extends Error {
     this.businessDate = businessDate;
   }
 }
+
+// Thrown when the device changed hands between the moment an async write was
+// started and the moment it would have committed (Volume 0 Days 5/11 device
+// handover; state/switchUser.ts). A screen handler closes over the session
+// that rendered it, and that closure outlives the switch — so every write that
+// stamps an actor id carries a liveness callback and this is what it throws.
+// Distinct from NotAuthorizedError: the actor was fully entitled, they just are
+// not the person holding the phone any more.
+export class StaleSessionError extends Error {
+  constructor() {
+    super('The active user changed. This action was not saved.');
+    this.name = 'StaleSessionError';
+  }
+}
+
+/**
+ * Guard for every write that stamps an actor id.
+ *
+ * FAILS CLOSED. The parameter is required, and a missing or non-callable one
+ * throws exactly like a stale session: a mutation boundary that cannot say
+ * whose session it belongs to must not run. Leaving it optional would mean a
+ * caller who simply forgot silently lost the protection.
+ *
+ * Placement:
+ *  - SYNCHRONOUS db.transaction callbacks (cash, customers, purchases, sales):
+ *    call it as the FIRST statement. The whole body then runs in one
+ *    uninterruptible turn and switchUser() cannot land inside it.
+ *  - ASYNC db.transaction callbacks (inventory, staff, settings, suppliers):
+ *    call it first AND last. Those bodies await between writes, so a handover
+ *    can land mid-transaction; the trailing check turns that into a throw,
+ *    which rolls the whole transaction back.
+ *
+ * This is the ATTRIBUTION backstop, and deliberately not the AUTHORIZATION
+ * one — db/auth.ts's requirePermission/requireOwner still re-derive the
+ * actor's role from SQLite on every one of these paths.
+ */
+export function assertSessionLive(isStillActive: () => boolean): void {
+  if (typeof isStillActive !== 'function' || !isStillActive()) {
+    throw new StaleSessionError();
+  }
+}
+
+/**
+ * The liveness callback for callers that are NOT tied to an interactive
+ * session: unit tests, and any deliberately session-independent path. Naming
+ * the exemption makes it visible at the call site, instead of letting an
+ * omitted argument quietly mean the same thing.
+ */
+export const ALWAYS_LIVE = (): boolean => true;
 
 // expo-sqlite surfaces a plain Error with no `.code` — detection is by
 // message text. SQLite's own wording: 'UNIQUE constraint failed:

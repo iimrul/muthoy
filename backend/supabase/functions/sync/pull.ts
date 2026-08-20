@@ -1,5 +1,4 @@
-import type { User } from "npm:@supabase/supabase-js@2";
-import { HttpError, requireCallerShop } from "./_shared/auth.ts";
+import { assertCallerCurrent, type Caller, HttpError, requireCallerShop } from "./_shared/auth.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
 
 const PAGE_SIZE = 500;
@@ -16,9 +15,14 @@ function parseCursor(value: unknown): Cursor | null {
   return cursor as Cursor;
 }
 
-export async function pull(user: User, body: Record<string, unknown>) {
+export async function pull(caller: Caller, body: Record<string, unknown>) {
   if (typeof body.shopId !== "string") throw new HttpError(400, "shopId is required");
-  const shopId = requireCallerShop(user, body.shopId);
+  const shopId = requireCallerShop(caller, body.shopId);
+  // A pull hands over the shop's entire history, so it is gated exactly as
+  // hard as a write: a deactivated staff member's still-valid token must not
+  // keep downloading sales, prices and customer balances after the owner has
+  // revoked them.
+  await assertCallerCurrent(caller);
   const since = parseCursor(body.since);
   const { data, error } = await supabaseAdmin.rpc("sync_pull_changes", {
     p_shop_id: shopId, p_since_updated_at: since?.updatedAt ?? null,

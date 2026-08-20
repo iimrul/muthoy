@@ -13,6 +13,7 @@ import {
   type Customer,
 } from '../../db/customers';
 import { remainingBalance } from '../../domain/credit';
+import { captureSessionFor } from '../../state/sessionGuard';
 import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
@@ -33,15 +34,24 @@ export default function CustomerDetailScreen() {
     if (!session || !isAllowed || !customerId) {
       return;
     }
+    // This customer's balance and ledger are owner-only. A read that lands
+    // after the handover must not paint them for the incoming user.
+    const guard = captureSessionFor(session);
     try {
       const [customerRow, history] = await Promise.all([
         getCustomer(session.shopId, customerId),
         getCustomerCreditLedger(session.shopId, customerId),
       ]);
+      if (!guard || guard.isStale()) {
+        return;
+      }
       setCustomer(customerRow);
       setLedgerRows(history);
       setError(null);
     } catch (caught) {
+      if (!guard || guard.isStale()) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : 'Customer details failed to load.');
     }
   }, [customerId, isAllowed, session]);
@@ -58,6 +68,13 @@ export default function CustomerDetailScreen() {
     if (!session || !isAllowed || !customerId) {
       return;
     }
+    // Pinned at action start. A collection moves both the credit ledger and
+    // the cash drawer; db/customers.ts re-checks this same guard inside the
+    // transaction.
+    const guard = captureSessionFor(session);
+    if (!guard) {
+      return;
+    }
     const taka = Number(amountText.trim());
     if (!amountText.trim() || !Number.isFinite(taka) || taka <= 0) {
       setError('Enter a valid collection amount.');
@@ -70,13 +87,21 @@ export default function CustomerDetailScreen() {
       await collectPayment({
         shopId: session.shopId,
         staffId: session.userId,
+        isStillActive: guard.isStillActive,
         customerId,
         amount: fromTaka(taka),
       });
       void triggerSyncNow(session.shopId);
+      // Clearing the field and repainting the ledger belong to the collector.
+      if (guard.isStale()) {
+        return;
+      }
       setAmountText('');
       await reload();
     } catch (caught) {
+      if (guard.isStale()) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : 'Payment could not be collected.');
     } finally {
       setIsSubmitting(false);

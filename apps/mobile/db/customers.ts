@@ -7,6 +7,7 @@ import { remainingBalance } from '../domain/credit';
 import { generateId } from '../native/id';
 import { requirePermission } from './auth';
 import { assertBusinessDateOpen, getCashSummarySync } from './cash';
+import { assertSessionLive } from './errors';
 import { db, sqliteConnection } from './client';
 import { cashDrawer, customers, payments, users } from './schema';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
@@ -48,6 +49,8 @@ export async function listCustomers(shopId: string, query?: string): Promise<Cus
 export interface CreateCustomerInput {
   shopId: string;
   actorUserId: string;
+  /** Device-handover guard — see db/errors.ts assertSessionLive. */
+  isStillActive: () => boolean;
   name: string;
   phone?: string;
   address?: string;
@@ -67,6 +70,7 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
     notes: input.notes ?? null,
   };
   db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
     const now = new Date().toISOString();
     const values = { ...customer, shopId: input.shopId, createdAt: now, updatedAt: now };
     tx.insert(customers).values(values).run();
@@ -186,6 +190,8 @@ export type CustomerPaymentMethod = 'cash' | 'bkash' | 'nagad' | 'rocket' | 'car
 export interface CollectPaymentInput {
   shopId: string;
   staffId: string;
+  /** Device-handover guard — see db/errors.ts assertSessionLive. */
+  isStillActive: () => boolean;
   customerId: string;
   amount: Paisa;
   method?: CustomerPaymentMethod;
@@ -217,6 +223,7 @@ export async function collectPayment(input: CollectPaymentInput): Promise<void> 
   // Keep this callback synchronous/no-await: the balance check and payment
   // write rely on sharing one uninterrupted SQLite transaction.
   db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
     const customer = tx.select({ id: customers.id }).from(customers).where(and(
       eq(customers.id, input.customerId),
       eq(customers.shopId, input.shopId),

@@ -1,10 +1,18 @@
 import { eq, and, desc, isNotNull } from 'drizzle-orm';
 import { db } from './client';
-import { shops, roles, users } from './schema';
+import { shops, roles, users, userPermissions } from './schema';
 import { generateId } from '../native/id';
 import { hashPin, verifyPinHash } from '../native/crypto';
-import { hasPermission, toRole, type Permission, type Role } from '../domain/permissions';
-import { NotAuthorizedError } from './errors';
+import {
+  isPermissionKey,
+  resolvePermission,
+  toRole,
+  type Permission,
+  type PermissionOverrides,
+  type Role,
+} from '../domain/permissions';
+import { normalizeBdPhone } from '@muthoy/validation';
+import { DuplicatePinError, NotAuthorizedError } from './errors';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
 
 // db/auth.ts — the ONLY file that will touch Drizzle/SQLite for auth
@@ -94,6 +102,91 @@ export async function getActiveSessionRole(
   return sessionUser?.role ?? null;
 }
 
+/**
+ * One user's explicit permission overrides, as domain/permissions.ts's
+ * PermissionOverrides. Absent keys mean "role default", so an unconfigured
+ * staff member returns `{}` and resolves exactly as before this feature.
+ *
+ * Shop-scoped on BOTH columns, not just user_id: a hostile or corrupted sync
+ * payload that attached another shop's override row to this user is dropped
+ * rather than widening what they can do here.
+ */
+export async function getUserPermissionOverrides(
+  shopId: string,
+  userId: string,
+): Promise<PermissionOverrides> {
+  const rows = await db
+    .select({ key: userPermissions.key, allowed: userPermissions.allowed })
+    .from(userPermissions)
+    .where(
+      and(
+        eq(userPermissions.userId, userId),
+        eq(userPermissions.shopId, shopId),
+        eq(userPermissions.isDeleted, false),
+      ),
+    );
+
+  const overrides: PermissionOverrides = {};
+  for (const row of rows) {
+    // An unrecognised key is ignored, never treated as a grant — the same
+    // fail-closed stance toRole takes for an unknown role name.
+    if (isPermissionKey(row.key)) {
+      overrides[row.key] = row.allowed;
+    }
+  }
+  return overrides;
+}
+
+export interface ActiveSessionContext {
+  role: Role;
+  permissions: PermissionOverrides;
+  permissionVersion: number;
+}
+
+/**
+ * Everything the root gate needs to revalidate a persisted MMKV session against
+ * SQLite in one pass: the live role, the live overrides, and the live
+ * permission version.
+ *
+ * Returns null for a user who is deactivated, deleted, in a deleted shop, or
+ * holding a role Beta does not assign — the same fail-closed set
+ * getActiveSessionRole rejects, so a session can never outlive the row it was
+ * minted from.
+ */
+export async function getActiveSessionContext(
+  userId: string,
+  shopId: string,
+): Promise<ActiveSessionContext | null> {
+  const [sessionUser] = await db
+    .select({ role: roles.name, permissionVersion: users.permissionVersion })
+    .from(users)
+    .innerJoin(shops, and(eq(shops.id, users.shopId), eq(shops.isDeleted, false)))
+    .innerJoin(
+      roles,
+      and(eq(roles.id, users.roleId), eq(roles.shopId, users.shopId), eq(roles.isDeleted, false)),
+    )
+    .where(
+      and(
+        eq(users.id, userId),
+        eq(users.shopId, shopId),
+        eq(users.isActive, true),
+        eq(users.isDeleted, false),
+      ),
+    )
+    .limit(1);
+
+  const role = toRole(sessionUser?.role);
+  if (!sessionUser || !role) {
+    return null;
+  }
+
+  return {
+    role,
+    permissions: await getUserPermissionOverrides(shopId, userId),
+    permissionVersion: sessionUser.permissionVersion,
+  };
+}
+
 
 /** Marks local cloud-link completion without enqueueing a sync row. */
 export async function markShopCloudLinked(shopId: string): Promise<void> {
@@ -122,7 +215,14 @@ export async function requirePermission(
   permission: Permission,
 ): Promise<void> {
   const role = toRole(await getActiveSessionRole(actorUserId, shopId));
-  if (!role || !hasPermission(role, permission)) {
+  if (!role) {
+    throw new NotAuthorizedError();
+  }
+  // Overrides are read from SQLite in the same breath as the role, never from
+  // the session store — an owner's grant or revoke arrives by sync, and the
+  // very next guarded action must honour it without waiting for a re-login.
+  const overrides = await getUserPermissionOverrides(shopId, actorUserId);
+  if (!resolvePermission(role, permission, overrides)) {
     throw new NotAuthorizedError();
   }
 }
@@ -157,6 +257,14 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
   // verifyPin below, until setOwnerPin overwrites it.
   const placeholderPinHash = await hashPin(generateId());
 
+  // Stored in ONE form. Phone is a credential now — it names the account on a
+  // fresh device, carries a unique index, and keys the login lockout — so
+  // '01712345678' and '+8801712345678' must not be two different shops.
+  const phone = normalizeBdPhone(input.phone);
+  if (!phone) {
+    throw new Error('Enter a valid Bangladeshi mobile number');
+  }
+
   await db.transaction(async (tx) => {
     const timestamp = new Date().toISOString();
     // shops.owner_id is intentionally NOT a foreign key (same reason as
@@ -166,7 +274,7 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
       id: shopId,
       ownerId: userId,
       name: input.shopName,
-      phone: input.phone,
+      phone,
       // CLAUDE.md rule 7: a fresh, unique, non-hardcoded id every time —
       // generateId() above, never reused or derived from device identity.
       createdAt: timestamp,
@@ -190,7 +298,7 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
       id: userId,
       shopId,
       name: input.shopName,
-      phone: input.phone,
+      phone,
       pinHash: placeholderPinHash,
       roleId: ownerRoleId,
       isActive: true,
@@ -207,6 +315,9 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
 // stored in plain text. Caller (PIN Setup screen) must not pass the raw PIN
 // to any logging path either.
 export async function setOwnerPin(userId: string, rawPin: string): Promise<void> {
+  // Before hashing: an owner whose PIN collides with a staff member's would be
+  // signed in as whichever row verifyPin reached first.
+  await assertPinUnique(rawPin, userId);
   const pinHash = await hashPin(rawPin);
   const values = stampUpdatedAt({ pinHash, pinSetAt: new Date().toISOString() });
   await db.transaction(async (tx) => {
@@ -224,11 +335,13 @@ export async function setOwnerPin(userId: string, rawPin: string): Promise<void>
 // Assumes one shop per device (Volume 0's P0 scope — multi-shop is P1), so
 // "every active user" means every active user in the local database, full
 // stop; this must be revisited if multi-shop ships.
-export async function verifyPin(rawPin: string): Promise<{ shopId: string; userId: string; role: Role } | null> {
+export async function verifyPin(
+  rawPin: string,
+): Promise<{ shopId: string; userId: string; role: Role; permissions: PermissionOverrides } | null> {
   const activeUsers = await db
     .select({ id: users.id, shopId: users.shopId, pinHash: users.pinHash, roleId: users.roleId })
     .from(users)
-    .where(and(eq(users.isActive, true), isNotNull(users.pinSetAt)));
+    .where(and(eq(users.isActive, true), eq(users.isDeleted, false), isNotNull(users.pinSetAt)));
 
   for (const user of activeUsers) {
     // Sequential, not Promise.all — a wrong PIN should not race real hashing
@@ -245,11 +358,46 @@ export async function verifyPin(rawPin: string): Promise<{ shopId: string; userI
       if (!role) {
         continue;
       }
-      return { shopId: user.shopId, userId: user.id, role };
+      // Carried into the session so route guards can hide what this staff
+      // member may not reach. It is a UI convenience only: every db/ write
+      // re-reads overrides from SQLite through requirePermission, and the
+      // server re-derives them again from its own tables.
+      const permissions = await getUserPermissionOverrides(user.shopId, user.id);
+      return { shopId: user.shopId, userId: user.id, role, permissions };
     }
   }
 
   return null;
+}
+
+/**
+ * Refuses a PIN that another live user on this device already has.
+ *
+ * verifyPin below matches a typed PIN against EVERY live user and returns the
+ * FIRST hit, because PIN Login has no "who are you" step. So two users sharing
+ * a PIN is not a cosmetic clash — it silently signs one of them in as the
+ * other, and a collision with the owner hands a staff member owner access.
+ *
+ * Enforced where the PIN is CHOSEN (owner setup, staff creation, PIN reset,
+ * self-service change) rather than at login, because at login it is far too
+ * late: one of the two is already locked out of their own account.
+ *
+ * `exceptUserId` lets somebody re-set their own PIN to what it already was.
+ */
+export async function assertPinUnique(rawPin: string, exceptUserId?: string): Promise<void> {
+  const liveUsers = await db
+    .select({ id: users.id, pinHash: users.pinHash })
+    .from(users)
+    .where(and(eq(users.isActive, true), eq(users.isDeleted, false), isNotNull(users.pinSetAt)));
+
+  for (const user of liveUsers) {
+    if (user.id === exceptUserId) {
+      continue;
+    }
+    if (await verifyPinHash(rawPin, user.pinHash)) {
+      throw new DuplicatePinError();
+    }
+  }
 }
 
 // Used by db/staff.ts's createStaff to attach a new staff member to the

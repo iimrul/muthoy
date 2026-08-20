@@ -8,6 +8,7 @@ import { AccessDenied } from '../components/ui/AccessDenied';
 import { StandardHeader } from '../components/ui/StandardHeader';
 import { currentBusinessDate, getCashSummary, setOpeningCash } from '../db/cash';
 import { expectedCash, type CashFormulaInput } from '../domain/cashFormula';
+import { captureSessionFor } from '../state/sessionGuard';
 import { usePermission } from '../state/usePermission';
 import { triggerSyncNow } from '../sync';
 
@@ -53,10 +54,22 @@ export default function CashSummaryScreen() {
     if (!session || !isAllowed) {
       return;
     }
+    // These are owner-only figures, read under the OUTGOING owner's id. If the
+    // device changes hands while the read is in flight, painting the result
+    // would put the previous owner's drawer on the incoming user's screen —
+    // the exact Day 11 leak, arriving by the back door.
+    const guard = captureSessionFor(session);
     try {
-      setSummary(await getCashSummary(session.shopId, session.userId, businessDate));
+      const next = await getCashSummary(session.shopId, session.userId, businessDate);
+      if (!guard || guard.isStale()) {
+        return;
+      }
+      setSummary(next);
       setError(null);
     } catch (caught) {
+      if (!guard || guard.isStale()) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : 'Cash summary failed to load.');
     }
   }, [businessDate, isAllowed, session]);
@@ -73,6 +86,14 @@ export default function CashSummaryScreen() {
     if (!session || !isAllowed) {
       return;
     }
+    // Pinned at action start: this closure outlives a device handover, and
+    // opening cash is money stamped with an actor id. db/cash.ts re-checks the
+    // same guard inside its transaction, which is what actually blocks a
+    // commit under the outgoing user.
+    const guard = captureSessionFor(session);
+    if (!guard) {
+      return;
+    }
     const parsed = openingCashFormSchema.safeParse({ openingCashTaka: Number(openingText.trim()) });
     if (!openingText.trim() || !parsed.success) {
       setError(parsed.success ? 'Enter a valid amount' : parsed.error.issues[0]?.message ?? 'Enter a valid amount');
@@ -85,13 +106,25 @@ export default function CashSummaryScreen() {
       await setOpeningCash({
         shopId: session.shopId,
         staffId: session.userId,
+        isStillActive: guard.isStillActive,
         businessDate,
         openingCash: fromTaka(parsed.data.openingCashTaka),
       });
+      // Committed and correctly attributed, so flush it either way —
+      // triggerSyncNow independently requires a live session on this shop.
       void triggerSyncNow(session.shopId);
+      // Everything below belongs to the user who pressed Save. After a
+      // handover it must not clear the incoming user's field or repaint the
+      // outgoing owner's figures.
+      if (guard.isStale()) {
+        return;
+      }
       setOpeningText('');
       await reload();
     } catch (caught) {
+      if (guard.isStale()) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : 'Opening cash could not be saved.');
     } finally {
       setIsSaving(false);

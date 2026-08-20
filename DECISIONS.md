@@ -844,3 +844,86 @@ One unrelated pre-existing test is red and was left alone as out of scope:
 out at 5000ms under full-suite parallel load (it passes alone at ~2.5s, already
 half its budget). Confirmed pre-existing — it fails identically with the Day 14
 test files excluded.
+
+---
+
+## 2026-08-18 — Multi-device inventory: stock becomes a derived ledger, not a synced column
+
+**The bug this replaces:** `batches.stock` was a plain LWW-synced integer.
+Two devices selling from the same batch offline each computed their own new
+absolute stock and pushed it; sync then kept whichever write had the later
+`updated_at` and silently discarded the other device's sale from the stock
+figure. Not a rare edge case — the default outcome of any two-device shop.
+
+**The fix, in both SQLite and Postgres:** `batches.stock` is now a derived
+projection — `stock = SUM(inventory_movements.change_qty)` — enforced by a
+trigger guard in each store (`batches_stock_guard` / SQLite,
+`batches_stock_is_ledger_derived` / Postgres) that rejects any write to
+`stock` not equal to `OLD.stock` plus the ledger delta being applied. Every
+stock change (sale, purchase, adjustment, opening quantity) is a signed
+`inventory_movements.change_qty` row; the apply trigger
+(`inventory_movement_applies_delta` / `apply_inventory_movement`) is the only
+writer of `stock`, and it **adds**, so two devices' concurrent deltas combine
+instead of one clobbering the other.
+
+**New batches start at `stock: 0`, then take an opening movement** through the
+same `addStock` path every later sale/purchase uses — never baked into the
+insert as a special case. Every batch's history is therefore complete back to
+row zero; there is no bootstrap exception for the guard to special-case.
+
+**Movements are append-only.** The existing UPDATE-immutability trigger is
+joined this round by a DELETE guard in both stores
+(`inventory_movement_is_undeletable` / `inventory_movement_no_delete`,
+Postgres errcode `MU007`) — a movement can never be physically removed, only
+tombstoned (`is_deleted`), and a tombstoned movement's delta deliberately
+stays in the ledger sum because it genuinely happened. No legitimate write
+path needs physical deletion.
+
+**Devices/cloud rows that predate the ledger** hold stock with no movement
+history at all — the guard would reject every future write to them. Migration
+`0006` (SQLite) and `20260818000000`/`20260818000100` (Postgres) backfill one
+synthetic `adjustment` movement per gap, using an id **deterministically
+derived from the batch's own UUID** (its version nibble set to `8`) so the
+device and the cloud, backfilling the same historical gap independently, mint
+the identical primary key and reconcile as a no-op instead of doubling the
+quantity. Both backfills fail loudly (abort, never skip) on a stock gap in a
+shop with no user row to attribute it to.
+
+**Hydration ordering:** `HYDRATION_TABLE_ORDER` now applies to both full and
+incremental pulls (previously only full hydration had it — an incremental-pull
+gap found and fixed this round). Full hydration for a fresh device runs as one
+transaction, so a device is never left observing a partially-applied ledger.
+
+**Offline reconciliation keeps oversells, flagged, never silently drops or
+clamps them** — an offline sale that oversells is written with `oversold_at`
+set; `displayableStock()` clamps only what the UI renders, never what is
+stored or summed.
+
+**Realtime is a signal, not a data channel.** `sync/realtime.ts` subscribes
+to `batches` (its `updated_at` moves on every applied delta, covering sales,
+purchases, returns, and adjustments alike) per shop; the payload itself is
+discarded, and receipt just triggers the existing incremental pull, so there
+remains exactly one apply path with FK ordering, LWW, and ledger idempotency
+all still enforced normally — no second, forked apply path for CDC payloads.
+
+**Invoice numbers gained a 12-character UUID-tail suffix**:
+`{INV|PUR}-{YYYY}-{6-digit-seq}-{12 uppercase hex}` (`domain/invoice.ts`). The
+sequence is still counted per-device and two phones can still both reach, say,
+document 11 — that is now expected and harmless, because the suffix (the
+UUID's own 48-bit node field, taken from the tail, not the fixed-nibble head)
+is what `sales_shop_invoice_unique` / `purchases_shop_invoice_unique`
+actually rests on. Before this, a same-sequence collision from two offline
+devices was silent, permanent data loss for the second sale at sync time.
+
+**Deferred, explicitly:**
+- The Dev/Test Postgres migration (both ledger migration files, plus the
+  read-only `backend/supabase/checks/ledger_invariant.sql` verification
+  query) is written and tested but **not yet pushed** to the linked Dev/Test
+  Supabase project.
+- Return/write-off UI does not exist yet. The ledger's `reason` vocabulary
+  (already used by the backfill's `adjustment` reason) supports it
+  structurally; no screen or dedicated reason code has been built.
+- Separate-device Owner/Staff login — a Staff member authenticating from
+  their own device rather than an Owner handing theirs over — is not yet
+  supported by the session/auth flow. Planned as the next phase after this
+  ledger/sync work lands.

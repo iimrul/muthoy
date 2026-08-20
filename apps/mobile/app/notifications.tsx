@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { EmptyState } from '../components/ui/EmptyState';
 import { StandardHeader } from '../components/ui/StandardHeader';
 import { listNotifications, markAsRead, type Notification } from '../db/notifications';
+import { captureSessionFor } from '../state/sessionGuard';
 import { useSessionStore } from '../state/sessionStore';
 
 const SEVERITY_STYLES = {
@@ -33,7 +34,6 @@ export default function NotificationCenterScreen() {
 
   useEffect(() => {
     // SQLite load-on-mount; TanStack Query is reserved for sync.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
   }, [reload]);
 
@@ -42,13 +42,21 @@ export default function NotificationCenterScreen() {
       if (!session) {
         return;
       }
+      // Read state is per-user: marking after a handover would hide an alert
+      // the incoming user has never seen.
+      const guard = captureSessionFor(session);
+      if (!guard) {
+        return;
+      }
       try {
         if (!item.isRead) {
-          await markAsRead(session.shopId, session.userId, item.id);
-          await reload();
+          await markAsRead(session.shopId, session.userId, item.id, guard.isStillActive);
+          await guard.ifLiveAsync(reload);
         }
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : 'Notification could not be marked as read.');
+        guard.ifLive(() =>
+          setError(caught instanceof Error ? caught.message : 'Notification could not be marked as read.'),
+        );
       }
     },
     [reload, session],

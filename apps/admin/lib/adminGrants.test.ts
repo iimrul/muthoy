@@ -57,8 +57,19 @@ describe('Day 14 admin Postgres privileges', () => {
 
   test('no migration weakens row level security', () => {
     expect(MIGRATIONS_SQL).not.toMatch(/disable\s+row\s+level\s+security/i);
-    expect(MIGRATIONS_SQL).not.toMatch(/drop\s+policy/i);
+    // An UNCONDITIONAL drop assumes a policy exists and leaves the table
+    // unprotected if the rest of the migration then fails. `if exists` is the
+    // only acceptable form, and it is how a policy gets REPLACED — which
+    // 20260819000000 does throughout, to stay re-runnable.
+    expect(MIGRATIONS_SQL).not.toMatch(/drop\s+policy\s+(?!if\s+exists)/i);
   });
+
+  // Whether the policies that SURVIVE all this actually protect anything is not
+  // a question text can answer — the previous blanket ban on `drop policy` was
+  // this test trying to answer it anyway, and it would have failed any
+  // re-runnable migration. It is now asserted against a real Postgres in
+  // backend/supabase/pgtest/migration.pgtest.ts, which applies every migration
+  // and checks the end state per table.
 
   test('the sync RPC lockdown is still in place', () => {
     for (const routine of ['sync_apply_row', 'sync_pull_changes']) {

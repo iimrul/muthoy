@@ -1,6 +1,7 @@
 import { and, count, desc, eq, isNull, ne } from 'drizzle-orm';
 import { generateId } from '../native/id';
 import { getActiveSessionRole, requireOwner } from './auth';
+import { assertSessionLive } from './errors';
 import { db } from './client';
 import { notifications } from './schema';
 
@@ -52,8 +53,21 @@ export async function getUnreadCount(shopId: string, actorUserId: string): Promi
   return row?.value ?? 0;
 }
 
-export async function markAsRead(shopId: string, actorUserId: string, notificationId: string): Promise<void> {
+// The only INTERACTIVE mutation in this file. Every other write here is a
+// background/system notification keyed to the SHOP, not to a login (see
+// native/notifications.ts and sync/stuckNotification.ts), and is deliberately
+// left unguarded — those jobs must keep running across a handover.
+export async function markAsRead(
+  shopId: string,
+  actorUserId: string,
+  notificationId: string,
+  isStillActive: () => boolean,
+): Promise<void> {
   const isOwner = await getActiveSessionRole(actorUserId, shopId) === 'owner';
+  // Read state is per-user, and this update is a bare db.update rather than a
+  // transaction, so the check sits immediately before it. Marking after a
+  // handover would hide an alert the incoming user has never seen.
+  assertSessionLive(isStillActive);
   await db
     .update(notifications)
     .set({

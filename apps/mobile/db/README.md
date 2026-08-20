@@ -53,6 +53,40 @@ or owner access, and never mints a session at all if its PIN is used
 (`verifyPin` skips a manager match). The full Owner/Manager/Staff matrix and
 owner-configurable per-staff permissions remain P1.
 
+### Per-staff permissions (migration 0007)
+
+`permissions` is ROLE-scoped and shared by everyone holding that role.
+`user_permissions` is the per-USER override layer an owner edits when adding or
+editing a staff member: one explicit allow/deny per key. An ABSENT key means
+"use the role default", so the table holds only deltas and a staff member on
+standard access carries no rows at all. This supersedes the "owner-configurable
+per-staff permissions remain P1" note above — they shipped here.
+
+Effective permission = role default, overridden per user
+(`domain/permissions.ts`'s `resolvePermission`, mirrored in SQL by
+`user_has_permission`). An OWNER ignores overrides entirely: the owner is the
+only account that can edit permissions, so honouring a stored
+`staff_management: false` against them would let one bad write — or one hostile
+sync payload — lock a shop out of its own administration with no way back in.
+
+`users.permission_version` is a read-only SQLite mirror of Postgres's revocation
+counter. Mobile code never increments it, and both outbox creation and push
+strip it from user payloads. Postgres triggers are the only authoritative
+writer; pulls populate the local mirror. A stale JWT is refreshed and retried
+once without consuming normal outbox attempts.
+
+`users.phone` became a CREDENTIAL in the same migration, unique among live users
+(`users_phone_unique`, partial on `is_deleted = false`). It is what names an
+account on a device whose SQLite is still empty; the offline PIN-only login on an
+already-enrolled device is unchanged. Staff created before 0007 have no number
+and keep working on their existing device, but cannot enrol a new one until the
+owner gives them one.
+
+Server-side enforcement is new too. Until 0007 RLS and the sync function asked
+only WHICH SHOP a row belonged to, so a tampered client could push a medicine, a
+stock adjustment, an expense or a users row unchallenged. `sync_row_permitted`
+now gates every pushed row, with restrictive RLS policies as defence in depth.
+
 Current owner-only permission keys: `staff_management` (`staff.ts`),
 `cash_management` (`cash.ts`, including its reads — see "Cash" below),
 `settings_manage` (`settings.ts`, including an owner's own PIN change —
@@ -107,7 +141,9 @@ purchase screens require an owner session; the DB functions independently
 revalidate the active owner from SQLite (including the active shop) rather than
 trusting the UI. Every operation is shop-scoped.
 
-Purchase invoice numbers use `PUR-{YYYY}-{6-digit-seq}`. Purchase creation is
+Purchase invoice numbers use `PUR-{YYYY}-{6-digit-seq}-{12 uppercase hex}`,
+the same suffixed format as sales — see "Inventory ledger" below. Purchase
+creation is
 one atomic transaction covering the header, items, batch stock, inventory
 movements, and—when COD—the supplier payment and cash-drawer recomputation.
 
@@ -179,6 +215,49 @@ Proven in `closed-day-guard.sqlite.test.ts`.
 
 Receipt-photo capture UI remains deferred — `recordExpense` accepts a
 `receiptPhotoUri` string today, but no screen produces one yet.
+
+## Inventory ledger
+
+`batches.stock` is a derived projection, not a synced column:
+`stock = SUM(inventory_movements.change_qty)`. This replaces a real bug — a
+plain LWW-synced `stock` column let two devices' offline sales silently
+overwrite one another instead of combining (full account in `DECISIONS.md`,
+2026-08-18).
+
+Every stock change — sale, purchase, adjustment, or a new batch's opening
+quantity — is a signed `inventory_movements` row, applied through `stockLedger
+.ts`'s `addStock`/`deductStock`. A new batch is inserted with `stock: 0`, then
+takes its opening quantity through that same path, never baked into the
+insert. `batches_stock_guard` (a SQLite trigger; `apply_inventory_movement`'s
+Postgres counterpart) rejects any write to `stock` that isn't `OLD.stock`
+plus the movement's own delta — `inventory_movements` triggers are the only
+writer of `stock` in either store. Movements are append-only: neither store
+allows `UPDATE` or physical `DELETE` on `inventory_movements`; correction is
+always a tombstone (`is_deleted`), whose delta deliberately stays in the sum.
+
+An offline oversell is kept and flagged (`oversold_at`), never silently
+dropped or clamped — `displayableStock()` clamps only what a screen renders.
+
+Devices/cloud rows that predate the ledger were backfilled by migration
+`0006` (see `migrations/`) using one synthetic `adjustment` movement per
+stock gap, with an id derived deterministically from the batch's own UUID (its
+version nibble forced to `8`) so the device and the cloud mint the identical
+id for the same historical gap and reconcile as a no-op rather than doubling
+the quantity.
+
+Sale and purchase invoice numbers share one format,
+`{INV|PUR}-{YYYY}-{6-digit-seq}-{12 uppercase hex}` (`domain/invoice.ts`). The
+sequence is still counted per device, so two phones can reach the same
+document number — that's expected; the 12-character suffix (taken from the
+tail of the row's own UUID) is what `sales_shop_invoice_unique` /
+`purchases_shop_invoice_unique` actually enforces, so a same-sequence
+collision from two offline devices no longer costs the second sale its sync.
+
+**Still pending:** the Postgres side of this ledger
+(`backend/supabase/migrations/`) is written and tested but not yet pushed to
+Dev/Test — see that directory's README. Return/write-off UI does not exist
+yet; the ledger's `reason` vocabulary supports it structurally but no screen
+uses it.
 
 ## Still stubs
 Unimplemented APIs remain in `settings.ts` (`getShopProfile`,

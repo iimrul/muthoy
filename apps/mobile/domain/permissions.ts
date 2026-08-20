@@ -31,10 +31,41 @@ export type Permission =
   // key only covers the separate admin surface for managing existing balances.
   | 'credit_management';
 
+/**
+ * Every permission key, in the order an owner sees them when configuring a
+ * staff member. Exported so the Staff form and key validation read ONE list —
+ * a key added here reaches the UI and is accepted without a second edit
+ * somewhere else.
+ */
+export const PERMISSION_KEYS: readonly Permission[] = [
+  'sales',
+  'inventory_view',
+  'inventory_write',
+  'credit_management',
+  'cash_management',
+  'staff_management',
+  'settings_manage',
+];
+
+const PERMISSION_KEY_SET: ReadonlySet<string> = new Set(PERMISSION_KEYS);
+
+/** Fail-closed narrowing for a key off the wire, MMKV, or a SQLite row. */
+export function isPermissionKey(value: unknown): value is Permission {
+  return typeof value === 'string' && PERMISSION_KEY_SET.has(value);
+}
+
 // Volume 0 Day 11's whole staff grant: sell, and look at stock. Everything
 // else — cash management, staff management/PIN reset, supplier/purchase and
-// any other inventory WRITE — stays owner-only for Beta.
-const STAFF_PERMISSIONS: readonly Permission[] = ['sales', 'inventory_view'];
+// any other inventory WRITE — stays owner-only unless the owner explicitly
+// grants it to one staff member (see PermissionOverrides below).
+export const STAFF_DEFAULT_PERMISSIONS: readonly Permission[] = ['sales', 'inventory_view'];
+
+/**
+ * An owner's explicit per-staff decisions, keyed by permission. An ABSENT key
+ * means "use the role default" — this map holds only deltas, which is why a
+ * staff member on standard access carries no override rows at all.
+ */
+export type PermissionOverrides = Partial<Record<Permission, boolean>>;
 
 export function hasPermission(role: Role, permission: Permission): boolean {
   // Owner = everything, expressed as a rule rather than a list, so a
@@ -42,7 +73,32 @@ export function hasPermission(role: Role, permission: Permission): boolean {
   if (role === 'owner') {
     return true;
   }
-  return STAFF_PERMISSIONS.includes(permission);
+  return STAFF_DEFAULT_PERMISSIONS.includes(permission);
+}
+
+/**
+ * The effective verdict: role default, overridden by the owner's per-staff
+ * decision where one exists.
+ *
+ * An OWNER ignores overrides entirely. That is deliberate and load-bearing: the
+ * owner is the only account that can edit permissions, so honouring a stored
+ * `staff_management: false` against them would let one bad write — or one
+ * hostile sync payload — lock a shop out of its own administration with no way
+ * back in. Owner stays "everything, as a rule".
+ *
+ * The server enforces this same shape in SQL (auth_has_permission). Both sides
+ * resolve default-then-override in the same order, so UI, local db/ guards and
+ * RLS cannot disagree about what a staff member may do.
+ */
+export function resolvePermission(
+  role: Role,
+  permission: Permission,
+  overrides: PermissionOverrides | undefined,
+): boolean {
+  if (role === 'owner') {
+    return true;
+  }
+  return overrides?.[permission] ?? hasPermission(role, permission);
 }
 
 /**

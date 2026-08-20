@@ -13,6 +13,7 @@ import { FormField } from '../../components/forms/FormField';
 import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createCustomer, listCustomersWithBalance } from '../../db/customers';
+import { captureSessionFor } from '../../state/sessionGuard';
 import { usePermission } from '../../state/usePermission';
 import { useUnreadCount } from '../../state/useUnreadCount';
 import { triggerSyncNow } from '../../sync';
@@ -37,10 +38,20 @@ export default function CreditSalesScreen() {
     if (!session || !isAllowed) {
       return;
     }
+    // Owner-only balances: a read that lands after the handover must not paint
+    // them for whoever is holding the phone now.
+    const guard = captureSessionFor(session);
     try {
-      setCustomerRows(await listCustomersWithBalance(session.shopId));
+      const rows = await listCustomersWithBalance(session.shopId);
+      if (!guard || guard.isStale()) {
+        return;
+      }
+      setCustomerRows(rows);
       setError(null);
     } catch (caught) {
+      if (!guard || guard.isStale()) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : 'Customer list failed to load.');
     }
   }, [isAllowed, session]);
@@ -55,15 +66,35 @@ export default function CreditSalesScreen() {
     if (!session || !isAllowed) {
       return;
     }
+    // react-hook-form awaits the zod resolver BEFORE calling this handler, so
+    // a handover can land in that gap and this closure still holds the
+    // outgoing `session`. captureSessionFor refuses outright when the store has
+    // already moved on, so createCustomer is never even reached.
+    const guard = captureSessionFor(session);
+    if (!guard) {
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
     try {
-      await createCustomer({ shopId: session.shopId, actorUserId: session.userId, ...values });
+      await createCustomer({
+        shopId: session.shopId,
+        actorUserId: session.userId,
+        isStillActive: guard.isStillActive,
+        ...values,
+      });
       void triggerSyncNow(session.shopId);
+      // Closing the form and repainting the list belong to the user who saved.
+      if (guard.isStale()) {
+        return;
+      }
       reset();
       setIsAdding(false);
       await reload();
     } catch (caught) {
+      if (guard.isStale()) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : 'Customer could not be saved.');
     } finally {
       setIsSubmitting(false);

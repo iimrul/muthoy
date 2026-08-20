@@ -10,7 +10,7 @@ import { asPaisa } from '@muthoy/types';
 
 const { db } = await import('./client');
 const schema = await import('./schema');
-const { batches, medicines, shops } = schema;
+const { batches, inventoryMovements, medicines, roles, shops, users } = schema;
 const { listBatchesByExpiry } = await import('./inventory');
 const { sqlite } = await import('./test/expo-sqlite');
 
@@ -31,6 +31,10 @@ function iso(offsetDays: number): string {
 function seedShop(id: string, name: string): void {
   const now = new Date().toISOString();
   db.insert(shops).values({ id, ownerId: `${id}-owner`, name, phone: '01700000000', createdAt: now, updatedAt: now }).run();
+  // An owner row so opening-stock movements have a real created_by to point
+  // at — inventory_movements.created_by is a restricted FK.
+  db.insert(roles).values({ id: `${id}-role`, shopId: id, name: 'owner', isSystem: true, createdAt: now, updatedAt: now }).run();
+  db.insert(users).values({ id: `${id}-owner`, shopId: id, name: 'Owner', pinHash: 'hash', pinSetAt: now, roleId: `${id}-role`, isActive: true, createdAt: now, updatedAt: now }).run();
 }
 
 function seedMedicine(id: string, shopId: string, name: string): void {
@@ -41,10 +45,19 @@ function seedMedicine(id: string, shopId: string, name: string): void {
 function seedBatch(id: string, shopId: string, medicineId: string, batchNo: string, expiryDate: string | null, stock: number, isDeleted = false): void {
   const now = new Date().toISOString();
   db.insert(batches).values({
-    id, shopId, medicineId, batchNo, expiryDate, stock,
+    id, shopId, medicineId, batchNo, expiryDate, stock: 0,
     purchasePrice: asPaisa(100), salePrice: asPaisa(200), isDeleted,
     createdAt: now, updatedAt: now,
   }).run();
+  // Opening quantity arrives as a movement, never as a directly-written
+  // absolute — migration 0006's triggers reject the latter outright.
+  if (stock !== 0) {
+    db.insert(inventoryMovements).values({
+      id: `${id}-opening`, shopId, batchId: id, changeQty: stock,
+      reason: 'purchase', createdBy: `${shopId}-owner`,
+      createdAt: now, updatedAt: now,
+    }).run();
+  }
 }
 
 beforeAll(() => {
@@ -54,6 +67,8 @@ beforeAll(() => {
   applyMigration('0003_curious_wild_pack.sql');
   applyMigration('0004_deep_boomer.sql');
   applyMigration('0005_eminent_legion.sql');
+  applyMigration('0006_inventory_movement_ledger.sql');
+  applyMigration('0007_staff_device_login.sql');
 
   seedShop(SHOP_ID, 'Expiry Test Shop');
   seedShop(OTHER_SHOP_ID, 'Other Shop');

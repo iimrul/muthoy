@@ -1,4 +1,4 @@
-import { hasPermissionForRoleName, type Permission } from '../domain/permissions';
+import { resolvePermission, toRole, type Permission } from '../domain/permissions';
 import { useSessionStore, type Session } from './sessionStore';
 
 // state/usePermission.ts — the route-level half of Volume 0 Day 11's
@@ -20,13 +20,17 @@ export interface PermissionCheck {
 
 export function usePermission(permission: Permission): PermissionCheck {
   const session = useSessionStore((state) => state.session);
+  // `session.role` is typed as Role but comes off persisted MMKV, so at runtime
+  // it can be any string — a P1 'manager', or a tampered value. toRole fails
+  // those closed here exactly as the db/ guards do, instead of letting an
+  // unnarrowed role fall through to the staff grant list.
+  const role = session ? toRole(session.role) : null;
   return {
     session,
-    // `session.role` is typed as Role but comes off persisted MMKV, so at
-    // runtime it can be any string — a P1 'manager', or a tampered value.
-    // hasPermissionForRoleName fails those closed here exactly as the db/
-    // guards do, instead of letting an unnarrowed role fall through to the
-    // staff grant list.
-    isAllowed: session !== null && hasPermissionForRoleName(session.role, permission),
+    // Same default-then-override resolution db/auth.ts's requirePermission and
+    // the server's auth_has_permission use, so a staff member is never shown a
+    // screen whose write the DB would then refuse — or refused a screen the
+    // owner granted them.
+    isAllowed: role !== null && resolvePermission(role, permission, session?.permissions),
   };
 }

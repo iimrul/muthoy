@@ -12,7 +12,7 @@ import { expectedCash, type CashFormulaInput } from '../domain/cashFormula';
 import { generateId } from '../native/id';
 import { requirePermission } from './auth';
 import { db, sqliteConnection } from './client';
-import { DayClosedError } from './errors';
+import { assertSessionLive, DayClosedError } from './errors';
 import { cashDrawer, expenses, payments, users } from './schema';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
 
@@ -145,6 +145,8 @@ function requireActiveUser(tx: DbTransaction, shopId: string, userId: string): v
 export interface RecordExpenseInput {
   shopId: string;
   staffId: string;
+  /** Device-handover guard — see db/errors.ts assertSessionLive. */
+  isStillActive: () => boolean;
   category: ExpenseCategory;
   amount: Paisa;
   description?: string;
@@ -174,6 +176,7 @@ export async function recordExpense(input: RecordExpenseInput): Promise<{ expens
   const expenseId = generateId();
 
   db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
     requireActiveUser(tx, input.shopId, input.staffId);
     const drawerId = ensureOpenDrawer(tx, input.shopId, businessDate, input.staffId, now);
 
@@ -247,6 +250,8 @@ export async function listExpenses(
 export interface SetOpeningCashInput {
   shopId: string;
   staffId: string;
+  /** Device-handover guard — see db/errors.ts assertSessionLive. */
+  isStillActive: () => boolean;
   businessDate: string;
   openingCash: Paisa;
 }
@@ -262,6 +267,7 @@ export async function setOpeningCash(input: SetOpeningCashInput): Promise<void> 
   }
 
   db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
     requireActiveUser(tx, input.shopId, input.staffId);
     const drawerId = ensureOpenDrawer(tx, input.shopId, input.businessDate, input.staffId, new Date());
     refreshClosingExpected(tx, input.shopId, input.businessDate, drawerId, {
@@ -465,6 +471,8 @@ export async function getEndOfDaySummary(
 
 export interface CloseDayInput {
   shopId: string;
+  /** Device-handover guard — see db/errors.ts assertSessionLive. */
+  isStillActive: () => boolean;
   businessDate: string;
   countedCash: Paisa;
   closedBy: string;
@@ -485,6 +493,7 @@ export async function closeDay(input: CloseDayInput): Promise<void> {
 
   const now = new Date();
   db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
     requireActiveUser(tx, input.shopId, input.closedBy);
     // A day with only credit sales has no drawer row yet; it still closes.
     // ensureOpenDrawer also rejects a second close of an already-closed day.

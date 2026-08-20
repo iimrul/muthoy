@@ -4,6 +4,7 @@
 import { asPaisa, type Paisa } from '@muthoy/types';
 import { generateId } from '../native/id';
 import { requireOwner } from './auth';
+import { assertSessionLive } from './errors';
 import { db, sqliteConnection } from './client';
 import { suppliers } from './schema';
 import { recordChange } from './sync-helpers';
@@ -64,6 +65,7 @@ export async function createSupplier(
   shopId: string,
   actorUserId: string,
   supplier: Omit<Supplier, 'id'>,
+  isStillActive: () => boolean,
 ): Promise<Supplier> {
   await requireOwner(shopId, actorUserId);
   const id = generateId();
@@ -72,8 +74,11 @@ export async function createSupplier(
     address: supplier.address ?? null, email: supplier.email ?? null,
     contactPerson: supplier.contactPerson ?? null, createdAt: now, updatedAt: now };
   await db.transaction(async (tx) => {
+    // Async callback — checked at both ends. See db/errors.ts.
+    assertSessionLive(isStillActive);
     await tx.insert(suppliers).values(values);
     recordChange(tx, { shopId, table: 'suppliers', rowId: id, op: 'insert', payload: values });
+    assertSessionLive(isStillActive);
   });
   return { id, ...supplier };
 }

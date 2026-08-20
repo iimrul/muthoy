@@ -12,14 +12,36 @@
 // Each test gets its own shop, so denials never depend on ordering.
 
 import { readFileSync } from 'node:fs';
+import { ALWAYS_LIVE } from './errors';
 import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { asPaisa, ZERO_PAISA } from '@muthoy/types';
 import { sqlite } from './test/expo-sqlite';
 
+// Phone became unique-per-live-user in migration 0007, so every staff member a
+// suite creates needs its own. Sequential rather than random: a collision would
+// surface as a confusing DuplicatePhoneError instead of as the assertion the
+// test is actually making.
+let staffPhoneCounter = 0;
+function nextStaffPhone(): string {
+  staffPhoneCounter += 1;
+  return `0171${String(staffPhoneCounter).padStart(7, '0')}`;
+}
+
+// PIN became unique-per-live-user too, for the same reason phone did: PIN Login
+// has no "who are you" step, so two users sharing one would make verifyPin
+// return whichever row it reached first. Suites stack several shops into one
+// database, and the check is device-wide, so the counter is too.
+let staffPinCounter = 1000;
+function nextStaffPin(): string {
+  staffPinCounter += 1;
+  return String(staffPinCounter);
+}
+
+
 const { db } = await import('./client');
 const schema = await import('./schema');
-const { batches, customers, medicines, roles, shops, suppliers, users } = schema;
+const { batches, inventoryMovements, customers, medicines, roles, shops, suppliers, users } = schema;
 const {
   closeDay,
   currentBusinessDate,
@@ -90,7 +112,10 @@ function seedShop(): Fixture {
   db.insert(users).values({ id: fixture.staffId, shopId: fixture.shopId, name: `Staff ${shop}`, pinHash: 'hash', pinSetAt: now, roleId: staffRoleId, isActive: true, createdAt: now, updatedAt: now }).run();
   db.insert(users).values({ id: fixture.managerId, shopId: fixture.shopId, name: `Manager ${shop}`, pinHash: 'hash', pinSetAt: now, roleId: managerRoleId, isActive: true, createdAt: now, updatedAt: now }).run();
   db.insert(medicines).values({ id: fixture.medicineId, shopId: fixture.shopId, name: 'Napa', createdAt: now, updatedAt: now }).run();
-  db.insert(batches).values({ id: fixture.batchId, shopId: fixture.shopId, medicineId: fixture.medicineId, batchNo: 'B1', expiryDate: '2027-01-31', stock: 100, purchasePrice: asPaisa(600), salePrice: asPaisa(1000), createdAt: now, updatedAt: now }).run();
+  db.insert(batches).values({ id: fixture.batchId, shopId: fixture.shopId, medicineId: fixture.medicineId, batchNo: 'B1', expiryDate: '2027-01-31', stock: 0, purchasePrice: asPaisa(600), salePrice: asPaisa(1000), createdAt: now, updatedAt: now }).run();
+  // Opening quantity is a movement, never a directly-written absolute —
+  // the ledger triggers in migration 0006 reject the latter outright.
+  db.insert(inventoryMovements).values({ id: fixtureId(shop, 12), shopId: fixture.shopId, batchId: fixture.batchId, changeQty: 100, reason: 'purchase', createdBy: fixture.ownerId, createdAt: now, updatedAt: now }).run();
   db.insert(suppliers).values({ id: fixture.supplierId, shopId: fixture.shopId, name: `Supplier ${shop}`, createdAt: now, updatedAt: now }).run();
   db.insert(customers).values({ id: fixture.customerId, shopId: fixture.shopId, name: `Customer ${shop}`, createdAt: now, updatedAt: now }).run();
   return fixture;
@@ -119,21 +144,23 @@ beforeAll(() => {
   applyMigration('0003_curious_wild_pack.sql');
   applyMigration('0004_deep_boomer.sql');
   applyMigration('0005_eminent_legion.sql');
+  applyMigration('0006_inventory_movement_ledger.sql');
+  applyMigration('0007_staff_device_login.sql');
 });
 
 describe('owner — full access', () => {
   it('may manage cash: opening cash, an expense, and closing the day', async () => {
     const fixture = seedShop();
 
-    await setOpeningCash({
+    await setOpeningCash({ isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId, staffId: fixture.ownerId,
       businessDate: BUSINESS_DATE, openingCash: asPaisa(50000),
     });
-    await recordExpense({
+    await recordExpense({ isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId, staffId: fixture.ownerId,
       category: 'rent', amount: asPaisa(2000),
     });
-    await closeDay({
+    await closeDay({ isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId, businessDate: BUSINESS_DATE,
       countedCash: asPaisa(48000), closedBy: fixture.ownerId,
     });
@@ -145,13 +172,13 @@ describe('owner — full access', () => {
   it('may manage staff: create, list, reset a PIN, and deactivate', async () => {
     const fixture = seedShop();
 
-    const created = await createStaff(fixture.shopId, fixture.ownerId, 'Arif', '4321');
+    const created = await createStaff(fixture.shopId, fixture.ownerId, { name: 'Arif', phone: nextStaffPhone(), rawPin: nextStaffPin(), permissions: {} }, ALWAYS_LIVE);
     await expect(listStaff(fixture.shopId, fixture.ownerId)).resolves.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: created.id, name: 'Arif', isActive: true })]),
     );
 
-    await resetStaffPin(created.id, '9876', fixture.ownerId);
-    await deactivateStaff(created.id, fixture.ownerId);
+    await resetStaffPin(created.id, '9876', fixture.ownerId, ALWAYS_LIVE);
+    await deactivateStaff(created.id, fixture.ownerId, ALWAYS_LIVE);
 
     // CLAUDE.md rule 8 / Day 11 checklist: audit rows record WHAT happened and
     // to whom, never a PIN value — and never the hash either.
@@ -166,7 +193,7 @@ describe('owner — full access', () => {
   it('may write inventory', async () => {
     const fixture = seedShop();
 
-    const result = await createMedicineWithBatch({
+    const result = await createMedicineWithBatch({ isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId, actorUserId: fixture.ownerId,
       name: 'Seclo', unitOfMeasure: 'piece', requiresPrescription: false, threshold: 10,
       firstBatch: { batchNo: 'OB1', expiryDate: '2028-01-01', quantity: 20, purchasePrice: asPaisa(500), salePrice: asPaisa(900) },
@@ -179,11 +206,11 @@ describe('owner — full access', () => {
   // CLAUDE.md rule 4: the formula is fixed and is not re-derived by the guard.
   it('reads the same cash figures through the gated APIs as the ledger holds', async () => {
     const fixture = seedShop();
-    await setOpeningCash({
+    await setOpeningCash({ isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId, staffId: fixture.ownerId,
       businessDate: BUSINESS_DATE, openingCash: asPaisa(50000),
     });
-    await recordExpense({
+    await recordExpense({ isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId, staffId: fixture.ownerId,
       category: 'transport', amount: asPaisa(7000),
     });
@@ -206,7 +233,7 @@ describe('owner — full access', () => {
     // short-circuited by the fixture's placeholder.
     sqlite.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(await hashPin('1234'), fixture.ownerId);
 
-    await changeOwnPin(fixture.ownerId, '1234', '5678');
+    await changeOwnPin(fixture.ownerId, '1234', '5678', ALWAYS_LIVE);
 
     const stored = (sqlite.prepare('SELECT pin_hash FROM users WHERE id = ?').get(fixture.ownerId) as unknown as { pin_hash: string }).pin_hash;
     await expect(verifyPinHash('5678', stored)).resolves.toBe(true);
@@ -220,7 +247,7 @@ describe('owner — full access', () => {
   it('may manage suppliers and purchases', async () => {
     const fixture = seedShop();
 
-    const supplier = await createSupplier(fixture.shopId, fixture.ownerId, { name: 'Beximco' });
+    const supplier = await createSupplier(fixture.shopId, fixture.ownerId, { name: 'Beximco' }, ALWAYS_LIVE);
     await expect(listSuppliers(fixture.shopId, fixture.ownerId)).resolves.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: supplier.id })]),
     );
@@ -228,7 +255,7 @@ describe('owner — full access', () => {
       expect.objectContaining({ supplier: expect.objectContaining({ id: supplier.id }) }),
     );
 
-    const purchase = await createPurchase({
+    const purchase = await createPurchase({ isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId, supplierId: fixture.supplierId, staffId: fixture.ownerId, paymentType: 'cod',
       lineItems: [{ medicineId: fixture.medicineId, batchNo: 'PB1', expiryDate: '2028-01-01', quantity: 10, purchasePrice: asPaisa(500), salePrice: asPaisa(900) }],
     });
@@ -243,13 +270,13 @@ describe('owner — full access', () => {
   it('may manage standalone customer credit: create a customer and collect a payment', async () => {
     const fixture = seedShop();
 
-    const customer = await createCustomer({ shopId: fixture.shopId, actorUserId: fixture.ownerId, name: 'Rina' });
+    const customer = await createCustomer({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, actorUserId: fixture.ownerId, name: 'Rina' });
 
-    await createSaleTransaction({
+    await createSaleTransaction({ isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId, staffId: fixture.ownerId, paymentType: 'credit', customerId: customer.id,
       lines: [{ medicineId: fixture.medicineId, deductions: [{ batchId: fixture.batchId, quantityDeducted: 1 }], unitPrice: asPaisa(1000) }],
     });
-    await collectPayment({
+    await collectPayment({ isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId, staffId: fixture.ownerId, customerId: customer.id, amount: asPaisa(400),
     });
 
@@ -266,7 +293,7 @@ describe('staff — what Volume 0 Day 11 still allows', () => {
   it('may make a sale', async () => {
     const fixture = seedShop();
 
-    const result = await createSaleTransaction({
+    const result = await createSaleTransaction({ isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId, staffId: fixture.staffId, paymentType: 'cash',
       lines: [{ medicineId: fixture.medicineId, deductions: [{ batchId: fixture.batchId, quantityDeducted: 2 }], unitPrice: asPaisa(1000) }],
     });
@@ -298,7 +325,7 @@ describe('staff — owner-only actions denied by direct navigation', () => {
     const fixture = seedShop();
 
     await expect(
-      setOpeningCash({
+      setOpeningCash({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, staffId: fixture.staffId,
         businessDate: BUSINESS_DATE, openingCash: asPaisa(50000),
       }),
@@ -312,7 +339,7 @@ describe('staff — owner-only actions denied by direct navigation', () => {
     const fixture = seedShop();
 
     await expect(
-      recordExpense({
+      recordExpense({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, staffId: fixture.staffId,
         category: 'transport', amount: asPaisa(7000),
       }),
@@ -328,7 +355,7 @@ describe('staff — owner-only actions denied by direct navigation', () => {
     const fixture = seedShop();
 
     await expect(
-      closeDay({
+      closeDay({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, businessDate: BUSINESS_DATE,
         countedCash: ZERO_PAISA, closedBy: fixture.staffId,
       }),
@@ -341,7 +368,7 @@ describe('staff — owner-only actions denied by direct navigation', () => {
     const fixture = seedShop();
     const usersBefore = countRows('users', fixture.shopId);
 
-    await expect(createStaff(fixture.shopId, fixture.staffId, 'Imposter', '1111')).rejects.toThrow(/Owner access only/);
+    await expect(createStaff(fixture.shopId, fixture.staffId, { name: 'Imposter', phone: nextStaffPhone(), rawPin: nextStaffPin(), permissions: {} }, ALWAYS_LIVE)).rejects.toThrow(/Owner access only/);
 
     expect(countRows('users', fixture.shopId)).toBe(usersBefore);
   });
@@ -354,10 +381,10 @@ describe('staff — owner-only actions denied by direct navigation', () => {
 
   it("cannot reset another user's PIN — the hash is untouched and nothing is audited", async () => {
     const fixture = seedShop();
-    const target = await createStaff(fixture.shopId, fixture.ownerId, 'Arif', '4321');
+    const target = await createStaff(fixture.shopId, fixture.ownerId, { name: 'Arif', phone: nextStaffPhone(), rawPin: nextStaffPin(), permissions: {} }, ALWAYS_LIVE);
     const hashBefore = pinHashOf(target.id);
 
-    await expect(resetStaffPin(target.id, '0000', fixture.staffId)).rejects.toThrow(/Owner access only/);
+    await expect(resetStaffPin(target.id, '0000', fixture.staffId, ALWAYS_LIVE)).rejects.toThrow(/Owner access only/);
 
     expect(pinHashOf(target.id)).toBe(hashBefore);
     expect(countRows('audit_logs', fixture.shopId)).toBe(0);
@@ -365,9 +392,9 @@ describe('staff — owner-only actions denied by direct navigation', () => {
 
   it('cannot deactivate another staff member', async () => {
     const fixture = seedShop();
-    const target = await createStaff(fixture.shopId, fixture.ownerId, 'Arif', '4321');
+    const target = await createStaff(fixture.shopId, fixture.ownerId, { name: 'Arif', phone: nextStaffPhone(), rawPin: nextStaffPin(), permissions: {} }, ALWAYS_LIVE);
 
-    await expect(deactivateStaff(target.id, fixture.staffId)).rejects.toThrow(/Owner access only/);
+    await expect(deactivateStaff(target.id, fixture.staffId, ALWAYS_LIVE)).rejects.toThrow(/Owner access only/);
 
     const row = sqlite.prepare('SELECT is_active FROM users WHERE id = ?').get(target.id) as unknown as { is_active: number };
     expect(row.is_active).toBe(1);
@@ -377,7 +404,7 @@ describe('staff — owner-only actions denied by direct navigation', () => {
     const fixture = seedShop();
 
     await expect(
-      createMedicineWithBatch({
+      createMedicineWithBatch({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, actorUserId: fixture.staffId,
         name: 'Sneaky', unitOfMeasure: 'piece', requiresPrescription: false, threshold: 10,
         firstBatch: { batchNo: 'SB1', expiryDate: '2028-01-01', quantity: 5, purchasePrice: asPaisa(500), salePrice: asPaisa(900) },
@@ -396,10 +423,10 @@ describe('staff — owner-only actions denied by direct navigation', () => {
 
     await expect(listSuppliers(fixture.shopId, fixture.staffId)).rejects.toThrow(/Owner access only/);
     await expect(getSupplierDetail(fixture.shopId, fixture.staffId, fixture.supplierId)).rejects.toThrow(/Owner access only/);
-    await expect(createSupplier(fixture.shopId, fixture.staffId, { name: 'Backdoor' })).rejects.toThrow(/Owner access only/);
+    await expect(createSupplier(fixture.shopId, fixture.staffId, { name: 'Backdoor' }, ALWAYS_LIVE)).rejects.toThrow(/Owner access only/);
     await expect(listPurchasesForSupplier(fixture.shopId, fixture.staffId, fixture.supplierId)).rejects.toThrow(/Owner access only/);
     await expect(
-      createPurchase({
+      createPurchase({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, supplierId: fixture.supplierId, staffId: fixture.staffId, paymentType: 'cod',
         lineItems: [{ medicineId: fixture.medicineId, batchNo: 'SP1', expiryDate: '2028-01-01', quantity: 10, purchasePrice: asPaisa(500), salePrice: asPaisa(900) }],
       }),
@@ -418,10 +445,10 @@ describe('staff — owner-only actions denied by direct navigation', () => {
     const queueBefore = queuedCount(fixture.shopId);
 
     await expect(
-      createCustomer({ shopId: fixture.shopId, actorUserId: fixture.staffId, name: 'Backdoor customer' }),
+      createCustomer({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, actorUserId: fixture.staffId, name: 'Backdoor customer' }),
     ).rejects.toThrow(/Owner access only/);
     await expect(
-      collectPayment({
+      collectPayment({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, staffId: fixture.staffId, customerId: fixture.customerId, amount: asPaisa(100),
       }),
     ).rejects.toThrow(/Owner access only/);
@@ -472,7 +499,7 @@ describe('settings — owner-sensitive actions denied', () => {
     const hashBefore = pinHashOf(fixture.staffId);
     const queueBefore = queuedCount(fixture.shopId);
 
-    await expect(changeOwnPin(fixture.staffId, '1234', '5678')).rejects.toThrow(/Owner access only/);
+    await expect(changeOwnPin(fixture.staffId, '1234', '5678', ALWAYS_LIVE)).rejects.toThrow(/Owner access only/);
 
     expect(pinHashOf(fixture.staffId)).toBe(hashBefore);
     expect(countRows('audit_logs', fixture.shopId)).toBe(0);
@@ -493,7 +520,7 @@ describe('settings — owner-sensitive actions denied', () => {
     const fixture = seedShop();
     sqlite.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(await hashPin('1234'), fixture.managerId);
 
-    await expect(changeOwnPin(fixture.managerId, '1234', '5678')).rejects.toThrow(/Owner access only/);
+    await expect(changeOwnPin(fixture.managerId, '1234', '5678', ALWAYS_LIVE)).rejects.toThrow(/Owner access only/);
     await expect(updateShopProfile(fixture.shopId, fixture.managerId, { name: 'Renamed' })).rejects.toThrow(/Owner access only/);
     expect(countRows('audit_logs', fixture.shopId)).toBe(0);
   });
@@ -515,7 +542,7 @@ describe('roles the session store cannot vouch for', () => {
     sqlite.prepare('UPDATE users SET is_active = 0 WHERE id = ?').run(fixture.ownerId);
 
     await expect(
-      recordExpense({ shopId: fixture.shopId, staffId: fixture.ownerId, category: 'rent', amount: asPaisa(100) }),
+      recordExpense({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, staffId: fixture.ownerId, category: 'rent', amount: asPaisa(100) }),
     ).rejects.toThrow(/Owner access only/);
   });
 
@@ -524,7 +551,7 @@ describe('roles the session store cannot vouch for', () => {
     const other = seedShop();
 
     await expect(
-      recordExpense({ shopId: fixture.shopId, staffId: other.ownerId, category: 'rent', amount: asPaisa(100) }),
+      recordExpense({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, staffId: other.ownerId, category: 'rent', amount: asPaisa(100) }),
     ).rejects.toThrow(/Owner access only/);
   });
 
@@ -538,8 +565,14 @@ describe('roles the session store cannot vouch for', () => {
     await expect(verifyPin('7391')).resolves.toBeNull();
     await expect(verifyPin('7392')).resolves.toEqual({
       shopId: fixture.shopId, userId: fixture.staffId, role: 'staff',
+      // No overrides configured, so the staff role default applies unchanged.
+      permissions: {},
     });
-  });
+    // Two bcrypt hashes plus two exhaustive verifyPin scans, over every staff
+    // member this suite has created. That is inherent to what is being proven —
+    // verifyPin has no "who are you" step, so it MUST compare against everyone —
+    // and the suite deliberately stacks many shops into one database.
+  }, 30_000);
 
   // The Manager matrix is P1 (Volume 0's scope lock). Until it ships, a
   // manager row must not inherit owner access — nor sell by default.
@@ -547,11 +580,11 @@ describe('roles the session store cannot vouch for', () => {
     const fixture = seedShop();
 
     await expect(
-      recordExpense({ shopId: fixture.shopId, staffId: fixture.managerId, category: 'rent', amount: asPaisa(100) }),
+      recordExpense({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, staffId: fixture.managerId, category: 'rent', amount: asPaisa(100) }),
     ).rejects.toThrow(/Owner access only/);
 
     await expect(
-      createSaleTransaction({
+      createSaleTransaction({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, staffId: fixture.managerId, paymentType: 'cash',
         lines: [{ medicineId: fixture.medicineId, deductions: [{ batchId: fixture.batchId, quantityDeducted: 1 }], unitPrice: asPaisa(1000) }],
       }),
@@ -566,12 +599,12 @@ describe('roles the session store cannot vouch for', () => {
     const queueBefore = queuedCount(fixture.shopId);
 
     await expect(
-      collectPayment({
+      collectPayment({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, staffId: fixture.managerId, customerId: fixture.customerId, amount: asPaisa(100),
       }),
     ).rejects.toThrow(/Owner access only/);
     await expect(
-      createCustomer({ shopId: fixture.shopId, actorUserId: fixture.managerId, name: 'Manager customer' }),
+      createCustomer({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, actorUserId: fixture.managerId, name: 'Manager customer' }),
     ).rejects.toThrow(/Owner access only/);
 
     expect(countRows('payments', fixture.shopId)).toBe(0);

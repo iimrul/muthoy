@@ -22,6 +22,7 @@ import {
   subscriptions,
   suppliers,
   syncQueue,
+  userPermissions,
   users,
 } from "./schema";
 import { generateId } from "../native/id";
@@ -32,6 +33,7 @@ export const TABLE_REGISTRY = {
   roles,
   permissions,
   users,
+  user_permissions: userPermissions,
   medicines,
   batches,
   inventory_movements: inventoryMovements,
@@ -52,14 +54,20 @@ export const TABLE_REGISTRY = {
 
 export type SyncTableName = keyof typeof TABLE_REGISTRY;
 
-// Full hydration buffers all pages, then applies parents before FK dependents.
-// Incremental pull ordering remains cursor-based and must not use this rank.
+// FK-safe apply order: every parent table precedes the tables that reference
+// it. `applyRemoteRows` sorts by this before writing, so BOTH pull paths get
+// it — full hydration and incremental alike. It used to be applied only to
+// hydration, which is how a movement could reach the incremental path ahead of
+// its own batch and wedge the pull on a foreign key it could never satisfy.
 export const HYDRATION_TABLE_ORDER = [
   "shops",
   "subscriptions",
   "roles",
   "permissions",
   "users",
+  // After `users` — every row points at one, so a fresh device that applied an
+  // override before its user would hit the foreign key and roll the page back.
+  "user_permissions",
   "medicines",
   "suppliers",
   "customers",
@@ -79,6 +87,34 @@ export const HYDRATION_TABLE_ORDER = [
 ] as const satisfies readonly SyncTableName[];
 export type SyncOperation = "insert" | "update" | "delete";
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * What became of one pulled row.
+ *
+ * `deferred` means the row's parent has not arrived yet, so nothing was
+ * written and the caller must present it again alongside a later page. It is
+ * NOT a failure and NOT a drop: the pull cursor is held back until every
+ * deferred row has landed, so the pages carrying the parent are re-fetched
+ * rather than skipped past.
+ */
+export type RemoteRowResult = "applied" | "skipped_stale" | "deferred";
+
+export interface ApplyRemoteRowsOptions {
+  /**
+   * True when the caller is mid-pagination and more pages are still coming,
+   * so a row whose parent has not arrived can wait for one of them.
+   *
+   * False — the default — means this is the COMPLETE set. A missing parent is
+   * then a real inconsistency, and it is raised inside the transaction so the
+   * whole batch rolls back rather than committing a shop that is missing part
+   * of its history.
+   */
+  moreToCome?: boolean;
+}
+
+const HYDRATION_TABLE_RANK = new Map<SyncTableName, number>(
+  HYDRATION_TABLE_ORDER.map((tableName, index) => [tableName, index]),
+);
 
 export interface PendingSyncRow {
   id: string;
@@ -163,6 +199,14 @@ function readCompleteRow(
       return (
         tx.select().from(users).where(eq(users.id, rowId)).get() ??
         missingRow(tableName, rowId)
+      );
+    case "user_permissions":
+      return (
+        tx
+          .select()
+          .from(userPermissions)
+          .where(eq(userPermissions.id, rowId))
+          .get() ?? missingRow(tableName, rowId)
       );
     case "medicines":
       return (
@@ -295,9 +339,13 @@ function buildDeletePayload(
   return { ...markers, shopId: params.shopId };
 }
 function toSyncPayload(tableName: SyncTableName, row: Record<string, unknown>): Record<string, unknown> {
-  if (tableName !== "shops") return row;
   const payload = { ...row };
-  delete payload.cloudLinkedAt;
+  if (tableName === "shops") {
+    delete payload.cloudLinkedAt;
+  }
+  if (tableName === "users") {
+    delete payload.permissionVersion;
+  }
   return payload;
 }
 export function recordChange(
@@ -344,10 +392,61 @@ function applyToTable<T extends SyncTableName>(
   tx: DbTransaction,
   tableName: T,
   row: Record<string, unknown>,
-): "applied" | "skipped_stale" {
+): RemoteRowResult {
   const rowId = row.id;
   if (typeof rowId !== "string") {
     throw new Error(`Remote ${tableName} row has no id`);
+  }
+
+  if (tableName === "inventory_movements") {
+    // A movement whose batch is not here YET, rather than not here at all.
+    //
+    // The server returns `order by updated_at, table_name, row_id`, and its
+    // apply trigger stamps a batch at `greatest(updated_at, now())` every time
+    // a movement lands — so a batch row is always timestamped at or after the
+    // movement that touched it, and sorts AFTER it on the wire. A brand-new
+    // batch therefore reaches this device behind its own opening movement,
+    // which used to hit the batch_id foreign key and roll the whole page back.
+    // The page never changes, so the retry failed identically: the device was
+    // wedged on that page for good.
+    //
+    // Ordering the rows we hold fixes it inside one page (see
+    // applyRemoteRows). It cannot fix a page BOUNDARY falling between the two,
+    // which is what this handles: report the row, let the caller carry it to
+    // the next page's apply, and hold the cursor until it lands.
+    const batchId = row.batchId;
+    if (typeof batchId !== "string") {
+      throw new Error(`Remote inventory_movements row ${rowId} has no batch_id`);
+    }
+    const parent = tx
+      .select({ id: batches.id })
+      .from(batches)
+      .where(eq(batches.id, batchId))
+      .get();
+    if (!parent) {
+      return "deferred";
+    }
+  }
+
+  if (tableName === "user_permissions") {
+    // Same page-boundary hazard as inventory_movements above, one table over: a
+    // staff member and the overrides the owner set for them are written in the
+    // same breath, so they carry near-identical timestamps and can land either
+    // side of a page split. HYDRATION_TABLE_ORDER fixes it WITHIN a page; this
+    // carries the row to the next page's apply instead of failing the foreign
+    // key and wedging the pull on a page that will never change.
+    const userId = row.userId;
+    if (typeof userId !== "string") {
+      throw new Error(`Remote user_permissions row ${rowId} has no user_id`);
+    }
+    const parent = tx
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, userId))
+      .get();
+    if (!parent) {
+      return "deferred";
+    }
   }
 
   if (tableName === "audit_logs") {
@@ -363,6 +462,24 @@ function applyToTable<T extends SyncTableName>(
       timestampMs(row.updatedAt, "Remote")
   ) {
     return "skipped_stale";
+  }
+
+  if (tableName === "batches") {
+    // A batch's METADATA (price, expiry, batch_no) is last-write-wins like
+    // everything else. Its `stock` is not, and is never accepted from the
+    // wire: this device derives it from its own copy of the movement ledger,
+    // via the apply trigger.
+    //
+    // Taking the remote absolute here would double-count on hydration —
+    // HYDRATION_TABLE_ORDER applies `batches` before `inventory_movements`, so
+    // a batch seeded with the server's already-summed figure would then have
+    // every one of those same movements replayed on top of it. Preserving the
+    // local figure (0 for a batch this device has not seen) lets the movements
+    // that follow build the correct sum exactly once, and keeps unpushed local
+    // deltas from being erased by a server figure that cannot include them yet.
+    const preserved = local ? { stock: local.stock, oversoldAt: local.oversoldAt } : { stock: 0, oversoldAt: null };
+    upsertRemoteRow(tx, tableName, { ...row, ...preserved });
+    return "applied";
   }
 
   // Every non-audit table uses strict LWW: equal timestamps are no-ops.
@@ -427,6 +544,12 @@ function upsertRemoteRow(
         .onConflictDoUpdate({ target: users.id, set: row })
         .run();
       break;
+    case "user_permissions":
+      tx.insert(userPermissions)
+        .values(row as typeof userPermissions.$inferInsert)
+        .onConflictDoUpdate({ target: userPermissions.id, set: row })
+        .run();
+      break;
     case "medicines":
       tx.insert(medicines)
         .values(row as typeof medicines.$inferInsert)
@@ -440,9 +563,15 @@ function upsertRemoteRow(
         .run();
       break;
     case "inventory_movements":
+      // DO NOTHING, not DO UPDATE: the ledger is append-only and a movement's
+      // id is its operation id. A row redelivered by a retry, a crash-replay,
+      // or an overlapping pull page conflicts here and inserts nothing, so the
+      // `inventory_movement_applies_delta` trigger (INSERT-only) cannot apply
+      // the same delta twice. That is the entire idempotency mechanism — there
+      // is no separate dedupe table to keep in step.
       tx.insert(inventoryMovements)
         .values(row as typeof inventoryMovements.$inferInsert)
-        .onConflictDoUpdate({ target: inventoryMovements.id, set: row })
+        .onConflictDoNothing({ target: inventoryMovements.id })
         .run();
       break;
     case "customers":
@@ -529,23 +658,62 @@ function upsertRemoteRow(
 export function applyRemoteRow(
   tableName: SyncTableName,
   snakeCaseRow: Record<string, unknown>,
-): "applied" | "skipped_stale" {
+): RemoteRowResult {
   return db.transaction((tx) =>
     applyToTable(tx, tableName, toCamelCaseRow(snakeCaseRow)),
   );
 }
 
+/**
+ * Applies a batch of pulled rows in ONE transaction, parents before dependents.
+ *
+ * The ordering lives HERE, not in the caller. It used to live in sync/pull.ts
+ * and was applied only to full hydration, so the incremental pull applied rows
+ * in wire order — and wire order routinely puts an inventory movement ahead of
+ * the batch it references. Every caller now gets a foreign-key-safe order it
+ * cannot opt out of, and there is one place to keep correct instead of one per
+ * call site.
+ *
+ * Rows of the SAME table keep the order they were given, so last-write-wins
+ * still resolves the way the server sent it. The returned array is aligned
+ * with the CALLER's order, not the apply order.
+ */
 export function applyRemoteRows(
   changes: readonly {
     tableName: SyncTableName;
     row: Record<string, unknown>;
   }[],
-): ("applied" | "skipped_stale")[] {
-  return db.transaction((tx) =>
-    changes.map(({ tableName, row }) =>
-      applyToTable(tx, tableName, toCamelCaseRow(row)),
-    ),
-  );
+  options: ApplyRemoteRowsOptions = {},
+): RemoteRowResult[] {
+  const applyOrder = changes
+    .map((change, index) => ({ change, index }))
+    .sort(
+      (left, right) =>
+        HYDRATION_TABLE_RANK.get(left.change.tableName)! -
+          HYDRATION_TABLE_RANK.get(right.change.tableName)! ||
+        left.index - right.index,
+    );
+
+  const results = new Array<RemoteRowResult>(changes.length);
+  db.transaction((tx) => {
+    for (const { change, index } of applyOrder) {
+      const result = applyToTable(
+        tx,
+        change.tableName,
+        toCamelCaseRow(change.row),
+      );
+      if (result === "deferred" && !options.moreToCome) {
+        // Thrown from INSIDE the transaction, deliberately: every row applied
+        // so far rolls back with it. Committing them and reporting the problem
+        // afterwards is what left a half-hydrated shop on disk.
+        throw new Error(
+          `Remote ${change.tableName} row ${String(change.row.id)} references a parent that never arrived`,
+        );
+      }
+      results[index] = result;
+    }
+  });
+  return results;
 }
 
 export function listPendingSyncRows(

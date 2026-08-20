@@ -72,6 +72,8 @@ describe('notification DB queries on real SQLite', () => {
     applyMigration('0003_curious_wild_pack.sql');
     applyMigration('0004_deep_boomer.sql');
     applyMigration('0005_eminent_legion.sql');
+    applyMigration('0006_inventory_movement_ledger.sql');
+  applyMigration('0007_staff_device_login.sql');
     sqlite.prepare('INSERT INTO shops (id, owner_id, name, phone) VALUES (?, ?, ?, ?)').run('shop-1', 'owner-1', 'Shop One', '01700000001');
     sqlite.prepare('INSERT INTO shops (id, owner_id, name, phone) VALUES (?, ?, ?, ?)').run('shop-2', 'owner-2', 'Shop Two', '01700000002');
   });

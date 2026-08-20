@@ -11,6 +11,7 @@ import { createSaleTransaction } from '../../db/sales';
 import { deduct, InsufficientStockError } from '../../domain/fefo';
 import { runNotificationChecks } from '../../native/notifications';
 import { useCartStore } from '../../state/cartStore';
+import { captureSessionFor } from '../../state/sessionGuard';
 import { useSessionStore } from '../../state/sessionStore';
 import { triggerSyncNow } from '../../sync';
 
@@ -72,6 +73,21 @@ export default function CheckoutScreen() {
     : undefined;
 
   const handleConfirm = async () => {
+    // handleConfirm captures `session` and `items` at the render that created
+    // it, and both survive a device handover that lands mid-await. Attribution
+    // belongs to whoever is logged in AT COMMIT TIME, so this unit of work is
+    // pinned to the login it started under (Volume 0 Days 5/11;
+    // state/switchUser.ts). An epoch, not a user id: owner → staff → owner is
+    // two real handovers that a userId comparison cannot see, and the cart it
+    // would commit was cleared in between.
+    // captureSessionFor, not captureSession: the store is written
+    // synchronously but React re-renders afterwards, so a press landing in
+    // that window would otherwise pin a FRESH epoch to the OUTGOING session
+    // this closure still holds, and the guard could never go stale.
+    const guard = captureSessionFor(session);
+    if (!guard) {
+      return;
+    }
     setError(null);
     if (items.length === 0) {
       setError('Cart is empty.');
@@ -114,22 +130,42 @@ export default function CheckoutScreen() {
         unitPrice: item.unitPrice,
         discount: item.discount,
       }));
+      // The device changed hands while the batches were being read. The
+      // outgoing user's cart is already gone from the store; committing it
+      // now would stamp their staff_id on a sale nobody is standing behind
+      // and silently deduct real stock.
+      if (guard.isStale()) {
+        setError('The active user changed. This sale was not saved.');
+        return;
+      }
       const result = await createSaleTransaction({
         shopId: session.shopId,
         staffId: session.userId,
+        // Re-checked inside the transaction itself. The check above cannot
+        // cover the await on requirePermission inside createSaleTransaction.
+        isStillActive: guard.isStillActive,
         paymentType,
         amountTendered: cashTendered,
         customerId: paymentType === 'credit' && !isNewCustomer ? selectedCustomerId ?? undefined : undefined,
         newCustomer,
         lines,
       });
+      // Committed under a verified-live session, so the cart it came from is
+      // this session's cart and clearing it is correct.
+      clearCart();
       void triggerSyncNow(session.shopId);
 
       // The sale is already committed. Notification failures must not affect it.
       void runNotificationChecks(session.shopId).catch((error: unknown) => {
         console.warn('Post-sale notification check failed', error);
       });
-      clearCart();
+      // Last boundary: a handover during the commit leaves a correctly
+      // attributed sale that cannot be unwound, so it is kept — but the
+      // outgoing user's invoice and change due must never land on the
+      // incoming user's screen. app/index.tsx's gate routes them to PIN Login.
+      if (guard.isStale()) {
+        return;
+      }
       router.replace({
         pathname: './confirmation',
         params: {

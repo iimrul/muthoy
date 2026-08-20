@@ -7,6 +7,7 @@ import { EXPENSE_CATEGORIES, expenseFormSchema, type ExpenseCategory } from '@mu
 import { AccessDenied } from '../components/ui/AccessDenied';
 import { StandardHeader } from '../components/ui/StandardHeader';
 import { currentBusinessDate, listExpenses, recordExpense, type ExpenseRow } from '../db/cash';
+import { captureSessionFor } from '../state/sessionGuard';
 import { usePermission } from '../state/usePermission';
 import { triggerSyncNow } from '../sync';
 
@@ -44,10 +45,20 @@ export default function ExpenseTrackingScreen() {
     if (!session || !isAllowed) {
       return;
     }
+    // Owner-only rows read under the OUTGOING owner's id: a read that lands
+    // after the handover must not paint them for whoever holds the phone now.
+    const guard = captureSessionFor(session);
     try {
-      setTodaysExpenses(await listExpenses(session.shopId, session.userId, businessDate));
+      const rows = await listExpenses(session.shopId, session.userId, businessDate);
+      if (!guard || guard.isStale()) {
+        return;
+      }
+      setTodaysExpenses(rows);
       setError(null);
     } catch (caught) {
+      if (!guard || guard.isStale()) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "Today's expenses failed to load.");
     }
   }, [businessDate, isAllowed, session]);
@@ -67,6 +78,12 @@ export default function ExpenseTrackingScreen() {
     if (!session || !isAllowed) {
       return;
     }
+    // Pinned at action start. Survives a device handover; db/cash.ts re-checks
+    // this same guard inside the transaction.
+    const guard = captureSessionFor(session);
+    if (!guard) {
+      return;
+    }
     const parsed = expenseFormSchema.safeParse({
       category,
       amountTaka: Number(amountText.trim()),
@@ -83,16 +100,24 @@ export default function ExpenseTrackingScreen() {
       await recordExpense({
         shopId: session.shopId,
         staffId: session.userId,
+        isStillActive: guard.isStillActive,
         category: parsed.data.category,
         // fromTaka is the one place taka becomes paisa (packages/types).
         amount: fromTaka(parsed.data.amountTaka),
         description: parsed.data.description,
       });
       void triggerSyncNow(session.shopId);
+      // The form reset and the reload below are the outgoing user's screen.
+      if (guard.isStale()) {
+        return;
+      }
       setAmountText('');
       setDescription('');
       await reload();
     } catch (caught) {
+      if (guard.isStale()) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : 'Expense could not be saved.');
     } finally {
       setIsSubmitting(false);

@@ -15,7 +15,8 @@ import { generateId } from '../native/id';
 import { activeBatch, sortByExpiry, type Batch } from '../domain/fefo';
 import { expiryStatus, type ExpiryStatus } from '../domain/notificationRules';
 import { requirePermission } from './auth';
-import { DuplicateBatchError, isUniqueConstraintViolation } from './errors';
+import { assertSessionLive, DuplicateBatchError, isUniqueConstraintViolation } from './errors';
+import { addStock } from './stockLedger';
 import { recordChange } from './sync-helpers';
 
 const BATCH_UNIQUE_COLUMNS = ['shop_id', 'medicine_id', 'batch_no'];
@@ -80,6 +81,8 @@ export interface CreateMedicineInput {
   shopId: string;
   /** Logged-in user performing the write — checked against `inventory_write`. */
   actorUserId: string;
+  /** Liveness of the login this write belongs to (state/sessionGuard.ts). */
+  isStillActive: () => boolean;
   name: string;
   generic?: string;
   manufacturer?: string;
@@ -110,6 +113,11 @@ export async function createMedicineWithBatch(
   const batchId = generateId();
 
   await db.transaction(async (tx) => {
+    // This callback AWAITS between writes, so unlike the synchronous ones in
+    // cash/customers/purchases/sales a handover can land mid-transaction.
+    // Checked at both ends: the trailing check turns a mid-flight switch into
+    // a throw, which rolls the whole transaction back.
+    assertSessionLive(input.isStillActive);
     const now = new Date().toISOString();
     const medicineValues = {
       id: medicineId,
@@ -134,13 +142,23 @@ export async function createMedicineWithBatch(
       medicineId,
       batchNo: input.firstBatch.batchNo,
       expiryDate: input.firstBatch.expiryDate ?? null,
-      stock: input.firstBatch.quantity,
+      // Opening quantity arrives as a movement, never as a seeded absolute —
+      // `batches.stock` is the ledger's projection everywhere (schema.ts).
+      stock: 0,
       purchasePrice: input.firstBatch.purchasePrice,
       salePrice: input.firstBatch.salePrice,
       createdAt: now, updatedAt: now,
     };
     await tx.insert(batches).values(batchValues);
     recordChange(tx, { shopId: input.shopId, table: 'batches', rowId: batchId, op: 'insert', payload: batchValues });
+    addStock(tx, {
+      shopId: input.shopId,
+      batchId,
+      quantity: input.firstBatch.quantity,
+      reason: 'purchase',
+      createdBy: input.actorUserId,
+    });
+    assertSessionLive(input.isStillActive);
   });
 
   return { medicineId, batchId };
@@ -150,6 +168,8 @@ export interface AddBatchInput {
   shopId: string;
   /** Logged-in user performing the write — checked against `inventory_write`. */
   actorUserId: string;
+  /** Liveness of the login this write belongs to (state/sessionGuard.ts). */
+  isStillActive: () => boolean;
   medicineId: string;
   batchNo: string;
   expiryDate?: string;
@@ -168,6 +188,8 @@ export async function addBatchToMedicine(input: AddBatchInput): Promise<{ batchI
   const batchId = generateId();
   try {
     await db.transaction(async (tx) => {
+      // Async callback — checked at both ends. See createMedicineWithBatch.
+      assertSessionLive(input.isStillActive);
       const existing = await tx.select({ id: batches.id }).from(batches).where(and(
         eq(batches.shopId, input.shopId), eq(batches.medicineId, input.medicineId), eq(batches.batchNo, input.batchNo),
       )).get();
@@ -176,11 +198,21 @@ export async function addBatchToMedicine(input: AddBatchInput): Promise<{ batchI
       const values = {
         id: batchId, shopId: input.shopId, medicineId: input.medicineId,
         batchNo: input.batchNo, expiryDate: input.expiryDate ?? null,
-        stock: input.quantity, purchasePrice: input.purchasePrice, salePrice: input.salePrice,
+        // See createMedicineWithBatch: the movement below is the only source
+        // of this batch's opening quantity.
+        stock: 0, purchasePrice: input.purchasePrice, salePrice: input.salePrice,
         createdAt: now, updatedAt: now,
       };
       await tx.insert(batches).values(values);
       recordChange(tx, { shopId: input.shopId, table: 'batches', rowId: batchId, op: 'insert', payload: values });
+      addStock(tx, {
+        shopId: input.shopId,
+        batchId,
+        quantity: input.quantity,
+        reason: 'purchase',
+        createdBy: input.actorUserId,
+      });
+      assertSessionLive(input.isStillActive);
     });
   } catch (err) {
     if (err instanceof DuplicateBatchError || isUniqueConstraintViolation(err, 'batches', BATCH_UNIQUE_COLUMNS)) {

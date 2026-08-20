@@ -13,6 +13,7 @@ import { FormField } from '../../components/forms/FormField';
 import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createSupplier, listSuppliers } from '../../db/suppliers';
+import { captureSessionFor } from '../../state/sessionGuard';
 import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
@@ -44,7 +45,6 @@ export default function SupplierListScreen() {
 
   useEffect(() => {
     // SQLite load-on-mount; TanStack Query is reserved for sync.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
   }, [reload]);
 
@@ -52,16 +52,23 @@ export default function SupplierListScreen() {
     if (!session || !isAllowed) {
       return;
     }
+    // Owner-only write, reached through react-hook-form's awaited resolver.
+    const guard = captureSessionFor(session);
+    if (!guard) {
+      return;
+    }
     setIsSubmitting(true);
     setError(null);
     try {
-      await createSupplier(session.shopId, session.userId, values);
+      await createSupplier(session.shopId, session.userId, values, guard.isStillActive);
       void triggerSyncNow(session.shopId);
-      reset();
-      setIsAdding(false);
-      await reload();
+      guard.ifLive(() => {
+        reset();
+        setIsAdding(false);
+      });
+      await guard.ifLiveAsync(reload);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Supplier could not be saved.');
+      guard.ifLive(() => setError(caught instanceof Error ? caught.message : 'Supplier could not be saved.'));
     } finally {
       setIsSubmitting(false);
     }

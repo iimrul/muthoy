@@ -16,6 +16,7 @@ import {
   type MedicineDetail,
 } from '../../db/inventory';
 import { DuplicateBatchError } from '../../db/errors';
+import { captureSessionFor } from '../../state/sessionGuard';
 import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
@@ -70,11 +71,18 @@ export default function BatchDetailScreen() {
       if (!session || !medicineId || !canWriteInventory) {
         return;
       }
+      // Adding stock is an actor-stamped mutation, and react-hook-form's
+      // resolver already awaited before this handler ran.
+      const guard = captureSessionFor(session);
+      if (!guard) {
+        return;
+      }
       setIsSubmitting(true);
       try {
         await addBatchToMedicine({
           shopId: session.shopId,
           actorUserId: session.userId,
+          isStillActive: guard.isStillActive,
           medicineId,
           batchNo: input.batchNo,
           expiryDate: input.expiryDate,
@@ -83,10 +91,16 @@ export default function BatchDetailScreen() {
           salePrice: fromTaka(input.salePrice),
         });
         void triggerSyncNow(session.shopId);
-        reset();
-        setIsAdding(false);
-        await reload();
+        // Form reset and list repaint belong to the user who added the batch.
+        guard.ifLive(() => {
+          reset();
+          setIsAdding(false);
+        });
+        await guard.ifLiveAsync(reload);
       } catch (err) {
+        if (guard.isStale()) {
+          return;
+        }
         if (err instanceof DuplicateBatchError) {
           setError('batchNo', { message: err.message });
           return;

@@ -12,14 +12,23 @@ import { pullChanges } from "../../sync/pull";
 const RESEND_COOLDOWN_SECONDS = 30;
 
 export default function OtpVerifyScreen() {
-  const { phone, shopName, resumeShopId } = useLocalSearchParams<{
+  const { phone, shopName, resumeShopId, resumeOwnerUserId } = useLocalSearchParams<{
     phone: string;
     shopName?: string;
     resumeShopId?: string;
+    // Supplied by app/index.tsx when resuming an interrupted registration, so
+    // linkDeviceToShop can bind this auth account to the owner's app user (see
+    // sync/linkDevice.ts). The users row exists locally but has not synced up
+    // yet, which is why the id has to travel with the request.
+    resumeOwnerUserId?: string;
   }>();
   const inputRef = useRef<TextInput>(null);
   const verifiedSessionRef = useRef<Session | null>(null);
   const pendingShopIdRef = useRef<string | null>(null);
+  // Held alongside the shop id across a retry, for the same reason: a second
+  // attempt must reuse the owner row the first one created rather than binding
+  // a different id.
+  const pendingOwnerUserIdRef = useRef<string | null>(null);
   const resendInFlightRef = useRef(false);
   const recoveryOtpRequestedRef = useRef(false);
   const [code, setCode] = useState("");
@@ -103,7 +112,7 @@ export default function OtpVerifyScreen() {
         const linkedShopId = session.user.app_metadata.shop_id;
 
         if (resumeShopId) {
-          await linkDeviceToShop(resumeShopId);
+          await linkDeviceToShop(resumeShopId, resumeOwnerUserId);
           completedShopId = resumeShopId;
         } else if (typeof linkedShopId === "string" && linkedShopId.length > 0) {
           setIsRestoring(true);
@@ -112,10 +121,12 @@ export default function OtpVerifyScreen() {
         } else {
           let shopId = pendingShopIdRef.current;
           if (!shopId) {
-            ({ shopId } = await createShopAndOwner({ shopName: shopName!, phone }));
+            const created = await createShopAndOwner({ shopName: shopName!, phone });
+            shopId = created.shopId;
             pendingShopIdRef.current = shopId;
+            pendingOwnerUserIdRef.current = created.userId;
           }
-          await linkDeviceToShop(shopId);
+          await linkDeviceToShop(shopId, pendingOwnerUserIdRef.current ?? undefined);
           completedShopId = shopId;
         }
         await markShopCloudLinked(completedShopId);
@@ -131,7 +142,7 @@ export default function OtpVerifyScreen() {
         setIsRestoring(false);
       }
     },
-    [isSendingRecoveryOtp, isSubmitting, phone, resumeShopId, shopName],
+    [isSendingRecoveryOtp, isSubmitting, phone, resumeShopId, resumeOwnerUserId, shopName],
   );
 
   const handleCodeChange = (next: string) => {

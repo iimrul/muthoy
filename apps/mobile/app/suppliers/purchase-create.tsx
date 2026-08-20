@@ -21,6 +21,7 @@ import {
 } from '../../db/purchases';
 import { listSuppliers } from '../../db/suppliers';
 import type { PurchasePaymentType } from '../../domain/purchases';
+import { captureSessionFor } from '../../state/sessionGuard';
 import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
@@ -142,6 +143,12 @@ export default function PurchaseCreateScreen() {
     if (!session || !isAllowed) {
       return;
     }
+    // Pinned at action start. A purchase moves real stock and supplier money;
+    // db/purchases.ts re-checks this same guard inside the transaction.
+    const guard = captureSessionFor(session);
+    if (!guard) {
+      return;
+    }
     if (!selectedSupplierId) {
       setErrorMessage('Select a supplier.');
       return;
@@ -157,6 +164,7 @@ export default function PurchaseCreateScreen() {
         shopId: session.shopId,
         supplierId: selectedSupplierId,
         staffId: session.userId,
+        isStillActive: guard.isStillActive,
         paymentType,
         lineItems: lines.map((line) => ({
           medicineId: line.medicine.medicineId,
@@ -168,8 +176,18 @@ export default function PurchaseCreateScreen() {
         })),
       });
       void triggerSyncNow(session.shopId);
+      // Never push the outgoing owner's supplier page at whoever is holding
+      // the phone now; app/index.tsx's gate routes them to PIN Login.
+      if (guard.isStale()) {
+        return;
+      }
       router.replace({ pathname: '/suppliers/detail', params: { supplierId: selectedSupplierId } });
     } catch (caught) {
+      // The outgoing user's failed line must not be restored into the incoming
+      // user's form, and their error must not be shown as if it were theirs.
+      if (guard.isStale()) {
+        return;
+      }
       if (caught instanceof BatchExpiryMismatchError || caught instanceof DuplicateBatchError) {
         restoreFailedLine(caught);
       } else {

@@ -7,6 +7,7 @@ import { endOfDayFormSchema } from '@muthoy/validation';
 import { AccessDenied } from '../components/ui/AccessDenied';
 import { StandardHeader } from '../components/ui/StandardHeader';
 import { closeDay, currentBusinessDate, getEndOfDaySummary, type EndOfDaySummary } from '../db/cash';
+import { captureSessionFor } from '../state/sessionGuard';
 import { usePermission } from '../state/usePermission';
 import { triggerSyncNow } from '../sync';
 
@@ -49,10 +50,20 @@ export default function EndOfDayScreen() {
     if (!session || !isAllowed) {
       return;
     }
+    // The whole day's money, read under the OUTGOING owner's id. A read that
+    // lands after the handover must not paint it for the incoming user.
+    const guard = captureSessionFor(session);
     try {
-      setSummary(await getEndOfDaySummary(session.shopId, session.userId, businessDate));
+      const next = await getEndOfDaySummary(session.shopId, session.userId, businessDate);
+      if (!guard || guard.isStale()) {
+        return;
+      }
+      setSummary(next);
       setError(null);
     } catch (caught) {
+      if (!guard || guard.isStale()) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : 'End-of-day summary failed to load.');
     }
   }, [businessDate, isAllowed, session]);
@@ -67,6 +78,13 @@ export default function EndOfDayScreen() {
     if (!session || !isAllowed) {
       return;
     }
+    // Pinned at action start. Closing the day locks an EOD snapshot against
+    // closed_by, and this closure outlives a handover; db/cash.ts re-checks
+    // the same guard inside the transaction.
+    const guard = captureSessionFor(session);
+    if (!guard) {
+      return;
+    }
     const parsed = endOfDayFormSchema.safeParse({ countedCashTaka: Number(countedText.trim()) });
     if (!countedText.trim() || !parsed.success) {
       setError(parsed.success ? 'Enter the counted cash' : parsed.error.issues[0]?.message ?? 'Enter the counted cash');
@@ -78,14 +96,23 @@ export default function EndOfDayScreen() {
     try {
       await closeDay({
         shopId: session.shopId,
+        isStillActive: guard.isStillActive,
         businessDate,
         countedCash: fromTaka(parsed.data.countedCashTaka),
         closedBy: session.userId,
       });
       void triggerSyncNow(session.shopId);
+      // A locked day is a strong signal to show. It belongs to the owner who
+      // closed it, not to whoever picked the phone up afterwards.
+      if (guard.isStale()) {
+        return;
+      }
       setCountedText('');
       await reload();
     } catch (caught) {
+      if (guard.isStale()) {
+        return;
+      }
       setError(caught instanceof Error ? caught.message : 'The day could not be closed.');
     } finally {
       setIsClosing(false);

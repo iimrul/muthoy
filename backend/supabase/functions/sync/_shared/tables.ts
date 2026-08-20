@@ -1,7 +1,7 @@
 export const SYNCED_TABLES = [
-  "shops", "subscriptions", "roles", "permissions", "users", "medicines",
-  "batches", "inventory_movements", "customers", "sales", "sale_items",
-  "sales_returns", "suppliers", "purchases", "purchase_items",
+  "shops", "subscriptions", "roles", "permissions", "users", "user_permissions",
+  "medicines", "batches", "inventory_movements", "customers", "sales",
+  "sale_items", "sales_returns", "suppliers", "purchases", "purchase_items",
   "purchase_returns", "credits", "expenses", "payments", "cash_drawer",
   "audit_logs",
 ] as const;

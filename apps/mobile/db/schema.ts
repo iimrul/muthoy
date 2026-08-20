@@ -97,14 +97,51 @@ export const users = sqliteTable("users", {
   ...base,
   shopId: text("shop_id").notNull().references(() => shops.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  phone: text("phone"), // owner only
+  // Owner AND staff, since migration 0007: phone is now the login identifier
+  // every user types on a FRESH device, before this device has any SQLite rows
+  // to match a PIN against. Unique per non-deleted user (partial index below)
+  // because the server must resolve exactly one account from it.
+  phone: text("phone"),
   pinHash: text("pin_hash").notNull(), // bcrypt — NEVER plain text
   pinSetAt: text("pin_set_at"), // null only while owner registration is incomplete
   roleId: text("role_id").notNull().references(() => roles.id, { onDelete: "restrict" }),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  /** Read-only mirror of Postgres's server-derived revocation counter. */
+  permissionVersion: integer("permission_version").notNull().default(0),
 }, (t) => ({
   shopIdx: index("users_shop_idx").on(t.shopId),
   shopActiveIdx: index("users_shop_active_idx").on(t.shopId, t.isActive),
+  // Partial: soft-deleted rows keep their phone (history stays readable) but
+  // release it for reuse, and rows without one don't collide with each other
+  // on NULL.
+  phoneUnique: uniqueIndex("users_phone_unique")
+    .on(t.phone)
+    .where(sql`phone is not null and is_deleted = 0`),
+}));
+
+// ── user_permissions (per-staff overrides on the role default) ──────────
+// `permissions` above is ROLE-scoped — one row per shop role, shared by every
+// user holding it. This table is the per-USER layer the owner edits when
+// adding or editing a staff member: an explicit allow/deny for one key,
+// overriding what domain/permissions.ts grants that role by default.
+//
+// Absence means "use the role default", so this table stays empty for a staff
+// member on standard access and holds only the deltas otherwise. An OWNER's
+// rows are ignored on read (domain/permissions.ts keeps owner = everything as
+// a rule, not a list) so no combination of overrides can lock a shop out of
+// its own administration.
+export const userPermissions = sqliteTable("user_permissions", {
+  ...base,
+  shopId: text("shop_id").notNull().references(() => shops.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  key: text("key").notNull(), // a domain/permissions.ts Permission value
+  allowed: integer("allowed", { mode: "boolean" }).notNull().default(false),
+}, (t) => ({
+  userIdx: index("user_permissions_user_idx").on(t.userId),
+  shopIdx: index("user_permissions_shop_idx").on(t.shopId),
+  // One verdict per key per user — a second row for the same key would make
+  // the effective permission depend on read order.
+  userKeyUnique: uniqueIndex("user_permissions_user_key_unique").on(t.userId, t.key),
 }));
 
 // ── medicines (catalogue item — not stock) ──────────────────────────────
@@ -138,11 +175,27 @@ export const batches = sqliteTable("batches", {
   medicineId: text("medicine_id").notNull().references(() => medicines.id, { onDelete: "cascade" }),
   batchNo: text("batch_no").notNull(),
   expiryDate: text("expiry_date"), // ISO date; null sorts LAST in FEFO
+  /**
+   * DERIVED, never independently written: always equal to the sum of this
+   * batch's inventory_movements.change_qty. Nothing outside the
+   * `inventory_movement_applies_delta` trigger (migration 0006) may assign it,
+   * and it is excluded from batch sync payloads — two devices pushing
+   * competing absolutes is exactly the lost update this ledger replaced.
+   * Record a movement instead: see db/stockLedger.ts.
+   */
   stock: integer("stock").notNull().default(0),
   purchasePrice: integer("purchase_price").$type<Paisa>().notNull(),
   salePrice: integer("sale_price").$type<Paisa>().notNull(),
   isDiscounted: integer("is_discounted", { mode: "boolean" }).notNull().default(false),
   originalPrice: integer("original_price").$type<Paisa>(),
+  /**
+   * Set by the ledger trigger the first time movements drive `stock` below
+   * zero — offline sales on two devices that together outran real stock. The
+   * sale happened; the movement is kept and the discrepancy surfaced for
+   * reconciliation rather than silently discarded. Reads clamp the displayed
+   * quantity at zero; this column is how the shop learns it needs a count.
+   */
+  oversoldAt: text("oversold_at"),
 }, (t) => ({
   medicineIdx: index("batches_medicine_idx").on(t.medicineId),
   // THIS index is what makes FEFO ordering fast:
@@ -183,7 +236,10 @@ export const customers = sqliteTable("customers", {
 export const sales = sqliteTable("sales", {
   ...base,
   shopId: text("shop_id").notNull().references(() => shops.id, { onDelete: "cascade" }),
-  invoiceNo: text("invoice_no").notNull(), // human-readable: INV-2026-000482
+  // INV-{year}-{6-digit local sequence}-{12 hex from this row's id}, built by
+  // domain/invoice.ts. The sequence is per-DEVICE, so the suffix is what keeps
+  // sales_shop_invoice_unique satisfiable once two phones sell the same shop.
+  invoiceNo: text("invoice_no").notNull(), // human-readable: INV-2026-000482-A1B2C3D4E5F6
   total: integer("total").$type<Paisa>().notNull(),
   paid: integer("paid").$type<Paisa>().notNull(),
   change: integer("change").$type<Paisa>().notNull().default(ZERO_PAISA),
@@ -251,7 +307,10 @@ export const suppliers = sqliteTable("suppliers", {
 export const purchases = sqliteTable("purchases", {
   ...base,
   shopId: text("shop_id").notNull().references(() => shops.id, { onDelete: "cascade" }),
-  invoiceNo: text("invoice_no").notNull(), // human-readable: PUR-2026-000112
+  // PUR-{year}-{6-digit local sequence}-{12 hex from this row id}, built by
+  // domain/invoice.ts. The sequence is per-DEVICE, so the suffix is what keeps
+  // purchases_shop_invoice_unique satisfiable once two phones receive stock.
+  invoiceNo: text("invoice_no").notNull(), // human-readable: PUR-2026-000112-A1B2C3D4E5F6
   supplierId: text("supplier_id").notNull().references(() => suppliers.id, { onDelete: "restrict" }),
   total: integer("total").$type<Paisa>().notNull(),
   paymentTerms: text("payment_terms", { enum: ["cod", "credit"] }).notNull(),

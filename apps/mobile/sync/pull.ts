@@ -5,7 +5,8 @@ import {
   setLastPulledCursor,
   type PullCursor,
 } from "./cursorStore";
-import { isSupabaseConfigured, supabase } from "./supabaseClient";
+import { invokeSyncWithClaimRefresh } from "./invoke";
+import { isSupabaseConfigured } from "./supabaseClient";
 
 interface PullChange {
   updatedAt: string;
@@ -20,10 +21,6 @@ interface PullPage {
   nextCursor: PullCursor | null;
 }
 
-const HYDRATION_APPLY_CHUNK_SIZE = 50;
-const HYDRATION_TABLE_RANK = new Map<SyncTableName, number>(
-  HYDRATION_TABLE_ORDER.map((tableName, index) => [tableName, index]),
-);
 const SYNC_TABLE_NAMES = new Set<string>(HYDRATION_TABLE_ORDER);
 
 function isSyncTableName(value: unknown): value is SyncTableName {
@@ -104,8 +101,10 @@ async function fetchPullPage(
   shopId: string,
   cursor: PullCursor | null,
 ): Promise<PullPage> {
-  const { data, error } = await supabase.functions.invoke("sync", {
-    body: { action: "pull", shopId, since: cursor },
+  const { data, error } = await invokeSyncWithClaimRefresh({
+    action: "pull",
+    shopId,
+    since: cursor,
   });
   if (error) {
     throw error;
@@ -120,34 +119,50 @@ function requireNextCursor(page: PullPage): PullCursor {
   return page.nextCursor;
 }
 
-function applyChanges(changes: PullChange[]): void {
-  applyRemoteRows(
+/**
+ * Applies one batch of pulled rows and returns those that could not land yet.
+ *
+ * `applyRemoteRows` orders parents before dependents itself, so nothing here
+ * needs to sort. What it cannot do is invent a parent that is still on the
+ * server: a movement can be separated from its batch by a PAGE BOUNDARY, and
+ * that row comes back as `deferred` for the caller to carry forward.
+ */
+function applyChanges(
+  changes: PullChange[],
+  moreToCome: boolean,
+): PullChange[] {
+  if (changes.length === 0) {
+    return [];
+  }
+  const results = applyRemoteRows(
     changes.map((change) => ({
       tableName: change.tableName,
       row: change.payload,
     })),
+    { moreToCome },
   );
+  return changes.filter((_, index) => results[index] === "deferred");
 }
 
-function orderForHydration(changes: PullChange[]): PullChange[] {
-  return changes
-    .map((change, discoveryIndex) => ({ change, discoveryIndex }))
-    .sort((left, right) => {
-      const tableRankDifference =
-        HYDRATION_TABLE_RANK.get(left.change.tableName)! -
-        HYDRATION_TABLE_RANK.get(right.change.tableName)!;
-      return tableRankDifference || left.discoveryIndex - right.discoveryIndex;
-    })
-    .map(({ change }) => change);
-}
-
-async function pullFullHydration(shopId: string): Promise<void> {
+async function pullFullHydration(
+  shopId: string,
+  isCancelled: () => boolean,
+): Promise<void> {
   const discoveredChanges: PullChange[] = [];
   let cursor: PullCursor | null = null;
   let finalCursor: PullCursor | null = null;
 
   while (true) {
+    if (isCancelled()) {
+      return;
+    }
     const page = await fetchPullPage(shopId, cursor);
+    // Abandoning a hydration mid-flight applies nothing and stores no cursor,
+    // so the next login starts the full hydration over rather than inheriting
+    // a half-populated shop.
+    if (isCancelled()) {
+      return;
+    }
     discoveredChanges.push(...page.changes);
 
     if (page.changes.length > 0) {
@@ -163,16 +178,20 @@ async function pullFullHydration(shopId: string): Promise<void> {
     }
   }
 
-  const orderedChanges = orderForHydration(discoveredChanges);
-  for (
-    let offset = 0;
-    offset < orderedChanges.length;
-    offset += HYDRATION_APPLY_CHUNK_SIZE
-  ) {
-    applyChanges(
-      orderedChanges.slice(offset, offset + HYDRATION_APPLY_CHUNK_SIZE),
-    );
+  if (isCancelled()) {
+    return;
   }
+  // ONE transaction for the entire hydration — the apply is synchronous, so
+  // the check above covers the whole phase.
+  //
+  // This used to commit in chunks of 50, which meant a hydration that failed
+  // partway through left a PREFIX of the shop on disk: some batches present,
+  // most of their movement history missing, and every quantity short by
+  // whatever had not been applied. The invariant held on each committed chunk,
+  // so nothing detected it — the owner simply saw wrong stock with no way to
+  // tell it apart from the truth. All or nothing instead: a failed hydration
+  // rolls back to an empty shop and no cursor, so the next login starts over.
+  applyChanges(discoveredChanges, false);
 
   if (finalCursor) {
     setLastPulledCursor(shopId, finalCursor);
@@ -182,15 +201,36 @@ async function pullFullHydration(shopId: string): Promise<void> {
 async function pullIncremental(
   shopId: string,
   initialCursor: PullCursor,
+  isCancelled: () => boolean,
 ): Promise<void> {
   let cursor = initialCursor;
+  // Rows whose parent has not arrived yet ride along to the next page's apply.
+  // Incremental pull commits page by page so a long backlog makes forward
+  // progress; this is what keeps that safe when a batch and its movement fall
+  // on opposite sides of a page boundary.
+  let deferred: PullChange[] = [];
+
   while (true) {
+    if (isCancelled()) {
+      return;
+    }
     const page = await fetchPullPage(shopId, cursor);
-    applyChanges(page.changes);
+    // Applying rows and advancing the cursor are both writes. Neither may
+    // happen once the device has changed hands — the page is simply dropped,
+    // and the unmoved cursor makes the next login fetch it again.
+    if (isCancelled()) {
+      return;
+    }
+    deferred = applyChanges([...deferred, ...page.changes], page.hasMore);
 
     if (page.changes.length > 0) {
       cursor = requireNextCursor(page);
-      setLastPulledCursor(shopId, cursor);
+      // The cursor means "everything up to here is applied". Holding it back
+      // while a row is still deferred is what makes a crash mid-backlog
+      // re-fetch the page that carried it instead of stepping over it.
+      if (deferred.length === 0) {
+        setLastPulledCursor(shopId, cursor);
+      }
     }
 
     if (!page.hasMore) {
@@ -205,6 +245,7 @@ async function pullIncremental(
 export async function pullChanges(
   shopId: string,
   cursorOverride?: PullCursor | null,
+  isCancelled: () => boolean = () => false,
 ): Promise<void> {
   if (!isSupabaseConfigured) {
     if (cursorOverride === null) {
@@ -216,8 +257,8 @@ export async function pullChanges(
   const initialCursor =
     cursorOverride === undefined ? getLastPulledCursor(shopId) : cursorOverride;
   if (initialCursor === null) {
-    await pullFullHydration(shopId);
+    await pullFullHydration(shopId, isCancelled);
     return;
   }
-  await pullIncremental(shopId, initialCursor);
+  await pullIncremental(shopId, initialCursor, isCancelled);
 }

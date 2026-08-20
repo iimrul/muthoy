@@ -36,8 +36,15 @@ export const pinSetupSchema = z
   });
 export type PinSetupInput = z.infer<typeof pinSetupSchema>;
 
+// Phone is REQUIRED for staff since migration 0007. It stopped being contact
+// detail and became a credential: it is what a staff member types on a FRESH
+// device, before that device has any rows to match a PIN against. Volume 4's
+// "Staff... never needs a phone number" held while the shop shared one handset;
+// staff-owned devices cannot work that way, because nothing else identifies the
+// account ahead of hydration.
 export const createStaffSchema = z.object({
   name: z.string().trim().min(2, 'Name is too short'),
+  phone: bdPhoneSchema,
   pin: pinDigitsSchema,
   confirmPin: pinDigitsSchema,
 }).refine((data) => data.pin === data.confirmPin, {
@@ -45,6 +52,30 @@ export const createStaffSchema = z.object({
   path: ['confirmPin'],
 });
 export type CreateStaffInput = z.infer<typeof createStaffSchema>;
+
+// Phone + PIN: the ONLY login on a device with no local data yet, for owner and
+// staff alike. No OTP — staff have never had a number to receive one at, and an
+// owner's routine login must not wait on an SMS.
+export const deviceLoginSchema = z.object({
+  phone: bdPhoneSchema,
+  pin: pinDigitsSchema,
+});
+export type DeviceLoginInput = z.infer<typeof deviceLoginSchema>;
+
+// Owner-only PIN recovery: the one place OTP survives after registration. The
+// PIN is what was lost, so the phone number has to be re-proved some other way
+// before a new one can be set.
+export const recoverPinSchema = z
+  .object({
+    phone: bdPhoneSchema,
+    newPin: pinDigitsSchema,
+    confirmNewPin: pinDigitsSchema,
+  })
+  .refine((data) => data.newPin === data.confirmNewPin, {
+    message: 'PINs do not match',
+    path: ['confirmNewPin'],
+  });
+export type RecoverPinInput = z.infer<typeof recoverPinSchema>;
 
 // Reused for both "owner changes own PIN" and "owner resets a staff PIN" —
 // the latter simply has no currentPin field (the owner isn't proving the

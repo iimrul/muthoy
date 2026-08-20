@@ -3,7 +3,8 @@
 // restoreFromBackupKey remain stubs — out of the Days 4-5/11 auth scope.
 
 import { and, eq } from 'drizzle-orm';
-import { requirePermission } from './auth';
+import { assertPinUnique, requirePermission } from './auth';
+import { assertSessionLive } from './errors';
 import { db } from './client';
 import { auditLogs, shops, users } from './schema';
 import { hashPin, verifyPinHash } from '../native/crypto';
@@ -52,7 +53,12 @@ export async function getShopName(shopId: string): Promise<string | null> {
 // the CURRENT PIN against this specific user's hash directly — not
 // db/auth.ts's verifyPin, which searches every active user and is for login,
 // where the identity isn't known yet. Here it already is.
-export async function changeOwnPin(userId: string, currentRawPin: string, newRawPin: string): Promise<void> {
+export async function changeOwnPin(
+  userId: string,
+  currentRawPin: string,
+  newRawPin: string,
+  isStillActive: () => boolean,
+): Promise<void> {
   const [user] = await db.select({ shopId: users.shopId, pinHash: users.pinHash }).from(users).where(eq(users.id, userId));
   if (!user) {
     throw new Error(`No user found with id ${userId}`);
@@ -71,8 +77,17 @@ export async function changeOwnPin(userId: string, currentRawPin: string, newRaw
     throw new Error('Current PIN is incorrect');
   }
 
+  // Changing to a PIN somebody else already uses would make PIN Login
+  // ambiguous: verifyPin returns the FIRST matching user, so one of the two
+  // would start signing in as the other.
+  await assertPinUnique(newRawPin, userId);
+
   const newPinHash = await hashPin(newRawPin);
   await db.transaction(async (tx) => {
+    // Async callback — checked at both ends. Two bcrypt awaits precede this
+    // transaction, so the window between pressing Confirm and committing a
+    // new PIN hash is one of the widest in the app.
+    assertSessionLive(isStillActive);
     const userValues = stampUpdatedAt({ pinHash: newPinHash });
     await tx.update(users).set(userValues).where(eq(users.id, userId));
     recordChange(tx, { shopId: user.shopId, table: 'users', rowId: userId, op: 'update', payload: userValues });
@@ -81,6 +96,7 @@ export async function changeOwnPin(userId: string, currentRawPin: string, newRaw
     const auditValues = { id: auditId, shopId: user.shopId, actorId: userId, action: 'pin_changed', meta: null, createdAt: now, updatedAt: now };
     await tx.insert(auditLogs).values(auditValues);
     recordChange(tx, { shopId: user.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
+    assertSessionLive(isStillActive);
   });
 }
 

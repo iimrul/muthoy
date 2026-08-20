@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { router, type Href } from 'expo-router';
 import { getShopName } from '../../db/settings';
 import { hasPermissionForRoleName, type Permission } from '../../domain/permissions';
 import { useSessionStore } from '../../state/sessionStore';
+import { switchUser } from '../../state/switchUser';
 
 // MorningDashboard — Volume 0 Day 5: "a shell showing shop name and a
 // greeting", and the (tabs) group's landing tab.
@@ -55,6 +56,32 @@ const NAV_ENTRIES: NavEntry[] = [
   { label: 'Settings', hint: 'Change your PIN', href: '/settings/settings', permission: 'settings_manage' },
 ];
 
+// Volume 0 Days 5/11: the shared pharmacy phone changes hands during a shift.
+// Deliberately NOT permission-gated and NOT on the owner-only Settings screen
+// — a staff member must be able to hand the device back, which is impossible
+// if the only exit lives behind 'settings_manage'. Confirmed first, because a
+// mis-tap discards the in-progress cart (state/switchUser.ts).
+function confirmSwitchUser(): void {
+  Alert.alert(
+    'Switch user?',
+    'The app returns to PIN login. Any unfinished sale is cleared. This shop stays set up on this device.',
+    [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Switch user',
+        onPress: () => {
+          switchUser();
+          // Back to the root gate, not straight to PIN Login: app/index.tsx
+          // re-derives the destination from SQLite, so an unfinished
+          // registration lands on the right screen instead of a PIN prompt
+          // no local hash could ever satisfy.
+          router.replace('/');
+        },
+      },
+    ],
+  );
+}
+
 export default function MorningDashboardScreen() {
   const session = useSessionStore((state) => state.session);
   const [shopName, setShopName] = useState<string | null>(null);
@@ -95,6 +122,11 @@ export default function MorningDashboardScreen() {
         <View className="gap-1 pt-2">
           <Text className="font-sans text-sm text-midGray">{greetingFor(new Date().getHours())}</Text>
           <Text className="font-sans-bold text-2xl text-richBlack">{shopName ?? 'Your shop'}</Text>
+          {/* Who the device currently belongs to — the one thing a handover
+              needs to show, so nobody sells under someone else's login. */}
+          <Text className="font-sans text-xs text-midGray">
+            Signed in as {session.role === 'owner' ? 'Owner' : 'Staff'}
+          </Text>
         </View>
 
         <View className="gap-3">
@@ -111,6 +143,18 @@ export default function MorningDashboardScreen() {
             </Pressable>
           ))}
         </View>
+
+        <Pressable
+          onPress={confirmSwitchUser}
+          accessibilityRole="button"
+          accessibilityLabel="Switch user"
+          className="gap-1 rounded-lg border border-midGray p-4 active:opacity-80"
+        >
+          <Text className="font-sans-semibold text-base text-richBlack">Switch user</Text>
+          <Text className="font-sans text-xs text-midGray">
+            Lock the app and hand the device to someone else
+          </Text>
+        </Pressable>
       </ScrollView>
     </View>
   );

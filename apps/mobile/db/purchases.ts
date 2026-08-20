@@ -10,16 +10,22 @@ import {
   type Paisa,
 } from '@muthoy/types';
 import { resolvePaymentEffect, type PurchasePaymentType } from '../domain/purchases';
+import { buildPurchaseInvoiceNo } from '../domain/invoice';
 import { expectedCash } from '../domain/cashFormula';
 import { generateId } from '../native/id';
 import { requireOwner } from './auth';
 import { assertBusinessDateOpen, getCashSummarySync } from './cash';
 import { db, sqliteConnection } from './client';
-import { BatchExpiryMismatchError, DuplicateBatchError, NotAuthorizedError } from './errors';
+import {
+  assertSessionLive,
+  BatchExpiryMismatchError,
+  DuplicateBatchError,
+  NotAuthorizedError,
+} from './errors';
+import { addStock } from './stockLedger';
 import {
   batches,
   cashDrawer,
-  inventoryMovements,
   medicines,
   payments,
   purchaseItems,
@@ -32,12 +38,13 @@ import {
 import { recordChange, stampUpdatedAt } from './sync-helpers';
 
 const SEARCH_LIMIT = 50;
-const INVOICE_SEQUENCE_WIDTH = 6;
 
 export interface CreatePurchaseInput {
   shopId: string;
   supplierId: string;
   staffId: string;
+  /** Device-handover guard — see db/errors.ts assertSessionLive. */
+  isStillActive: () => boolean;
   paymentType: PurchasePaymentType;
   lineItems: {
     medicineId: string;
@@ -144,6 +151,7 @@ export async function createPurchase(
   const year = now.getFullYear();
 
   return db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
     // Recheck inside the write transaction so a stale caller cannot bypass
     // owner-only financial access between the public guard and the write.
     const owner = tx.select({ id: users.id }).from(users)
@@ -177,8 +185,9 @@ export async function createPurchase(
       eq(purchases.shopId, input.shopId),
       sql`strftime('%Y', ${purchases.createdAt}, 'localtime') = ${String(year)}`,
     )).get()?.value ?? 0;
-    const invoiceNo = `PUR-${year}-${String(yearlyCount + 1).padStart(INVOICE_SEQUENCE_WIDTH, '0')}`;
+    // The id first: the invoice number derives its uniqueness suffix from it.
     const purchaseId = generateId();
+    const invoiceNo = buildPurchaseInvoiceNo(year, yearlyCount + 1, purchaseId);
 
     const purchaseNow = new Date().toISOString();
     const purchaseValues = { id: purchaseId, shopId: input.shopId, invoiceNo,
@@ -217,22 +226,18 @@ export async function createPurchase(
           throw new BatchExpiryMismatchError(line.medicineId, line.batchNo);
         }
         batchId = existingBatch.id;
-        const batchValues = stampUpdatedAt({ stock: existingBatch.stock + line.quantity, isDirty: true });
-        const update = tx.update(batches).set(batchValues).where(and(
-          eq(batches.id, batchId), eq(batches.shopId, input.shopId),
-          eq(batches.medicineId, line.medicineId), eq(batches.isDeleted, false),
-          eq(batches.expiryDate, line.expiryDate),
-        )).run();
-        if (update.changes !== 1) {
-          throw new Error(`Batch changed before purchase save for medicine ${line.medicineId}`);
-        }
-        recordChange(tx, { shopId: input.shopId, table: 'batches', rowId: batchId, op: 'update', payload: batchValues });
-
+        // Receiving into an existing batch is a +qty delta, appended below.
+        // The batch row is deliberately left untouched and unqueued: writing
+        // an absolute here is what let a purchase on this phone silently undo
+        // a concurrent sale on another one.
       } else {
         batchId = generateId();
         const batchNow = new Date().toISOString();
+        // stock 0, not line.quantity: the +qty movement below is the SINGLE
+        // source of this batch's opening quantity. Seeding it here as well
+        // would double-count once the ledger trigger applies that movement.
         const batchValues = { id: batchId, shopId: input.shopId, medicineId: line.medicineId,
-          batchNo: line.batchNo, expiryDate: line.expiryDate, stock: line.quantity,
+          batchNo: line.batchNo, expiryDate: line.expiryDate, stock: 0,
           purchasePrice: line.purchasePrice, salePrice: line.salePrice,
           createdAt: batchNow, updatedAt: batchNow };
         tx.insert(batches).values(batchValues).run();
@@ -247,13 +252,14 @@ export async function createPurchase(
         createdAt: itemNow, updatedAt: itemNow };
       tx.insert(purchaseItems).values(itemValues).run();
       recordChange(tx, { shopId: input.shopId, table: 'purchase_items', rowId: itemId, op: 'insert', payload: itemValues });
-      const movementId = generateId();
-      const movementNow = new Date().toISOString();
-      const movementValues = { id: movementId, shopId: input.shopId, batchId,
-        changeQty: line.quantity, reason: 'purchase' as const, refId: purchaseId,
-        createdBy: input.staffId, createdAt: movementNow, updatedAt: movementNow };
-      tx.insert(inventoryMovements).values(movementValues).run();
-      recordChange(tx, { shopId: input.shopId, table: 'inventory_movements', rowId: movementId, op: 'insert', payload: movementValues });
+      addStock(tx, {
+        shopId: input.shopId,
+        batchId,
+        quantity: line.quantity,
+        reason: 'purchase',
+        refId: purchaseId,
+        createdBy: input.staffId,
+      });
     });
 
     if (input.paymentType === 'cod') {

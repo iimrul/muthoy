@@ -7,8 +7,10 @@ import m0002 from './0002_furry_celestials.sql';
 import m0003 from './0003_curious_wild_pack.sql';
 import m0004 from './0004_deep_boomer.sql';
 import m0005 from './0005_eminent_legion.sql';
+import m0006 from './0006_inventory_movement_ledger.sql';
+import m0007 from './0007_staff_device_login.sql';
 
 export default {
   journal,
-  migrations: { m0000, m0001, m0002, m0003, m0004, m0005 },
+  migrations: { m0000, m0001, m0002, m0003, m0004, m0005, m0006, m0007 },
 };

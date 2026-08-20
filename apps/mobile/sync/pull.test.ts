@@ -1,262 +1,129 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+// The pull pagination loops themselves, with only the network and the two
+// write boundaries (applyRemoteRows, the MMKV cursor) mocked. A cursor that
+// advances after a handover is the worst outcome here: the incoming user then
+// never receives the pages the outgoing user's session skipped past.
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  applyRemoteRows: vi.fn(),
-  getCursor: vi.fn(),
-  setCursor: vi.fn(),
   invoke: vi.fn(),
+  // Returns the per-row outcome array the real helper returns; an empty
+  // array reads as "nothing deferred", which is the ordinary case.
+  applyRemoteRows: vi.fn(() => []),
+  getLastPulledCursor: vi.fn(),
+  setLastPulledCursor: vi.fn(),
 }));
 
-vi.mock("../db/sync-helpers", () => ({
-  applyRemoteRows: mocks.applyRemoteRows,
-}));
-vi.mock("./cursorStore", () => ({
-  HYDRATION_TABLE_ORDER: [
-    "shops",
-    "subscriptions",
-    "roles",
-    "permissions",
-    "users",
-    "medicines",
-    "suppliers",
-    "customers",
-    "batches",
-    "purchases",
-    "purchase_items",
-    "sales",
-    "sale_items",
-    "sales_returns",
-    "purchase_returns",
-    "inventory_movements",
-    "credits",
-    "payments",
-    "expenses",
-    "cash_drawer",
-    "audit_logs",
-  ],
-  getLastPulledCursor: mocks.getCursor,
-  setLastPulledCursor: mocks.setCursor,
-}));
-vi.mock("./supabaseClient", () => ({
+vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
   supabase: { functions: { invoke: mocks.invoke } },
+}));
+vi.mock('../db/sync-helpers', () => ({
+  applyRemoteRows: mocks.applyRemoteRows,
+  HYDRATION_TABLE_ORDER: ['medicines', 'sales'],
+}));
+vi.mock('./cursorStore', () => ({
+  getLastPulledCursor: mocks.getLastPulledCursor,
+  setLastPulledCursor: mocks.setLastPulledCursor,
+  clearLastPulledCursor: vi.fn(),
+  HYDRATION_TABLE_ORDER: ['medicines', 'sales'],
 }));
 
 // Vitest mocks must be registered before importing the module under test.
 // eslint-disable-next-line import/first
-import { pullChanges } from "./pull";
+import { pullChanges } from './pull';
 
-const firstCursor = {
-  updatedAt: "2026-08-13T10:00:00.000Z",
-  tableName: "shops",
-  rowId: "00000000-0000-4000-8000-000000000001",
-} as const;
-const secondCursor = {
-  updatedAt: "2026-08-13T11:00:00.000Z",
-  tableName: "users",
-  rowId: "00000000-0000-4000-8000-000000000002",
-} as const;
+const SHOP = 'shop-1';
+const START_CURSOR = { updatedAt: '2026-01-01T00:00:00Z', tableName: 'sales', rowId: 'r0' };
 
-describe("pullChanges", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.applyRemoteRows.mockImplementation(() => undefined);
-  });
+function page(rowId: string, hasMore: boolean) {
+  const cursor = { updatedAt: `2026-01-0${rowId.slice(1)}T00:00:00Z`, tableName: 'sales', rowId };
+  return {
+    data: {
+      changes: [{ ...cursor, payload: { id: rowId } }],
+      hasMore,
+      nextCursor: cursor,
+    },
+    error: null,
+  };
+}
 
-  it("discovers full hydration before applying dependency-ordered chunks and persists once", async () => {
-    const batchChanges = Array.from({ length: 25 }, (_, index) => ({
-      updatedAt: "2026-08-13T10:00:00.000Z",
-      tableName: "batches",
-      rowId: `batch-${index}`,
-      payload: { id: `batch-${index}` },
-    }));
-    const medicineChanges = Array.from({ length: 27 }, (_, index) => ({
-      updatedAt: "2026-08-13T11:00:00.000Z",
-      tableName: "medicines",
-      rowId: `medicine-${index}`,
-      payload: { id: `medicine-${index}` },
-    }));
-    const pageOneCursor = {
-      updatedAt: batchChanges.at(-1)!.updatedAt,
-      tableName: "batches",
-      rowId: batchChanges.at(-1)!.rowId,
-    } as const;
-    const finalCursor = {
-      updatedAt: medicineChanges.at(-1)!.updatedAt,
-      tableName: "medicines",
-      rowId: medicineChanges.at(-1)!.rowId,
-    } as const;
-    mocks.getCursor.mockReturnValue({
-      updatedAt: "old",
-      tableName: "sales",
-      rowId: "old",
-    });
-    mocks.invoke
-      .mockResolvedValueOnce({
-        data: {
-          changes: batchChanges,
-          hasMore: true,
-          nextCursor: pageOneCursor,
-        },
-        error: null,
-      })
-      .mockResolvedValueOnce({
-        data: {
-          changes: medicineChanges,
-          hasMore: false,
-          nextCursor: finalCursor,
-        },
-        error: null,
-      });
-    mocks.applyRemoteRows.mockImplementationOnce(() => {
-      expect(mocks.invoke).toHaveBeenCalledTimes(2);
-    });
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.getLastPulledCursor.mockReturnValue(START_CURSOR);
+});
 
-    await pullChanges("shop-1", null);
-
-    expect(mocks.getCursor).not.toHaveBeenCalled();
-    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "sync", {
-      body: { action: "pull", shopId: "shop-1", since: null },
-    });
-    expect(mocks.invoke).toHaveBeenNthCalledWith(2, "sync", {
-      body: { action: "pull", shopId: "shop-1", since: pageOneCursor },
-    });
-    const orderedRows = [...medicineChanges, ...batchChanges].map((change) => ({
-      tableName: change.tableName,
-      row: change.payload,
-    }));
-    expect(mocks.applyRemoteRows).toHaveBeenNthCalledWith(
-      1,
-      orderedRows.slice(0, 50),
+describe('pullChanges honours the device-handover kill switch', () => {
+  it('drops the page that arrives after the handover: no apply, no cursor write', async () => {
+    let releasePage: () => void = () => undefined;
+    mocks.invoke.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releasePage = () => resolve(page('r1', true));
+      }),
     );
-    expect(mocks.applyRemoteRows).toHaveBeenNthCalledWith(
-      2,
-      orderedRows.slice(50),
+    mocks.invoke.mockResolvedValue(page('r2', false));
+
+    let handedOver = false;
+    const pulled = pullChanges(SHOP, undefined, () => handedOver);
+
+    handedOver = true;
+    releasePage();
+    await pulled;
+
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.applyRemoteRows).not.toHaveBeenCalled();
+    expect(mocks.setLastPulledCursor).not.toHaveBeenCalled();
+  });
+
+  it('does not fetch a further page once cancelled between pages', async () => {
+    let handedOver = false;
+    mocks.invoke.mockImplementationOnce(() => Promise.resolve(page('r1', true)));
+    mocks.invoke.mockImplementation(() => {
+      handedOver = true;
+      return Promise.resolve(page('r2', true));
+    });
+
+    await pullChanges(SHOP, undefined, () => handedOver);
+
+    // Page 1 applied and advanced the cursor under a live session; page 2
+    // arrived after the switch, so nothing beyond it was requested.
+    expect(mocks.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.applyRemoteRows).toHaveBeenCalledTimes(1);
+    expect(mocks.setLastPulledCursor).toHaveBeenCalledTimes(1);
+  });
+
+  it('abandons a full hydration without storing a partial cursor', async () => {
+    mocks.getLastPulledCursor.mockReturnValue(null);
+
+    let releasePage: () => void = () => undefined;
+    mocks.invoke.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releasePage = () => resolve(page('r1', true));
+      }),
     );
-    expect(mocks.setCursor).toHaveBeenCalledOnce();
-    expect(mocks.setCursor).toHaveBeenCalledWith("shop-1", finalCursor);
-  });
 
-  it("does not apply or persist when hydration discovery fails", async () => {
-    mocks.getCursor.mockReturnValue(null);
-    mocks.invoke
-      .mockResolvedValueOnce({
-        data: {
-          changes: [{ ...firstCursor, payload: { id: firstCursor.rowId } }],
-          hasMore: true,
-          nextCursor: firstCursor,
-        },
-        error: null,
-      })
-      .mockResolvedValueOnce({
-        data: null,
-        error: new Error("network failed"),
-      });
+    let handedOver = false;
+    const pulled = pullChanges(SHOP, undefined, () => handedOver);
 
-    await expect(pullChanges("shop-1")).rejects.toThrow("network failed");
+    handedOver = true;
+    releasePage();
+    await pulled;
 
+    // A null cursor next login means the whole hydration runs again, rather
+    // than the incoming user inheriting a half-populated shop.
     expect(mocks.applyRemoteRows).not.toHaveBeenCalled();
-    expect(mocks.setCursor).not.toHaveBeenCalled();
+    expect(mocks.setLastPulledCursor).not.toHaveBeenCalled();
   });
 
-  it("does not persist hydration progress when a later apply chunk fails", async () => {
-    const changes = Array.from({ length: 51 }, (_, index) => ({
-      ...firstCursor,
-      rowId: `shop-${index}`,
-      payload: { id: `shop-${index}` },
-    }));
-    const finalCursor = { ...firstCursor, rowId: "shop-50" };
-    mocks.getCursor.mockReturnValue(null);
-    mocks.invoke.mockResolvedValue({
-      data: { changes, hasMore: false, nextCursor: finalCursor },
-      error: null,
-    });
-    mocks.applyRemoteRows
-      .mockImplementationOnce(() => undefined)
-      .mockImplementationOnce(() => {
-        throw new Error("SQLite apply failed");
-      });
-
-    await expect(pullChanges("shop-1")).rejects.toThrow("SQLite apply failed");
-
-    expect(mocks.applyRemoteRows).toHaveBeenCalledTimes(2);
-    expect(mocks.setCursor).not.toHaveBeenCalled();
-  });
-
-  it("keeps incremental pulls page-by-page with per-page cursor persistence", async () => {
-    mocks.getCursor.mockReturnValue(firstCursor);
+  it('pages through normally when nobody switches user', async () => {
     mocks.invoke
-      .mockResolvedValueOnce({
-        data: {
-          changes: [{ ...secondCursor, payload: { id: secondCursor.rowId } }],
-          hasMore: true,
-          nextCursor: secondCursor,
-        },
-        error: null,
-      })
-      .mockResolvedValueOnce({
-        data: {
-          changes: [
-            {
-              updatedAt: "2026-08-13T12:00:00.000Z",
-              tableName: "sales",
-              rowId: "sale-1",
-              payload: { id: "sale-1" },
-            },
-          ],
-          hasMore: false,
-          nextCursor: {
-            updatedAt: "2026-08-13T12:00:00.000Z",
-            tableName: "sales",
-            rowId: "sale-1",
-          },
-        },
-        error: null,
-      });
+      .mockResolvedValueOnce(page('r1', true))
+      .mockResolvedValueOnce(page('r2', false));
 
-    await pullChanges("shop-1");
+    await pullChanges(SHOP);
 
+    expect(mocks.invoke).toHaveBeenCalledTimes(2);
     expect(mocks.applyRemoteRows).toHaveBeenCalledTimes(2);
-    expect(mocks.setCursor).toHaveBeenCalledTimes(2);
-    expect(mocks.setCursor).toHaveBeenNthCalledWith(1, "shop-1", secondCursor);
-    expect(mocks.setCursor).toHaveBeenNthCalledWith(2, "shop-1", {
-      updatedAt: "2026-08-13T12:00:00.000Z",
-      tableName: "sales",
-      rowId: "sale-1",
-    });
-  });
-
-  it("does not reset a stored cursor after an empty poll", async () => {
-    mocks.getCursor.mockReturnValue(firstCursor);
-    mocks.invoke.mockResolvedValue({
-      data: { changes: [], hasMore: false, nextCursor: null },
-      error: null,
-    });
-
-    await pullChanges("shop-1");
-
-    expect(mocks.setCursor).not.toHaveBeenCalled();
-  });
-
-  it("rejects an unrecognized table without advancing the cursor", async () => {
-    mocks.getCursor.mockReturnValue(null);
-    mocks.invoke.mockResolvedValue({
-      data: {
-        changes: [
-          {
-            ...firstCursor,
-            tableName: "sync_queue",
-            payload: { id: firstCursor.rowId },
-          },
-        ],
-        hasMore: false,
-        nextCursor: firstCursor,
-      },
-      error: null,
-    });
-
-    await expect(pullChanges("shop-1")).rejects.toThrow("invalid change");
-    expect(mocks.applyRemoteRows).not.toHaveBeenCalled();
-    expect(mocks.setCursor).not.toHaveBeenCalled();
+    expect(mocks.setLastPulledCursor).toHaveBeenCalledTimes(2);
   });
 });

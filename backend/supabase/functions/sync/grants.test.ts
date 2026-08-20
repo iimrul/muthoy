@@ -48,7 +48,11 @@ describe('sync edge-function Postgres privileges', () => {
   // Pinned, not derived: adding a direct read is exactly the change that
   // reintroduces this bug, so it should force a deliberate update here.
   test('the edge functions read only the tables we have vetted directly', () => {
-    expect(DIRECT_TABLES).toEqual(['roles', 'shop_claims']);
+    // auth_bindings and users joined the list with the separate-device login
+    // (20260819000000_staff_device_login.sql): deviceLogin/identity/recoverPin
+    // resolve an account and a permission_version through PostgREST rather than
+    // through an RPC, so each needs its own service_role grant.
+    expect(DIRECT_TABLES).toEqual(['auth_bindings', 'roles', 'shop_claims', 'users']);
   });
 
   test.each(DIRECT_TABLES)('service_role is granted SELECT on %s', (table) => {

@@ -3,6 +3,8 @@ import { Pressable, Text, View } from 'react-native';
 import { AccessDenied } from '../../components/ui/AccessDenied';
 import { PinPad, usePinEntry, useConfirmedPinEntry } from '../../components/ui/PinPad';
 import { changeOwnPin } from '../../db/settings';
+import { captureSessionFor } from '../../state/sessionGuard';
+import type { Session } from '../../state/sessionStore';
 import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
@@ -36,7 +38,7 @@ export default function SettingsScreen() {
       <View className="gap-3 rounded-lg bg-white p-4">
         <Text className="font-sans-medium text-base text-richBlack">Security</Text>
         {isChangingPin ? (
-          <ChangeOwnPinFlow shopId={session.shopId} userId={session.userId} onDone={() => setIsChangingPin(false)} onCancel={() => setIsChangingPin(false)} />
+          <ChangeOwnPinFlow shopId={session.shopId} userId={session.userId} session={session} onDone={() => setIsChangingPin(false)} onCancel={() => setIsChangingPin(false)} />
         ) : (
           <Pressable onPress={() => setIsChangingPin(true)}>
             <Text className="font-sans-medium text-sm text-brand-green">Change my PIN</Text>
@@ -50,13 +52,15 @@ export default function SettingsScreen() {
 interface ChangeOwnPinFlowProps {
   shopId: string;
   userId: string;
+  /** Pinned per action, so a PIN typed across a handover cannot commit. */
+  session: Session;
   onDone: () => void;
   onCancel: () => void;
 }
 
 type ChangePinStep = 'current' | 'new';
 
-function ChangeOwnPinFlow({ shopId, userId, onDone, onCancel }: ChangeOwnPinFlowProps) {
+function ChangeOwnPinFlow({ shopId, userId, session, onDone, onCancel }: ChangeOwnPinFlowProps) {
   const [step, setStep] = useState<ChangePinStep>('current');
   const [currentPin, setCurrentPin] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -71,20 +75,28 @@ function ChangeOwnPinFlow({ shopId, userId, onDone, onCancel }: ChangeOwnPinFlow
 
   const handleNewConfirmed = useCallback(
     async (newPin: string) => {
+      // Three PIN entries and two bcrypt rounds separate the first keypress
+      // from the commit — one of the widest windows in the app.
+      const guard = captureSessionFor(session);
+      if (!guard) {
+        return;
+      }
       try {
         // CLAUDE.md rule 8: currentPin/newPin only ever passed to
         // changeOwnPin, which verifies the current hash and bcrypt-hashes
         // the new one — never logged.
-        await changeOwnPin(userId, currentPin, newPin);
+        await changeOwnPin(userId, currentPin, newPin, guard.isStillActive);
         void triggerSyncNow(shopId);
-        onDone();
+        guard.ifLive(onDone);
       } catch {
-        setError('Current PIN is incorrect');
-        setStep('current');
-        setCurrentPin('');
+        guard.ifLive(() => {
+          setError('Current PIN is incorrect');
+          setStep('current');
+          setCurrentPin('');
+        });
       }
     },
-    [shopId, userId, currentPin, onDone],
+    [shopId, userId, session, currentPin, onDone],
   );
 
   const newEntry = useConfirmedPinEntry(handleNewConfirmed, () => setError('New PINs did not match — start over'));

@@ -42,6 +42,8 @@ beforeAll(() => {
   applyMigration("0003_curious_wild_pack.sql");
   applyMigration("0004_deep_boomer.sql");
   applyMigration("0005_eminent_legion.sql");
+  applyMigration("0006_inventory_movement_ledger.sql");
+  applyMigration("0007_staff_device_login.sql");
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: USER_ID, name: "Test Shop", phone: "01700000000", createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: "owner", isSystem: true, createdAt: NOW, updatedAt: NOW }).run();

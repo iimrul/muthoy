@@ -5,7 +5,8 @@ import {
   markSyncRowTransientFailure,
 } from '../db/sync-helpers';
 import { computeBackoffMs, MAX_SYNC_ATTEMPTS } from './backoff';
-import { isSupabaseConfigured, supabase } from './supabaseClient';
+import { invokeSyncWithClaimRefresh } from './invoke';
+import { isSupabaseConfigured } from './supabaseClient';
 
 const PUSH_BATCH_SIZE = 50;
 const retryNotBefore = new Map<string, number>();
@@ -28,6 +29,16 @@ interface PushResultSkipped {
 }
 
 type PushResult = PushResultApplied | PushResultRejected | PushResultSkipped;
+
+function outgoingPayload(tableName: string, serialized: string): unknown {
+  const payload = JSON.parse(serialized) as unknown;
+  if (tableName !== 'users' || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  const sanitized = { ...(payload as Record<string, unknown>) };
+  delete sanitized.permission_version;
+  return sanitized;
+}
 
 function parsePushResults(value: unknown): PushResult[] {
   if (!value || typeof value !== 'object' || !Array.isArray((value as { results?: unknown }).results)) {
@@ -80,12 +91,33 @@ function markTransient(queueId: string, error: string, previousAttempts: number)
   }
 }
 
-export async function pushPendingRows(shopId: string): Promise<boolean> {
+/**
+ * Drains the outbox for one shop.
+ *
+ * `isCancelled` is the device-handover kill switch (Volume 0 Days 5/11). The
+ * orchestrator in sync/index.ts cannot enforce it on our behalf: the loop below
+ * is where the queue is actually mutated, and a guard outside a loop cannot
+ * stop the loop. Cancellation is checked before starting each batch and again
+ * the moment the network settles, so after stopSyncEngine() no further batch
+ * goes out and no row is marked sent.
+ *
+ * Cancelling never loses a row. The outbox is at-least-once: a batch left
+ * un-marked stays `pending` and is re-sent at the next login, where the sync
+ * edge function upserts it by rowId. Marking rows sent under no active user is
+ * the failure we refuse; re-sending one is not a failure.
+ */
+export async function pushPendingRows(
+  shopId: string,
+  isCancelled: () => boolean = () => false,
+): Promise<boolean> {
   if (!isSupabaseConfigured) {
     return false;
   }
 
   while (true) {
+    if (isCancelled()) {
+      return false;
+    }
     const pending = listPendingSyncRows(shopId, PUSH_BATCH_SIZE);
     if (pending.length === 0) {
       return true;
@@ -105,12 +137,23 @@ export async function pushPendingRows(shopId: string): Promise<boolean> {
       tableName: row.tableName,
       rowId: row.rowId,
       op: row.op,
-      payload: JSON.parse(row.payload) as unknown,
+      payload: outgoingPayload(row.tableName, row.payload),
     }));
 
-    const { data, error } = await supabase.functions.invoke('sync', {
-      body: { action: 'push', shopId, rows },
+    if (isCancelled()) {
+      return false;
+    }
+    const { data, error } = await invokeSyncWithClaimRefresh({
+      action: 'push',
+      shopId,
+      rows,
     });
+    // The handover landed while this batch was on the wire. The request cannot
+    // be recalled, but every local consequence of it can be: leave the rows
+    // pending and let the next login re-send them.
+    if (isCancelled()) {
+      return false;
+    }
     if (error) {
       due.forEach((row) => markTransient(row.id, error.message, row.attempts));
       return false;
