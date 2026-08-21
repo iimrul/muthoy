@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Pressable, Text, View } from "react-native";
 
 // PinPad — Volume 2 components/ui: "Header, PinPad, PlanBadge, buttons".
 // Presentation only, fully controlled by props (DEVELOPMENT_RULES.md) —
@@ -29,9 +29,9 @@ export interface PinCompletionMeta {
 export function usePinEntry(
   onComplete: (pin: string, meta: PinCompletionMeta) => void | Promise<void>,
 ) {
-  const [pin, setPin] = useState('');
+  const [pin, setPin] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const pinRef = useRef('');
+  const pinRef = useRef("");
   const isSubmittingRef = useRef(false);
   const firstFrameRef = useRef<number | null>(null);
   const secondFrameRef = useRef<number | null>(null);
@@ -77,8 +77,8 @@ export function usePinEntry(
             void Promise.resolve()
               .then(() => onComplete(next, { completedAt }))
               .finally(() => {
-                pinRef.current = '';
-                setPin('');
+                pinRef.current = "";
+                setPin("");
                 isSubmittingRef.current = false;
                 setIsSubmitting(false);
               });
@@ -103,8 +103,8 @@ export function usePinEntry(
       return;
     }
     cancelScheduledCompletion();
-    pinRef.current = '';
-    setPin('');
+    pinRef.current = "";
+    setPin("");
   }, [cancelScheduledCompletion]);
 
   return { pin, isSubmitting, handleDigitPress, handleBackspace, reset };
@@ -119,14 +119,14 @@ export function useConfirmedPinEntry(
   onConfirmed: (pin: string, meta: PinCompletionMeta) => void | Promise<void>,
   onMismatch?: () => void,
 ) {
-  const [step, setStep] = useState<'enter' | 'confirm'>('enter');
-  const [firstPin, setFirstPin] = useState('');
+  const [step, setStep] = useState<"enter" | "confirm">("enter");
+  const [firstPin, setFirstPin] = useState("");
 
   const handleComplete = useCallback(
     async (pin: string, meta: PinCompletionMeta) => {
-      if (step === 'enter') {
+      if (step === "enter") {
         setFirstPin(pin);
-        setStep('confirm');
+        setStep("confirm");
         return;
       }
       if (pin === firstPin) {
@@ -134,15 +134,22 @@ export function useConfirmedPinEntry(
       } else {
         onMismatch?.();
       }
-      setStep('enter');
-      setFirstPin('');
+      setStep("enter");
+      setFirstPin("");
     },
     [step, firstPin, onConfirmed, onMismatch],
   );
 
   const entry = usePinEntry(handleComplete);
+  const resetEntry = entry.reset;
 
-  return { step, ...entry };
+  const reset = useCallback(() => {
+    resetEntry();
+    setStep("enter");
+    setFirstPin("");
+  }, [resetEntry]);
+
+  return { step, ...entry, reset };
 }
 
 export interface PinPadProps {
@@ -161,13 +168,19 @@ const PIN_LENGTH = 4;
 // null = the skip cell (bottom-left); 'backspace' = the backspace cell
 // (bottom-right) — Volume 4's exact layout.
 const KEYPAD_ROWS: (string | null)[][] = [
-  ['1', '2', '3'],
-  ['4', '5', '6'],
-  ['7', '8', '9'],
-  [null, '0', 'backspace'],
+  ["1", "2", "3"],
+  ["4", "5", "6"],
+  ["7", "8", "9"],
+  [null, "0", "backspace"],
 ];
 
-export function PinPad({ value, onDigitPress, onBackspace, error = false, disabled = false }: PinPadProps) {
+export function PinPad({
+  value,
+  onDigitPress,
+  onBackspace,
+  error = false,
+  disabled = false,
+}: PinPadProps) {
   const isFull = value.length >= PIN_LENGTH;
   const isKeypadDisabled = disabled || isFull;
 
@@ -181,8 +194,8 @@ export function PinPad({ value, onDigitPress, onBackspace, error = false, disabl
               key={i}
               className={
                 filled
-                  ? `h-4 w-4 rounded-full ${error ? 'bg-error' : 'bg-brand-green'}`
-                  : 'h-4 w-4 rounded-full border border-midGray bg-brand-softGreen'
+                  ? `h-4 w-4 rounded-full ${error ? "bg-error" : "bg-brand-green"}`
+                  : "h-4 w-4 rounded-full border border-midGray bg-brand-softGreen"
               }
             />
           );
@@ -197,7 +210,7 @@ export function PinPad({ value, onDigitPress, onBackspace, error = false, disabl
                 return <View key={`skip-${colIndex}`} className="h-16 w-16" />;
               }
 
-              if (key === 'backspace') {
+              if (key === "backspace") {
                 return (
                   <Pressable
                     key="backspace"
@@ -207,7 +220,9 @@ export function PinPad({ value, onDigitPress, onBackspace, error = false, disabl
                     accessibilityLabel="Backspace"
                     className="h-16 w-16 items-center justify-center rounded-full active:bg-brand-softGreen"
                   >
-                    <Text className="font-sans-semibold text-xl text-richBlack">⌫</Text>
+                    <Text className="font-sans-semibold text-xl text-richBlack">
+                      ⌫
+                    </Text>
                   </Pressable>
                 );
               }
@@ -221,7 +236,9 @@ export function PinPad({ value, onDigitPress, onBackspace, error = false, disabl
                   accessibilityLabel={`Digit ${key}`}
                   className="h-16 w-16 items-center justify-center rounded-full active:bg-brand-softGreen"
                 >
-                  <Text className="font-sans-semibold text-2xl text-richBlack">{key}</Text>
+                  <Text className="font-sans-semibold text-2xl text-richBlack">
+                    {key}
+                  </Text>
                 </Pressable>
               );
             })}

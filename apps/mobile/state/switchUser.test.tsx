@@ -139,7 +139,8 @@ describe('switchUser — what a handover clears', () => {
     useSessionStore.getState().login(STAFF);
 
     expect(useCartStore.getState().items).toEqual([]);
-    expect(useSessionStore.getState().session).toEqual(STAFF);
+    expect(useSessionStore.getState().session).toMatchObject(STAFF);
+    expect(useSessionStore.getState().session?.startedAt).toEqual(expect.any(String));
   });
 
   it('stops the sync engine as part of the handover itself, every time — not left to another screen noticing', () => {
@@ -161,7 +162,8 @@ describe('switchUser — what a handover clears', () => {
     // CLAUDE.md rule 8. The session carries identity only; users.pin_hash in
     // SQLite stays the single home of the hash, and the raw PIN no home at all.
     expect(persisted).not.toMatch(/pin/i);
-    expect(JSON.parse(persisted).state.session).toEqual(OWNER);
+    expect(JSON.parse(persisted).state.session).toMatchObject(OWNER);
+    expect(JSON.parse(persisted).state.session.startedAt).toEqual(expect.any(String));
   });
 });
 
@@ -255,10 +257,7 @@ describe('usePermission — the guard follows the active user', () => {
     expect(result.current.staffManagement.isAllowed).toBe(true);
   });
 
-  // Fail-closed, unchanged by the handover work: the P1 'manager' rows every
-  // shop already carries (db/auth.ts's createShopAndOwner) must not inherit a
-  // grant if one is ever forced into the persisted session.
-  it('denies a manager or unknown role forced into the session', () => {
+  it('grants manager operational defaults while unknown roles fail closed', () => {
     const { result } = renderGuards();
 
     act(() =>
@@ -267,9 +266,10 @@ describe('usePermission — the guard follows the active user', () => {
       }),
     );
 
-    expect(result.current.sales.isAllowed).toBe(false);
-    expect(result.current.inventoryView.isAllowed).toBe(false);
-    expect(result.current.cash.isAllowed).toBe(false);
+    expect(result.current.sales.isAllowed).toBe(true);
+    expect(result.current.inventoryView.isAllowed).toBe(true);
+    expect(result.current.cash.isAllowed).toBe(true);
+    expect(result.current.staffManagement.isAllowed).toBe(false);
 
     act(() =>
       useSessionStore.setState({

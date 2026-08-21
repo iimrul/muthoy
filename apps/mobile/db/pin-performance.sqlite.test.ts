@@ -29,6 +29,7 @@ beforeAll(() => {
     '0006_inventory_movement_ledger.sql',
     '0007_staff_device_login.sql',
     '0008_native_pin_lookup.sql',
+    '0009_strong_gargoyle.sql',
   ]) migrate(name);
 });
 

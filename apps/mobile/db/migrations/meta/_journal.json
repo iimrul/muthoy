@@ -64,6 +64,13 @@
       "when": 1787193600000,
       "tag": "0008_native_pin_lookup",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1787292455696,
+      "tag": "0009_strong_gargoyle",
+      "breakpoints": true
     }
   ]
 }

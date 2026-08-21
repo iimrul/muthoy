@@ -156,6 +156,7 @@ beforeAll(() => {
   applyMigration('0006_inventory_movement_ledger.sql');
   applyMigration('0007_staff_device_login.sql');
   applyMigration('0008_native_pin_lookup.sql');
+  applyMigration('0009_strong_gargoyle.sql');
 });
 
 describe('expense recording and its cash impact', () => {

@@ -28,6 +28,8 @@ export interface Session {
   shopId: string;
   userId: string;
   role: Role;
+  /** Start of this operational login/shift. Preserved across app restarts. */
+  startedAt?: string;
   /**
    * The owner's per-staff permission overrides for THIS user, snapshotted at
    * login so route guards can decide what to render without a SQLite read per
@@ -97,7 +99,10 @@ export const useSessionStore = create<SessionState>()(
       // Both transitions bump. clearActiveUser() alone is not enough: work
       // started before a handover must be invalidated even if the SAME person
       // logs back in before it finishes.
-      login: (session) => set((state) => ({ session, epoch: state.epoch + 1 })),
+      login: (session) => set((state) => ({
+        session: { ...session, startedAt: session.startedAt ?? new Date().toISOString() },
+        epoch: state.epoch + 1,
+      })),
       clearActiveUser: () => set((state) => ({ session: null, epoch: state.epoch + 1 })),
     }),
     {

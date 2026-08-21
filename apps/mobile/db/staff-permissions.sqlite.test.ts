@@ -95,6 +95,7 @@ beforeAll(() => {
   applyMigration('0006_inventory_movement_ledger.sql');
   applyMigration('0007_staff_device_login.sql');
   applyMigration('0008_native_pin_lookup.sql');
+  applyMigration('0009_strong_gargoyle.sql');
 });
 
 beforeEach(async () => {
@@ -179,6 +180,10 @@ describe('phone as a login credential', () => {
 });
 
 describe('per-staff permission overrides', () => {
+  it('never treats the Owner account as a staff-management target', async () => {
+    await expect(resetStaffPin(fixture.ownerId, '8844', fixture.ownerId, ALWAYS_LIVE)).rejects.toThrow(/Only Staff or Manager/);
+    await expect(deactivateStaff(fixture.ownerId, fixture.ownerId, ALWAYS_LIVE)).rejects.toThrow(/Only Staff or Manager/);
+  });
   it('denies a capability the staff default does not include', async () => {
     const staff = await createStaff(
       fixture.shopId, fixture.ownerId,
@@ -229,7 +234,7 @@ describe('per-staff permission overrides', () => {
 
     await expect(verifyPin(pin)).resolves.toMatchObject({
       role: 'staff',
-      permissions: { cash_management: true },
+      permissions: { cash_drawer: true },
     });
   });
 
@@ -264,13 +269,10 @@ describe('per-staff permission overrides', () => {
     ).rejects.toBeInstanceOf(NotAuthorizedError);
   });
 
-  it('ignores an override that would deny an OWNER their own administration', async () => {
-    // The owner is the only account that can edit permissions, so honouring a
-    // stored denial against them would lock a shop out of itself with no way
-    // back in. Owner stays "everything, as a rule".
-    await setStaffPermissions(
+  it('refuses to edit Owner permissions while Owner administration remains absolute', async () => {
+    await expect(setStaffPermissions(
       fixture.shopId, fixture.ownerId, fixture.ownerId, { staff_management: false }, ALWAYS_LIVE,
-    );
+    )).rejects.toThrow(/Only Staff or Manager/);
 
     await expect(
       requirePermission(fixture.shopId, fixture.ownerId, 'staff_management'),

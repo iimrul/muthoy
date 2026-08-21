@@ -21,7 +21,8 @@ export default function CustomerDetailScreen() {
   const { customerId } = useLocalSearchParams<{ customerId: string }>();
   // Volume 0 Day 11: same owner-only surface as credit-sales.tsx — collecting
   // a payment mutates both the credit ledger and (for cash) the drawer.
-  const { session, isAllowed } = usePermission('credit_management');
+  const { session, isAllowed } = usePermission('credit_view');
+  const { isAllowed: canManage } = usePermission('credit_manage');
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [ledgerRows, setLedgerRows] = useState<CreditLedgerRow[]>([]);
   const [amountText, setAmountText] = useState('');
@@ -39,8 +40,8 @@ export default function CustomerDetailScreen() {
     const guard = captureSessionFor(session);
     try {
       const [customerRow, history] = await Promise.all([
-        getCustomer(session.shopId, customerId),
-        getCustomerCreditLedger(session.shopId, customerId),
+        getCustomer(session.shopId, session.userId, customerId),
+        getCustomerCreditLedger(session.shopId, session.userId, customerId),
       ]);
       if (!guard || guard.isStale()) {
         return;
@@ -65,7 +66,7 @@ export default function CustomerDetailScreen() {
   const balance = useMemo(() => remainingBalance(ledgerRows), [ledgerRows]);
 
   const handleCollect = useCallback(async () => {
-    if (!session || !isAllowed || !customerId) {
+    if (!session || !isAllowed || !canManage || !customerId) {
       return;
     }
     // Pinned at action start. A collection moves both the credit ledger and
@@ -106,7 +107,7 @@ export default function CustomerDetailScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [amountText, customerId, isAllowed, reload, session]);
+  }, [amountText, canManage, customerId, isAllowed, reload, session]);
 
   if (!session) {
     return <AccessDenied message="Active session required." />;
@@ -146,7 +147,7 @@ export default function CustomerDetailScreen() {
           </View>
         ) : null}
 
-        <View className="gap-3 rounded-lg bg-white p-4">
+        {canManage ? <View className="gap-3 rounded-lg bg-white p-4">
           <Text className="font-sans-bold text-base text-richBlack">Collect payment</Text>
           <Text className="font-sans-medium text-sm text-richBlack">Amount (৳)</Text>
           <TextInput
@@ -164,7 +165,7 @@ export default function CustomerDetailScreen() {
           >
             <Text className="font-sans-semibold text-white">{isSubmitting ? 'Collecting…' : 'Collect cash'}</Text>
           </Pressable>
-        </View>
+        </View> : null}
 
         <Text className="font-sans-bold text-base text-richBlack">Credit ledger</Text>
         {ledgerRows.length === 0 ? (

@@ -1,4 +1,4 @@
-import { resolvePermission, toRole, type Permission } from '../domain/permissions';
+import { resolvePermission, toRole, type AuthorizationPermission } from '../domain/permissions';
 import { useSessionStore, type Session } from './sessionStore';
 
 // state/usePermission.ts — the route-level half of Volume 0 Day 11's
@@ -18,11 +18,11 @@ export interface PermissionCheck {
   isAllowed: boolean;
 }
 
-export function usePermission(permission: Permission): PermissionCheck {
+export function usePermission(permission: AuthorizationPermission): PermissionCheck {
   const session = useSessionStore((state) => state.session);
   // `session.role` is typed as Role but comes off persisted MMKV, so at runtime
-  // it can be any string — a P1 'manager', or a tampered value. toRole fails
-  // those closed here exactly as the db/ guards do, instead of letting an
+  // it can be any string. toRole fails tampered/unknown values closed here
+  // exactly as the db/ guards do, instead of letting an
   // unnarrowed role fall through to the staff grant list.
   const role = session ? toRole(session.role) : null;
   return {

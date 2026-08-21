@@ -1,134 +1,199 @@
-// domain/permissions.ts — pure, framework-free role/permission checks. Zero
-// React/DB imports (DEVELOPMENT_RULES.md). Volume 0 Day 11: "a SIMPLE
-// two-role permission check (Owner = everything, Staff = sales/
-// inventory-view only)." The full 3-tier Owner/Manager/Staff matrix is P1
-// (Volume 0's scope lock) — do not build the Manager nuance here yet.
-//
-// This file is the app's ONLY grant table. Route guards
-// (state/usePermission.ts) and action guards (db/auth.ts's requirePermission)
-// both resolve through hasPermission below — no screen and no db/ module
-// decides access from a raw role string of its own.
+// Pure authorization contract. Product permission names match the prototype;
+// storage names stay stable so existing offline overrides remain valid.
 
-export type Role = 'owner' | 'staff';
+export type Role = "owner" | "manager" | "staff";
 
 export type Permission =
-  | 'sales'
-  | 'inventory_view'
-  | 'inventory_write'
-  | 'staff_management'
-  | 'cash_management'
-  // Owner-sensitive Settings: shop profile, and PIN management from the
-  // Settings screen. Volume 0 Day 11 scopes PIN handling to "the owner's
-  // ability to reset a staff PIN or change their own PIN" — a staff member's
-  // PIN is changed BY THE OWNER via reset (db/staff.ts's resetStaffPin), not
-  // self-service. This is still the same two-role model: an owner-only key,
-  // no Manager nuance.
-  | 'settings_manage'
-  // Standalone customer credit ledger/collections (app/credit/*): viewing
-  // balances and collecting a payment outside of checkout. This is distinct
-  // from the 'sales' grant — a Staff-made SALE on credit still works, because
-  // createSaleTransaction writes the credit row itself (see db/sales.ts); this
-  // key only covers the separate admin surface for managing existing balances.
-  | 'credit_management';
+  | "sale_entry"
+  | "sale_discount"
+  | "sale_return"
+  | "sale_history"
+  | "inventory_view"
+  | "inventory_edit"
+  | "expiry_manage"
+  | "credit_view"
+  | "credit_manage"
+  | "cash_drawer"
+  | "reports"
+  | "staff_manage";
 
-/**
- * Every permission key, in the order an owner sees them when configuring a
- * staff member. Exported so the Staff form and key validation read ONE list —
- * a key added here reaches the UI and is accepted without a second edit
- * somewhere else.
- */
-export const PERMISSION_KEYS: readonly Permission[] = [
-  'sales',
-  'inventory_view',
-  'inventory_write',
-  'credit_management',
-  'cash_management',
-  'staff_management',
-  'settings_manage',
-];
+/** Compatibility names used by existing DB/RLS rows. Never shown in the UI. */
+export type LegacyPermission =
+  | "sales"
+  | "inventory_write"
+  | "credit_management"
+  | "cash_management"
+  | "staff_management"
+  | "settings_manage";
 
-const PERMISSION_KEY_SET: ReadonlySet<string> = new Set(PERMISSION_KEYS);
+export type AuthorizationPermission = Permission | LegacyPermission;
+export type PermissionOverrides = Partial<
+  Record<Permission | LegacyPermission, boolean>
+>;
+export type PermissionPreset = "cashier" | "manager" | "custom";
 
-/** Fail-closed narrowing for a key off the wire, MMKV, or a SQLite row. */
+export const PERMISSION_KEYS = [
+  "sale_entry",
+  "sale_discount",
+  "sale_return",
+  "sale_history",
+  "inventory_view",
+  "inventory_edit",
+  "expiry_manage",
+  "credit_view",
+  "credit_manage",
+  "cash_drawer",
+  "reports",
+  "staff_manage",
+] as const satisfies readonly Permission[];
+
+export const PERMISSION_GROUPS = [
+  {
+    key: "sales",
+    label: "Sales",
+    permissions: ["sale_entry", "sale_discount", "sale_return", "sale_history"],
+  },
+  {
+    key: "inventory",
+    label: "Inventory",
+    permissions: ["inventory_view", "inventory_edit", "expiry_manage"],
+  },
+  {
+    key: "credit_cash",
+    label: "Credit & Cash",
+    permissions: ["credit_view", "credit_manage", "cash_drawer"],
+  },
+  {
+    key: "management",
+    label: "Management",
+    permissions: ["reports", "staff_manage"],
+  },
+] as const satisfies readonly {
+  key: string;
+  label: string;
+  permissions: readonly Permission[];
+}[];
+
+export const CASHIER_DEFAULT_PERMISSIONS = [
+  "sale_entry",
+  "inventory_view",
+] as const satisfies readonly Permission[];
+export const MANAGER_DEFAULT_PERMISSIONS = PERMISSION_KEYS.filter(
+  (key) => key !== "staff_manage",
+);
+
+function preset(enabled: readonly Permission[]): PermissionOverrides {
+  return Object.fromEntries(
+    PERMISSION_KEYS.map((key) => [key, enabled.includes(key)]),
+  ) as PermissionOverrides;
+}
+
+export const PERMISSION_PRESETS: Readonly<
+  Record<PermissionPreset, PermissionOverrides>
+> = {
+  cashier: preset(CASHIER_DEFAULT_PERMISSIONS),
+  manager: preset(MANAGER_DEFAULT_PERMISSIONS),
+  custom: preset([]),
+};
+
+const PRODUCT_KEY_SET: ReadonlySet<string> = new Set(PERMISSION_KEYS);
+
+const STORAGE_KEY_BY_PERMISSION: Readonly<Record<Permission, string>> = {
+  sale_entry: "sales",
+  sale_discount: "sale_discount",
+  sale_return: "sale_return",
+  sale_history: "sale_history",
+  inventory_view: "inventory_view",
+  inventory_edit: "inventory_write",
+  expiry_manage: "expiry_manage",
+  credit_view: "credit_view",
+  credit_manage: "credit_management",
+  cash_drawer: "cash_management",
+  reports: "reports",
+  staff_manage: "staff_management",
+};
+
+const PRODUCT_KEY_BY_STORAGE = new Map<string, Permission>(
+  Object.entries(STORAGE_KEY_BY_PERMISSION).map(([permission, storage]) => [
+    storage,
+    permission as Permission,
+  ]),
+);
+
 export function isPermissionKey(value: unknown): value is Permission {
-  return typeof value === 'string' && PERMISSION_KEY_SET.has(value);
+  return typeof value === "string" && PRODUCT_KEY_SET.has(value);
 }
 
-// Volume 0 Day 11's whole staff grant: sell, and look at stock. Everything
-// else — cash management, staff management/PIN reset, supplier/purchase and
-// any other inventory WRITE — stays owner-only unless the owner explicitly
-// grants it to one staff member (see PermissionOverrides below).
-export const STAFF_DEFAULT_PERMISSIONS: readonly Permission[] = ['sales', 'inventory_view'];
-
-/**
- * An owner's explicit per-staff decisions, keyed by permission. An ABSENT key
- * means "use the role default" — this map holds only deltas, which is why a
- * staff member on standard access carries no override rows at all.
- */
-export type PermissionOverrides = Partial<Record<Permission, boolean>>;
-
-export function hasPermission(role: Role, permission: Permission): boolean {
-  // Owner = everything, expressed as a rule rather than a list, so a
-  // permission added later can never accidentally lock the owner out.
-  if (role === 'owner') {
-    return true;
-  }
-  return STAFF_DEFAULT_PERMISSIONS.includes(permission);
+export function permissionStorageKey(permission: Permission): string {
+  return STORAGE_KEY_BY_PERMISSION[permission];
 }
 
-/**
- * The effective verdict: role default, overridden by the owner's per-staff
- * decision where one exists.
- *
- * An OWNER ignores overrides entirely. That is deliberate and load-bearing: the
- * owner is the only account that can edit permissions, so honouring a stored
- * `staff_management: false` against them would let one bad write — or one
- * hostile sync payload — lock a shop out of its own administration with no way
- * back in. Owner stays "everything, as a rule".
- *
- * The server enforces this same shape in SQL (auth_has_permission). Both sides
- * resolve default-then-override in the same order, so UI, local db/ guards and
- * RLS cannot disagree about what a staff member may do.
- */
+export function fromStoragePermissionKey(value: unknown): Permission | null {
+  return typeof value === "string"
+    ? (PRODUCT_KEY_BY_STORAGE.get(value) ?? null)
+    : null;
+}
+
+export function normalizePermission(
+  permission: AuthorizationPermission,
+): Permission | null {
+  if (isPermissionKey(permission)) return permission;
+  if (permission === "settings_manage") return null;
+  return PRODUCT_KEY_BY_STORAGE.get(permission) ?? null;
+}
+
+export function defaultPermissions(
+  role: Exclude<Role, "owner">,
+): readonly Permission[] {
+  return role === "manager"
+    ? MANAGER_DEFAULT_PERMISSIONS
+    : CASHIER_DEFAULT_PERMISSIONS;
+}
+
+export function hasPermission(
+  role: Role,
+  permission: AuthorizationPermission,
+): boolean {
+  if (role === "owner") return true;
+  if (permission === "settings_manage") return false;
+  const productPermission = normalizePermission(permission);
+  return (
+    productPermission !== null &&
+    defaultPermissions(role).includes(productPermission)
+  );
+}
+
 export function resolvePermission(
   role: Role,
-  permission: Permission,
+  permission: AuthorizationPermission,
   overrides: PermissionOverrides | undefined,
 ): boolean {
-  if (role === 'owner') {
-    return true;
-  }
-  return overrides?.[permission] ?? hasPermission(role, permission);
+  if (role === "owner") return true;
+  if (permission === "settings_manage") return false;
+  const productPermission = normalizePermission(permission);
+  if (productPermission === null) return false;
+  const legacyValue =
+    overrides?.[permissionStorageKey(productPermission) as LegacyPermission];
+  return (
+    overrides?.[productPermission] ??
+    legacyValue ??
+    hasPermission(role, productPermission)
+  );
 }
 
-/**
- * Narrows a stored `roles.name` to the two roles Beta actually assigns. A
- * 'manager' row exists in every shop from registration (db/auth.ts creates all
- * three system roles up front to avoid a backfill migration) but is
- * unassignable until the P1 matrix ships — so 'manager', and any unknown
- * value, resolves to null and is DENIED here rather than silently falling
- * through to owner-level access.
- */
 export function toRole(roleName: string | null | undefined): Role | null {
-  return roleName === 'owner' || roleName === 'staff' ? roleName : null;
+  return roleName === "owner" || roleName === "manager" || roleName === "staff"
+    ? roleName
+    : null;
 }
 
-/**
- * The fail-closed entry point for a role that came from OUTSIDE this module —
- * a persisted MMKV session, or a `roles.name` read back from SQLite. Anything
- * toRole cannot narrow (a P1 'manager', an unknown string, null) is denied,
- * for every permission, in the UI exactly as in db/auth.ts's requirePermission.
- *
- * Callers holding an already-narrowed `Role` should use hasPermission; every
- * caller holding a raw string must use this, so UI and DB can never disagree.
- */
 export function hasPermissionForRoleName(
   roleName: string | null | undefined,
-  permission: Permission,
+  permission: AuthorizationPermission,
+  overrides?: PermissionOverrides,
 ): boolean {
   const role = toRole(roleName);
-  return role !== null && hasPermission(role, permission);
+  return role !== null && resolvePermission(role, permission, overrides);
 }
 
-/** The single user-facing denial string — friendly text, never a crash. */
-export const ACCESS_DENIED_MESSAGE = 'Owner access only.';
+export const ACCESS_DENIED_MESSAGE = "Owner access only.";

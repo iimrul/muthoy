@@ -58,7 +58,7 @@ const { changeOwnPin, getShopName, getShopProfile, updateShopProfile } = await i
 const { createSupplier, getSupplierDetail, listSuppliers } = await import('./suppliers');
 const { createPurchase, listPurchasesForSupplier } = await import('./purchases');
 const { collectPayment, createCustomer, getCustomerCreditLedger } = await import('./customers');
-const { verifyPin } = await import('./auth');
+const { requirePermission, verifyPin } = await import('./auth');
 const { hashPin, verifyPinHash } = await import('../native/crypto');
 
 const BUSINESS_DATE = currentBusinessDate();
@@ -147,6 +147,7 @@ beforeAll(() => {
   applyMigration('0006_inventory_movement_ledger.sql');
   applyMigration('0007_staff_device_login.sql');
   applyMigration('0008_native_pin_lookup.sql');
+  applyMigration('0009_strong_gargoyle.sql');
 });
 
 describe('owner — full access', () => {
@@ -281,7 +282,7 @@ describe('owner — full access', () => {
       shopId: fixture.shopId, staffId: fixture.ownerId, customerId: customer.id, amount: asPaisa(400),
     });
 
-    const ledger = await getCustomerCreditLedger(fixture.shopId, customer.id);
+    const ledger = await getCustomerCreditLedger(fixture.shopId, fixture.ownerId, customer.id);
     expect(ledger).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'credit_sale', amount: 1000 }),
       expect.objectContaining({ type: 'collection', amount: 400 }),
@@ -473,12 +474,12 @@ describe('cash-sensitive reads — denied for unauthorized roles', () => {
     await expect(getEndOfDaySummary(fixture.shopId, fixture.staffId, BUSINESS_DATE)).rejects.toThrow(/Owner access only/);
   });
 
-  it('denies the P1 manager role and a cross-shop owner the same reads', async () => {
+  it('grants manager cash reads but denies a cross-shop owner', async () => {
     const fixture = seedShop();
     const other = seedShop();
 
-    await expect(getCashSummary(fixture.shopId, fixture.managerId, BUSINESS_DATE)).rejects.toThrow(/Owner access only/);
-    await expect(getEndOfDaySummary(fixture.shopId, fixture.managerId, BUSINESS_DATE)).rejects.toThrow(/Owner access only/);
+    await expect(getCashSummary(fixture.shopId, fixture.managerId, BUSINESS_DATE)).resolves.toBeDefined();
+    await expect(getEndOfDaySummary(fixture.shopId, fixture.managerId, BUSINESS_DATE)).resolves.toBeDefined();
     await expect(listExpenses(fixture.shopId, other.ownerId, BUSINESS_DATE)).rejects.toThrow(/Owner access only/);
   });
 
@@ -511,10 +512,9 @@ describe('settings — owner-sensitive actions denied', () => {
     const fixture = seedShop();
 
     await expect(getShopProfile(fixture.shopId, fixture.staffId)).rejects.toThrow(/Owner access only/);
-    await expect(updateShopProfile(fixture.shopId, fixture.staffId, { name: 'Renamed' })).rejects.toThrow(/Owner access only/);
+    await expect(updateShopProfile(fixture.shopId, fixture.staffId, { name: 'Renamed' }, ALWAYS_LIVE)).rejects.toThrow(/Owner access only/);
 
-    // The denial must beat the TODO stub, not fall through to it.
-    await expect(getShopProfile(fixture.shopId, fixture.ownerId)).rejects.toThrow(/TODO/);
+    await expect(getShopProfile(fixture.shopId, fixture.ownerId)).resolves.toMatchObject({ id: fixture.ownerId });
   });
 
   it('denies the P1 manager role the same Settings actions', async () => {
@@ -522,7 +522,7 @@ describe('settings — owner-sensitive actions denied', () => {
     sqlite.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(await hashPin('1234'), fixture.managerId);
 
     await expect(changeOwnPin(fixture.managerId, '1234', '5678', ALWAYS_LIVE)).rejects.toThrow(/Owner access only/);
-    await expect(updateShopProfile(fixture.shopId, fixture.managerId, { name: 'Renamed' })).rejects.toThrow(/Owner access only/);
+    await expect(updateShopProfile(fixture.shopId, fixture.managerId, { name: 'Renamed' }, ALWAYS_LIVE)).rejects.toThrow(/Owner access only/);
     expect(countRows('audit_logs', fixture.shopId)).toBe(0);
   });
 
@@ -556,14 +556,14 @@ describe('roles the session store cannot vouch for', () => {
     ).rejects.toThrow(/Owner access only/);
   });
 
-  // Fail closed at the front door too: a manager PIN must not mint a session
-  // whose role the guards would then have to keep rejecting screen by screen.
-  it('refuses to log a manager in at all, while a staff PIN still works', async () => {
+  it('logs both manager and staff into their assigned operational roles', async () => {
     const fixture = seedShop();
     sqlite.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(await hashPin('7391'), fixture.managerId);
     sqlite.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(await hashPin('7392'), fixture.staffId);
 
-    await expect(verifyPin('7391')).resolves.toBeNull();
+    await expect(verifyPin('7391')).resolves.toEqual({
+      shopId: fixture.shopId, userId: fixture.managerId, role: 'manager', permissions: {},
+    });
     await expect(verifyPin('7392')).resolves.toEqual({
       shopId: fixture.shopId, userId: fixture.staffId, role: 'staff',
       // No overrides configured, so the staff role default applies unchanged.
@@ -575,40 +575,33 @@ describe('roles the session store cannot vouch for', () => {
     // and the suite deliberately stacks many shops into one database.
   }, 30_000);
 
-  // The Manager matrix is P1 (Volume 0's scope lock). Until it ships, a
-  // manager row must not inherit owner access — nor sell by default.
-  it('denies the unassigned P1 manager role, including for sales', async () => {
+  it('grants manager expense and sales operations by default', async () => {
     const fixture = seedShop();
 
     await expect(
       recordExpense({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, staffId: fixture.managerId, category: 'rent', amount: asPaisa(100) }),
-    ).rejects.toThrow(/Owner access only/);
+    ).resolves.toBeDefined();
 
     await expect(
       createSaleTransaction({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, staffId: fixture.managerId, paymentType: 'cash',
         lines: [{ medicineId: fixture.medicineId, deductions: [{ batchId: fixture.batchId, quantityDeducted: 1 }], unitPrice: asPaisa(1000) }],
       }),
-    ).rejects.toThrow(/Owner access only/);
+    ).resolves.toBeDefined();
 
-    expect(countRows('sales', fixture.shopId)).toBe(0);
+    expect(countRows('sales', fixture.shopId)).toBe(1);
   });
 
-  // Same P1 scope lock, for the credit-management gate this fix adds.
-  it('denies the P1 manager role standalone credit management, with zero side effects', async () => {
+  it('grants manager standalone credit management by default', async () => {
     const fixture = seedShop();
     const queueBefore = queuedCount(fixture.shopId);
 
-    await expect(
-      collectPayment({ isStillActive: ALWAYS_LIVE,
-        shopId: fixture.shopId, staffId: fixture.managerId, customerId: fixture.customerId, amount: asPaisa(100),
-      }),
-    ).rejects.toThrow(/Owner access only/);
+    await expect(requirePermission(fixture.shopId, fixture.managerId, 'credit_management')).resolves.toBeUndefined();
     await expect(
       createCustomer({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, actorUserId: fixture.managerId, name: 'Manager customer' }),
-    ).rejects.toThrow(/Owner access only/);
+    ).resolves.toBeDefined();
 
-    expect(countRows('payments', fixture.shopId)).toBe(0);
-    expect(queuedCount(fixture.shopId)).toBe(queueBefore);
+    expect(countRows('customers', fixture.shopId)).toBe(2);
+    expect(queuedCount(fixture.shopId)).toBeGreaterThan(queueBefore);
   });
 });

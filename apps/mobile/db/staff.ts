@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import { db } from './client';
 import { users, roles, auditLogs, userPermissions } from './schema';
 import { generateId } from '../native/id';
@@ -8,11 +8,23 @@ import {
   assertPinUnique,
   getShopRoleId,
   getUserPermissionOverrides,
+  getActiveSessionRole,
   requirePermission,
+  requireOwner,
 } from './auth';
 import { assertSessionLive, DuplicatePhoneError, isUniqueConstraintViolation } from './errors';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
-import { isPermissionKey, type PermissionOverrides, type Role } from '../domain/permissions';
+import {
+  CASHIER_DEFAULT_PERMISSIONS,
+  PERMISSION_KEYS,
+  fromStoragePermissionKey,
+  hasPermission,
+  isPermissionKey,
+  permissionStorageKey,
+  toRole,
+  type PermissionOverrides,
+  type Role,
+} from '../domain/permissions';
 import type { AuthTimingTrace } from '../dev/authTiming';
 
 // db/staff.ts — the ONLY file that will touch Drizzle/SQLite for Staff
@@ -41,12 +53,25 @@ export interface CreateStaffInput {
   name: string;
   phone: string;
   rawPin: string;
+  role?: 'staff' | 'manager';
   /**
    * The owner's choices at creation time. Only keys that DIFFER from the staff
    * role default are written, so an unchanged set writes no override rows at
    * all and the common case behaves exactly as it did before this feature.
    */
   permissions: PermissionOverrides;
+}
+
+async function getManageableStaffTarget(staffId: string): Promise<{ shopId: string }> {
+  const [target] = await db
+    .select({ shopId: users.shopId, role: roles.name })
+    .from(users)
+    .innerJoin(roles, and(eq(roles.id, users.roleId), eq(roles.shopId, users.shopId)))
+    .where(and(eq(users.id, staffId), eq(users.isDeleted, false)));
+  if (!target || (target.role !== 'staff' && target.role !== 'manager')) {
+    throw new Error('Only Staff or Manager accounts can be managed here');
+  }
+  return { shopId: target.shopId };
 }
 
 // Staff only — the owner viewing this list isn't "staff" (Volume 0 Day 11:
@@ -56,13 +81,17 @@ export interface CreateStaffInput {
 // the shop, and who is deactivated, is not something a Staff login gets to
 // enumerate by navigating straight to the screen.
 export async function listStaff(shopId: string, actorUserId: string): Promise<StaffMember[]> {
-  await requirePermission(shopId, actorUserId, 'staff_management');
+  await requirePermission(shopId, actorUserId, 'staff_manage');
 
   const rows = await db
-    .select({ id: users.id, name: users.name, phone: users.phone, isActive: users.isActive })
+    .select({ id: users.id, name: users.name, phone: users.phone, isActive: users.isActive, role: roles.name })
     .from(users)
     .innerJoin(roles, eq(users.roleId, roles.id))
-    .where(and(eq(users.shopId, shopId), eq(users.isDeleted, false), eq(roles.name, 'staff')));
+    .where(and(
+      eq(users.shopId, shopId),
+      eq(users.isDeleted, false),
+      or(eq(roles.name, 'staff'), eq(roles.name, 'manager')),
+    ));
 
   // Sequential rather than a join: the roster is a handful of rows, and reusing
   // getUserPermissionOverrides keeps ONE place that decides which override rows
@@ -74,7 +103,7 @@ export async function listStaff(shopId: string, actorUserId: string): Promise<St
       id: row.id,
       name: row.name,
       phone: row.phone,
-      role: 'staff' as Role,
+      role: toRole(row.role) ?? 'staff',
       isActive: row.isActive,
       permissions: await getUserPermissionOverrides(shopId, row.id),
     });
@@ -93,31 +122,40 @@ export async function listStaff(shopId: string, actorUserId: string): Promise<St
  */
 function writePermissionOverrides(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  params: { shopId: string; staffId: string; permissions: PermissionOverrides },
+  params: { shopId: string; staffId: string; role: 'staff' | 'manager'; permissions: PermissionOverrides },
 ): void {
   const existing = tx
-    .select({ id: userPermissions.id, key: userPermissions.key })
+    .select({ id: userPermissions.id, key: userPermissions.key, isDeleted: userPermissions.isDeleted })
     .from(userPermissions)
     .where(
       and(
         eq(userPermissions.userId, params.staffId),
         eq(userPermissions.shopId, params.shopId),
-        eq(userPermissions.isDeleted, false),
       ),
     )
     .all();
 
   const now = new Date().toISOString();
+  const desired: PermissionOverrides = {};
+  for (const [rawKey, allowed] of Object.entries(params.permissions)) {
+    const key = isPermissionKey(rawKey) ? rawKey : fromStoragePermissionKey(rawKey);
+    if (key && typeof allowed === 'boolean') desired[key] = allowed;
+  }
 
-  for (const [key, allowed] of Object.entries(params.permissions)) {
+  for (const [rawKey, allowed] of Object.entries(desired)) {
     // An unrecognised key never reaches SQLite: the same fail-closed narrowing
     // getUserPermissionOverrides applies on the way out.
-    if (!isPermissionKey(key) || typeof allowed !== 'boolean') {
+    const key = isPermissionKey(rawKey) ? rawKey : null;
+    if (!key || typeof allowed !== 'boolean') {
       continue;
     }
-    const current = existing.find((row) => row.key === key);
+    if (allowed === hasPermission(params.role, key)) {
+      continue;
+    }
+    const storageKey = permissionStorageKey(key);
+    const current = existing.find((row) => row.key === storageKey);
     if (current) {
-      const values = stampUpdatedAt({ allowed });
+      const values = stampUpdatedAt({ allowed, isDeleted: false, deletedAt: null, deletedBy: null });
       tx.update(userPermissions).set(values).where(eq(userPermissions.id, current.id)).run();
       recordChange(tx, { shopId: params.shopId, table: 'user_permissions', rowId: current.id, op: 'update', payload: values });
       continue;
@@ -127,7 +165,7 @@ function writePermissionOverrides(
       id,
       shopId: params.shopId,
       userId: params.staffId,
-      key,
+      key: storageKey,
       allowed,
       createdAt: now,
       updatedAt: now,
@@ -140,7 +178,9 @@ function writePermissionOverrides(
   // so the other devices holding it learn the override is gone. A hard delete
   // would simply never be mentioned again, and they would keep enforcing it.
   for (const row of existing) {
-    if (row.key in params.permissions) {
+    if (row.isDeleted) continue;
+    const permission = fromStoragePermissionKey(row.key);
+    if (permission && desired[permission] !== undefined && desired[permission] !== hasPermission(params.role, permission)) {
       continue;
     }
     const values = stampUpdatedAt({ isDeleted: true, deletedAt: now });
@@ -172,21 +212,26 @@ export async function setStaffPermissions(
   permissions: PermissionOverrides,
   isStillActive: () => boolean,
 ): Promise<void> {
-  await requirePermission(shopId, actorUserId, 'staff_management');
+  await requireOwner(shopId, actorUserId);
 
   await db.transaction((tx) => {
     // Synchronous callback — one uninterruptible turn, so a single check at the
     // top covers the whole body (db/errors.ts's placement rule).
     assertSessionLive(isStillActive);
     const staff = tx
-      .select({ shopId: users.shopId })
+      .select({ shopId: users.shopId, role: roles.name })
       .from(users)
+      .innerJoin(roles, eq(users.roleId, roles.id))
       .where(and(eq(users.id, staffId), eq(users.shopId, shopId), eq(users.isDeleted, false)))
       .get();
     if (!staff) {
       throw new Error(`No user found with id ${staffId} in shop ${shopId}`);
     }
-    writePermissionOverrides(tx, { shopId, staffId, permissions });
+    const targetRole = toRole(staff.role);
+    if (!targetRole || targetRole === 'owner') {
+      throw new Error('Only Staff or Manager permissions can be edited');
+    }
+    writePermissionOverrides(tx, { shopId, staffId, role: targetRole, permissions });
     const auditId = generateId();
     const now = new Date().toISOString();
     // The KEYS changed, never a value that could identify a credential.
@@ -218,13 +263,23 @@ export async function createStaff(
 ): Promise<StaffMember> {
   // Volume 0 Day 11: only an owner can add a login to the shop. Gated before
   // the PIN is hashed or any row is written.
-  const checkPermission = () => requirePermission(shopId, actorUserId, 'staff_management');
+  const checkPermission = () => requirePermission(shopId, actorUserId, 'staff_manage');
   if (timing) await timing.measure('permission_check', checkPermission);
   else await checkPermission();
 
-  const staffRoleId = await getShopRoleId(shopId, 'staff');
+  const actorRole = toRole(await getActiveSessionRole(actorUserId, shopId));
+  const targetRole = input.role ?? 'staff';
+  if (actorRole === 'manager') {
+    const isCashierPreset = PERMISSION_KEYS.every(
+      (key) => (input.permissions[key] ?? hasPermission('staff', key)) === CASHIER_DEFAULT_PERMISSIONS.includes(key as typeof CASHIER_DEFAULT_PERMISSIONS[number]),
+    );
+    if (targetRole !== 'staff' || !isCashierPreset) {
+      throw new Error('Managers may add Cashiers with the Cashier preset only');
+    }
+  }
+  const staffRoleId = await getShopRoleId(shopId, targetRole);
   if (!staffRoleId) {
-    throw new Error(`No 'staff' role found for shop ${shopId} — registration should have created it`);
+    throw new Error(`No '${targetRole}' role found for shop ${shopId} — registration should have created it`);
   }
 
   // Pre-check AND the constraint backstop below, the same two-layer shape
@@ -291,7 +346,7 @@ export async function createStaff(
       timing?.mark('user_outbox_enqueue');
       // Same transaction as the user row: a staff member must never exist for
       // even one commit with permissions the owner did not choose.
-      writePermissionOverrides(tx, { shopId, staffId: userId, permissions: input.permissions });
+      writePermissionOverrides(tx, { shopId, staffId: userId, role: targetRole, permissions: input.permissions });
       timing?.mark('permissions_and_outbox_persist');
       assertSessionLive(isStillActive);
     });
@@ -308,7 +363,7 @@ export async function createStaff(
     id: userId,
     name: input.name,
     phone,
-    role: 'staff',
+    role: targetRole,
     isActive: true,
     permissions: input.permissions,
   };
@@ -322,14 +377,11 @@ export async function resetStaffPin(
   performedByUserId: string,
   isStillActive: () => boolean,
 ): Promise<void> {
-  const [staff] = await db.select({ shopId: users.shopId }).from(users).where(eq(users.id, staffId));
-  if (!staff) {
-    throw new Error(`No user found with id ${staffId}`);
-  }
+  const staff = await getManageableStaffTarget(staffId);
   // Volume 0 Day 11: resetting someone else's PIN is owner-only. Checked
   // against the TARGET's shop and BEFORE the new PIN is hashed, so a denied
   // caller never reaches native/crypto.ts with a raw PIN at all.
-  await requirePermission(staff.shopId, performedByUserId, 'staff_management');
+  await requireOwner(staff.shopId, performedByUserId);
 
   // The reset must not create the collision createStaff refuses. Checked before
   // the hash, so a rejected reset never reaches native/crypto.ts with the PIN.
@@ -362,11 +414,8 @@ export async function deactivateStaff(
   performedByUserId: string,
   isStillActive: () => boolean,
 ): Promise<void> {
-  const [staff] = await db.select({ shopId: users.shopId }).from(users).where(eq(users.id, staffId));
-  if (!staff) {
-    throw new Error(`No user found with id ${staffId}`);
-  }
-  await requirePermission(staff.shopId, performedByUserId, 'staff_management');
+  const staff = await getManageableStaffTarget(staffId);
+  await requireOwner(staff.shopId, performedByUserId);
 
   await db.transaction(async (tx) => {
     // Async callback — checked at both ends. This one is reached from an
@@ -380,6 +429,46 @@ export async function deactivateStaff(
     const auditId = generateId();
     const now = new Date().toISOString();
     const auditValues = { id: auditId, shopId: staff.shopId, actorId: performedByUserId, action: 'staff_deactivated', target: staffId, meta: null, createdAt: now, updatedAt: now };
+    await tx.insert(auditLogs).values(auditValues);
+    recordChange(tx, { shopId: staff.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
+    assertSessionLive(isStillActive);
+  });
+}
+
+export async function activateStaff(
+  staffId: string,
+  performedByUserId: string,
+  isStillActive: () => boolean,
+): Promise<void> {
+  const staff = await getManageableStaffTarget(staffId);
+  await requireOwner(staff.shopId, performedByUserId);
+  await db.transaction(async (tx) => {
+    assertSessionLive(isStillActive);
+    updateStaffSecurityFields(tx, { shopId: staff.shopId, staffId, extraValues: { isActive: true } });
+    const auditId = generateId();
+    const now = new Date().toISOString();
+    const auditValues = { id: auditId, shopId: staff.shopId, actorId: performedByUserId, action: 'staff_activated', target: staffId, meta: null, createdAt: now, updatedAt: now };
+    await tx.insert(auditLogs).values(auditValues);
+    recordChange(tx, { shopId: staff.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
+    assertSessionLive(isStillActive);
+  });
+}
+
+export async function removeStaff(
+  staffId: string,
+  performedByUserId: string,
+  isStillActive: () => boolean,
+): Promise<void> {
+  const staff = await getManageableStaffTarget(staffId);
+  await requireOwner(staff.shopId, performedByUserId);
+  await db.transaction(async (tx) => {
+    assertSessionLive(isStillActive);
+    const now = new Date().toISOString();
+    const values = stampUpdatedAt({ isActive: false, isDeleted: true, deletedAt: now, deletedBy: performedByUserId });
+    tx.update(users).set(values).where(and(eq(users.id, staffId), eq(users.shopId, staff.shopId))).run();
+    recordChange(tx, { shopId: staff.shopId, table: 'users', rowId: staffId, op: 'delete', payload: values });
+    const auditId = generateId();
+    const auditValues = { id: auditId, shopId: staff.shopId, actorId: performedByUserId, action: 'staff_removed', target: staffId, meta: null, createdAt: now, updatedAt: now };
     await tx.insert(auditLogs).values(auditValues);
     recordChange(tx, { shopId: staff.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
     assertSessionLive(isStillActive);

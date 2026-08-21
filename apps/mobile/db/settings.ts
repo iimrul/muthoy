@@ -3,7 +3,7 @@
 // restoreFromBackupKey remain stubs — out of the Days 4-5/11 auth scope.
 
 import { and, eq } from 'drizzle-orm';
-import { assertPinUnique, requirePermission } from './auth';
+import { assertPinUnique, requireOwner } from './auth';
 import { assertSessionLive } from './errors';
 import { db } from './client';
 import { auditLogs, shops, users } from './schema';
@@ -15,7 +15,8 @@ export interface ShopProfile {
   id: string;
   name: string;
   phone: string;
-  address?: string;
+  address: string | null;
+  email: string | null;
 }
 
 // P0 slice (Volume 4 SETTINGS: "security... change own PIN — P0").
@@ -24,17 +25,36 @@ export interface ShopProfile {
 // surface: a non-owner gets the friendly denial rather than the TODO error,
 // and the guard is already in place for whoever implements the body.
 export async function getShopProfile(shopId: string, actorUserId: string): Promise<ShopProfile> {
-  await requirePermission(shopId, actorUserId, 'settings_manage');
-  throw new Error('TODO: implement shop profile query (Volume 4 SETTINGS)');
+  await requireOwner(shopId, actorUserId);
+  const [profile] = await db
+    .select({ id: users.id, name: users.name, phone: users.phone, address: users.address, email: users.email })
+    .from(users)
+    .where(and(eq(users.id, actorUserId), eq(users.shopId, shopId), eq(users.isDeleted, false)));
+  if (!profile) throw new Error('Owner profile not found');
+  return { ...profile, phone: profile.phone ?? '' };
 }
 
 export async function updateShopProfile(
   shopId: string,
   actorUserId: string,
-  _profile: Partial<Omit<ShopProfile, 'id'>>,
+  profile: Partial<Pick<ShopProfile, 'name' | 'address' | 'email'>>,
+  isStillActive: () => boolean,
 ): Promise<void> {
-  await requirePermission(shopId, actorUserId, 'settings_manage');
-  throw new Error('TODO: implement shop profile update (Volume 4 SETTINGS)');
+  await requireOwner(shopId, actorUserId);
+  await db.transaction(async (tx) => {
+    assertSessionLive(isStillActive);
+    const values = stampUpdatedAt({
+      ...(profile.name === undefined ? {} : { name: profile.name.trim() }),
+      ...(profile.address === undefined ? {} : { address: profile.address?.trim() || null }),
+      ...(profile.email === undefined ? {} : { email: profile.email?.trim() || null }),
+    });
+    const result = await tx.update(users).set(values).where(and(
+      eq(users.id, actorUserId), eq(users.shopId, shopId), eq(users.isDeleted, false),
+    ));
+    if (result.changes !== 1) throw new Error('Owner profile not found');
+    recordChange(tx, { shopId, table: 'users', rowId: actorUserId, op: 'update', payload: values });
+    assertSessionLive(isStillActive);
+  });
 }
 
 // Volume 0 Day 5: MorningDashboard is "a shell showing shop name and a
@@ -70,7 +90,7 @@ export async function changeOwnPin(
   // db/staff.ts's resetStaffPin. Checked BEFORE the current PIN is verified
   // or the new one hashed, so a denied caller touches native/crypto.ts with
   // neither value and leaves no row, audit entry, or outbox item behind.
-  await requirePermission(user.shopId, userId, 'settings_manage');
+  await requireOwner(user.shopId, userId);
 
   const currentPinMatches = await verifyPinHash(currentRawPin, user.pinHash);
   if (!currentPinMatches) {

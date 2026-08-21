@@ -1,5 +1,5 @@
 import { normalizeBdPhone } from '@muthoy/validation';
-import { markShopCloudLinked, verifyPinForUser } from '../db/auth';
+import { markShopCloudLinked, recordSuccessfulLogin, verifyPinForUser } from '../db/auth';
 import { handoffAuthTiming, type AuthTimingTrace } from '../dev/authTiming';
 import { useSessionStore } from '../state/sessionStore';
 import { pullChanges } from './pull';
@@ -153,6 +153,7 @@ export async function loginOnNewDevice(
     throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false);
   }
 
+  await recordSuccessfulLogin(local);
   // The same login() every other entry point calls, so the epoch bumps and
   // state/sessionGuard.ts, app/_layout.tsx's sync start and the cart cleanup all
   // behave exactly as they do after a normal PIN login.

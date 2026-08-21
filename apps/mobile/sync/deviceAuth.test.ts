@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   pullChanges: vi.fn(),
   markShopCloudLinked: vi.fn(),
   verifyPinForUser: vi.fn(),
+  recordSuccessfulLogin: vi.fn(),
   login: vi.fn(),
 }));
 
@@ -25,6 +26,7 @@ vi.mock('./pull', () => ({ pullChanges: mocks.pullChanges }));
 vi.mock('../db/auth', () => ({
   markShopCloudLinked: mocks.markShopCloudLinked,
   verifyPinForUser: mocks.verifyPinForUser,
+  recordSuccessfulLogin: mocks.recordSuccessfulLogin,
 }));
 vi.mock('../state/sessionStore', () => ({
   useSessionStore: { getState: () => ({ login: mocks.login }) },
@@ -54,6 +56,7 @@ beforeEach(() => {
     role: 'owner',
     permissions: {},
   });
+  mocks.recordSuccessfulLogin.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -95,6 +98,8 @@ describe('fresh-device auth orchestration', () => {
     expect(mocks.pullChanges).toHaveBeenCalledBefore(mocks.markShopCloudLinked);
     expect(mocks.markShopCloudLinked).toHaveBeenCalledBefore(mocks.verifyPinForUser);
     expect(mocks.verifyPinForUser).toHaveBeenCalledWith('1234', SHOP_ID, USER_ID, timing);
+    expect(mocks.recordSuccessfulLogin).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID }));
+    expect(mocks.recordSuccessfulLogin).toHaveBeenCalledBefore(mocks.login);
     expect(mocks.login).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID }));
   });
 });

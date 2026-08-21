@@ -27,39 +27,35 @@ function insertNotification(id: string, shopId: string, type: 'low_stock' | 'dai
     .run(id, shopId, type, `${type} title`, `${type} body`, refId);
 }
 
-function listVisible(shopId: string, isOwner: boolean): NotificationRow[] {
+function listVisible(shopId: string, userId: string, isOwner: boolean): NotificationRow[] {
   return sqlite
     .prepare(
-      `SELECT id, shop_id, type, is_read, resolved_at
-         FROM notifications
-        WHERE shop_id = ? AND is_deleted = 0
-          AND (? = 1 OR type <> 'daily_summary')
-        ORDER BY created_at DESC, id DESC`,
+      `SELECT n.id, n.shop_id, n.type,
+              CASE WHEN r.read_at IS NULL THEN 0 ELSE 1 END AS is_read,
+              n.resolved_at
+         FROM notifications n
+         LEFT JOIN notification_receipts r
+           ON r.notification_id = n.id AND r.user_id = ? AND r.is_deleted = 0
+        WHERE n.shop_id = ? AND n.is_deleted = 0 AND r.dismissed_at IS NULL
+          AND (? = 1 OR n.type <> 'daily_summary')
+        ORDER BY n.created_at DESC, n.id DESC`,
     )
-    .all(shopId, isOwner ? 1 : 0) as unknown as NotificationRow[];
+    .all(userId, shopId, isOwner ? 1 : 0) as unknown as NotificationRow[];
 }
 
-function unreadCount(shopId: string, isOwner: boolean): number {
-  const row = sqlite
-    .prepare(
-      `SELECT COUNT(*) AS value
-         FROM notifications
-        WHERE shop_id = ? AND is_read = 0 AND is_deleted = 0
-          AND (? = 1 OR type <> 'daily_summary')`,
-    )
-    .get(shopId, isOwner ? 1 : 0) as { value: number };
-  return row.value;
+function unreadCount(shopId: string, userId: string, isOwner: boolean): number {
+  return listVisible(shopId, userId, isOwner).filter((row) => row.is_read === 0).length;
 }
 
-function markVisibleAsRead(shopId: string, notificationId: string, isOwner: boolean): number {
-  return Number(sqlite
-    .prepare(
-      `UPDATE notifications
-          SET is_read = 1, updated_at = current_timestamp
-        WHERE id = ? AND shop_id = ?
-          AND (? = 1 OR type <> 'daily_summary')`,
-    )
-    .run(notificationId, shopId, isOwner ? 1 : 0).changes);
+function markVisibleAsRead(shopId: string, userId: string, notificationId: string, isOwner: boolean): number {
+  const visible = listVisible(shopId, userId, isOwner).some((row) => row.id === notificationId);
+  if (!visible) return 0;
+  return Number(sqlite.prepare(
+    `INSERT INTO notification_receipts
+       (id, shop_id, notification_id, user_id, read_at, is_dirty)
+     VALUES (?, ?, ?, ?, current_timestamp, 0)
+     ON CONFLICT(notification_id, user_id) DO UPDATE SET read_at = current_timestamp`,
+  ).run(`receipt-${userId}-${notificationId}`, shopId, notificationId, userId).changes);
 }
 
 describe('notification DB queries on real SQLite', () => {
@@ -73,10 +69,17 @@ describe('notification DB queries on real SQLite', () => {
     applyMigration('0004_deep_boomer.sql');
     applyMigration('0005_eminent_legion.sql');
     applyMigration('0006_inventory_movement_ledger.sql');
-  applyMigration('0007_staff_device_login.sql');
+    applyMigration('0007_staff_device_login.sql');
     applyMigration('0008_native_pin_lookup.sql');
+    applyMigration('0009_strong_gargoyle.sql');
     sqlite.prepare('INSERT INTO shops (id, owner_id, name, phone) VALUES (?, ?, ?, ?)').run('shop-1', 'owner-1', 'Shop One', '01700000001');
     sqlite.prepare('INSERT INTO shops (id, owner_id, name, phone) VALUES (?, ?, ?, ?)').run('shop-2', 'owner-2', 'Shop Two', '01700000002');
+    sqlite.prepare("INSERT INTO roles (id, shop_id, name, is_system) VALUES ('role-owner-1', 'shop-1', 'owner', 1)").run();
+    sqlite.prepare("INSERT INTO roles (id, shop_id, name, is_system) VALUES ('role-staff-1', 'shop-1', 'staff', 1)").run();
+    sqlite.prepare("INSERT INTO roles (id, shop_id, name, is_system) VALUES ('role-owner-2', 'shop-2', 'owner', 1)").run();
+    sqlite.prepare("INSERT INTO users (id, shop_id, name, phone, pin_hash, role_id) VALUES ('owner-1', 'shop-1', 'Owner One', '01700000011', 'hash', 'role-owner-1')").run();
+    sqlite.prepare("INSERT INTO users (id, shop_id, name, phone, pin_hash, role_id) VALUES ('staff-1', 'shop-1', 'Staff One', '01700000012', 'hash', 'role-staff-1')").run();
+    sqlite.prepare("INSERT INTO users (id, shop_id, name, phone, pin_hash, role_id) VALUES ('owner-2', 'shop-2', 'Owner Two', '01700000021', 'hash', 'role-owner-2')").run();
   });
 
   afterEach(() => {
@@ -117,26 +120,27 @@ describe('notification DB queries on real SQLite', () => {
     insertNotification('low-1', 'shop-1', 'low_stock', 'medicine-1');
     insertNotification('daily-1', 'shop-1', 'daily_summary', '2026-08-12');
 
-    expect(listVisible('shop-1', false).map((row) => row.id)).toEqual(['low-1']);
-    expect(unreadCount('shop-1', false)).toBe(1);
-    expect(markVisibleAsRead('shop-1', 'daily-1', false)).toBe(0);
-    expect(unreadCount('shop-1', false)).toBe(1);
+    expect(listVisible('shop-1', 'staff-1', false).map((row) => row.id)).toEqual(['low-1']);
+    expect(unreadCount('shop-1', 'staff-1', false)).toBe(1);
+    expect(markVisibleAsRead('shop-1', 'staff-1', 'daily-1', false)).toBe(0);
+    expect(unreadCount('shop-1', 'staff-1', false)).toBe(1);
 
-    expect(listVisible('shop-1', true).map((row) => row.id).sort()).toEqual(['daily-1', 'low-1']);
-    expect(unreadCount('shop-1', true)).toBe(2);
-    expect(markVisibleAsRead('shop-1', 'daily-1', true)).toBe(1);
-    expect(unreadCount('shop-1', true)).toBe(1);
+    expect(listVisible('shop-1', 'owner-1', true).map((row) => row.id).sort()).toEqual(['daily-1', 'low-1']);
+    expect(unreadCount('shop-1', 'owner-1', true)).toBe(2);
+    expect(markVisibleAsRead('shop-1', 'owner-1', 'daily-1', true)).toBe(1);
+    expect(unreadCount('shop-1', 'owner-1', true)).toBe(1);
+    expect(unreadCount('shop-1', 'staff-1', false)).toBe(1);
   });
 
   it('isolates list, unread, and read operations by shop', () => {
     insertNotification('shop-1-low', 'shop-1', 'low_stock', 'medicine-1');
     insertNotification('shop-2-low', 'shop-2', 'low_stock', 'medicine-2');
 
-    expect(listVisible('shop-1', true).map((row) => row.id)).toEqual(['shop-1-low']);
-    expect(listVisible('shop-2', true).map((row) => row.id)).toEqual(['shop-2-low']);
-    expect(unreadCount('shop-1', true)).toBe(1);
-    expect(unreadCount('shop-2', true)).toBe(1);
-    expect(markVisibleAsRead('shop-1', 'shop-2-low', true)).toBe(0);
-    expect(unreadCount('shop-2', true)).toBe(1);
+    expect(listVisible('shop-1', 'owner-1', true).map((row) => row.id)).toEqual(['shop-1-low']);
+    expect(listVisible('shop-2', 'owner-2', true).map((row) => row.id)).toEqual(['shop-2-low']);
+    expect(unreadCount('shop-1', 'owner-1', true)).toBe(1);
+    expect(unreadCount('shop-2', 'owner-2', true)).toBe(1);
+    expect(markVisibleAsRead('shop-1', 'owner-1', 'shop-2-low', true)).toBe(0);
+    expect(unreadCount('shop-2', 'owner-2', true)).toBe(1);
   });
 });

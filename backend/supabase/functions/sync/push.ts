@@ -117,7 +117,9 @@ async function authorizePermission(
  * deactivation, a role change or a PIN reset therefore has to cut the sessions
  * outright, and this is the snapshot that makes "did it change?" answerable.
  */
-async function readRevocationState(userId: string): Promise<RevocationState | null> {
+async function readRevocationState(
+  userId: string,
+): Promise<RevocationState | null> {
   const { data, error } = await supabaseAdmin
     .from("users")
     .select("is_active, is_deleted, pin_hash, role_id")
@@ -154,6 +156,37 @@ async function revokeSessionsIfNeeded(
   if (shouldGloballySignOut(userId, callerUserId, before, after)) {
     await signOutAppUser(userId);
   }
+}
+
+/**
+ * `sync_apply_row` predates the optional B1 profile columns, so its hardened
+ * users UPDATE list intentionally does not know about them. Apply only those
+ * non-security fields after the guarded row RPC succeeds. The timestamp
+ * predicate preserves the same last-write-wins rule and prevents a retried
+ * stale profile row from overwriting a newer device.
+ */
+async function applyUserProfileFields(
+  row: PushRow,
+  shopId: string,
+): Promise<string | null> {
+  const updatedAt = row.payload.updated_at;
+  if (typeof updatedAt !== "string")
+    return "User profile row is missing updated_at";
+  const values: { address?: string | null; email?: string | null } = {};
+  if (typeof row.payload.address === "string" || row.payload.address === null) {
+    values.address = row.payload.address;
+  }
+  if (typeof row.payload.email === "string" || row.payload.email === null) {
+    values.email = row.payload.email;
+  }
+  if (!("address" in values) && !("email" in values)) return null;
+  const { error } = await supabaseAdmin
+    .from("users")
+    .update(values)
+    .eq("id", row.rowId)
+    .eq("shop_id", shopId)
+    .lte("updated_at", updatedAt);
+  return error?.message ?? null;
 }
 
 async function authorizeRow(
@@ -265,7 +298,11 @@ export async function push(caller: Caller, body: Record<string, unknown>) {
     }
     // Shop ownership first, permission second: a row from another shop is not
     // this caller's to be permitted or refused in the first place.
-    const permitted = await authorizePermission(appUserId, row.tableName, row.payload);
+    const permitted = await authorizePermission(
+      appUserId,
+      row.tableName,
+      row.payload,
+    );
     if (permitted.status === "rejected") {
       results.push(rejection(row.queueId, permitted.reason, permitted.error));
       halted = permitted.reason === "transient";
@@ -274,7 +311,8 @@ export async function push(caller: Caller, body: Record<string, unknown>) {
     // A users row can revoke somebody. Whether it did is only knowable by
     // comparing against what the server holds NOW, so that snapshot is taken
     // before the write and consulted after it.
-    const before = row.tableName === "users" ? await readRevocationState(row.rowId) : null;
+    const before =
+      row.tableName === "users" ? await readRevocationState(row.rowId) : null;
 
     const { data, error } = await supabaseAdmin.rpc("sync_apply_row", {
       p_table: row.tableName,
@@ -305,6 +343,14 @@ export async function push(caller: Caller, body: Record<string, unknown>) {
       );
       halted = true;
     } else {
+      if (row.tableName === "users") {
+        const profileError = await applyUserProfileFields(row, shopId);
+        if (profileError) {
+          results.push(rejection(row.queueId, "transient", profileError));
+          halted = true;
+          continue;
+        }
+      }
       if (row.tableName === "users") {
         await revokeSessionsIfNeeded(row.rowId, appUserId, before);
       }

@@ -21,7 +21,8 @@ import { triggerSyncNow } from '../../sync';
 export default function CreditSalesScreen() {
   // Volume 0 Day 11: standalone customer credit management is owner-only —
   // Staff still makes credit SALES at checkout (db/sales.ts), just not here.
-  const { session, isAllowed } = usePermission('credit_management');
+  const { session, isAllowed } = usePermission('credit_view');
+  const { isAllowed: canManage } = usePermission('credit_manage');
   const unreadCount = useUnreadCount(session?.shopId, session?.userId);
   const [customerRows, setCustomerRows] = useState<Awaited<ReturnType<typeof listCustomersWithBalance>>>([]);
   const [isAdding, setIsAdding] = useState(false);
@@ -42,7 +43,7 @@ export default function CreditSalesScreen() {
     // them for whoever is holding the phone now.
     const guard = captureSessionFor(session);
     try {
-      const rows = await listCustomersWithBalance(session.shopId);
+      const rows = await listCustomersWithBalance(session.shopId, session.userId);
       if (!guard || guard.isStale()) {
         return;
       }
@@ -63,7 +64,7 @@ export default function CreditSalesScreen() {
   }, [reload]);
 
   const handleCreate = useCallback(async (values: CustomerFieldsOutput) => {
-    if (!session || !isAllowed) {
+    if (!session || !isAllowed || !canManage) {
       return;
     }
     // react-hook-form awaits the zod resolver BEFORE calling this handler, so
@@ -99,7 +100,7 @@ export default function CreditSalesScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [isAllowed, reload, reset, session]);
+  }, [canManage, isAllowed, reload, reset, session]);
 
   if (!session) {
     return <AccessDenied message="Active session required." />;
@@ -121,14 +122,14 @@ export default function CreditSalesScreen() {
         unreadCount={unreadCount}
       />
       <ScrollView contentContainerClassName="gap-4 p-4" keyboardShouldPersistTaps="handled">
-        <Pressable
+        {canManage ? <Pressable
           onPress={() => setIsAdding((current) => !current)}
           className="items-center rounded-lg bg-brand-green py-3"
         >
           <Text className="font-sans-semibold text-white">{isAdding ? 'Cancel' : 'Add customer'}</Text>
-        </Pressable>
+        </Pressable> : null}
 
-        {isAdding ? (
+        {isAdding && canManage ? (
           <View className="gap-4 rounded-lg bg-white p-4">
             <FormField control={control} name="name" label="Customer name" />
             <FormField control={control} name="phone" label="Phone" keyboardType="phone-pad" />

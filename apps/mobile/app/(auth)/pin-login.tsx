@@ -2,8 +2,14 @@ import { useCallback, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { PinPad, usePinEntry, type PinCompletionMeta } from '../../components/ui/PinPad';
-import { verifyPin } from '../../db/auth';
+import { recordSuccessfulLogin, verifyPin } from '../../db/auth';
 import { handoffAuthTiming, startAuthTiming } from '../../dev/authTiming';
+import {
+  markRuntimeDiagnosticStep,
+  sessionDiagnosticContext,
+} from '../../dev/runtimeDiagnostics';
+import { toRole } from '../../domain/permissions';
+import { authenticatedHome } from '../../navigation/routes';
 import { useSessionStore } from '../../state/sessionStore';
 
 // PIN Login — Volume 4 AUTHENTICATION, Volume 0 Day 5. Checks the bcrypt
@@ -14,6 +20,13 @@ export default function PinLoginScreen() {
 
   const handleComplete = useCallback(
     async (pin: string, { completedAt }: PinCompletionMeta) => {
+      markRuntimeDiagnosticStep('pin_submit', {
+        currentRoute: '/pin-login',
+        userId: 'none',
+        shopId: 'none',
+        resolvedRole: 'unknown',
+        permissionCount: 0,
+      });
       const timing = startAuthTiming('offline_pin_login', completedAt);
       timing?.mark('submit_start');
       const result = timing
@@ -26,11 +39,28 @@ export default function PinLoginScreen() {
       }
 
       setError(false);
+      markRuntimeDiagnosticStep(
+        'authentication_completed',
+        sessionDiagnosticContext(result, '/pin-login'),
+      );
+      await recordSuccessfulLogin(result);
       login(result);
       timing?.mark('session_store_login');
+      markRuntimeDiagnosticStep(
+        'auth_session_hydrated',
+        sessionDiagnosticContext(result, '/pin-login'),
+      );
+      markRuntimeDiagnosticStep('role_resolved', {
+        ...sessionDiagnosticContext(result, '/pin-login'),
+        resolvedRole: toRole(result.role) ?? 'unknown',
+      });
       handoffAuthTiming(timing);
-      router.replace('/dashboard');
+      router.replace(authenticatedHome(result));
       timing?.mark('navigation_requested');
+      markRuntimeDiagnosticStep(
+        'router_replace_requested',
+        sessionDiagnosticContext(result, '/pin-login'),
+      );
     },
     [login],
   );

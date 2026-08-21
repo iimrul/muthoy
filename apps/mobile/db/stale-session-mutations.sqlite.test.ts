@@ -273,6 +273,7 @@ beforeAll(async () => {
   applyMigration('0006_inventory_movement_ledger.sql');
   applyMigration('0007_staff_device_login.sql');
   applyMigration('0008_native_pin_lookup.sql');
+  applyMigration('0009_strong_gargoyle.sql');
 
   const registration = await createShopAndOwner({
     shopName: 'Muthoy Audit Pharmacy',
@@ -426,10 +427,9 @@ describe('every actor-attributed mutation refuses a stale session', () => {
   // read state is per-user and deliberately not synced — so it is verified on
   // the column it actually changes rather than on row counts.
   it('notifications — markAsRead', async () => {
-    const isRead = (): number =>
-      (sqlite.prepare('SELECT is_read FROM notifications WHERE id = ?').get(fixture.notificationId) as unknown as {
-        is_read: number;
-      }).is_read;
+    const isRead = (): number => Number((sqlite.prepare(
+      'SELECT COUNT(*) AS value FROM notification_receipts WHERE notification_id = ? AND user_id = ? AND read_at IS NOT NULL',
+    ).get(fixture.notificationId, fixture.ownerId) as unknown as { value: number }).value);
     expect(isRead()).toBe(0);
 
     await expect(

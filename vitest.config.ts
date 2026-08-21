@@ -8,18 +8,23 @@ import { defineConfig } from 'vitest/config';
 // file opts in via its own `@vitest-environment jsdom` docblock, so the
 // default node environment below still applies everywhere else).
 export default defineConfig({
+  define: { __DEV__: false },
   resolve: {
     alias: {
       './client': resolve(process.cwd(), 'apps/mobile/db/test/client.ts'),
       'expo-sqlite': resolve(process.cwd(), 'apps/mobile/db/test/expo-sqlite.ts'),
       'expo-crypto': resolve(process.cwd(), 'apps/mobile/db/test/expo-crypto.ts'),
       'muthoy-pin-crypto': resolve(process.cwd(), 'apps/mobile/db/test/muthoy-pin-crypto.ts'),
+      '../modules/muthoy-pin-crypto': resolve(process.cwd(), 'apps/mobile/db/test/muthoy-pin-crypto.ts'),
+      'react-native-mmkv': resolve(process.cwd(), 'apps/mobile/db/test/react-native-mmkv.ts'),
     },
   },
   test: {
     server: { deps: { inline: ['expo-sqlite', 'expo-crypto'] } },
     include: [
       'apps/mobile/domain/**/*.test.ts',
+      'apps/mobile/i18n/**/*.test.ts',
+      'apps/mobile/navigation/**/*.test.ts',
       'apps/mobile/components/scanner/*.test.tsx',
       'apps/mobile/components/ui/PinPad.test.tsx',
       // dev/ also contains production-disabled auth timing code. Remove only
@@ -32,6 +37,7 @@ export default defineConfig({
       'apps/mobile/db/notifications.sqlite.test.ts',
       'apps/mobile/db/permissions.sqlite.test.ts',
       'apps/mobile/db/pin-performance.sqlite.test.ts',
+      'apps/mobile/db/staff-dashboard.sqlite.test.ts',
       // Per-staff permission overrides, the phone credential's uniqueness, and
       // the revocation counter — through the real db/ actions on real SQLite.
       'apps/mobile/db/staff-permissions.sqlite.test.ts',
@@ -71,7 +77,9 @@ export default defineConfig({
       // OWNER → STAFF → OWNER handover with only db/ and sync/ mocked.
       'apps/mobile/tests/switch-user-writes.test.tsx',
       'apps/mobile/tests/app-layout.test.tsx',
+      'apps/mobile/tests/authenticated-routing.test.tsx',
       'apps/mobile/tests/auth-pin-latency.test.tsx',
+      'apps/mobile/tests/staff-home-routing.test.tsx',
       'apps/mobile/tests/staff-management-pin.test.tsx',
       'apps/mobile/sync/**/*.test.ts',
       // Reads the edge-function sources and migration SQL as text to check that

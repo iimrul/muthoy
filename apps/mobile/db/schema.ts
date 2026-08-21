@@ -102,6 +102,8 @@ export const users = sqliteTable("users", {
   // to match a PIN against. Unique per non-deleted user (partial index below)
   // because the server must resolve exactly one account from it.
   phone: text("phone"),
+  address: text("address"),
+  email: text("email"),
   pinHash: text("pin_hash").notNull(), // bcrypt — NEVER plain text
   pinSetAt: text("pin_set_at"), // null only while owner registration is incomplete
   // Android-Keystore HMAC. Local-only routing aid; never synced. The paired
@@ -423,7 +425,10 @@ export const cashDrawer = sqliteTable("cash_drawer", {
 export const notifications = sqliteTable("notifications", {
   ...base,
   shopId: text("shop_id").notNull().references(() => shops.id, { onDelete: "cascade" }),
-  type: text("type", { enum: ["expiry", "low_stock", "sync", "daily_summary", "admin"] }).notNull(),
+  type: text("type", { enum: [
+    "expiry", "low_stock", "sync", "daily_summary", "admin",
+    "overdue_credit", "backup_reminder", "refund",
+  ] }).notNull(),
   severity: text("severity", { enum: ["info", "warning", "critical"] }).notNull().default("info"),
   title: text("title").notNull(),
   body: text("body").notNull(),
@@ -432,6 +437,20 @@ export const notifications = sqliteTable("notifications", {
   resolvedAt: text("resolved_at"), // Low-stock hysteresis re-arm marker; system-set only.
 }, (t) => ({
   shopReadIdx: index("notifications_shop_read_idx").on(t.shopId, t.isRead),
+}));
+
+// Per-user inbox state. The shop notification remains shared and immutable;
+// reading/dismissing it on a shared device affects only the acting account.
+export const notificationReceipts = sqliteTable("notification_receipts", {
+  ...base,
+  shopId: text("shop_id").notNull().references(() => shops.id, { onDelete: "cascade" }),
+  notificationId: text("notification_id").notNull().references(() => notifications.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  readAt: text("read_at"),
+  dismissedAt: text("dismissed_at"),
+}, (t) => ({
+  shopUserIdx: index("notification_receipts_shop_user_idx").on(t.shopId, t.userId),
+  notificationUserUnique: uniqueIndex("notification_receipts_notification_user_unique").on(t.notificationId, t.userId),
 }));
 
 // ── audit_logs (append-only — no update/delete, enforced at app + RLS) ──

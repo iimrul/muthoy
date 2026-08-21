@@ -42,6 +42,7 @@ const deps = vi.hoisted(() => ({
   replace: vi.fn(),
   push: vi.fn(),
   verifyPin: vi.fn(),
+  recordSuccessfulLogin: vi.fn(),
   setOwnerPin: vi.fn(),
   loginOnNewDevice: vi.fn(),
   login: vi.fn(),
@@ -54,6 +55,7 @@ vi.mock('expo-router', () => ({
 
 vi.mock('../db/auth', () => ({
   verifyPin: deps.verifyPin,
+  recordSuccessfulLogin: deps.recordSuccessfulLogin,
   setOwnerPin: deps.setOwnerPin,
 }));
 
@@ -108,6 +110,8 @@ beforeEach(() => {
   deps.replace.mockReset();
   deps.push.mockReset();
   deps.verifyPin.mockReset();
+  deps.recordSuccessfulLogin.mockReset();
+  deps.recordSuccessfulLogin.mockResolvedValue(undefined);
   deps.setOwnerPin.mockReset();
   deps.loginOnNewDevice.mockReset();
   deps.login.mockReset();
@@ -151,6 +155,7 @@ describe('PIN authentication loading state', () => {
       permissions: {},
     });
     await waitFor(() => expect(deps.replace).toHaveBeenCalledWith('/dashboard'));
+    expect(deps.recordSuccessfulLogin).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_ID }));
     expect(deps.login).toHaveBeenCalledTimes(1);
   });
 
@@ -165,6 +170,24 @@ describe('PIN authentication loading state', () => {
     expect(screen.queryByText('Signing in…')).toBeNull();
     expect((screen.getByLabelText('Digit 1') as HTMLButtonElement).disabled).toBe(false);
     expect(deps.replace).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['staff', '/staff-home'],
+    ['manager', '/staff-home'],
+  ] as const)('routes a successful %s PIN login to StaffHome', async (role, destination) => {
+    deps.verifyPin.mockResolvedValueOnce({
+      shopId: SHOP_ID,
+      userId: USER_ID,
+      role,
+      permissions: {},
+    });
+    render(createElement(PinLoginScreen));
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    await waitFor(() => expect(deps.replace).toHaveBeenCalledWith(destination));
   });
 
   it('keeps Confirm PIN visible while Owner setup hashes, then navigates', async () => {

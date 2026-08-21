@@ -1,14 +1,14 @@
 import { eq, and, desc, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from './client';
-import { shops, roles, users, userPermissions } from './schema';
+import { auditLogs, shops, roles, users, userPermissions } from './schema';
 import { generateId } from '../native/id';
 import { createPinLookupTag, hashPin, verifyPinHash } from '../native/crypto';
 import type { AuthTimingTrace } from '../dev/authTiming';
 import {
-  isPermissionKey,
+  fromStoragePermissionKey,
   resolvePermission,
   toRole,
-  type Permission,
+  type AuthorizationPermission,
   type PermissionOverrides,
   type Role,
 } from '../domain/permissions';
@@ -131,8 +131,9 @@ export async function getUserPermissionOverrides(
   for (const row of rows) {
     // An unrecognised key is ignored, never treated as a grant — the same
     // fail-closed stance toRole takes for an unknown role name.
-    if (isPermissionKey(row.key)) {
-      overrides[row.key] = row.allowed;
+    const permission = fromStoragePermissionKey(row.key);
+    if (permission) {
+      overrides[permission] = row.allowed;
     }
   }
   return overrides;
@@ -213,7 +214,7 @@ export async function markShopCloudLinked(shopId: string): Promise<void> {
 export async function requirePermission(
   shopId: string,
   actorUserId: string,
-  permission: Permission,
+  permission: AuthorizationPermission,
 ): Promise<void> {
   const role = toRole(await getActiveSessionRole(actorUserId, shopId));
   if (!role) {
@@ -338,6 +339,32 @@ export interface LocalPinSession {
   userId: string;
   role: Role;
   permissions: PermissionOverrides;
+}
+
+/** Records an authenticated login without storing credential material. */
+export async function recordSuccessfulLogin(session: LocalPinSession): Promise<void> {
+  const id = generateId();
+  const now = new Date().toISOString();
+  const values = {
+    id,
+    shopId: session.shopId,
+    actorId: session.userId,
+    action: 'user_login',
+    target: null,
+    meta: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.transaction(async (tx) => {
+    await tx.insert(auditLogs).values(values);
+    recordChange(tx, {
+      shopId: session.shopId,
+      table: 'audit_logs',
+      rowId: id,
+      op: 'insert',
+      payload: values,
+    });
+  });
 }
 
 interface LoginUserRow {

@@ -128,10 +128,7 @@ async function findUserByPhone(phone: string): Promise<ResolvedUser | null> {
     return null;
   }
   const roleName = (data.roles as unknown as { name: string } | null)?.name;
-  // A P1 'manager' row gets no session at all, matching verifyPin's stance on
-  // the mobile side: a role Beta does not assign must not mint a token the
-  // guards would then have to keep rejecting screen by screen.
-  if (roleName !== "owner" && roleName !== "staff") {
+  if (roleName !== "owner" && roleName !== "manager" && roleName !== "staff") {
     return null;
   }
   return { id: data.id, shopId: data.shop_id, pinHash: data.pin_hash, roleName };

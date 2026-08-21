@@ -79,7 +79,8 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
   return customer;
 }
 
-export async function getCustomer(shopId: string, customerId: string): Promise<Customer> {
+export async function getCustomer(shopId: string, actorUserId: string, customerId: string): Promise<Customer> {
+  await requirePermission(shopId, actorUserId, 'credit_view');
   const customer = db.select({
     id: customers.id,
     name: customers.name,
@@ -133,8 +134,10 @@ function getCustomerLedgerRowsSync(shopId: string, customerId: string): CreditLe
 
 export async function getCustomerCreditLedger(
   shopId: string,
+  actorUserId: string,
   customerId: string,
 ): Promise<CreditLedgerRow[]> {
+  await requirePermission(shopId, actorUserId, 'credit_view');
   return getCustomerLedgerRowsSync(shopId, customerId);
 }
 
@@ -149,8 +152,10 @@ interface CustomerBalanceRow {
 
 export async function listCustomersWithBalance(
   shopId: string,
+  actorUserId: string,
   query?: string,
 ): Promise<(Customer & { balance: Paisa })[]> {
+  await requirePermission(shopId, actorUserId, 'credit_view');
   const search = query?.trim();
   const searchClause = search
     ? `AND (c.name LIKE $search OR c.phone LIKE $search)`

@@ -102,6 +102,41 @@ describe('claims round-trip through the access token hook', () => {
   });
 });
 
+describe('Phase B1 operational Manager permissions', () => {
+  it('uses the exact Manager preset and permits only an explicit staff-management grant', async () => {
+    const managerRole = '77777777-7777-4777-8777-777777777771';
+    const managerUser = '77777777-7777-4777-8777-777777777772';
+    await h.exec(`
+      insert into roles (id, shop_id, name, is_system) values
+        ('${managerRole}', '${SHOP_A}', 'manager', true);
+      insert into users (id, shop_id, name, phone, pin_hash, role_id) values
+        ('${managerUser}', '${SHOP_A}', 'Operational Manager', '+8801700000077', 'hash', '${managerRole}');
+    `);
+
+    const granted = [
+      'sales', 'sale_discount', 'sale_return', 'sale_history',
+      'inventory_view', 'inventory_write', 'expiry_manage',
+      'credit_view', 'credit_management', 'cash_management', 'reports',
+    ];
+    for (const key of granted) {
+      const row = await h.one<{ allowed: boolean }>(
+        `select user_has_permission($1, $2) as allowed`, [managerUser, key],
+      );
+      expect(row.allowed, key).toBe(true);
+    }
+    await expect(h.one<{ allowed: boolean }>(
+      `select user_has_permission($1, 'staff_management') as allowed`, [managerUser],
+    )).resolves.toEqual({ allowed: false });
+
+    await h.exec(`insert into user_permissions
+      (id, shop_id, user_id, key, allowed) values
+      ('77777777-7777-4777-8777-777777777773', '${SHOP_A}', '${managerUser}', 'staff_management', true)`);
+    await expect(h.one<{ allowed: boolean }>(
+      `select user_has_permission($1, 'staff_management') as allowed`, [managerUser],
+    )).resolves.toEqual({ allowed: true });
+  });
+});
+
 describe('identity binding', () => {
   it('converges when two first-logins race, instead of one of them failing', async () => {
     // What _shared/identity.ts's claimBinding relies on. The previous version

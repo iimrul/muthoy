@@ -21,27 +21,18 @@ import { AppState, Text, View } from 'react-native';
 import { useDatabaseMigrations } from '../db';
 import {
   registerNotificationBackgroundTaskAsync,
-  requestNotificationPermissionsAsync,
   runNotificationChecks,
 } from '../native/notifications';
 import { useSessionStore } from '../state/sessionStore';
 import { handleAppStateChangeForAuthRefresh } from '../sync/supabaseClient';
 import { startSyncEngine, stopSyncEngine } from '../sync';
 import '../global.css';
+import { AppNavigationShell } from '../components/navigation/AppNavigationShell';
+import { AuthenticatedRuntimeErrorBoundary } from '../components/navigation/AuthenticatedRuntimeErrorBoundary';
+import { NavigationBoundary } from '../components/navigation/NavigationBoundary';
 
 const FOREGROUND_CHECK_DEBOUNCE_MS = 60_000;
 let lastForegroundCheckAt = 0;
-let notificationBootstrapPromise: Promise<void> | null = null;
-
-function bootstrapNotifications(): Promise<void> {
-  notificationBootstrapPromise ??= requestNotificationPermissionsAsync()
-    .then(() => undefined)
-    .catch((error: unknown) => {
-      console.warn('Notification permission/channel initialization failed', error);
-    });
-  return notificationBootstrapPromise;
-}
-
 // Keep the splash screen visible while brand fonts load — CLAUDE.md rule 6
 // requires the correct font family from first paint, never a system-font flash.
 SplashScreen.preventAutoHideAsync();
@@ -101,9 +92,9 @@ export default function RootLayout() {
         return;
       }
       lastForegroundCheckAt = now;
-      // Prompt only from a visible foreground app. The first check waits until
-      // Android's channel exists; denied permission still allows DB alerts.
-      void bootstrapNotifications().then(() => runNotificationChecks(session.shopId));
+      // In-app alerts do not require OS permission. The explicit Settings
+      // switch owns the system permission prompt; local delivery is best effort.
+      void runNotificationChecks(session.shopId);
     };
     checkIfDue();
     const subscription = AppState.addEventListener('change', (state) => {
@@ -138,5 +129,13 @@ export default function RootLayout() {
     );
   }
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <AuthenticatedRuntimeErrorBoundary>
+      <AppNavigationShell>
+        <NavigationBoundary>
+          <Stack screenOptions={{ headerShown: false }} />
+        </NavigationBoundary>
+      </AppNavigationShell>
+    </AuthenticatedRuntimeErrorBoundary>
+  );
 }

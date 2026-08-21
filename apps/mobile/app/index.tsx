@@ -6,13 +6,14 @@ import { getActiveSessionContext, getRegistrationStatus } from '../db/auth';
 import type { Permission, PermissionOverrides } from '../domain/permissions';
 // ⚠️ TEMPORARY import — remove with the dev auth bypass (see dev/README.md).
 import { isDevPlaceholderPhone } from '../dev/devAnonAuth';
+import { authenticatedHome, type AuthenticatedHomePath } from '../navigation/routes';
 import { useSessionStore } from '../state/sessionStore';
 
 type RootDestination =
   | '/register'
   | '/role-select'
   | '/pin-login'
-  | '/dashboard'
+  | AuthenticatedHomePath
   | {
       pathname: '/otp-verify';
       params: { phone: string; resumeShopId: string; resumeOwnerUserId: string };
@@ -118,8 +119,8 @@ export default function RootSessionGate() {
         }
 
         // Narrowed inside getActiveSessionContext: a persisted session naming a
-        // role Beta does not assign (the P1 'manager', or a tampered MMKV
-        // value) resolves to null and goes back to PIN login, rather than being
+        // role Beta does not assign (or a tampered MMKV value) resolves to null
+        // and goes back to PIN login, rather than being
         // compared as-is and let through.
         const active = await getActiveSessionContext(session.userId, session.shopId);
         if (active === null || active.role !== session.role) {
@@ -145,7 +146,7 @@ export default function RootSessionGate() {
           if (!isSamePermissions(session.permissions, active.permissions)) {
             login({ ...session, permissions: active.permissions });
           }
-          setDestination('/dashboard');
+          setDestination(authenticatedHome(active));
         }
       } catch (cause) {
         if (isCurrent) {

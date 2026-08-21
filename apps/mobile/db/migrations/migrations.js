@@ -10,8 +10,20 @@ import m0005 from './0005_eminent_legion.sql';
 import m0006 from './0006_inventory_movement_ledger.sql';
 import m0007 from './0007_staff_device_login.sql';
 import m0008 from './0008_native_pin_lookup.sql';
+import m0009 from './0009_strong_gargoyle.sql';
 
 export default {
   journal,
-  migrations: { m0000, m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008 },
+  migrations: {
+    m0000,
+    m0001,
+    m0002,
+    m0003,
+    m0004,
+    m0005,
+    m0006,
+    m0007,
+    m0008,
+    m0009,
+  },
 };

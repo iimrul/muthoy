@@ -162,6 +162,7 @@ beforeAll(async () => {
   applyMigration('0006_inventory_movement_ledger.sql');
   applyMigration('0007_staff_device_login.sql');
   applyMigration('0008_native_pin_lookup.sql');
+  applyMigration('0009_strong_gargoyle.sql');
 
   // Day 4: the owner registers, sets a PIN, and the device gets linked.
   const registration = await createShopAndOwner({
@@ -254,12 +255,13 @@ describe('handover round trip — each PIN returns its OWN session', () => {
     await expect(verifyPin('0000')).resolves.toBeNull();
   });
 
-  // Fail closed at the front door: a manager PIN must not mint a session the
-  // guards would then have to keep rejecting screen by screen. Unchanged by
-  // this work — asserted here because a handover is exactly where an
-  // unassigned role would slip in unnoticed.
-  it('refuses the P1 manager role a session even with a valid PIN', async () => {
-    await expect(verifyPin(MANAGER_PIN)).resolves.toBeNull();
+  it('mints an operational manager session for a valid manager PIN', async () => {
+    await expect(verifyPin(MANAGER_PIN)).resolves.toEqual({
+      shopId: fixture.shopId,
+      userId: fixture.managerId,
+      role: 'manager',
+      permissions: {},
+    });
     expect(await getActiveSessionRole(fixture.managerId, fixture.shopId)).toBe('manager');
   });
 });
@@ -343,11 +345,10 @@ describe('permissions follow whoever is logged in', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('denies the P1 manager role every permission, including sales', async () => {
-    await expect(requirePermission(fixture.shopId, fixture.managerId, 'sales')).rejects.toThrow(
-      /Owner access only/,
-    );
-    await expect(requirePermission(fixture.shopId, fixture.managerId, 'cash_management')).rejects.toThrow(
+  it('grants manager operational defaults but not staff-management escalation', async () => {
+    await expect(requirePermission(fixture.shopId, fixture.managerId, 'sales')).resolves.toBeUndefined();
+    await expect(requirePermission(fixture.shopId, fixture.managerId, 'cash_management')).resolves.toBeUndefined();
+    await expect(requirePermission(fixture.shopId, fixture.managerId, 'staff_management')).rejects.toThrow(
       /Owner access only/,
     );
   });

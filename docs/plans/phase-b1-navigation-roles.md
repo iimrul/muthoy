@@ -100,6 +100,8 @@ The alert is shown only when its underlying permission allows the data and desti
 | customers | Count with positive outstanding balance | `credit_view` |
 | Staff Active | Staff who logged in today, excluding signed-in Manager | `staff_manage` |
 
+Successful enrolled and fresh-device authentication appends a credential-free `user_login` audit event. The metric counts distinct eligible actors for the current business day, never active roster rows.
+
 The prototype Manager preset grants all of these except `staff_manage`. A Custom Manager without a permission must not receive its protected query result; unavailable cells/sections are omitted rather than filled with leaked or fake zero values.
 
 ### Manager actions and activity
@@ -383,6 +385,13 @@ The prototype Notifications modal is included exactly as a functional Settings b
 - Denied OS permission shows a localized explanation. In-app alerts may remain enabled independently.
 - Preferences are local/device settings and are shop-keyed where notification jobs depend on active shop. They do not alter business rows or bypass permission filtering.
 
+### Approved B1 receipt persistence
+
+- Notification read/dismiss receipts are intentionally local-only SQLite state in B1.
+- Receipt mutations set `is_dirty = 0`, never enter the outbox, and are not represented in PostgreSQL/RLS/sync mappings.
+- Per-user isolation applies on each enrolled device. Cross-device read/dismiss convergence is deferred until explicitly approved; B1 does not add Postgres receipt sync.
+- The local upgrade backfills legacy global read state only for the shop Owner, preserving other users as unread.
+
 ## Explicit B1 Settings behavior
 
 Settings is Owner-only in B1 because its reachable prototype surface combines Owner account, billing entry, and destructive security entries. B1 implements only these visible prototype behaviors:
@@ -463,8 +472,8 @@ Deferred destinations may be linked from B1 navigation only when the route exist
 
 - Add Manager to pure role narrowing/default resolution and all auth/session/sync/RLS role checks.
 - Add only missing permission keys; map existing keys rather than renaming storage.
-- Add additive SQLite/Postgres migrations for any missing synced nullable Owner profile fields and per-user notification receipts. Every FK has explicit `onDelete`.
-- Notification receipt unique key: `(notification_id, user_id)` with `read_at` and nullable `dismissed_at`; backfill legacy read state without erasing other users’ unread state.
+- Add an additive SQLite migration for per-user notification receipts and additive SQLite/Postgres migrations for missing synced nullable Owner profile fields. Every FK has explicit `onDelete`.
+- Local-only notification receipt unique key: `(notification_id, user_id)` with `read_at` and nullable `dismissed_at`; backfill legacy read state without erasing other users’ unread state. Do not add receipts to PostgreSQL or sync.
 - Keep notification preferences in an explicit local/device table or store; never in screen state alone.
 - Add Staff/Manager dashboard read models under `db/`, scoped by shop, actor, business day, and required permission.
 - Add one typed route registry under mobile navigation code containing exact route, localized label, role rule, permission, bottom slot/lock behavior, More membership, Owner Quick Links membership, and notification action eligibility.
@@ -494,7 +503,7 @@ Expected new production files:
 
 - Manager accidentally inheriting Owner authority or unknown-role fallback.
 - UI/SQLite/sync/RLS permission drift across the 12 keys.
-- Cross-shop or cross-user leakage in dashboard metrics and notification receipts.
+- Cross-shop leakage in dashboard metrics or cross-user leakage in local notification receipts.
 - Legacy read notifications becoming unread for everyone or dismissed globally during upgrade.
 - Store totals using wrong day boundaries, seller scope, held/cancelled rows, or floating-point money.
 - End Shift clearing enrollment/outbox, or ordinary navigation clearing cart.

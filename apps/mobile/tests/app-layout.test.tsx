@@ -51,6 +51,9 @@ vi.mock('react-native', () => ({
 }));
 
 vi.mock('expo-router', () => ({ Stack: () => createElement('div') }));
+vi.mock('../components/navigation/AppNavigationShell', () => ({ AppNavigationShell: ({ children }: { children?: ReactNode }) => createElement('div', null, children) }));
+vi.mock('../components/navigation/AuthenticatedRuntimeErrorBoundary', () => ({ AuthenticatedRuntimeErrorBoundary: ({ children }: { children?: ReactNode }) => createElement('div', null, children) }));
+vi.mock('../components/navigation/NavigationBoundary', () => ({ NavigationBoundary: ({ children }: { children?: ReactNode }) => createElement('div', null, children) }));
 vi.mock('expo-splash-screen', () => ({
   preventAutoHideAsync: vi.fn(),
   hideAsync: vi.fn(),

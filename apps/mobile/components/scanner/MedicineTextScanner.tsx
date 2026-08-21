@@ -1,12 +1,23 @@
-import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Modal, Pressable, Text, View } from 'react-native';
+import { useCallback, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Linking,
+  Modal,
+  Pressable,
+  Text,
+  View,
+} from "react-native";
 import {
   openSettingsErrorMessage,
   requestPermissionErrorMessage,
   type CameraPermissionState,
-} from '../../domain/cameraPermissionState';
-import { ScannerCamera, type ScannerCameraHandle } from '../../native/ScannerCamera';
-import { scanText } from '../../native/scanner';
+} from "../../domain/cameraPermissionState";
+import {
+  ScannerCamera,
+  type ScannerCameraHandle,
+} from "../../native/ScannerCamera";
+import { scanText } from "../../native/scanner";
+import { useI18n } from "../../state/localeStore";
 
 // components/scanner/MedicineTextScanner.tsx — polished, reusable full-screen
 // scan modal (docs/plans/ocr.md). Imports ONLY native/ScannerCamera +
@@ -19,7 +30,7 @@ import { scanText } from '../../native/scanner';
 // results/prefill handling is entirely the calling screen's concern via
 // onTextRecognized.
 
-export type ScannerMode = 'lookup' | 'prefill';
+export type ScannerMode = "lookup" | "prefill";
 
 export interface MedicineTextScannerProps {
   visible: boolean;
@@ -28,17 +39,19 @@ export interface MedicineTextScannerProps {
   onTextRecognized: (recognizedText: string) => void;
 }
 
-type CaptureState = 'ready' | 'capturing' | 'processing' | 'error';
+type CaptureState = "ready" | "capturing" | "processing" | "error";
 
-const MODE_INSTRUCTIONS: Record<ScannerMode, string> = {
-  lookup: 'Point the camera at the medicine strip, then capture.',
-  prefill: 'Point the camera at the medicine strip to prefill this form.',
-};
-
-export function MedicineTextScanner({ visible, mode, onClose, onTextRecognized }: MedicineTextScannerProps) {
+export function MedicineTextScanner({
+  visible,
+  mode,
+  onClose,
+  onTextRecognized,
+}: MedicineTextScannerProps) {
+  const { t } = useI18n();
   const cameraRef = useRef<ScannerCameraHandle>(null);
-  const [permissionState, setPermissionState] = useState<CameraPermissionState>('checking');
-  const [captureState, setCaptureState] = useState<CaptureState>('ready');
+  const [permissionState, setPermissionState] =
+    useState<CameraPermissionState>("checking");
+  const [captureState, setCaptureState] = useState<CaptureState>("ready");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -53,9 +66,9 @@ export function MedicineTextScanner({ visible, mode, onClose, onTextRecognized }
   // effect) so every exit path leaves state clean for the next open, with no
   // one-frame flash of stale content — see docs/plans/ocr.md.
   const resetAndClose = useCallback(() => {
-    setCaptureState('ready');
+    setCaptureState("ready");
     setErrorMessage(null);
-    setPermissionState('checking');
+    setPermissionState("checking");
     setRequestError(null);
     setSettingsError(null);
     onClose();
@@ -88,32 +101,32 @@ export function MedicineTextScanner({ visible, mode, onClose, onTextRecognized }
     if (!cameraRef.current) {
       return;
     }
-    setCaptureState('capturing');
+    setCaptureState("capturing");
     const uri = await cameraRef.current.captureAsync();
     if (!uri) {
-      setCaptureState('error');
-      setErrorMessage("Couldn't capture the photo. Try again.");
+      setCaptureState("error");
+      setErrorMessage(t("cameraCaptureFailed"));
       return;
     }
 
-    setCaptureState('processing');
+    setCaptureState("processing");
     try {
       const result = await scanText(uri);
       if (!result) {
-        setCaptureState('error');
-        setErrorMessage('No text detected on the strip. Hold it flat and steady, then retry.');
+        setCaptureState("error");
+        setErrorMessage(t("cameraNoText"));
         return;
       }
       onTextRecognized(result.recognizedText);
       resetAndClose();
     } catch {
-      setCaptureState('error');
-      setErrorMessage("Couldn't read the strip. Try again.");
+      setCaptureState("error");
+      setErrorMessage(t("cameraReadFailed"));
     }
-  }, [onTextRecognized, resetAndClose]);
+  }, [onTextRecognized, resetAndClose, t]);
 
   const handleRetry = useCallback(() => {
-    setCaptureState('ready');
+    setCaptureState("ready");
     setErrorMessage(null);
   }, []);
 
@@ -122,16 +135,25 @@ export function MedicineTextScanner({ visible, mode, onClose, onTextRecognized }
   }
 
   return (
-    <Modal visible presentationStyle="fullScreen" animationType="slide" onRequestClose={resetAndClose}>
+    <Modal
+      visible
+      presentationStyle="fullScreen"
+      animationType="slide"
+      onRequestClose={resetAndClose}
+    >
       <View className="flex-1 bg-richBlack">
-        <ScannerCamera key={cameraInstanceKey} ref={cameraRef} onPermissionStateChange={setPermissionState} />
+        <ScannerCamera
+          key={cameraInstanceKey}
+          ref={cameraRef}
+          onPermissionStateChange={setPermissionState}
+        />
 
         <View className="absolute inset-0">
           <View className="flex-row justify-end p-4">
             <Pressable
               onPress={resetAndClose}
               accessibilityRole="button"
-              accessibilityLabel="Close scanner"
+              accessibilityLabel={t("closeScanner")}
               hitSlop={8}
               className="h-10 w-10 items-center justify-center rounded-full bg-white/10 active:opacity-70"
             >
@@ -139,7 +161,7 @@ export function MedicineTextScanner({ visible, mode, onClose, onTextRecognized }
             </Pressable>
           </View>
 
-          {permissionState === 'granted' ? (
+          {permissionState === "granted" ? (
             <View className="flex-1 items-center justify-center p-10">
               <View className="aspect-square w-full max-w-sm rounded-3xl border-2 border-white/40" />
             </View>
@@ -148,112 +170,139 @@ export function MedicineTextScanner({ visible, mode, onClose, onTextRecognized }
           )}
 
           <View className="gap-4 p-6 pb-10">
-            {permissionState === 'deniable' ? (
+            {permissionState === "deniable" ? (
               <View className="items-center gap-3">
                 <Text className="text-center font-sans text-sm text-white">
-                  Camera access is needed to scan medicine strips.
+                  {t("cameraNeeded")}
                 </Text>
                 <Pressable
                   onPress={handleRequestPermission}
                   accessibilityRole="button"
-                  accessibilityLabel="Grant camera access"
+                  accessibilityLabel={t("grantCameraAccess")}
                   className="items-center rounded-lg bg-brand-green px-5 py-3 active:opacity-80"
                 >
-                  <Text className="font-sans-semibold text-base text-white">Grant access</Text>
+                  <Text className="font-sans-semibold text-base text-white">
+                    {t("grantAccess")}
+                  </Text>
                 </Pressable>
                 {requestError ? (
-                  <Text className="text-center font-sans text-xs text-white/80">{requestError}</Text>
+                  <Text className="text-center font-sans text-xs text-white/80">
+                    {requestError}
+                  </Text>
                 ) : null}
               </View>
             ) : null}
 
-            {permissionState === 'blocked' ? (
+            {permissionState === "blocked" ? (
               <View className="items-center gap-3">
                 <Text className="text-center font-sans text-sm text-white">
-                  Camera access was denied. Enable it in Settings to scan.
+                  {t("cameraDenied")}
                 </Text>
                 <Pressable
                   onPress={handleOpenSettings}
                   accessibilityRole="button"
-                  accessibilityLabel="Open Settings"
+                  accessibilityLabel={t("openSettings")}
                   className="items-center rounded-lg bg-brand-green px-5 py-3 active:opacity-80"
                 >
-                  <Text className="font-sans-semibold text-base text-white">Open Settings</Text>
+                  <Text className="font-sans-semibold text-base text-white">
+                    {t("openSettings")}
+                  </Text>
                 </Pressable>
                 {settingsError ? (
-                  <Text className="text-center font-sans text-xs text-white/80">{settingsError}</Text>
+                  <Text className="text-center font-sans text-xs text-white/80">
+                    {settingsError}
+                  </Text>
                 ) : null}
               </View>
             ) : null}
 
-            {permissionState === 'unavailable' ? (
+            {permissionState === "unavailable" ? (
               <View className="items-center gap-3">
-                <Text className="text-center font-sans text-sm text-white">Camera unavailable right now.</Text>
+                <Text className="text-center font-sans text-sm text-white">
+                  {t("cameraUnavailable")}
+                </Text>
                 <Pressable
                   onPress={handleRetryMount}
                   accessibilityRole="button"
-                  accessibilityLabel="Retry camera"
+                  accessibilityLabel={t("retryCamera")}
                   className="items-center rounded-lg bg-brand-green px-5 py-3 active:opacity-80"
                 >
-                  <Text className="font-sans-semibold text-base text-white">Retry</Text>
+                  <Text className="font-sans-semibold text-base text-white">
+                    {t("retry")}
+                  </Text>
                 </Pressable>
               </View>
             ) : null}
 
-            {permissionState === 'granted' && captureState === 'ready' ? (
-              <Text className="text-center font-sans text-sm text-white/80">{MODE_INSTRUCTIONS[mode]}</Text>
+            {permissionState === "granted" && captureState === "ready" ? (
+              <Text className="text-center font-sans text-sm text-white/80">
+                {t(mode === "lookup" ? "cameraLookup" : "cameraPrefill")}
+              </Text>
             ) : null}
 
-            {permissionState === 'granted' && (captureState === 'capturing' || captureState === 'processing') ? (
+            {permissionState === "granted" &&
+            (captureState === "capturing" || captureState === "processing") ? (
               <View className="items-center gap-3">
                 <ActivityIndicator color="#FFFFFF" />
-                <Text className="font-sans text-sm text-white">Reading strip…</Text>
+                <Text className="font-sans text-sm text-white">
+                  {t("readingStrip")}
+                </Text>
               </View>
             ) : null}
 
-            {permissionState === 'granted' && captureState === 'error' ? (
+            {permissionState === "granted" && captureState === "error" ? (
               <View className="items-center gap-3">
-                <Text className="text-center font-sans text-sm text-white">{errorMessage}</Text>
+                <Text className="text-center font-sans text-sm text-white">
+                  {errorMessage}
+                </Text>
                 <View className="flex-row gap-3">
                   <Pressable
                     onPress={handleRetry}
                     accessibilityRole="button"
-                    accessibilityLabel="Retry scan"
+                    accessibilityLabel={t("retryScan")}
                     className="items-center rounded-lg bg-brand-green px-5 py-3 active:opacity-80"
                   >
-                    <Text className="font-sans-semibold text-base text-white">Retry</Text>
+                    <Text className="font-sans-semibold text-base text-white">
+                      {t("retry")}
+                    </Text>
                   </Pressable>
                   <Pressable
                     onPress={resetAndClose}
                     accessibilityRole="button"
-                    accessibilityLabel="Cancel scan"
+                    accessibilityLabel={t("cancelScan")}
                     className="items-center rounded-lg bg-white/10 px-5 py-3 active:opacity-70"
                   >
-                    <Text className="font-sans-semibold text-base text-white">Cancel</Text>
+                    <Text className="font-sans-semibold text-base text-white">
+                      {t("cancel")}
+                    </Text>
                   </Pressable>
                 </View>
               </View>
             ) : null}
 
-            {permissionState === 'granted' && captureState === 'ready' ? (
+            {permissionState === "granted" && captureState === "ready" ? (
               <Pressable
                 onPress={handleCapture}
                 accessibilityRole="button"
-                accessibilityLabel="Capture photo"
+                accessibilityLabel={t("capturePhoto")}
                 className="items-center rounded-lg bg-brand-green py-4 active:opacity-80"
               >
-                <Text className="font-sans-semibold text-base text-white">Capture</Text>
+                <Text className="font-sans-semibold text-base text-white">
+                  {t("capture")}
+                </Text>
               </Pressable>
             ) : null}
 
-            {captureState !== 'processing' ? (
+            {captureState !== "processing" ? (
               <Pressable
                 onPress={resetAndClose}
                 accessibilityRole="button"
-                accessibilityLabel="Search manually instead"
+                accessibilityLabel={t("searchManually")}
                 className="items-center py-2 active:opacity-70"
               >
-                <Text className="font-sans text-sm text-white/70 underline">Search manually instead</Text>
+                <Text className="font-sans text-sm text-white/70 underline">
+                  {t("searchManually")}
+                </Text>
               </Pressable>
             ) : null}
           </View>

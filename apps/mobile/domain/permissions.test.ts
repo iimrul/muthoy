@@ -1,134 +1,47 @@
-// Volume 0 Day 11's permission matrix, proven at the pure-domain level.
-// The roadmap's Day 11 checklist ("A Staff-role login cannot access owner-only
-// screens") is enforced in two places — route guards and db/ action guards —
-// and BOTH resolve through hasPermission below, so this file pins the rule
-// itself. The action-level half is proven against a real SQLite engine in
-// db/permissions.sqlite.test.ts.
-
 import { describe, expect, it } from 'vitest';
 import {
   ACCESS_DENIED_MESSAGE,
-  hasPermission,
-  hasPermissionForRoleName,
-  toRole,
-  type Permission,
+  CASHIER_DEFAULT_PERMISSIONS, MANAGER_DEFAULT_PERMISSIONS, PERMISSION_KEYS, PERMISSION_PRESETS,
+  fromStoragePermissionKey, hasPermission, hasPermissionForRoleName, permissionStorageKey,
+  resolvePermission, toRole, type Permission,
 } from './permissions';
 
-const ALL_PERMISSIONS: Permission[] = [
-  'sales',
-  'inventory_view',
-  'inventory_write',
-  'staff_management',
-  'cash_management',
-  'settings_manage',
-  'credit_management',
-];
-
-// Every role name that can reach a guard at runtime without being one of the
-// two Beta assigns: the P1 'manager' rows every shop already carries, plus
-// anything a tampered/stale MMKV session could hold.
-const NON_P0_ROLE_NAMES = ['manager', 'superuser', '', null, undefined];
-
-describe('hasPermission — owner', () => {
-  it('grants every permission (Volume 0 Day 11: "Owner = everything")', () => {
-    for (const permission of ALL_PERMISSIONS) {
-      expect(hasPermission('owner', permission)).toBe(true);
+describe('Phase B1 permission contract', () => {
+  it('contains the exact twelve prototype keys', () => {
+    expect(PERMISSION_KEYS).toEqual(['sale_entry','sale_discount','sale_return','sale_history','inventory_view','inventory_edit','expiry_manage','credit_view','credit_manage','cash_drawer','reports','staff_manage']);
+  });
+  it('uses exact Cashier, Manager and Custom presets', () => {
+    expect(PERMISSION_KEYS.filter((key) => PERMISSION_PRESETS.cashier[key])).toEqual(CASHIER_DEFAULT_PERMISSIONS);
+    expect(PERMISSION_KEYS.filter((key) => PERMISSION_PRESETS.manager[key])).toEqual(MANAGER_DEFAULT_PERMISSIONS);
+    expect(MANAGER_DEFAULT_PERMISSIONS).toEqual(PERMISSION_KEYS.filter((key) => key !== 'staff_manage'));
+    expect(PERMISSION_KEYS.some((key) => PERMISSION_PRESETS.custom[key])).toBe(false);
+  });
+  it('keeps mapped production storage keys stable', () => {
+    const pairs: [Permission, string][] = [['sale_entry','sales'],['inventory_edit','inventory_write'],['credit_manage','credit_management'],['cash_drawer','cash_management'],['staff_manage','staff_management']];
+    for (const [product, storage] of pairs) { expect(permissionStorageKey(product)).toBe(storage); expect(fromStoragePermissionKey(storage)).toBe(product); }
+  });
+  it('gives Owner everything, Manager all operational defaults except staff management, and Cashier two defaults', () => {
+    for (const key of PERMISSION_KEYS) expect(hasPermission('owner', key)).toBe(true);
+    for (const key of PERMISSION_KEYS) expect(hasPermission('manager', key)).toBe(key !== 'staff_manage');
+    for (const key of PERMISSION_KEYS) expect(hasPermission('staff', key)).toBe(key === 'sale_entry' || key === 'inventory_view');
+  });
+  it('applies individual overrides and never lets settings_manage escape Owner-only', () => {
+    expect(resolvePermission('manager', 'staff_manage', { staff_manage: true })).toBe(true);
+    expect(resolvePermission('manager', 'reports', { reports: false })).toBe(false);
+    expect(resolvePermission('staff', 'sale_entry', { sale_entry: false })).toBe(false);
+    expect(resolvePermission('manager', 'settings_manage', {})).toBe(false);
+  });
+  it('accepts Manager and denies unknown roles', () => {
+    expect(toRole('manager')).toBe('manager'); expect(toRole('owner')).toBe('owner'); expect(toRole('staff')).toBe('staff');
+    expect(toRole('superuser')).toBeNull(); expect(hasPermissionForRoleName('superuser', 'sale_entry')).toBe(false);
+  });
+  it('fails closed for null, missing, and empty role names', () => {
+    for (const roleName of [null, undefined, '']) {
+      expect(toRole(roleName)).toBeNull();
+      expect(hasPermissionForRoleName(roleName, 'sale_entry')).toBe(false);
     }
   });
-});
-
-describe('hasPermission — staff', () => {
-  it('allows making a sale', () => {
-    expect(hasPermission('staff', 'sales')).toBe(true);
-  });
-
-  it('allows viewing inventory', () => {
-    expect(hasPermission('staff', 'inventory_view')).toBe(true);
-  });
-
-  it.each<Permission>([
-    'inventory_write',
-    'staff_management',
-    'cash_management',
-    'settings_manage',
-    'credit_management',
-  ])(
-    'denies the owner-only permission %s',
-    (permission) => {
-      expect(hasPermission('staff', permission)).toBe(false);
-    },
-  );
-
-  // The predicate every Settings route guard evaluates. Volume 0 Day 11 keeps
-  // PIN handling with the owner (own PIN, or resetting a staff PIN), so a
-  // Staff login direct-navigating to /settings/settings is denied.
-  it('is denied Settings — including changing its own PIN there', () => {
-    expect(hasPermissionForRoleName('staff', 'settings_manage')).toBe(false);
-  });
-
-  // The predicate app/credit/* evaluates. Standalone credit management
-  // (viewing balances, collecting a payment) stays owner-only even though
-  // Staff can still make a credit SALE at checkout — that's the 'sales' grant,
-  // a different permission from this one.
-  it('is denied standalone credit management', () => {
-    expect(hasPermissionForRoleName('staff', 'credit_management')).toBe(false);
-  });
-
-  it('grants exactly sales + inventory_view and nothing else', () => {
-    const granted = ALL_PERMISSIONS.filter((permission) => hasPermission('staff', permission));
-    expect(granted).toEqual(['sales', 'inventory_view']);
-  });
-});
-
-describe('toRole', () => {
-  it('passes through the two roles Beta assigns', () => {
-    expect(toRole('owner')).toBe('owner');
-    expect(toRole('staff')).toBe('staff');
-  });
-
-  // Every shop already has a 'manager' role row (db/auth.ts creates all three
-  // system roles at registration) but the Manager matrix is P1. It must deny,
-  // never fall through to owner-level access.
-  it('denies manager — the P1 role that already exists in every shop', () => {
-    expect(toRole('manager')).toBeNull();
-  });
-
-  it('denies an unknown, null, or missing role name', () => {
-    expect(toRole('superuser')).toBeNull();
-    expect(toRole(null)).toBeNull();
-    expect(toRole(undefined)).toBeNull();
-    expect(toRole('')).toBeNull();
-  });
-});
-
-// hasPermissionForRoleName is what the UI guards (state/usePermission.ts,
-// the dashboard tile filter) call, so this is the UI half of "manager and
-// unknown roles fail closed" — db/permissions.sqlite.test.ts is the DB half.
-describe('hasPermissionForRoleName — untrusted role strings', () => {
-  it('matches hasPermission for the two roles Beta assigns', () => {
-    for (const permission of ALL_PERMISSIONS) {
-      expect(hasPermissionForRoleName('owner', permission)).toBe(hasPermission('owner', permission));
-      expect(hasPermissionForRoleName('staff', permission)).toBe(hasPermission('staff', permission));
-    }
-  });
-
-  it.each(NON_P0_ROLE_NAMES)('denies EVERY permission for the role name %p', (roleName) => {
-    for (const permission of ALL_PERMISSIONS) {
-      expect(hasPermissionForRoleName(roleName, permission)).toBe(false);
-    }
-  });
-
-  // The specific regression this closes: 'manager' is not 'owner', so a naive
-  // check would fall through to the staff grant list and hand it sales +
-  // inventory_view. It must be denied outright until the P1 matrix ships.
-  it('never treats manager as staff', () => {
-    expect(hasPermissionForRoleName('manager', 'sales')).toBe(false);
-    expect(hasPermissionForRoleName('manager', 'inventory_view')).toBe(false);
-  });
-});
-
-describe('ACCESS_DENIED_MESSAGE', () => {
-  it('is friendly text, not a stack trace or an error code', () => {
+  it('keeps the shared access-denied message stable', () => {
     expect(ACCESS_DENIED_MESSAGE).toBe('Owner access only.');
   });
 });

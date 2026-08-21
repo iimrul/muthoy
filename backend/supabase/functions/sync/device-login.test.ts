@@ -281,6 +281,12 @@ describe('JWT claims and revocation', () => {
 });
 
 describe('server-side permission enforcement', () => {
+  test('B1 Owner profile fields use the guarded users push and timestamp-safe follow-up', () => {
+    expect(PUSH).toContain('applyUserProfileFields');
+    expect(PUSH).toMatch(/\.eq\("shop_id", shopId\)/);
+    expect(PUSH).toMatch(/\.lte\("updated_at", updatedAt\)/);
+    expect(PUSH).toContain('results.push(rejection(row.queueId, "transient", profileError))');
+  });
   test('push checks the permission for every row, and rejects permanently', () => {
     const body = code(PUSH);
     expect(body).toMatch(/sync_row_permitted/);

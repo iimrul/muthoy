@@ -32,6 +32,13 @@ export function currentBusinessDate(now: Date = new Date()): string {
   return localBusinessDate(now);
 }
 
+export async function hasCashDrawerForDate(shopId: string, businessDate: string): Promise<boolean> {
+  return Boolean(sqliteConnection.getFirstSync<{ id: string }>(
+    `SELECT id FROM cash_drawer WHERE shop_id=$shopId AND business_date=$businessDate AND is_deleted=0 LIMIT 1`,
+    { $shopId: shopId, $businessDate: businessDate },
+  ));
+}
+
 // Centralized closed-day guard (Codex finding, post-Day-10 fix): a closed
 // business date's cash_drawer row is the locked EOD snapshot — sales, credit
 // collections and purchases all feed numbers that snapshot reports
