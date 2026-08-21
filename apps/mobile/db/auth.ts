@@ -1,8 +1,9 @@
-import { eq, and, desc, isNotNull } from 'drizzle-orm';
+import { eq, and, desc, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from './client';
 import { shops, roles, users, userPermissions } from './schema';
 import { generateId } from '../native/id';
-import { hashPin, verifyPinHash } from '../native/crypto';
+import { createPinLookupTag, hashPin, verifyPinHash } from '../native/crypto';
+import type { AuthTimingTrace } from '../dev/authTiming';
 import {
   isPermissionKey,
   resolvePermission,
@@ -315,68 +316,176 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
 // stored in plain text. Caller (PIN Setup screen) must not pass the raw PIN
 // to any logging path either.
 export async function setOwnerPin(userId: string, rawPin: string): Promise<void> {
-  // Before hashing: an owner whose PIN collides with a staff member's would be
-  // signed in as whichever row verifyPin reached first.
-  await assertPinUnique(rawPin, userId);
+  const user = await db.select({ shopId: users.shopId }).from(users).where(eq(users.id, userId)).get();
+  if (!user) throw new Error(`No user found with id ${userId}`);
+  const pinLookupTag = await assertPinUnique(rawPin, user.shopId, userId);
   const pinHash = await hashPin(rawPin);
-  const values = stampUpdatedAt({ pinHash, pinSetAt: new Date().toISOString() });
+  const pinSetAt = new Date().toISOString();
+  const values = stampUpdatedAt({
+    pinHash,
+    pinSetAt,
+    pinLookupTag,
+    pinLookupPinSetAt: pinSetAt,
+  });
   await db.transaction(async (tx) => {
-    const user = await tx.select({ shopId: users.shopId }).from(users).where(eq(users.id, userId)).get();
-    if (!user) throw new Error(`No user found with id ${userId}`);
     await tx.update(users).set(values).where(eq(users.id, userId));
     recordChange(tx, { shopId: user.shopId, table: 'users', rowId: userId, op: 'update', payload: values });
   });
 }
 
-// PIN Login has no separate "who are you" step (Volume 4 AUTHENTICATION
-// describes PIN-only entry) — so there is no userId to check against until
-// AFTER a match is found. Checks the PIN against every active user's hash.
-//
-// Assumes one shop per device (Volume 0's P0 scope — multi-shop is P1), so
-// "every active user" means every active user in the local database, full
-// stop; this must be revisited if multi-shop ships.
+export interface LocalPinSession {
+  shopId: string;
+  userId: string;
+  role: Role;
+  permissions: PermissionOverrides;
+}
+
+interface LoginUserRow {
+  id: string;
+  shopId: string;
+  pinHash: string;
+  pinSetAt: string | null;
+  roleId: string;
+}
+
+const livePinWhere = and(
+  eq(users.isActive, true),
+  eq(users.isDeleted, false),
+  isNotNull(users.pinSetAt),
+);
+
+async function toLocalPinSession(user: LoginUserRow): Promise<LocalPinSession | null> {
+  const roleRow = await db
+    .select({ name: roles.name })
+    .from(roles)
+    .where(and(eq(roles.id, user.roleId), eq(roles.shopId, user.shopId), eq(roles.isDeleted, false)))
+    .get();
+  const role = toRole(roleRow?.name);
+  if (!role) return null;
+  return {
+    shopId: user.shopId,
+    userId: user.id,
+    role,
+    permissions: await getUserPermissionOverrides(user.shopId, user.id),
+  };
+}
+
+async function storeCurrentPinLookup(user: LoginUserRow, tag: string): Promise<void> {
+  if (!user.pinSetAt) return;
+  await db
+    .update(users)
+    .set({ pinLookupTag: tag, pinLookupPinSetAt: user.pinSetAt })
+    .where(
+      and(
+        eq(users.id, user.id),
+        eq(users.shopId, user.shopId),
+        eq(users.pinSetAt, user.pinSetAt),
+        eq(users.isActive, true),
+        eq(users.isDeleted, false),
+      ),
+    );
+}
+
+function selectLoginUsers() {
+  return db.select({
+    id: users.id,
+    shopId: users.shopId,
+    pinHash: users.pinHash,
+    pinSetAt: users.pinSetAt,
+    roleId: users.roleId,
+  }).from(users);
+}
+
+/**
+ * PIN-only local login. Current rows use Keystore-HMAC lookup followed by one
+ * bcrypt comparison. Rows upgraded from 0007 are scanned only while their tag
+ * is absent/stale, then lazily indexed after a successful compatible bcrypt
+ * verification.
+ */
 export async function verifyPin(
   rawPin: string,
-): Promise<{ shopId: string; userId: string; role: Role; permissions: PermissionOverrides } | null> {
-  const activeUsers = await db
-    .select({ id: users.id, shopId: users.shopId, pinHash: users.pinHash, roleId: users.roleId })
-    .from(users)
-    .where(and(eq(users.isActive, true), eq(users.isDeleted, false), isNotNull(users.pinSetAt)));
+  timing?: AuthTimingTrace,
+): Promise<LocalPinSession | null> {
+  const lookup = async () => {
+    const tag = await createPinLookupTag(rawPin);
+    const matches = await selectLoginUsers().where(
+      and(
+        livePinWhere,
+        eq(users.pinLookupTag, tag),
+        sql`${users.pinLookupPinSetAt} = ${users.pinSetAt}`,
+      ),
+    );
+    return { tag, candidates: matches.map((user) => ({ user, tag })) };
+  };
+  const { tag: lookupTag, candidates } = timing
+    ? await timing.measure('pin_lookup', lookup)
+    : await lookup();
 
-  for (const user of activeUsers) {
-    // Sequential, not Promise.all — a wrong PIN should not race real hashing
-    // work for every OTHER user's hash; a small local staff list keeps this
-    // fast even sequentially (native/crypto.ts's binding is non-blocking).
-    const matches = await verifyPinHash(rawPin, user.pinHash);
+  // Legacy rows are the only compatibility exception to the one-compare
+  // steady-state path. They are native-verified once, then tagged.
+  const legacyUsers = await selectLoginUsers().where(
+    and(
+      livePinWhere,
+      or(
+        isNull(users.pinLookupTag),
+        isNull(users.pinLookupPinSetAt),
+        sql`${users.pinLookupPinSetAt} IS NOT ${users.pinSetAt}`,
+      ),
+    ),
+  );
+
+  const verified: { user: LoginUserRow; tag: string }[] = [];
+  for (const candidate of candidates) {
+    const matches = timing
+      ? await timing.measure('bcrypt_compare', () => verifyPinHash(rawPin, candidate.user.pinHash))
+      : await verifyPinHash(rawPin, candidate.user.pinHash);
+    if (matches) verified.push(candidate);
+  }
+  for (const user of legacyUsers) {
+    const matches = timing
+      ? await timing.measure('legacy_bcrypt_compare', () => verifyPinHash(rawPin, user.pinHash))
+      : await verifyPinHash(rawPin, user.pinHash);
     if (matches) {
-      const [roleRow] = await db.select({ name: roles.name }).from(roles).where(eq(roles.id, user.roleId));
-      // Fail closed on a role this Beta does not assign — the P1 'manager'
-      // rows every shop already carries, or anything unrecognised. Such a
-      // user gets NO session at all rather than one whose role the guards
-      // would then have to keep rejecting screen by screen.
-      const role = toRole(roleRow?.name);
-      if (!role) {
-        continue;
-      }
-      // Carried into the session so route guards can hide what this staff
-      // member may not reach. It is a UI convenience only: every db/ write
-      // re-reads overrides from SQLite through requirePermission, and the
-      // server re-derives them again from its own tables.
-      const permissions = await getUserPermissionOverrides(user.shopId, user.id);
-      return { shopId: user.shopId, userId: user.id, role, permissions };
+      verified.push({ user, tag: lookupTag });
     }
   }
 
-  return null;
+  // Corrupted/old duplicate PINs must never choose an identity by row order.
+  if (verified.length !== 1) return null;
+  const match = verified[0];
+  if (!match) return null;
+  const { user, tag } = match;
+  await storeCurrentPinLookup(user, tag);
+  return toLocalPinSession(user);
+}
+
+/** Exact post-hydration check for the identity already verified by the server. */
+export async function verifyPinForUser(
+  rawPin: string,
+  shopId: string,
+  userId: string,
+  timing?: AuthTimingTrace,
+): Promise<LocalPinSession | null> {
+  const user = await selectLoginUsers().where(
+    and(livePinWhere, eq(users.shopId, shopId), eq(users.id, userId)),
+  ).get();
+  if (!user) return null;
+  const matches = timing
+    ? await timing.measure('bcrypt_compare', () => verifyPinHash(rawPin, user.pinHash))
+    : await verifyPinHash(rawPin, user.pinHash);
+  if (!matches) return null;
+  const tag = await createPinLookupTag(rawPin);
+  await storeCurrentPinLookup(user, tag);
+  return toLocalPinSession(user);
 }
 
 /**
  * Refuses a PIN that another live user on this device already has.
  *
- * verifyPin below matches a typed PIN against EVERY live user and returns the
- * FIRST hit, because PIN Login has no "who are you" step. So two users sharing
- * a PIN is not a cosmetic clash — it silently signs one of them in as the
- * other, and a collision with the owner hands a staff member owner access.
+ * PIN Login has no "who are you" step, so two users sharing a PIN is not a
+ * cosmetic clash: identity would be ambiguous, and an Owner collision would
+ * be an escalation risk. The indexed path therefore fails closed unless one
+ * live user verifies.
  *
  * Enforced where the PIN is CHOSEN (owner setup, staff creation, PIN reset,
  * self-service change) rather than at login, because at login it is far too
@@ -384,20 +493,44 @@ export async function verifyPin(
  *
  * `exceptUserId` lets somebody re-set their own PIN to what it already was.
  */
-export async function assertPinUnique(rawPin: string, exceptUserId?: string): Promise<void> {
-  const liveUsers = await db
+export async function assertPinUnique(
+  rawPin: string,
+  _targetShopId: string,
+  exceptUserId?: string,
+  timing?: AuthTimingTrace,
+): Promise<string> {
+  const targetTag = await createPinLookupTag(rawPin);
+  const indexedMatch = await db.select({ id: users.id }).from(users).where(
+    and(
+      livePinWhere,
+      eq(users.pinLookupTag, targetTag),
+      sql`${users.pinLookupPinSetAt} = ${users.pinSetAt}`,
+      exceptUserId ? ne(users.id, exceptUserId) : undefined,
+    ),
+  ).get();
+  if (indexedMatch) throw new DuplicatePinError();
+
+  const legacyUsers = await db
     .select({ id: users.id, pinHash: users.pinHash })
     .from(users)
-    .where(and(eq(users.isActive, true), eq(users.isDeleted, false), isNotNull(users.pinSetAt)));
-
-  for (const user of liveUsers) {
-    if (user.id === exceptUserId) {
-      continue;
-    }
-    if (await verifyPinHash(rawPin, user.pinHash)) {
-      throw new DuplicatePinError();
-    }
+    .where(
+      and(
+        livePinWhere,
+        exceptUserId ? ne(users.id, exceptUserId) : undefined,
+        or(
+          isNull(users.pinLookupTag),
+          isNull(users.pinLookupPinSetAt),
+          sql`${users.pinLookupPinSetAt} IS NOT ${users.pinSetAt}`,
+        ),
+      ),
+    );
+  for (const user of legacyUsers) {
+    const matches = timing
+      ? await timing.measure('legacy_uniqueness_bcrypt_compare', () => verifyPinHash(rawPin, user.pinHash))
+      : await verifyPinHash(rawPin, user.pinHash);
+    if (matches) throw new DuplicatePinError();
   }
+  return targetTag;
 }
 
 // Used by db/staff.ts's createStaff to attach a new staff member to the

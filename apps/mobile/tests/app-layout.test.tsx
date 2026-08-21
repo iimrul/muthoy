@@ -91,7 +91,7 @@ vi.mock('../sync', () => ({
 
 const { useSessionStore } = await import('../state/sessionStore');
 type Session = import('../state/sessionStore').Session;
-const RootLayout = (await import('./_layout')).default;
+const RootLayout = (await import('../app/_layout')).default;
 
 const OWNER: Session = { shopId: SHOP_ID, userId: '3f1c8a90-0000-4000-8000-000000000002', role: 'owner' };
 const STAFF: Session = { shopId: SHOP_ID, userId: '3f1c8a90-0000-4000-8000-000000000003', role: 'staff' };

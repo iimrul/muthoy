@@ -104,12 +104,19 @@ export const users = sqliteTable("users", {
   phone: text("phone"),
   pinHash: text("pin_hash").notNull(), // bcrypt — NEVER plain text
   pinSetAt: text("pin_set_at"), // null only while owner registration is incomplete
+  // Android-Keystore HMAC. Local-only routing aid; never synced. The paired
+  // timestamp invalidates it whenever a pulled PIN reset changes pin_set_at.
+  pinLookupTag: text("pin_lookup_tag"),
+  pinLookupPinSetAt: text("pin_lookup_pin_set_at"),
   roleId: text("role_id").notNull().references(() => roles.id, { onDelete: "restrict" }),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
   /** Read-only mirror of Postgres's server-derived revocation counter. */
   permissionVersion: integer("permission_version").notNull().default(0),
 }, (t) => ({
   shopIdx: index("users_shop_idx").on(t.shopId),
+  livePinLookupUnique: uniqueIndex("users_live_pin_lookup_unique")
+    .on(t.pinLookupTag)
+    .where(sql`${t.pinLookupTag} IS NOT NULL AND ${t.pinLookupPinSetAt} = ${t.pinSetAt} AND ${t.isActive} = 1 AND ${t.isDeleted} = 0`),
   shopActiveIdx: index("users_shop_active_idx").on(t.shopId, t.isActive),
   // Partial: soft-deleted rows keep their phone (history stays readable) but
   // release it for reuse, and rows without one don't collide with each other

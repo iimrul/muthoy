@@ -15,10 +15,17 @@ Without them background sync safely no-ops; foreground OTP calls fail loudly.
 `deviceAuth.ts` is the fresh-device entry point: phone + PIN, verified by the
 server, because a device with an empty SQLite has no local hash to check against.
 It is ORCHESTRATION ONLY — `pullChanges(shopId, null)` does the hydration,
-`db/auth.ts`'s `verifyPin` does the local match and builds the session, and
+`db/auth.ts`'s exact-user verifier checks only the hydrated identity and builds the session, and
 `sessionStore`'s `login()` bumps the epoch everything else already keys off.
 Once it has run, the device is enrolled and every later login is the existing
 offline PIN-only path: no network, no phone re-entry.
+
+Full hydration remains required before fresh-device entry. The post-hydration
+check performs one native bcrypt comparison against the server-verified user,
+not a scan of every local user. Initial sync is scheduled after navigation
+interactions; required hydration is not. Enrolled PIN login never invokes Edge,
+Supabase, hydration, or sync before navigation. Staff creation similarly
+commits SQLite + permissions + outbox first, navigates, then triggers sync.
 
 `device-login` is the ONE unauthenticated action on the edge function — it is
 what mints the token every other action requires — and is dispatched before

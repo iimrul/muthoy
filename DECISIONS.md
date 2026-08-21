@@ -927,3 +927,60 @@ devices was silent, permanent data loss for the second sale at sync time.
   their own device rather than an Owner handing theirs over — is not yet
   supported by the session/auth flow. Planned as the next phase after this
   ledger/sync work lands.
+
+---
+
+## 2026-08-20 — PIN authentication latency state
+
+Physical Android testing observed an approximately 15–16 second baseline after
+PIN confirmation and phone + PIN login. The perceived freeze is fixed: all four
+PIN bullets paint and an immediate loading state is shown while the existing
+work completes. Actual latency reduction has not yet been proven.
+
+**PHYSICAL TIMING VALIDATION: PENDING.** Development-only timing instrumentation
+now separates input validation, local bcrypt work, Edge invocation, server
+processing, identity work, session minting/validation, hydration, initial sync,
+and navigation/render completion. Mobile timing logs are guarded by `__DEV__`;
+server timing additionally requires explicit development environment flags. No
+PIN values, phone/account identifiers, tokens, or other sensitive values are
+logged.
+
+No bcrypt cost, PIN validation, required server validation, hydration, or other
+security guarantee was weakened. The temporary DEV OTP bypass must be removed
+and anonymous sign-in disabled before production. Production Owner registration
+requires a real OTP provider. Normal Owner and Staff login remains phone + PIN;
+OTP is used only for registration and Owner PIN recovery.
+
+---
+
+## 2026-08-20 — Native Android PIN crypto and indexed local login
+
+The physical 30–33 second Staff confirmation was two serial pure-JS bcryptjs
+operations on Hermes: one uniqueness comparison against the Owner plus one
+hash. Enrolled PIN login was also linear in user order, at approximately
+15–16 seconds per comparison. Network sync was fire-and-forget, but could begin
+before the destination rendered.
+
+Android now uses a local Expo module wrapping `at.favre.lib:bcrypt` 0.10.2 at
+unchanged cost 10. Its standard bcrypt hashes verify existing `$2a$`/`$2b$`/
+`$2y$` credentials; no credential rewrite is required. The earlier bcryptjs
+decision above remains historical context and is superseded for Android.
+
+Migration 0008 is SQLite-only. It adds a local Android-Keystore HMAC-SHA256 PIN
+lookup tag bound to `pin_set_at`. The non-exportable key and tag never sync;
+plaintext/recoverable PIN storage was not introduced. Current users get O(1)
+device-wide lookup plus one bcrypt compare. Staff uniqueness is one lookup plus
+one hash, including when multiple shops exist locally. Legacy
+untagged hashes are native-verified and lazily tagged on successful login; that
+one-time compatibility scan is the explicit exception.
+
+Hard product rules: enrolled PIN login is local and navigates before any
+network work; Staff creation navigates after the SQLite/permissions/outbox
+transaction commits; background sync starts only after navigation interactions.
+Fresh-device login still awaits Edge verification, session adoption, full
+hydration, and one exact-user local bcrypt verification, but not initial sync.
+
+Targets: enrolled login <=2 seconds (ideally <1 second), Staff creation <=2–3
+seconds on target Android hardware. Development timings now separate lookup,
+bcrypt compare/hash, SQLite/permissions/outbox, Edge/session, hydration,
+navigation, and background-sync start. **PHYSICAL TIMING VALIDATION: PENDING.**

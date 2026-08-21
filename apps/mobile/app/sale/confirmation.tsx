@@ -45,7 +45,7 @@ export default function SaleConfirmationScreen() {
           ) : null}
         </View>
         <Pressable
-          onPress={() => router.replace('/(tabs)/sale')}
+          onPress={() => router.replace('/sale')}
           accessibilityRole="button"
           accessibilityLabel="Start new sale"
           className="w-full items-center rounded-lg bg-brand-green py-3.5 active:opacity-80"

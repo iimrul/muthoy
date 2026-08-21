@@ -13,6 +13,7 @@ export default defineConfig({
       './client': resolve(process.cwd(), 'apps/mobile/db/test/client.ts'),
       'expo-sqlite': resolve(process.cwd(), 'apps/mobile/db/test/expo-sqlite.ts'),
       'expo-crypto': resolve(process.cwd(), 'apps/mobile/db/test/expo-crypto.ts'),
+      'muthoy-pin-crypto': resolve(process.cwd(), 'apps/mobile/db/test/muthoy-pin-crypto.ts'),
     },
   },
   test: {
@@ -20,7 +21,9 @@ export default defineConfig({
     include: [
       'apps/mobile/domain/**/*.test.ts',
       'apps/mobile/components/scanner/*.test.tsx',
-      // ⚠️ TEMPORARY — remove with apps/mobile/dev/ (see dev/README.md).
+      'apps/mobile/components/ui/PinPad.test.tsx',
+      // dev/ also contains production-disabled auth timing code. Remove only
+      // the OTP-bypass files listed in dev/README.md before production.
       'apps/mobile/dev/*.test.ts',
       'apps/mobile/db/cash.sqlite.test.ts',
       'apps/mobile/db/closed-day-guard.sqlite.test.ts',
@@ -28,6 +31,7 @@ export default defineConfig({
       'apps/mobile/db/inventory-expiry.sqlite.test.ts',
       'apps/mobile/db/notifications.sqlite.test.ts',
       'apps/mobile/db/permissions.sqlite.test.ts',
+      'apps/mobile/db/pin-performance.sqlite.test.ts',
       // Per-staff permission overrides, the phone credential's uniqueness, and
       // the revocation counter — through the real db/ actions on real SQLite.
       'apps/mobile/db/staff-permissions.sqlite.test.ts',
@@ -62,11 +66,13 @@ export default defineConfig({
       // at the module boundary), so the default node environment below is
       // unaffected.
       'apps/mobile/state/switchUser.test.tsx',
-      'apps/mobile/app/sale/checkout.test.tsx',
+      'apps/mobile/tests/sale/checkout.test.tsx',
       // The six sibling actor-stamping write screens, driven across a real
       // OWNER → STAFF → OWNER handover with only db/ and sync/ mocked.
-      'apps/mobile/app/switch-user-writes.test.tsx',
-      'apps/mobile/app/_layout.test.tsx',
+      'apps/mobile/tests/switch-user-writes.test.tsx',
+      'apps/mobile/tests/app-layout.test.tsx',
+      'apps/mobile/tests/auth-pin-latency.test.tsx',
+      'apps/mobile/tests/staff-management-pin.test.tsx',
       'apps/mobile/sync/**/*.test.ts',
       // Reads the edge-function sources and migration SQL as text to check that
       // every direct PostgREST read has a matching grant. Named file, not a

@@ -18,7 +18,7 @@ export default function RegisterScreen() {
     try {
       await sendOtp(input.phone);
       router.push({
-        pathname: '/(auth)/otp-verify',
+        pathname: '/otp-verify',
         params: { phone: input.phone, shopName: input.shopName },
       });
     } catch {

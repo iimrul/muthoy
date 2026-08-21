@@ -69,6 +69,7 @@ beforeAll(() => {
   applyMigration('0005_eminent_legion.sql');
   applyMigration('0006_inventory_movement_ledger.sql');
   applyMigration('0007_staff_device_login.sql');
+  applyMigration('0008_native_pin_lookup.sql');
 
   seedShop(SHOP_ID, 'Expiry Test Shop');
   seedShop(OTHER_SHOP_ID, 'Other Shop');

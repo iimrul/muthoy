@@ -2,7 +2,8 @@ import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { deviceLoginSchema } from '@muthoy/validation';
-import { PinPad, usePinEntry } from '../../components/ui/PinPad';
+import { PinPad, usePinEntry, type PinCompletionMeta } from '../../components/ui/PinPad';
+import { startAuthTiming } from '../../dev/authTiming';
 import { DeviceLoginError, loginOnNewDevice } from '../../sync/deviceAuth';
 
 // Device Login — phone + PIN on a device that holds no shop data yet.
@@ -24,7 +25,6 @@ export default function DeviceLoginScreen() {
 
   const [phone, setPhone] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [step, setStep] = useState<'phone' | 'pin'>('phone');
 
   const handlePhoneNext = () => {
@@ -38,49 +38,39 @@ export default function DeviceLoginScreen() {
   };
 
   const handlePinComplete = useCallback(
-    async (pin: string) => {
+    async (pin: string, { completedAt }: PinCompletionMeta) => {
+      const timing = startAuthTiming('device_login', completedAt);
+      timing?.mark('submit_start');
       const parsed = deviceLoginSchema.safeParse({ phone, pin });
       if (!parsed.success) {
         setError(parsed.error.issues[0]?.message ?? 'Check your details and try again');
+        timing?.mark('local_input_validation', 'error');
         return;
       }
 
-      setIsSubmitting(true);
       setError(null);
       try {
         // CLAUDE.md rule 8: the raw PIN goes to loginOnNewDevice and nowhere
         // else — never logged, never written anywhere in plain text.
-        await loginOnNewDevice(parsed.data.phone, parsed.data.pin);
+        timing?.mark('local_input_validation');
+        await loginOnNewDevice(parsed.data.phone, parsed.data.pin, timing);
         // Back to the root gate rather than straight to a tab: app/index.tsx
         // re-derives the destination from SQLite, so a freshly hydrated shop
         // routes exactly as it would on any other launch.
         router.replace('/');
       } catch (cause) {
+        timing?.mark('device_login_failed', 'error');
         setError(
           cause instanceof DeviceLoginError
             ? cause.message
             : 'Something went wrong. Please try again.',
         );
-      } finally {
-        setIsSubmitting(false);
       }
     },
     [phone],
   );
 
-  const { pin, handleDigitPress, handleBackspace } = usePinEntry(handlePinComplete);
-
-  if (isSubmitting) {
-    return (
-      <View className="flex-1 items-center justify-center gap-4 bg-brand-softGreen p-6">
-        <ActivityIndicator />
-        <Text className="font-sans-bold text-xl text-richBlack">Setting up this device…</Text>
-        <Text className="font-sans text-center text-sm text-midGray">
-          Keep the app open while your shop downloads.
-        </Text>
-      </View>
-    );
-  }
+  const { pin, isSubmitting, handleDigitPress, handleBackspace } = usePinEntry(handlePinComplete);
 
   return (
     <View className="flex-1 justify-center gap-8 bg-brand-softGreen p-6">
@@ -94,6 +84,17 @@ export default function DeviceLoginScreen() {
       </View>
 
       {error ? <Text className="font-sans text-center text-sm text-error">{error}</Text> : null}
+      {isSubmitting ? (
+        <View className="items-center gap-2">
+          <View className="flex-row items-center gap-2">
+            <ActivityIndicator />
+            <Text className="font-sans-semibold text-sm text-richBlack">Setting up account…</Text>
+          </View>
+          <Text className="font-sans text-center text-xs text-midGray">
+            Keep the app open while your shop downloads.
+          </Text>
+        </View>
+      ) : null}
 
       {step === 'phone' ? (
         <View className="gap-4">
@@ -121,8 +122,13 @@ export default function DeviceLoginScreen() {
             onDigitPress={handleDigitPress}
             onBackspace={handleBackspace}
             error={Boolean(error)}
+            disabled={isSubmitting}
           />
-          <Pressable accessibilityRole="button" onPress={() => setStep('phone')}>
+          <Pressable
+            accessibilityRole="button"
+            disabled={isSubmitting}
+            onPress={() => setStep('phone')}
+          >
             <Text className="font-sans-medium text-sm text-midGray">Change phone number</Text>
           </Pressable>
         </View>
@@ -133,7 +139,8 @@ export default function DeviceLoginScreen() {
       {isOwner ? (
         <Pressable
           accessibilityRole="button"
-          onPress={() => router.push({ pathname: '/(auth)/forgot-pin', params: { phone } })}
+          disabled={isSubmitting}
+          onPress={() => router.push({ pathname: '/forgot-pin', params: { phone } })}
           className="items-center py-2"
         >
           <Text className="font-sans-semibold text-sm text-brand-green">Forgot your PIN?</Text>

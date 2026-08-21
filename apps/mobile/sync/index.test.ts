@@ -11,10 +11,15 @@ const mocks = vi.hoisted(() => ({
   startForegroundScheduler: vi.fn(),
   startInventoryRealtime: vi.fn(),
   stopInventoryRealtime: vi.fn(),
+  runAfterInteractions: vi.fn((operation: () => void) => {
+    operation();
+    return { cancel: vi.fn() };
+  }),
 }));
 
 vi.mock("react-native", () => ({
   AppState: { addEventListener: mocks.addEventListener, currentState: "active" },
+  InteractionManager: { runAfterInteractions: mocks.runAfterInteractions },
 }));
 // sync/index.ts reads the live session to gate triggerSyncNow, so the real
 // store is used here — only its native storage is stubbed.
@@ -87,6 +92,10 @@ function resetEngine(): void {
   mocks.addEventListener.mockReturnValue({ remove: vi.fn() });
   mocks.subscribeToReconnect.mockReturnValue(vi.fn());
   mocks.startForegroundScheduler.mockReturnValue(vi.fn());
+  mocks.runAfterInteractions.mockImplementation((operation: () => void) => {
+    operation();
+    return { cancel: vi.fn() };
+  });
   stopSyncEngine();
 }
 
@@ -102,6 +111,21 @@ describe("sync cycle orchestration", () => {
     await vi.waitFor(() => expect(mocks.notify).toHaveBeenCalled());
 
     expect(mocks.pull).toHaveBeenCalledWith("shop-complete", undefined, expect.any(Function));
+  });
+
+  it("does not start network work until post-navigation interactions complete", async () => {
+    let release: (() => void) | undefined;
+    mocks.runAfterInteractions.mockImplementationOnce((operation: () => void) => {
+      release = operation;
+      return { cancel: vi.fn() };
+    });
+    loginTo("shop-deferred");
+
+    startSyncEngine("shop-deferred");
+    expect(mocks.push).not.toHaveBeenCalled();
+
+    release?.();
+    await vi.waitFor(() => expect(mocks.push).toHaveBeenCalledTimes(1));
   });
 
   it("does not pull while push has transient or skipped work", async () => {

@@ -146,6 +146,7 @@ beforeAll(() => {
   applyMigration('0005_eminent_legion.sql');
   applyMigration('0006_inventory_movement_ledger.sql');
   applyMigration('0007_staff_device_login.sql');
+  applyMigration('0008_native_pin_lookup.sql');
 });
 
 describe('owner — full access', () => {

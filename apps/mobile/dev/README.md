@@ -1,17 +1,23 @@
-# ⚠️ TEMPORARY dev-only auth entry — DELETE BEFORE PRODUCTION
+# Development auth utilities
 
-Not part of the product. Not referenced by any permanent doc. This folder exists
-only so the cloud/auth/sync architecture can be exercised on a device before SMS
-OTP delivery is configured.
+This folder contains two separate concerns with different production policies:
 
-## Why
+- The temporary OTP bypass (`DevSkipOtpButton`, `devAnonAuth`) is not part of
+  the product and must be removed before production.
+- Auth timing instrumentation (`authTiming.ts`) is imported by production code
+  but emits nothing unless `__DEV__` is true. It is safe and intended to remain
+  in production builds unless all of its consumers are removed at the same time.
+
+## Temporary DEV OTP bypass
+
+### Why
 
 Phone OTP needs a configured SMS provider. Until that exists, there is no way to
 get a real Supabase session on a test device — which means RLS, the link-device
 Edge Function, `shop_claims`, and the sync engine all go untested. This entry
 skips **only** the phone-ownership proof, and nothing else.
 
-## How it works
+### How it works
 
 `DevSkipOtpButton` → `devSignInAnonymouslyAndRegister()`:
 
@@ -28,7 +34,7 @@ skips **only** the phone-ownership proof, and nothing else.
 
 Sync then runs normally. There is no local-only mode and no sync suppression.
 
-## Why this is safe on the dev project
+### Why this is safe on the dev project
 
 Verified against `backend/supabase/` before this was written:
 
@@ -44,7 +50,7 @@ Verified against `backend/supabase/` before this was written:
 Nothing was weakened to make this work — no RLS, Edge Function, `shop_claims`,
 or link-device code was modified.
 
-## Known dev-only hazards
+### Known dev-only hazards
 
 - **Anonymous users cannot sign back in.** They have no credentials. If the
   app's storage is cleared, that user is gone forever — and because
@@ -56,7 +62,7 @@ or link-device code was modified.
 - `DEV_SHOP_NAME` / `DEV_SHOP_PHONE` are ordinary business fields on the shops
   row, not identity. The phone is a placeholder and proves nothing.
 
-## Safety behaviour
+### Safety behaviour
 
 - **Only anonymous sessions are used.** If a real (phone-verified) Supabase
   session is signed in, the flow refuses rather than reusing it — reusing it
@@ -71,36 +77,38 @@ or link-device code was modified.
   button switches to **"Dev: Resume linking"** and retries against the existing
   shop (never creating a duplicate).
 
-## Remove before production (complete list)
+### Remove before production (complete OTP-bypass list)
 
-### 1. Code
+#### 1. Code
 
-1. Delete this folder: `apps/mobile/dev/` (includes `devAnonAuth.test.ts`).
+1. Delete only `apps/mobile/dev/DevSkipOtpButton.tsx`,
+   `apps/mobile/dev/devAnonAuth.ts`, and
+   `apps/mobile/dev/devAnonAuth.test.ts`.
 2. `app/(auth)/register.tsx` — remove the `DevSkipOtpButton` import and the
    `{__DEV__ ? <DevSkipOtpButton /> : null}` line.
 3. `app/index.tsx` — remove the `isDevPlaceholderPhone` import and the
    `if (__DEV__ && isDevPlaceholderPhone(...))` block in the `link_pending`
    branch.
-4. `vitest.config.ts` — remove the `apps/mobile/dev/*.test.ts` include glob.
 
-Nothing else references this folder. The real OTP screens (`register.tsx`'s
-form, `otp-verify.tsx`, `pin-setup.tsx`, `pin-login.tsx`), `sync/otp.ts`,
-`sync/linkDevice.ts`, and all backend code are untouched by it.
+Do not delete `apps/mobile/dev/` or remove its Vitest include glob: auth timing
+code and tests remain there. The real OTP screens (`register.tsx`'s form,
+`otp-verify.tsx`, `pin-setup.tsx`, `pin-login.tsx`), `sync/otp.ts`,
+`sync/linkDevice.ts`, and all backend code are untouched by the bypass removal.
 
-### 2. Supabase project settings
+#### 2. Supabase project settings
 
-5. Dashboard → Authentication → Providers → **disable Anonymous sign-ins** on
+4. Dashboard → Authentication → Providers → **disable Anonymous sign-ins** on
    every project (it should never have been on outside dev).
 
-### 3. Sign out / clear anonymous sessions on test devices
+#### 3. Sign out / clear anonymous sessions on test devices
 
-6. On each dev device/emulator, sign out so no anonymous refresh token is left
+5. On each dev device/emulator, sign out so no anonymous refresh token is left
    in storage. Either reinstall the app, or clear its storage — the Supabase
    session lives in the `muthoy-supabase-auth` MMKV store and the app session in
    `muthoy-session`. An anonymous user cannot sign back in, so a stale token is
    dead weight, not a credential worth keeping.
 
-### 4. Purge disposable anonymous test data from the DEV project
+#### 4. Purge disposable anonymous test data from the DEV project
 
 Run against the **dev** project only. Verify the project ref before executing.
 
@@ -135,3 +143,27 @@ Optional hardening for production: reject anonymous callers in
 `verifyCallerJwt()` (e.g. `if (data.user.is_anonymous) throw new HttpError(403,
 ...)`). Deliberately **not** done here — that would modify production auth code,
 which this task forbade.
+
+Production Owner registration requires a configured real OTP provider. Normal
+Owner and Staff login remains phone + PIN; OTP is not part of normal login.
+
+## Auth timing instrumentation production policy
+
+Retain `authTiming.ts` for production. Every mobile log/trace is guarded by
+`__DEV__`, so production builds emit no timing logs and create no correlation
+IDs. `authTiming.test.ts` is test-only and is not bundled into the app.
+
+If timing instrumentation is intentionally removed later, remove the consumer
+imports and calls in all of these files in the same change:
+
+- `app/(auth)/pin-setup.tsx`
+- `app/(auth)/pin-login.tsx`
+- `app/(auth)/device-login.tsx`
+- `app/(tabs)/dashboard.tsx`
+- `sync/deviceAuth.ts`
+- `sync/pull.ts`
+- `sync/index.ts`
+- `sync/deviceAuth.test.ts`
+
+Also remove `authTiming.test.ts` and any timing-specific test assertions. Never
+delete the entire `dev/` folder as a shortcut.

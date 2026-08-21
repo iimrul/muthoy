@@ -80,7 +80,7 @@ export async function changeOwnPin(
   // Changing to a PIN somebody else already uses would make PIN Login
   // ambiguous: verifyPin returns the FIRST matching user, so one of the two
   // would start signing in as the other.
-  await assertPinUnique(newRawPin, userId);
+  const pinLookupTag = await assertPinUnique(newRawPin, user.shopId, userId);
 
   const newPinHash = await hashPin(newRawPin);
   await db.transaction(async (tx) => {
@@ -88,7 +88,13 @@ export async function changeOwnPin(
     // transaction, so the window between pressing Confirm and committing a
     // new PIN hash is one of the widest in the app.
     assertSessionLive(isStillActive);
-    const userValues = stampUpdatedAt({ pinHash: newPinHash });
+    const pinSetAt = new Date().toISOString();
+    const userValues = stampUpdatedAt({
+      pinHash: newPinHash,
+      pinSetAt,
+      pinLookupTag,
+      pinLookupPinSetAt: pinSetAt,
+    });
     await tx.update(users).set(userValues).where(eq(users.id, userId));
     recordChange(tx, { shopId: user.shopId, table: 'users', rowId: userId, op: 'update', payload: userValues });
     const auditId = generateId();

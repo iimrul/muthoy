@@ -22,6 +22,28 @@ SQLite is the app's single source of truth (CLAUDE.md rule 1).
   this file never sees a raw PIN outside that one call. Also owns Day 11's
   action-level permission gates — see "Permissions" below.
 
+### PIN performance and local-only lookup (migration 0008)
+
+Android PIN hashing/verification is native `at.favre.lib:bcrypt` at unchanged
+cost 10. Hashes remain standard bcrypt, so existing hashes require no rewrite.
+`users.pin_lookup_tag` is a local-only HMAC-SHA256 routing tag made with a
+non-exportable Android Keystore key. It is paired with `pin_set_at`, excluded
+from every sync payload, and never contains a plaintext/recoverable PIN. Its
+device-wide unique index preserves PIN-only identity across every local shop
+with one lookup rather than one query per user or shop.
+
+Current rows use an indexed lookup followed by exactly one bcrypt compare for
+PIN login. A normal staff creation uses an indexed uniqueness query plus one
+bcrypt hash and no bcrypt scan. Upgraded legacy rows keep working: while a row
+has no current tag it is native-bcrypt checked, then lazily tagged after its
+first successful login. This compatibility scan is the only non-O(1) path.
+
+Performance requirements: enrolled/offline PIN login <=2 seconds on target
+Android hardware (ideally <1 second); staff creation <=2-3 seconds locally.
+Staff creation navigates as soon as its SQLite transaction and durable outbox
+commit. Cloud sync is post-navigation background work and cannot be on either
+local critical path. **PHYSICAL TIMING VALIDATION: PENDING.**
+
 ### Auth registration state
 
 `users.pin_set_at` is the deterministic PIN-completion marker. The newest

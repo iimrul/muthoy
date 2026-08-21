@@ -57,6 +57,13 @@
       "when": 1787020800000,
       "tag": "0007_staff_device_login",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1787193600000,
+      "tag": "0008_native_pin_lookup",
+      "breakpoints": true
     }
   ]
 }

@@ -62,7 +62,7 @@ interface AuthContextType {
   login: (phone: string, pin: string) => Promise<boolean>;
   staffLogin: (phone: string, pin: string) => Promise<boolean>;
   logout: () => void;
-  register: (data: { shopName: string; shopNameEn: string; name: string; nameEn: string; phone: string; pin: string }) => Promise<boolean>;
+  register: (data: { shopName: string; shopNameEn: string; name: string; nameEn: string; phone: string; pin: string; biometricEnabled?: boolean }) => Promise<boolean>;
   updateUser: (data: Partial<User>) => void;
   changePin: (currentPin: string, newPin: string) => Promise<{ success: boolean; error?: string }>;
   hasPermission: (permission: keyof StaffMember['permissions']) => boolean;
@@ -115,6 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     nameEn: string;
     phone: string;
     pin: string;
+    biometricEnabled?: boolean;
   }): Promise<boolean> => {
     try {
       // Check if user already exists
@@ -166,6 +167,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       existingRegistry.push(firstShop);
       localStorage.setItem('shopRegistry', JSON.stringify(existingRegistry));
       localStorage.setItem('activeShopId', newShopId);
+
+      // Persist biometric sign-in preference (stub — real WebAuthn flow TBD).
+      // Keyed per-user so the login screen can offer fingerprint sign-in later.
+      localStorage.setItem(`biometricEnabled_${newUser.id}`, JSON.stringify(!!data.biometricEnabled));
 
       // Auto-login after registration
       setUser(newUser);

@@ -26,7 +26,7 @@ export default function RoleSelectScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Register a new shop"
-          onPress={() => router.push('/(auth)/register')}
+          onPress={() => router.push('/register')}
           className="gap-1 rounded-lg bg-brand-green p-4 active:opacity-80"
         >
           <Text className="font-sans-semibold text-base text-white">Register a new shop</Text>
@@ -38,7 +38,7 @@ export default function RoleSelectScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Owner login"
-          onPress={() => router.push({ pathname: '/(auth)/device-login', params: { role: 'owner' } })}
+          onPress={() => router.push({ pathname: '/device-login', params: { role: 'owner' } })}
           className="gap-1 rounded-lg bg-white p-4 active:opacity-80"
         >
           <Text className="font-sans-semibold text-base text-richBlack">I am the owner</Text>
@@ -50,7 +50,7 @@ export default function RoleSelectScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Staff login"
-          onPress={() => router.push({ pathname: '/(auth)/device-login', params: { role: 'staff' } })}
+          onPress={() => router.push({ pathname: '/device-login', params: { role: 'staff' } })}
           className="gap-1 rounded-lg bg-white p-4 active:opacity-80"
         >
           <Text className="font-sans-semibold text-base text-richBlack">I am staff</Text>

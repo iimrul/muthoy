@@ -1,5 +1,6 @@
 import * as bcrypt from "npm:bcryptjs@3";
 import { HttpError } from "./_shared/auth.ts";
+import type { ServerAuthTiming } from "./_shared/authTiming.ts";
 import { mintSessionForAppUser, resolveOrCreateAuthUserId } from "./_shared/identity.ts";
 import { normalizeBdPhone } from "./_shared/phone.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
@@ -35,6 +36,14 @@ const GENERIC_FAILURE = "Incorrect phone number or PIN";
 // bcrypt per request without ever tripping a per-phone limit.
 const PHONE_ATTEMPT_BUDGET = 5;
 const IP_ATTEMPT_BUDGET = 20;
+
+async function timed<T>(
+  timing: ServerAuthTiming | undefined,
+  stage: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return timing ? await timing.measure(stage, operation) : await operation();
+}
 
 interface DeviceLoginBody {
   /** Canonical +8801XXXXXXXXX. */
@@ -128,7 +137,11 @@ async function findUserByPhone(phone: string): Promise<ResolvedUser | null> {
   return { id: data.id, shopId: data.shop_id, pinHash: data.pin_hash, roleName };
 }
 
-export async function deviceLogin(body: Record<string, unknown>, clientIp: string | null) {
+export async function deviceLogin(
+  body: Record<string, unknown>,
+  clientIp: string | null,
+  timing?: ServerAuthTiming,
+) {
   const { phone, pin } = parseBody(body);
   const keys = attemptKeys(phone, clientIp);
 
@@ -137,10 +150,10 @@ export async function deviceLogin(body: Record<string, unknown>, clientIp: strin
   // call, which is a denial-of-service primitive on an open endpoint. The IP
   // key is what makes that true for an attacker walking a list of numbers,
   // where no single phone counter would ever trip.
-  if (keys.ip && await isLocked(keys.ip)) {
+  if (keys.ip && await timed(timing, "rate_limit_ip", () => isLocked(keys.ip!))) {
     throw new HttpError(429, "Too many attempts. Try again later.");
   }
-  if (await isLocked(keys.phone)) {
+  if (await timed(timing, "rate_limit_phone", () => isLocked(keys.phone))) {
     // Deliberately the SAME message as a wrong PIN. A distinct "too many
     // attempts" reply confirms the number is registered, which is precisely
     // what the generic error exists to withhold. (The IP branch above may say
@@ -148,33 +161,55 @@ export async function deviceLogin(body: Record<string, unknown>, clientIp: strin
     throw new HttpError(401, GENERIC_FAILURE);
   }
 
-  const user = await findUserByPhone(phone);
-  const matches = await bcrypt.compare(pin, user?.pinHash ?? DUMMY_HASH);
+  const user = await timed(timing, "account_lookup", () => findUserByPhone(phone));
+  const matches = await timed(
+    timing,
+    "server_bcrypt",
+    () => bcrypt.compare(pin, user?.pinHash ?? DUMMY_HASH),
+  );
 
   if (!user || !matches) {
-    await registerFailure(keys.phone, PHONE_ATTEMPT_BUDGET);
+    await timed(
+      timing,
+      "failure_counter_phone",
+      () => registerFailure(keys.phone, PHONE_ATTEMPT_BUDGET),
+    );
     if (keys.ip) {
-      await registerFailure(keys.ip, IP_ATTEMPT_BUDGET);
+      await timed(
+        timing,
+        "failure_counter_ip",
+        () => registerFailure(keys.ip!, IP_ATTEMPT_BUDGET),
+      );
     }
     throw new HttpError(401, GENERIC_FAILURE);
   }
 
-  await supabaseAdmin.rpc("clear_login_failures", { p_key: keys.phone });
+  await timed(
+    timing,
+    "failure_counter_clear",
+    async () => {
+      await supabaseAdmin.rpc("clear_login_failures", { p_key: keys.phone });
+    },
+  );
 
-  const authUserId = await resolveOrCreateAuthUserId(user.id);
+  const authUserId = await resolveOrCreateAuthUserId(user.id, timing);
 
   // shop_id is written to app_metadata BEFORE the token is minted, not after:
   // every pre-existing RLS policy reads this claim, and the hook preserves an
   // existing shop_id rather than replacing it. Writing it afterwards would mint
   // one token without it.
-  const { error: metadataError } = await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-    app_metadata: { shop_id: user.shopId },
-  });
+  const { error: metadataError } = await timed(
+    timing,
+    "session_metadata_update",
+    () => supabaseAdmin.auth.admin.updateUserById(authUserId, {
+      app_metadata: { shop_id: user.shopId },
+    }),
+  );
   if (metadataError) {
     throw new HttpError(500, "Could not start session");
   }
 
-  const session = await mintSessionForAppUser(user.id);
+  const session = await mintSessionForAppUser(user.id, timing);
 
   return {
     shopId: user.shopId,

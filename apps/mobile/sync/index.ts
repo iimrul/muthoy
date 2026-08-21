@@ -1,4 +1,4 @@
-import { AppState, type AppStateStatus } from 'react-native';
+import { AppState, InteractionManager, type AppStateStatus } from 'react-native';
 import { subscribeToReconnect, hasNetworkConnection } from './connectivity';
 import { pullChanges } from './pull';
 import { pushPendingRows } from './push';
@@ -8,11 +8,16 @@ import { startForegroundScheduler } from './scheduler';
 import { notifyIfSyncIsStuck, notifySyncHalted } from './stuckNotification';
 import { isSupabaseConfigured } from './supabaseClient';
 import { useSessionStore } from '../state/sessionStore';
+import {
+  completePendingAuthTimingStage,
+  startPendingAuthTimingStage,
+} from '../dev/authTiming';
 
 let activeShopId: string | null = null;
 let stopReconnect: (() => void) | null = null;
 let stopScheduler: (() => void) | null = null;
 let removeAppStateListener: (() => void) | null = null;
+let cancelInitialCycle: (() => void) | null = null;
 const cycles = new Map<string, Promise<void>>();
 
 // Bumped by every stopSyncEngine(). A cycle captures the value it started
@@ -73,8 +78,17 @@ export function triggerSyncNow(shopId: string): void {
     return;
   }
   const startedAt = generation;
+  const authTimingId = startPendingAuthTimingStage('initial_sync');
   const cycle = runCycle(shopId, startedAt)
+    .then(() => {
+      if (authTimingId) {
+        completePendingAuthTimingStage('initial_sync', 'ok', authTimingId);
+      }
+    })
     .catch((error: unknown) => {
+      if (authTimingId) {
+        completePendingAuthTimingStage('initial_sync', 'error', authTimingId);
+      }
       console.warn('Background sync cycle failed', error);
     })
     .finally(() => {
@@ -83,6 +97,22 @@ export function triggerSyncNow(shopId: string): void {
       }
     });
   cycles.set(shopId, cycle);
+}
+
+/** Schedules durable outbox work after navigation/interaction rendering. */
+export function triggerSyncAfterInteractions(shopId: string, onStart?: () => void): () => void {
+  const task = InteractionManager.runAfterInteractions(() => {
+    onStart?.();
+    triggerSyncNow(shopId);
+  });
+  return () => task.cancel();
+}
+
+function scheduleInitialCycle(shopId: string): void {
+  cancelInitialCycle?.();
+  cancelInitialCycle = triggerSyncAfterInteractions(shopId, () => {
+    cancelInitialCycle = null;
+  });
 }
 
 export function startSyncEngine(shopId: string): void {
@@ -112,18 +142,20 @@ export function startSyncEngine(shopId: string): void {
   if (draining) {
     void draining.then(() => {
       if (activeShopId === shopId) {
-        triggerSyncNow(shopId);
+        scheduleInitialCycle(shopId);
       }
     });
     return;
   }
-  triggerSyncNow(shopId);
+  scheduleInitialCycle(shopId);
 }
 
 export function stopSyncEngine(): void {
   // Before the listeners, so a cycle that reaches an await boundary during
   // this teardown already sees itself as cancelled.
   generation += 1;
+  cancelInitialCycle?.();
+  cancelInitialCycle = null;
   stopInventoryRealtime();
   stopReconnect?.();
   stopScheduler?.();

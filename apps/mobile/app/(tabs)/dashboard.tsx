@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { router, type Href } from 'expo-router';
 import { getShopName } from '../../db/settings';
+import { completePendingAuthTimingStage } from '../../dev/authTiming';
 import { hasPermissionForRoleName, type Permission } from '../../domain/permissions';
 import { useSessionStore } from '../../state/sessionStore';
 import { switchUser } from '../../state/switchUser';
@@ -45,8 +46,8 @@ interface NavEntry {
 // Every href below points at a route file that already exists. Module scope so
 // the array is not reallocated on each render.
 const NAV_ENTRIES: NavEntry[] = [
-  { label: 'New sale', hint: 'Search, scan, and check out', href: '/(tabs)/sale', isTab: true },
-  { label: 'Inventory', hint: 'Medicines, batches, and stock', href: '/(tabs)/inventory', isTab: true },
+  { label: 'New sale', hint: 'Search, scan, and check out', href: '/sale', isTab: true },
+  { label: 'Inventory', hint: 'Medicines, batches, and stock', href: '/inventory', isTab: true },
   { label: 'Customer credit', hint: 'Balances and collections', href: '/credit/credit-sales', permission: 'credit_management' },
   { label: 'Expiry', hint: 'Batches by nearest expiry', href: '/inventory/expiry' },
   { label: 'Cash summary', hint: "Today's expected cash", href: '/cash-summary', permission: 'cash_management' },
@@ -85,6 +86,10 @@ function confirmSwitchUser(): void {
 export default function MorningDashboardScreen() {
   const session = useSessionStore((state) => state.session);
   const [shopName, setShopName] = useState<string | null>(null);
+
+  useEffect(() => {
+    completePendingAuthTimingStage('navigation_render_completion');
+  }, []);
 
   const loadShopName = useCallback(async () => {
     if (!session) {

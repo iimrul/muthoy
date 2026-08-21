@@ -23,7 +23,7 @@ export default function CartScreen() {
             title="Cart is empty"
             message="Search for medicines to start a sale."
             actionLabel="Find medicines"
-            onAction={() => router.replace('/(tabs)/sale')}
+            onAction={() => router.replace('/sale')}
           />
         }
         renderItem={({ item }) => (

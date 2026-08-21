@@ -1,0 +1,21 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.muthoy.pincrypto'
+version = '0.1.0'
+
+android {
+  namespace 'com.muthoy.pincrypto'
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // Established OpenBSD-compatible bcrypt implementation. Standard $2a/$2b/$2y
+  // hashes remain readable; cost is enforced by the module at 10.
+  implementation 'at.favre.lib:bcrypt:0.10.2'
+}

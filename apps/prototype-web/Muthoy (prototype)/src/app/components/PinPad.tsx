@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+import { Delete } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 
 interface PinPadProps {
@@ -8,6 +10,7 @@ interface PinPadProps {
   showSkip?: boolean;
   onSkip?: () => void;
   shake?: boolean;
+  variant?: "default" | "setup";
 }
 
 export function PinPad({
@@ -18,8 +21,32 @@ export function PinPad({
   showSkip = false,
   onSkip,
   shake = false,
+  variant = "default",
 }: PinPadProps) {
   const { t } = useLanguage();
+  const isSetup = variant === "setup";
+
+  // Briefly reveal the most recently typed digit, then mask it as a filled dot.
+  const [revealIndex, setRevealIndex] = useState<number | null>(null);
+  const prevLengthRef = useRef(value.length);
+
+  useEffect(() => {
+    const prevLength = prevLengthRef.current;
+    prevLengthRef.current = value.length;
+
+    // Only peek when a digit was added (not on backspace/reset).
+    if (value.length > prevLength) {
+      const idx = value.length - 1;
+      setRevealIndex(idx);
+      const timer = setTimeout(() => {
+        setRevealIndex((current) => (current === idx ? null : current));
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+
+    // On backspace or reset, hide any revealed digit immediately.
+    setRevealIndex(null);
+  }, [value]);
 
   const handleNumberPress = (num: string) => {
     if (disabled || value.length >= maxLength) return;
@@ -31,72 +58,72 @@ export function PinPad({
     onChange(value.slice(0, -1));
   };
 
+  const blockClass = isSetup
+    ? "h-[52px] w-[52px] text-[24px] border-2 shadow-[0_3px_8px_rgba(24,76,58,0.08)]"
+    : "h-[52px] w-[52px] text-[24px] border-2";
+  const keyClass = isSetup
+    ? "h-[50px] rounded-2xl border border-[#e1eee8] bg-white/90 text-[21px] font-semibold text-[#173d33] shadow-[0_5px_14px_rgba(17,72,53,0.07)] hover:bg-[#f5fbf8] active:scale-[0.96] active:bg-[#ddf2e7]"
+    : "h-[52px] rounded-2xl bg-white text-[22px] font-medium text-[#111827] shadow-sm active:scale-[0.96] active:bg-[#D1FAE5]";
+
   return (
-    <div className="w-full max-w-[320px]">
-      {/* PIN Dots */}
+    <div className="w-full">
       <div
-        className="flex justify-center gap-4 mb-6"
-        style={shake ? { animation: "shake 360ms ease-in-out" } : undefined}
+        className={`mb-5 flex justify-center ${isSetup ? "gap-3" : "gap-3"}`}
+        style={shake ? { animation: "shakeX 360ms ease-in-out" } : undefined}
+        aria-label={`${value.length} of ${maxLength} digits entered`}
       >
         {Array.from({ length: maxLength }).map((_, i) => {
           const isFilled = i < value.length;
-          const isNext = i === value.length;
-
+          const isActive = i === value.length && value.length < maxLength;
+          const isRevealed = isFilled && i === revealIndex;
           return (
             <div
               key={i}
-              className="w-[15px] h-[15px] rounded-full transition-all duration-200"
-              style={{
-                backgroundColor: isFilled ? "#059669" : "white",
-                border: isFilled
-                  ? "none"
-                  : `2px solid ${isNext ? "#059669" : "#A7F3D0"}`,
-                transform: isFilled ? "scale(1.1)" : "scale(1)",
-                opacity: isFilled ? 1 : 0.8,
-              }}
-            />
+              className={`${blockClass} flex items-center justify-center rounded-2xl font-semibold transition-all duration-150 ${
+                isFilled
+                  ? "border-[#0b7658] bg-[#eff7f2] text-[#0b604a] scale-105"
+                  : isActive
+                  ? "border-[#0b7658] bg-white text-transparent ring-4 ring-[#dff2e9]"
+                  : "border-[#c9e6da] bg-white text-transparent"
+              }`}
+            >
+              {isFilled ? (
+                isRevealed ? (
+                  value[i]
+                ) : (
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#0b604a]" />
+                )
+              ) : null}
+            </div>
           );
         })}
       </div>
 
-      {/* Numeric Keypad */}
-      <div className="grid grid-cols-3 gap-3">
-        {/* Numbers 1-9 */}
+      <div className={`grid grid-cols-3 ${isSetup ? "gap-2.5" : "gap-3"}`}>
         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
           <button
             key={num}
             type="button"
             onClick={() => handleNumberPress(num.toString())}
             disabled={disabled}
-            className="h-[52px] bg-white rounded-2xl text-[#111827] text-[22px] font-medium active:scale-[0.96] active:bg-[#D1FAE5] transition-all disabled:opacity-50 shadow-sm"
-            style={{ fontFamily: "var(--font-sans)" }}
+            className={`${keyClass} transition-all disabled:cursor-not-allowed disabled:opacity-50`}
           >
             {num}
           </button>
         ))}
 
-        {/* Bottom row: Skip/Empty, 0, Backspace */}
         {showSkip && onSkip ? (
           <button
             type="button"
             onClick={onSkip}
             disabled={disabled}
-            className="h-[52px] flex items-center justify-center text-[#6B7280] text-xs active:scale-[0.96] transition-all disabled:opacity-50"
-            style={{ fontFamily: "var(--font-bangla)" }}
+            className={`${isSetup ? "h-[50px]" : "h-[52px]"} rounded-2xl text-xs font-bold transition-all active:scale-[0.96] disabled:opacity-50 ${isSetup ? "text-[#62867a] hover:bg-white/60" : "text-[#6B7280]"}`}
           >
             {t("এড়িয়ে যান", "Skip")}
           </button>
-        ) : (
-          <div />
-        )}
+        ) : <div />}
 
-        <button
-          type="button"
-          onClick={() => handleNumberPress("0")}
-          disabled={disabled}
-          className="h-[52px] bg-white rounded-2xl text-[#111827] text-[22px] font-medium active:scale-[0.96] active:bg-[#D1FAE5] transition-all disabled:opacity-50 shadow-sm"
-          style={{ fontFamily: "var(--font-sans)" }}
-        >
+        <button type="button" onClick={() => handleNumberPress("0")} disabled={disabled} className={`${keyClass} transition-all disabled:cursor-not-allowed disabled:opacity-50`}>
           0
         </button>
 
@@ -104,42 +131,12 @@ export function PinPad({
           type="button"
           onClick={handleBackspace}
           disabled={disabled}
-          className="h-[52px] flex items-center justify-center text-[#6B7280] active:scale-[0.96] transition-all disabled:opacity-50"
+          className={`flex ${isSetup ? "h-[50px]" : "h-[52px]"} items-center justify-center rounded-2xl transition-all active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 ${isSetup ? "text-[#477065] hover:bg-white/60" : "text-[#6B7280]"}`}
           aria-label="Backspace"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-6 w-6"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 00-2-2h-8.172a2 2 0 00-1.414.586L3 12z"
-            />
-          </svg>
+          <Delete className="h-5 w-5" strokeWidth={1.8} />
         </button>
       </div>
-
-      {/* Animation styles */}
-      <style>{`
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          25% { transform: translateX(-8px); }
-          75% { transform: translateX(8px); }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          * {
-            animation-duration: 0.01ms !important;
-            animation-iteration-count: 1 !important;
-            transition-duration: 0.01ms !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }

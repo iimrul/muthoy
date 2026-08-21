@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { createStaffSchema } from '@muthoy/validation';
 import { AccessDenied } from '../../components/ui/AccessDenied';
-import { PinPad, useConfirmedPinEntry } from '../../components/ui/PinPad';
-import { DuplicatePhoneError } from '../../db/errors';
+import { PinPad, useConfirmedPinEntry, type PinCompletionMeta } from '../../components/ui/PinPad';
+import { DuplicatePhoneError, DuplicatePinError } from '../../db/errors';
 import {
   createStaff,
   deactivateStaff,
@@ -22,7 +22,8 @@ import {
 import { captureSessionFor } from '../../state/sessionGuard';
 import type { Session } from '../../state/sessionStore';
 import { usePermission } from '../../state/usePermission';
-import { triggerSyncNow } from '../../sync';
+import { triggerSyncAfterInteractions, triggerSyncNow } from '../../sync';
+import { startAuthTiming } from '../../dev/authTiming';
 
 type Mode = 'list' | 'add' | 'reset' | 'permissions';
 
@@ -60,6 +61,23 @@ function fromOverrides(overrides: PermissionOverrides): Record<Permission, boole
   return Object.fromEntries(
     PERMISSION_KEYS.map((key) => [key, resolvePermission('staff', key, overrides)]),
   ) as Record<Permission, boolean>;
+}
+
+function logStaffCreationError(cause: unknown, shopId: string, actorUserId: string): void {
+  if (!__DEV__) {
+    return;
+  }
+  const errorCode =
+    typeof cause === 'object' && cause !== null && 'code' in cause && typeof cause.code === 'string'
+      ? cause.code
+      : cause instanceof Error
+        ? cause.name
+        : 'unknown';
+  console.error('[staff:create] failed', {
+    code: errorCode,
+    message: cause instanceof Error ? cause.message : String(cause),
+    context: { operation: 'createStaff', shopId, actorUserId },
+  });
 }
 
 interface PermissionCheckboxesProps {
@@ -294,12 +312,16 @@ function AddStaffFlow({ shopId, actorUserId, session, onDone, onCancel }: AddSta
   };
 
   const handleConfirmed = useCallback(
-    async (pin: string) => {
+    async (pin: string, { completedAt }: PinCompletionMeta) => {
+      const timing = startAuthTiming('staff_creation', completedAt);
+      timing?.mark('submit_start');
       const result = createStaffSchema.safeParse({ name, phone, pin, confirmPin: pin });
       if (!result.success) {
         setPinError(result.error.issues[0]?.message ?? 'Invalid PIN');
+        timing?.mark('input_validation', 'error');
         return;
       }
+      timing?.mark('input_validation');
       // A name, a phone number, a permission list and two PINs is a long time
       // on screen, and bcrypt adds more — one of the widest handover windows in
       // the app.
@@ -320,10 +342,16 @@ function AddStaffFlow({ shopId, actorUserId, session, onDone, onCancel }: AddSta
             permissions: toOverrides(checked),
           },
           guard.isStillActive,
+          timing,
         );
-        void triggerSyncNow(shopId);
-        guard.ifLive(onDone);
+        timing?.mark('local_commit_complete');
+        guard.ifLive(() => {
+          onDone();
+          timing?.mark('navigation_requested');
+          triggerSyncAfterInteractions(shopId, () => timing?.mark('background_sync_start'));
+        });
       } catch (cause) {
+        logStaffCreationError(cause, shopId, actorUserId);
         guard.ifLive(() => {
           if (cause instanceof DuplicatePhoneError) {
             // Inline on the field that caused it, not an Alert: the owner has
@@ -333,6 +361,10 @@ function AddStaffFlow({ shopId, actorUserId, session, onDone, onCancel }: AddSta
             setPinError(null);
             return;
           }
+          if (cause instanceof DuplicatePinError) {
+            setPinError(cause.message);
+            return;
+          }
           Alert.alert('Something went wrong', 'Please try again.');
         });
       }
@@ -340,9 +372,8 @@ function AddStaffFlow({ shopId, actorUserId, session, onDone, onCancel }: AddSta
     [shopId, actorUserId, session, name, phone, checked, onDone],
   );
 
-  const { pin, step: pinStep, handleDigitPress, handleBackspace } = useConfirmedPinEntry(handleConfirmed, () =>
-    setPinError('PINs did not match — start over'),
-  );
+  const { pin, step: pinStep, isSubmitting, handleDigitPress, handleBackspace } =
+    useConfirmedPinEntry(handleConfirmed, () => setPinError('PINs did not match — start over'));
 
   if (step === 'details') {
     return (
@@ -409,7 +440,19 @@ function AddStaffFlow({ shopId, actorUserId, session, onDone, onCancel }: AddSta
         {pinStep === 'enter' ? `Set a PIN for ${name}` : 'Confirm PIN'}
       </Text>
       {pinError ? <Text className="font-sans text-sm text-error">{pinError}</Text> : null}
-      <PinPad value={pin} onDigitPress={handleDigitPress} onBackspace={handleBackspace} error={Boolean(pinError)} />
+      {isSubmitting && pinStep === 'confirm' ? (
+        <View className="flex-row items-center gap-2">
+          <ActivityIndicator />
+          <Text className="font-sans text-sm text-midGray">Creating staff…</Text>
+        </View>
+      ) : null}
+      <PinPad
+        value={pin}
+        onDigitPress={handleDigitPress}
+        onBackspace={handleBackspace}
+        error={Boolean(pinError)}
+        disabled={isSubmitting}
+      />
     </View>
   );
 }

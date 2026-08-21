@@ -13,6 +13,7 @@ import {
 import { assertSessionLive, DuplicatePhoneError, isUniqueConstraintViolation } from './errors';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
 import { isPermissionKey, type PermissionOverrides, type Role } from '../domain/permissions';
+import type { AuthTimingTrace } from '../dev/authTiming';
 
 // db/staff.ts — the ONLY file that will touch Drizzle/SQLite for Staff
 // (DEVELOPMENT_RULES.md). Hashing happens exclusively via native/crypto.ts —
@@ -213,10 +214,13 @@ export async function createStaff(
   actorUserId: string,
   input: CreateStaffInput,
   isStillActive: () => boolean,
+  timing?: AuthTimingTrace,
 ): Promise<StaffMember> {
   // Volume 0 Day 11: only an owner can add a login to the shop. Gated before
   // the PIN is hashed or any row is written.
-  await requirePermission(shopId, actorUserId, 'staff_management');
+  const checkPermission = () => requirePermission(shopId, actorUserId, 'staff_management');
+  if (timing) await timing.measure('permission_check', checkPermission);
+  else await checkPermission();
 
   const staffRoleId = await getShopRoleId(shopId, 'staff');
   if (!staffRoleId) {
@@ -235,10 +239,13 @@ export async function createStaff(
   if (!phone) {
     throw new DuplicatePhoneError(input.phone);
   }
-  const [existingPhone] = await db
+  const checkPhone = () => db
     .select({ id: users.id })
     .from(users)
     .where(and(eq(users.phone, phone), eq(users.isDeleted, false)));
+  const [existingPhone] = timing
+    ? await timing.measure('phone_uniqueness_check', checkPhone)
+    : await checkPhone();
   if (existingPhone) {
     throw new DuplicatePhoneError(input.phone);
   }
@@ -246,9 +253,14 @@ export async function createStaff(
   // A staff member whose PIN matches the owner's would sign IN as the owner:
   // verifyPin has no "who are you" step and returns the first hash that
   // matches. Refused here, where it can still be changed.
-  await assertPinUnique(input.rawPin);
+  const pinLookupTag = timing
+    ? await timing.measure('pin_uniqueness_check', () =>
+      assertPinUnique(input.rawPin, shopId, undefined, timing))
+    : await assertPinUnique(input.rawPin, shopId);
 
-  const pinHash = await hashPin(input.rawPin);
+  const pinHash = timing
+    ? await timing.measure('bcrypt_hash', () => hashPin(input.rawPin))
+    : await hashPin(input.rawPin);
   const userId = generateId();
   const now = new Date().toISOString();
   const values = {
@@ -259,6 +271,8 @@ export async function createStaff(
     phone,
     pinHash,
     pinSetAt: now,
+    pinLookupTag,
+    pinLookupPinSetAt: now,
     roleId: staffRoleId,
     isActive: true,
     createdAt: now,
@@ -266,18 +280,23 @@ export async function createStaff(
   };
 
   try {
-    await db.transaction(async (tx) => {
+    const writeLocal = () => db.transaction(async (tx) => {
       // Async callback — checked at both ends so a handover landing between the
       // awaits rolls the transaction back rather than creating a login under
       // the outgoing owner's name.
       assertSessionLive(isStillActive);
       await tx.insert(users).values(values);
+      timing?.mark('sqlite_user_insert');
       recordChange(tx, { shopId, table: 'users', rowId: userId, op: 'insert', payload: values });
+      timing?.mark('user_outbox_enqueue');
       // Same transaction as the user row: a staff member must never exist for
       // even one commit with permissions the owner did not choose.
       writePermissionOverrides(tx, { shopId, staffId: userId, permissions: input.permissions });
+      timing?.mark('permissions_and_outbox_persist');
       assertSessionLive(isStillActive);
     });
+    if (timing) await timing.measure('sqlite_transaction_commit', writeLocal);
+    else await writeLocal();
   } catch (error) {
     if (isUniqueConstraintViolation(error, 'users', ['phone'])) {
       throw new DuplicatePhoneError(input.phone);
@@ -314,7 +333,7 @@ export async function resetStaffPin(
 
   // The reset must not create the collision createStaff refuses. Checked before
   // the hash, so a rejected reset never reaches native/crypto.ts with the PIN.
-  await assertPinUnique(newRawPin, staffId);
+  const pinLookupTag = await assertPinUnique(newRawPin, staff.shopId, staffId);
 
   const pinHash = await hashPin(newRawPin);
   const pinSetAt = new Date().toISOString();
@@ -327,7 +346,7 @@ export async function resetStaffPin(
     updateStaffSecurityFields(tx, {
       shopId: staff.shopId,
       staffId,
-      extraValues: { pinHash, pinSetAt },
+      extraValues: { pinHash, pinSetAt, pinLookupTag, pinLookupPinSetAt: pinSetAt },
     });
     const auditId = generateId();
     const now = new Date().toISOString();

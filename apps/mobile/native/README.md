@@ -6,14 +6,12 @@ not Expo Go (see TECH_STACK.md).
 
 - `id.ts` — `generateId()`, every table's device-generated UUID
   (`expo-crypto`'s secure random source, not `Math.random`).
-- `crypto.ts` — `hashPin`/`verifyPinHash` (Days 4-5/11). The ONLY file that
-  hashes or verifies a PIN. Uses `bcryptjs` (pure JS) with its salt RNG
-  pointed at `expo-crypto`'s platform CSPRNG; the originally-chosen native
-  module `react-native-bcrypt-cpp` turned out to ship no Android JNI
-  registration at all upstream, so it could never load (see DECISIONS.md).
-  Every db/ file that touches a PIN calls only these two functions, never
-  bcrypt directly — which is what let the implementation swap without
-  touching any SQL.
+- `crypto.ts` — the only production PIN-crypto boundary. Android delegates
+  standard cost-10 bcrypt to the local Expo module in
+  `modules/muthoy-pin-crypto`, backed by `at.favre.lib:bcrypt` 0.10.2, and
+  creates local-only lookup tags with a non-exportable Android Keystore HMAC
+  key. Expo Go is unsupported; use a development/EAS build. `bcryptjs` remains
+  dev-only for the Node test shim and is never bundled into production code.
 
 `scanner.ts` (OCR + barcode, one ML Kit engine) remains a signature-only P1
 stub. `notifications.ts` is live and owns local low-stock, expiry, and daily

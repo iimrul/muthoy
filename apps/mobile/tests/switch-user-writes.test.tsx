@@ -14,7 +14,7 @@
 // short of the session epoch can see that two real handovers happened.
 //
 // React Native's primitives are replaced with minimal DOM stubs, the same
-// approach app/sale/checkout.test.tsx uses — this repo has no jest-expo
+// approach tests/sale/checkout.test.tsx uses — this repo has no jest-expo
 // harness, and what is under test is handler wiring across a session change,
 // not native rendering. Only the db/ and sync/ boundaries are mocked; the
 // session store, switchUser, captureSessionFor, react-hook-form and every
@@ -152,12 +152,12 @@ type Session = import('../state/sessionStore').Session;
 const { switchUser } = await import('../state/switchUser');
 const { captureSessionFor } = await import('../state/sessionGuard');
 
-const CashSummaryScreen = (await import('./cash-summary')).default;
-const ExpensesScreen = (await import('./expenses')).default;
-const EndOfDayScreen = (await import('./end-of-day')).default;
-const CreditSalesScreen = (await import('./credit/credit-sales')).default;
-const CustomerDetailScreen = (await import('./credit/customer-detail')).default;
-const PurchaseCreateScreen = (await import('./suppliers/purchase-create')).default;
+const CashSummaryScreen = (await import('../app/cash-summary')).default;
+const ExpensesScreen = (await import('../app/expenses')).default;
+const EndOfDayScreen = (await import('../app/end-of-day')).default;
+const CreditSalesScreen = (await import('../app/credit/credit-sales')).default;
+const CustomerDetailScreen = (await import('../app/credit/customer-detail')).default;
+const PurchaseCreateScreen = (await import('../app/suppliers/purchase-create')).default;
 
 const OWNER: Session = { shopId: SHOP_ID, userId: OWNER_ID, role: 'owner' };
 const STAFF: Session = { shopId: SHOP_ID, userId: STAFF_ID, role: 'staff' };

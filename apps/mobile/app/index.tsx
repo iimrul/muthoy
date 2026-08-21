@@ -9,15 +9,15 @@ import { isDevPlaceholderPhone } from '../dev/devAnonAuth';
 import { useSessionStore } from '../state/sessionStore';
 
 type RootDestination =
-  | '/(auth)/register'
-  | '/(auth)/role-select'
-  | '/(auth)/pin-login'
-  | '/(tabs)/dashboard'
+  | '/register'
+  | '/role-select'
+  | '/pin-login'
+  | '/dashboard'
   | {
-      pathname: '/(auth)/otp-verify';
+      pathname: '/otp-verify';
       params: { phone: string; resumeShopId: string; resumeOwnerUserId: string };
     }
-  | { pathname: '/(auth)/pin-setup'; params: { shopId: string; userId: string } };
+  | { pathname: '/pin-setup'; params: { shopId: string; userId: string } };
 
 /**
  * Order-independent comparison of two override maps.
@@ -65,7 +65,7 @@ export default function RootSessionGate() {
             // forever. It now means one of three things — new shop, owner's
             // second device, or a staff member's first — and only the person
             // holding the phone knows which.
-            setDestination('/(auth)/role-select');
+            setDestination('/role-select');
           }
           return;
         }
@@ -79,13 +79,13 @@ export default function RootSessionGate() {
           // where "Dev: Skip OTP" resumes the link. Delete with the dev entry.
           if (__DEV__ && isDevPlaceholderPhone(registration.phone)) {
             if (isCurrent) {
-              setDestination('/(auth)/register');
+              setDestination('/register');
             }
             return;
           }
           if (isCurrent) {
             setDestination({
-              pathname: '/(auth)/otp-verify',
+              pathname: '/otp-verify',
               params: {
                 phone: registration.phone,
                 resumeShopId: registration.shopId,
@@ -103,7 +103,7 @@ export default function RootSessionGate() {
           clearActiveUser();
           if (isCurrent) {
             setDestination({
-              pathname: '/(auth)/pin-setup',
+              pathname: '/pin-setup',
               params: { shopId: registration.shopId, userId: registration.userId },
             });
           }
@@ -112,7 +112,7 @@ export default function RootSessionGate() {
 
         if (!session) {
           if (isCurrent) {
-            setDestination('/(auth)/pin-login');
+            setDestination('/pin-login');
           }
           return;
         }
@@ -125,7 +125,7 @@ export default function RootSessionGate() {
         if (active === null || active.role !== session.role) {
           clearActiveUser();
           if (isCurrent) {
-            setDestination('/(auth)/pin-login');
+            setDestination('/pin-login');
           }
           return;
         }
@@ -145,7 +145,7 @@ export default function RootSessionGate() {
           if (!isSamePermissions(session.permissions, active.permissions)) {
             login({ ...session, permissions: active.permissions });
           }
-          setDestination('/(tabs)/dashboard');
+          setDestination('/dashboard');
         }
       } catch (cause) {
         if (isCurrent) {

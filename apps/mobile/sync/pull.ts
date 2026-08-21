@@ -7,6 +7,7 @@ import {
 } from "./cursorStore";
 import { invokeSyncWithClaimRefresh } from "./invoke";
 import { isSupabaseConfigured } from "./supabaseClient";
+import type { AuthTimingTrace } from "../dev/authTiming";
 
 interface PullChange {
   updatedAt: string;
@@ -100,11 +101,13 @@ function parsePullPage(value: unknown): PullPage {
 async function fetchPullPage(
   shopId: string,
   cursor: PullCursor | null,
+  timing?: AuthTimingTrace,
 ): Promise<PullPage> {
   const { data, error } = await invokeSyncWithClaimRefresh({
     action: "pull",
     shopId,
     since: cursor,
+    ...(timing ? { _timingId: timing.correlationId } : {}),
   });
   if (error) {
     throw error;
@@ -147,6 +150,7 @@ function applyChanges(
 async function pullFullHydration(
   shopId: string,
   isCancelled: () => boolean,
+  timing?: AuthTimingTrace,
 ): Promise<void> {
   const discoveredChanges: PullChange[] = [];
   let cursor: PullCursor | null = null;
@@ -156,7 +160,7 @@ async function pullFullHydration(
     if (isCancelled()) {
       return;
     }
-    const page = await fetchPullPage(shopId, cursor);
+    const page = await fetchPullPage(shopId, cursor, timing);
     // Abandoning a hydration mid-flight applies nothing and stores no cursor,
     // so the next login starts the full hydration over rather than inheriting
     // a half-populated shop.
@@ -246,6 +250,7 @@ export async function pullChanges(
   shopId: string,
   cursorOverride?: PullCursor | null,
   isCancelled: () => boolean = () => false,
+  timing?: AuthTimingTrace,
 ): Promise<void> {
   if (!isSupabaseConfigured) {
     if (cursorOverride === null) {
@@ -257,7 +262,7 @@ export async function pullChanges(
   const initialCursor =
     cursorOverride === undefined ? getLastPulledCursor(shopId) : cursorOverride;
   if (initialCursor === null) {
-    await pullFullHydration(shopId, isCancelled);
+    await pullFullHydration(shopId, isCancelled, timing);
     return;
   }
   await pullIncremental(shopId, initialCursor, isCancelled);

@@ -35,6 +35,7 @@ const INDEX = readFileSync(resolve(FUNCTIONS, 'index.ts'), 'utf8');
 const PUSH = readFileSync(resolve(FUNCTIONS, 'push.ts'), 'utf8');
 const PULL = readFileSync(resolve(FUNCTIONS, 'pull.ts'), 'utf8');
 const SHARED_AUTH = readFileSync(resolve(FUNCTIONS, '_shared/auth.ts'), 'utf8');
+const AUTH_TIMING = readFileSync(resolve(FUNCTIONS, '_shared/authTiming.ts'), 'utf8');
 
 /** Source with comments stripped, so a claim in prose cannot satisfy a test. */
 function code(source: string): string {
@@ -108,8 +109,8 @@ describe('brute-force and enumeration defences', () => {
     // may speak plainly, because it identifies a network rather than an
     // account — so the plain reply must be a 429 and must not appear on any
     // path that took a phone-shaped decision.
-    expect(body).toMatch(/keys\.ip && await isLocked[\s\S]{0,200}?HttpError\(429/);
-    expect(body).toMatch(/isLocked\(keys\.phone\)[\s\S]{0,400}?GENERIC_FAILURE/);
+    expect(body).toMatch(/keys\.ip && await timed[\s\S]{0,200}?isLocked\(keys\.ip![\s\S]{0,200}?HttpError\(429/);
+    expect(body).toMatch(/timed[\s\S]{0,200}?isLocked\(keys\.phone\)[\s\S]{0,400}?GENERIC_FAILURE/);
   });
 
   test('the attempt counter is incremented atomically in SQL, not read-then-written in Deno', () => {
@@ -146,6 +147,16 @@ describe('the PIN never leaks', () => {
     expect(body).toMatch(/bcrypt\.hash\(newPin, BCRYPT_COST_FACTOR\)/);
     // Must match native/crypto.ts, or a recovered PIN will not verify offline.
     expect(body).toMatch(/const BCRYPT_COST_FACTOR = 10/);
+  });
+});
+
+describe('development timing safety', () => {
+  test('server timing logs require explicit development and timing flags', () => {
+    const body = code(AUTH_TIMING);
+    expect(body).toMatch(/MUTHOY_ENVIRONMENT[^\n]*=== "development"/);
+    expect(body).toMatch(/MUTHOY_AUTH_TIMING[^\n]*=== "1"/);
+    expect(body).toMatch(/\^\[a-f0-9\]\{32\}\$/);
+    expect(body).not.toMatch(/phone|pin|token|userId|shopId/);
   });
 });
 

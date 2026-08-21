@@ -1,5 +1,6 @@
 import { normalizeBdPhone } from '@muthoy/validation';
-import { markShopCloudLinked, verifyPin } from '../db/auth';
+import { markShopCloudLinked, verifyPinForUser } from '../db/auth';
+import { handoffAuthTiming, type AuthTimingTrace } from '../dev/authTiming';
 import { useSessionStore } from '../state/sessionStore';
 import { pullChanges } from './pull';
 import { requireSupabaseConfiguration, supabase } from './supabaseClient';
@@ -8,7 +9,8 @@ import { requireSupabaseConfiguration, supabase } from './supabaseClient';
 //
 // ORCHESTRATION ONLY. Every step below already existed and is reused as-is:
 // pullChanges does the hydration (with its own FK ordering and all-or-nothing
-// transaction), verifyPin does the local match, the session store's login()
+// transaction), verifyPinForUser checks the server-selected local row, the
+// session store's login()
 // bumps the epoch state/sessionGuard.ts watches, and app/_layout.tsx starts the
 // sync engine off that session change. Nothing here re-implements any of it.
 //
@@ -71,13 +73,17 @@ function toLoginError(error: unknown): DeviceLoginError {
  * Phone + PIN on a fresh device: verify with the server, adopt the session it
  * mints, hydrate the shop, then log in locally.
  *
- * The local verifyPin at the end is not redundant. It proves the hydration
- * actually landed THIS user's row, and it builds the session object — role and
+ * The exact-user local verification at the end is not redundant. It proves
+ * hydration actually landed THIS user's row, and it builds the session object — role and
  * permission overrides included — from SQLite, the source of truth, rather than
  * from the server's reply. A silently incomplete hydration is caught here,
  * before any session exists.
  */
-export async function loginOnNewDevice(phone: string, pin: string): Promise<void> {
+export async function loginOnNewDevice(
+  phone: string,
+  pin: string,
+  timing?: AuthTimingTrace,
+): Promise<void> {
   requireSupabaseConfiguration();
 
   // Canonical on the wire. The server keys its lockout on this string, so
@@ -89,9 +95,17 @@ export async function loginOnNewDevice(phone: string, pin: string): Promise<void
     throw new DeviceLoginError(GENERIC_FAILURE, true);
   }
 
-  const { data, error } = await supabase.functions.invoke('sync', {
-    body: { action: 'device-login', phone: canonicalPhone, pin },
+  const invoke = () => supabase.functions.invoke('sync', {
+    body: {
+      action: 'device-login',
+      phone: canonicalPhone,
+      pin,
+      ...(timing ? { _timingId: timing.correlationId } : {}),
+    },
   });
+  const { data, error } = timing
+    ? await timing.measure('edge_function_invocation', invoke)
+    : await invoke();
   if (error) {
     throw toLoginError(error);
   }
@@ -100,10 +114,13 @@ export async function loginOnNewDevice(phone: string, pin: string): Promise<void
 
   // Adopt the minted session BEFORE pulling: pullChanges goes through the same
   // edge function, which needs this device authenticated as this user.
-  const { error: sessionError } = await supabase.auth.setSession({
+  const setSession = () => supabase.auth.setSession({
     access_token: response.accessToken,
     refresh_token: response.refreshToken,
   });
+  const { error: sessionError } = timing
+    ? await timing.measure('supabase_session_set', setSession)
+    : await setSession();
   if (sessionError) {
     throw new DeviceLoginError('Could not start your session. Please try again.', false);
   }
@@ -111,13 +128,24 @@ export async function loginOnNewDevice(phone: string, pin: string): Promise<void
   // `null` forces FULL hydration rather than an incremental pull from a cursor
   // this device has never had. The same call app/(auth)/otp-verify.tsx already
   // makes for an owner restoring onto a new phone — one hydration path, not two.
-  await pullChanges(response.shopId, null);
+  if (timing) {
+    await timing.measure('full_hydration', () => pullChanges(response.shopId, null, undefined, timing));
+  } else {
+    await pullChanges(response.shopId, null);
+  }
 
   // The device now holds the shop in the same sense a registered one does, so
   // the root gate must route it to PIN Login rather than Registration.
-  await markShopCloudLinked(response.shopId);
+  if (timing) {
+    await timing.measure('local_enrollment_write', () => markShopCloudLinked(response.shopId));
+  } else {
+    await markShopCloudLinked(response.shopId);
+  }
 
-  const local = await verifyPin(pin);
+  const local = timing
+    ? await timing.measure('hydrated_exact_user_validation', () =>
+      verifyPinForUser(pin, response.shopId, response.userId, timing))
+    : await verifyPinForUser(pin, response.shopId, response.userId);
   if (!local || local.userId !== response.userId || local.shopId !== response.shopId) {
     // Hydration returned without the row this login depends on. Refusing here
     // leaves the device unenrolled and the attempt retryable, which is far
@@ -129,6 +157,7 @@ export async function loginOnNewDevice(phone: string, pin: string): Promise<void
   // state/sessionGuard.ts, app/_layout.tsx's sync start and the cart cleanup all
   // behave exactly as they do after a normal PIN login.
   useSessionStore.getState().login(local);
+  handoffAuthTiming(timing);
 }
 
 /**
@@ -175,7 +204,7 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
   await pullChanges(response.shopId, null);
   await markShopCloudLinked(response.shopId);
 
-  const local = await verifyPin(newPin);
+  const local = await verifyPinForUser(newPin, response.shopId, response.userId);
   if (!local || local.userId !== response.userId) {
     throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false);
   }

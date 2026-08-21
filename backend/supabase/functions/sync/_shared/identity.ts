@@ -1,5 +1,14 @@
 import { HttpError } from "./auth.ts";
+import type { ServerAuthTiming } from "./authTiming.ts";
 import { supabaseAdmin, supabaseAnon } from "./supabaseAdmin.ts";
+
+async function timed<T>(
+  timing: ServerAuthTiming | undefined,
+  stage: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return timing ? await timing.measure(stage, operation) : await operation();
+}
 
 // _shared/identity.ts — the one place that decides which Supabase Auth account
 // belongs to which app user.
@@ -265,13 +274,20 @@ export async function assertBindingTarget(
  * Every step is repeatable: an address that already exists is adopted rather
  * than re-created, and the binding write converges under concurrency.
  */
-export async function resolveOrCreateAuthUserId(appUserId: string): Promise<string> {
-  const existing = await readBinding(appUserId);
+export async function resolveOrCreateAuthUserId(
+  appUserId: string,
+  timing?: ServerAuthTiming,
+): Promise<string> {
+  const existing = await timed(timing, "identity_binding_lookup", () => readBinding(appUserId));
   if (existing) {
     // Repairs a retry after claimBinding succeeded but email attachment did
     // not. Without this, the binding looked complete while session minting
     // remained permanently impossible.
-    await attachSyntheticEmail(appUserId, existing);
+    await timed(
+      timing,
+      "identity_email_attachment",
+      () => attachSyntheticEmail(appUserId, existing),
+    );
     return existing;
   }
 
@@ -279,26 +295,42 @@ export async function resolveOrCreateAuthUserId(appUserId: string): Promise<stri
   // An address that exists WITHOUT a binding is the signature of an earlier
   // attempt that died between creating the account and recording it. Adopt it
   // rather than trying to create it again and failing on the duplicate.
-  let authUserId = await findAuthUserIdByEmail(email);
+  let authUserId = await timed(
+    timing,
+    "identity_list_users_lookup",
+    () => findAuthUserIdByEmail(email),
+  );
 
   if (!authUserId) {
-    const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
-      email,
-      email_confirm: true,
-    });
+    const { data: created, error: createError } = await timed(
+      timing,
+      "identity_provisioning",
+      () => supabaseAdmin.auth.admin.createUser({
+        email,
+        email_confirm: true,
+      }),
+    );
     if (!createError && created.user) {
       authUserId = created.user.id;
     } else {
       // Either a concurrent request won the create, or the account exists in a
       // state the lookup above could not see. One more look before failing.
-      authUserId = await findAuthUserIdByEmail(email);
+      authUserId = await timed(
+        timing,
+        "identity_retry_lookup",
+        () => findAuthUserIdByEmail(email),
+      );
     }
   }
 
   if (!authUserId) {
     throw new HttpError(500, "Could not resolve account");
   }
-  return await claimBinding(appUserId, authUserId);
+  return await timed(
+    timing,
+    "identity_binding_claim",
+    () => claimBinding(appUserId, authUserId),
+  );
 }
 
 /**
@@ -314,19 +346,28 @@ export async function resolveOrCreateAuthUserId(appUserId: string): Promise<stri
  */
 export async function mintSessionForAppUser(
   appUserId: string,
+  timing?: ServerAuthTiming,
 ): Promise<{ accessToken: string; refreshToken: string }> {
-  const { data: link, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
-    type: "magiclink",
-    email: syntheticEmail(appUserId),
-  });
+  const { data: link, error: linkError } = await timed(
+    timing,
+    "session_mint_generate_link",
+    () => supabaseAdmin.auth.admin.generateLink({
+      type: "magiclink",
+      email: syntheticEmail(appUserId),
+    }),
+  );
   if (linkError || !link.properties?.hashed_token) {
     throw new HttpError(500, "Could not start session");
   }
 
-  const { data: verified, error: verifyError } = await supabaseAnon.auth.verifyOtp({
-    token_hash: link.properties.hashed_token,
-    type: "email",
-  });
+  const { data: verified, error: verifyError } = await timed(
+    timing,
+    "session_mint_verify_otp_and_jwt_hook",
+    () => supabaseAnon.auth.verifyOtp({
+      token_hash: link.properties.hashed_token,
+      type: "email",
+    }),
+  );
   if (verifyError || !verified.session) {
     throw new HttpError(500, "Could not start session");
   }

@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { normalizeBdPhone } from '@muthoy/validation';
 import { db, sqliteConnection } from './test/client';
 import { syncQueue, users } from './schema';
@@ -94,6 +94,7 @@ beforeAll(() => {
   applyMigration('0005_eminent_legion.sql');
   applyMigration('0006_inventory_movement_ledger.sql');
   applyMigration('0007_staff_device_login.sql');
+  applyMigration('0008_native_pin_lookup.sql');
 });
 
 beforeEach(async () => {
@@ -108,6 +109,29 @@ beforeEach(async () => {
 });
 
 describe('phone as a login credential', () => {
+  it('creates a staff login and its users outbox row with a unique PIN', async () => {
+    const pin = nextPin();
+    const staff = await createStaff(
+      fixture.shopId,
+      fixture.ownerId,
+      { name: 'Arif', phone: nextPhone(), rawPin: pin, permissions: {} },
+      ALWAYS_LIVE,
+    );
+
+    await expect(verifyPin(pin)).resolves.toMatchObject({
+      shopId: fixture.shopId,
+      userId: staff.id,
+      role: 'staff',
+    });
+    const queued = db
+      .select({ op: syncQueue.op, payload: syncQueue.payload, status: syncQueue.status })
+      .from(syncQueue)
+      .where(and(eq(syncQueue.tableName, 'users'), eq(syncQueue.rowId, staff.id)))
+      .get();
+    expect(queued).toMatchObject({ op: 'insert', status: 'pending' });
+    expect(JSON.parse(queued!.payload)).not.toMatchObject({ pin: pin, pin_hash: pin });
+  });
+
   it('stores the phone the owner assigned, so a fresh device can name the account', async () => {
     const phone = nextPhone();
     const staff = await createStaff(

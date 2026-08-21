@@ -1,13 +1,29 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "react-router";
 
-import { Fingerprint, AlertCircle, Loader2, User, Crown } from "lucide-react";
+import { Fingerprint, ShieldCheck, CheckCircle2, Loader2 } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 import { useAuth } from "../contexts/AuthContext";
 import { StandardHeader } from "../components/StandardHeader";
+import { PinPad } from "../components/PinPad";
 import { useMobileNumberSanitizer } from "../hooks/useMobileNumberSanitizer";
 import { validateMobileNumber, formatMobileForStorage } from "../utils/mobileNumber";
 import { useNavigate } from "../utils/navigation";
+
+function Shell({ children, title, onBack }: { children: React.ReactNode; title: string; onBack: () => void }) {
+  return (
+    <main className="h-[100dvh] overflow-hidden bg-[#f3faf7] text-[#163a31]">
+      <div className="relative mx-auto flex h-[100dvh] w-full max-w-md flex-col overflow-hidden bg-[#f8fcfa] shadow-[0_0_80px_rgba(6,95,70,0.08)]">
+        <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-[#b7e7d4]/45 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-28 -left-24 h-72 w-72 rounded-full bg-[#d9f2e5]/70 blur-3xl" />
+        <StandardHeader title={title} onBack={onBack} />
+        <section className="relative z-[1] flex flex-1 flex-col overflow-y-auto px-5 pb-4 pt-3 sm:px-7">
+          {children}
+        </section>
+      </div>
+    </main>
+  );
+}
 
 export function PINLogin() {
   const navigate = useNavigate();
@@ -25,9 +41,10 @@ export function PINLogin() {
   const [isLocked, setIsLocked] = useState(false);
   const [lockTimer, setLockTimer] = useState(0);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [shake, setShake] = useState(false);
 
   // Mobile number sanitizer
-  const { sanitizeMobile, handleMobileBlur } = useMobileNumberSanitizer(phone, setPhone);
+  const { handleMobileBlur } = useMobileNumberSanitizer(phone, setPhone);
 
   // Check if already logged in
   useEffect(() => {
@@ -50,7 +67,7 @@ export function PINLogin() {
 
   const handlePhoneSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Validate phone number (accept both 10 and 11 digits)
     if (!validateMobileNumber(phone)) {
       setError(t("সঠিক ফোন নম্বর দিন", "Enter valid phone number"));
@@ -61,7 +78,7 @@ export function PINLogin() {
     const normalizedPhone = formatMobileForStorage(phone);
 
     // Check if user exists
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = JSON.parse(localStorage.getItem("users") || "[]");
     const user = users.find((u: any) => u.phone === normalizedPhone);
 
     if (!user) {
@@ -76,52 +93,46 @@ export function PINLogin() {
     setShowPhoneInput(false);
   };
 
-  const handleNumberPress = async (num: string) => {
-    if (isLocked) return;
-    
-    if (pin.length < 4) {
-      const newPin = pin + num;
-      setPin(newPin);
-      
-      if (newPin.length === 4) {
-        setIsLoading(true);
-        setError("");
-        
-        // Simulate network delay
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Use normalized phone number for login
-        const normalizedPhone = formatMobileForStorage(phone);
-        const success = await login(normalizedPhone, newPin);
-        
-        if (success) {
-          // Successful login - navigate
-          setTimeout(() => {
-            navigate("/app");
-          }, 300);
-        } else {
-          // Failed login
+  const handlePinChange = async (value: string) => {
+    if (isLocked || isLoading) return;
+
+    setPin(value);
+    setError("");
+
+    if (value.length === 4) {
+      setIsLoading(true);
+
+      // Simulate network delay
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Use normalized phone number for login
+      const normalizedPhone = formatMobileForStorage(phone);
+      const success = await login(normalizedPhone, value);
+
+      if (success) {
+        // Successful login - navigate
+        setTimeout(() => {
+          navigate("/app");
+        }, 300);
+      } else {
+        // Failed login
+        setShake(true);
+        setTimeout(() => {
+          setShake(false);
           setPin("");
-          setIsLoading(false);
-          const newAttempts = attempts + 1;
-          setAttempts(newAttempts);
-          
-          if (newAttempts >= 5) {
-            setIsLocked(true);
-            setLockTimer(60); // Lock for 60 seconds
-            setError(t("অনেকবার ভুল PIN দেওয়া হয়েছে। ১ মিনিট পর আবার চেষ্টা করুন।", "Too many attempts. Try again in 1 minute."));
-          } else {
-            setError(t(`ভুল PIN। আরও ${formatNumber(5 - newAttempts)} বার চেষ্টা করতে পারবেন।`, `Wrong PIN. ${5 - newAttempts} attempts left.`));
-          }
+        }, 400);
+        setIsLoading(false);
+        const newAttempts = attempts + 1;
+        setAttempts(newAttempts);
+
+        if (newAttempts >= 5) {
+          setIsLocked(true);
+          setLockTimer(60); // Lock for 60 seconds
+          setError(t("অনেকবার ভুল PIN দেওয়া হয়েছে। ১ মিনিট পর আবার চেষ্টা করুন।", "Too many attempts. Try again in 1 minute."));
+        } else {
+          setError(t(`ভুল PIN। আরও ${formatNumber(5 - newAttempts)} বার চেষ্টা করতে পারবেন।`, `Wrong PIN. ${5 - newAttempts} attempts left.`));
         }
       }
-    }
-  };
-
-  const handleDelete = () => {
-    if (!isLocked) {
-      setPin(pin.slice(0, -1));
-      setError("");
     }
   };
 
@@ -136,20 +147,20 @@ export function PINLogin() {
   const handleBiometricLogin = async () => {
     setIsLoading(true);
     setError("");
-    
+
     // Simulate biometric authentication
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
     // Normalize phone number for lookup
     const normalizedPhone = formatMobileForStorage(phone);
-    
+
     // Get user's PIN from storage
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const users = JSON.parse(localStorage.getItem("users") || "[]");
     const user = users.find((u: any) => u.phone === normalizedPhone);
-    
+
     if (user && user.pin) {
       const success = await login(normalizedPhone, user.pin);
-      
+
       if (success) {
         setTimeout(() => {
           navigate("/app");
@@ -164,56 +175,52 @@ export function PINLogin() {
     }
   };
 
+  // ── Phone entry view ──────────────────────────────────────────────
   if (showPhoneInput) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-[#ECFDF5] to-[#F0FDF4] flex flex-col max-w-md mx-auto">
-        <StandardHeader
-          title={t("মালিক লগইন", "Owner Login")}
-          onBack={() => navigate("/")}
-          right={
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/50 text-[10px] font-bold uppercase tracking-widest text-[#059669]">
-                <Crown className="w-3 h-3" /> Owner
-              </span>
+      <Shell title={t("মালিক লগইন", "Owner Login")} onBack={() => navigate("/")}>
+        <div className="mx-auto flex w-full max-w-[340px] flex-1 flex-col">
+          <div className="flex flex-col items-center text-center">
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#c7e7d8] bg-white/80 px-3 py-1 shadow-[0_6px_20px_rgba(20,91,68,0.06)] backdrop-blur">
+              <ShieldCheck className="h-3 w-3 text-[#16a06f]" />
+              <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#397260]">Muthoy Owner</span>
             </div>
-          }
-        />
 
-        <div className="flex-1 px-6 pt-12 pb-8 flex flex-col">
-          {/* Brand Section */}
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center space-x-1 mb-2">
-              <span className="text-2xl tracking-tight text-[#111827]" style={{ fontFamily: "var(--font-sans)", fontWeight: 800 }}>
+            <div className="mb-3 flex h-[62px] w-[62px] items-center justify-center rounded-[22px] border border-white/70 bg-[#0b604a] shadow-[0_14px_30px_rgba(6,95,70,0.22)]">
+              <ShieldCheck className="h-7 w-7 text-white" strokeWidth={1.7} />
+            </div>
+
+            <div className="mb-1 flex items-center justify-center gap-1">
+              <span className="text-[22px] tracking-tight text-[#15382f]" style={{ fontFamily: "var(--font-sans)", fontWeight: 800 }}>
                 Muthoy
               </span>
-              <span className="text-2xl tracking-tight text-[#059669]" style={{ fontFamily: "var(--font-sans)", fontWeight: 800 }}>
-                (মুঠোয়)
+              <span className="text-[22px] tracking-tight text-[#0b604a]" style={{ fontFamily: "var(--font-bangla)", fontWeight: 800 }}>
+                (মুঠোয়)
               </span>
             </div>
-            <p className="text-sm text-[#6B7280]" style={{ fontFamily: "var(--font-bangla)" }}>
-              {t("আপনার ফোন নম্বর দিয়ে লগইন করুন", "Login with your phone number")}
+            <p className="mx-auto max-w-[280px] font-[var(--font-bangla)] text-[13px] leading-[1.45] text-[#668478]">
+              {t("আপনার দোকানে ফিরে আসার জন্য স্বাগতম। ফোন নম্বর দিয়ে চালিয়ে যান।", "Welcome back to your shop. Continue with your phone number.")}
             </p>
           </div>
 
-          {/* Phone Input Form */}
-          <form onSubmit={handlePhoneSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-[#374151]" style={{ fontFamily: "var(--font-bangla)" }}>
+          <form onSubmit={handlePhoneSubmit} className="mt-6 space-y-3">
+            <div className="space-y-1.5">
+              <label className="font-[var(--font-bangla)] text-[12px] font-semibold uppercase tracking-[0.14em] text-[#4d7e6d]">
                 {t("মোবাইল নম্বর", "Mobile Number")}
               </label>
               <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#6B7280] text-sm font-medium" style={{ fontFamily: "var(--font-sans)" }}>
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-medium text-[#668478]" style={{ fontFamily: "var(--font-sans)" }}>
                   +880
                 </span>
                 <input
                   type="tel"
                   value={phone}
                   onChange={(e) => {
-                    const value = e.target.value.replace(/\D/g, '');
+                    const value = e.target.value.replace(/\D/g, "");
                     if (value.length <= 11) setPhone(value);
                   }}
                   onBlur={handleMobileBlur}
-                  className="w-full h-14 pl-16 pr-4 bg-white border-2 border-[#E5E7EB] rounded-xl text-[#111827] placeholder:text-[#9CA3AF] focus:border-[#059669] focus:ring-0 transition-all outline-none"
+                  className="h-14 w-full rounded-2xl border border-[#c7e7d8] bg-white pl-16 pr-4 text-[#15382f] outline-none transition-all placeholder:text-[#a9c4b8] focus:border-[#0b7658] focus:ring-4 focus:ring-[#dff2e9]"
                   placeholder="1XXX XXX XXX"
                   style={{ fontFamily: "var(--font-sans)", fontSize: "16px" }}
                   maxLength={11}
@@ -223,227 +230,143 @@ export function PINLogin() {
             </div>
 
             {error && (
-              <div className="bg-[#FEE2E2] border border-[#DC2626] rounded-lg p-3 flex items-start gap-2">
-                <AlertCircle className="w-5 h-5 text-[#DC2626] flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-[#DC2626]" style={{ fontFamily: "var(--font-bangla)" }}>
-                  {error}
-                </p>
+              <div className="flex items-center gap-2 rounded-2xl border border-[#f2cfcd] bg-[#fff7f7] px-3.5 py-2 text-[#bf3f3d]" role="alert">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#fbe3e2] text-xs font-bold">!</span>
+                <p className="font-[var(--font-bangla)] text-sm font-medium">{error}</p>
               </div>
             )}
 
             <button
               type="submit"
               disabled={phone.length !== 11 && phone.length !== 10}
-              className="w-full h-14 text-white text-base font-bold rounded-xl shadow-lg active:scale-95 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{
-                background: "linear-gradient(135deg, #059669 0%, #10b981 100%)",
-                fontFamily: "var(--font-bangla)",
-              }}
+              className="h-14 w-full rounded-2xl bg-[#0b604a] font-[var(--font-bangla)] text-base font-bold text-white shadow-[0_14px_30px_rgba(6,95,70,0.22)] transition-transform active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {t("পরবর্তী", "Continue")}
             </button>
           </form>
 
-          {/* Quick Links */}
           <div className="mt-auto space-y-3 pt-8">
             <button
               onClick={() => navigate("/staff-login")}
-              className="w-full h-12 bg-white border-2 border-[#059669] text-[#059669] rounded-xl font-medium hover:bg-[#ECFDF5] transition-colors"
-              style={{ fontFamily: "var(--font-bangla)" }}
+              className="h-12 w-full rounded-2xl border border-[#c7e7d8] bg-white/70 font-[var(--font-bangla)] font-semibold text-[#0b604a] transition-colors hover:bg-[#edf9f3]"
             >
               {t("স্টাফ লগইন", "Staff Login")}
             </button>
-            
+
             <button
               type="button"
               onClick={() => navigate("/register")}
-              className="w-full text-sm text-[#6B7280] hover:text-[#059669] transition-colors"
-              style={{ fontFamily: "var(--font-bangla)" }}
+              className="w-full font-[var(--font-bangla)] text-sm text-[#668478] transition-colors hover:text-[#0b604a]"
             >
               {t("নতুন অ্যাকাউন্ট তৈরি করুন", "Create new account")}
             </button>
           </div>
         </div>
-      </div>
+      </Shell>
     );
   }
 
-  // PIN Entry Screen
+  // ── PIN entry view ────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#ECFDF5] to-[#F0FDF4] flex flex-col max-w-md mx-auto">
-      <StandardHeader
-        title={t("PIN দিন", "Enter PIN")}
-        onBack={handleChangePhone}
-        right={
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1 px-2 py-[3px] rounded-full bg-white/50 text-[10px] font-bold uppercase tracking-wide text-[#059669]">
-              <Crown className="w-3 h-3" /> Owner
+    <Shell title={t("PIN দিন", "Enter PIN")} onBack={handleChangePhone}>
+      <div className="mx-auto flex w-full max-w-[340px] flex-1 flex-col">
+        <div className="flex flex-col items-center text-center">
+          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[#c7e7d8] bg-white/80 px-3 py-1 shadow-[0_6px_20px_rgba(20,91,68,0.06)] backdrop-blur">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#16a06f] opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#16a06f]" />
             </span>
-            <div className="flex items-center bg-white/50 px-2 py-1 rounded-full gap-1.5">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#059669] opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#059669]"></span>
-              </span>
-              <span
-                className="text-[9px] font-medium text-[#059669] tracking-wider uppercase"
-                style={{ fontFamily: "var(--font-sans)" }}
-              >
-                {t("সিঙ্ক", "Sync")}
-              </span>
-            </div>
+            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#397260]">Muthoy Secure</span>
           </div>
-        }
-      />
 
-      <div className="flex-1 px-5 pt-6 pb-5 flex flex-col">
-        {/* User Info */}
-        <div className="flex flex-col items-center mb-5">
-          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#059669] to-[#10b981] flex items-center justify-center text-white mb-2 shadow-lg">
-            <User className="w-8 h-8" strokeWidth={2.2} />
+          <div className="mb-3 flex h-[62px] w-[62px] items-center justify-center rounded-[22px] border border-white/70 bg-[#0b604a] shadow-[0_14px_30px_rgba(6,95,70,0.22)]">
+            <ShieldCheck className="h-7 w-7 text-white" strokeWidth={1.7} />
           </div>
-          <p
-            className="text-base font-medium text-[#111827]"
-            style={{ fontFamily: "var(--font-sans)" }}
-          >
-            +880 {phone}
+
+          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.2em] text-[#4d7e6d]">
+            {t("মালিক প্রবেশাধিকার", "OWNER ACCESS")}
           </p>
+          <h1 className="font-[var(--font-bangla)] text-[22px] font-semibold leading-[1.25] tracking-[-0.015em] text-[#15382f]">
+            {t("স্বাগতম, আবার লগইন করুন", "Welcome back")}
+          </h1>
+          <p className="mt-1 font-[var(--font-sans)] text-[13px] font-medium text-[#397260]">+880 {phone}</p>
           <button
             onClick={handleChangePhone}
-            className="text-xs text-[#059669] mt-0.5 hover:underline"
-            style={{ fontFamily: "var(--font-bangla)" }}
+            className="mt-0.5 font-[var(--font-bangla)] text-xs text-[#059669] hover:underline"
           >
             {t("নম্বর পরিবর্তন করুন", "Change number")}
           </button>
         </div>
 
-        {/* PIN Dots */}
-        <div className="flex justify-center gap-3 mb-5">
-          {[0, 1, 2, 3].map((i) => (
+        <div className="mt-4 min-h-[26px]">
+          {error && (
             <div
-              key={i}
-              className={`w-5 h-5 rounded-full transition-all duration-200 ${
-                i < pin.length
-                  ? "bg-gradient-to-br from-[#0DAF7A] to-[#059669] scale-125 shadow-lg shadow-[#0DAF7A]/30"
-                  : "bg-[#E5E7EB]"
+              className={`flex items-center gap-2 rounded-2xl border px-3.5 py-2 ${
+                isLocked ? "border-[#f2cfcd] bg-[#fff7f7] text-[#bf3f3d]" : "border-[#f0dcae] bg-[#fffaf0] text-[#a86e18]"
               }`}
-              style={i < pin.length ? { animation: "pinPop 200ms ease-out" } : undefined}
-            />
-          ))}
-        </div>
-
-        {/* Error/Lock Message */}
-        {error && (
-          <div className={`mb-4 rounded-lg p-3 flex items-start gap-2 ${
-            isLocked ? 'bg-[#FEE2E2] border border-[#DC2626]' : 'bg-[#FEF3C7] border border-[#F59E0B]'
-          }`}>
-            <AlertCircle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isLocked ? 'text-[#DC2626]' : 'text-[#F59E0B]'}`} />
-            <div>
-              <p className={`text-sm font-medium ${isLocked ? 'text-[#DC2626]' : 'text-[#F59E0B]'}`} style={{ fontFamily: "var(--font-bangla)" }}>
-                {error}
-              </p>
-              {isLocked && lockTimer > 0 && (
-                <p className="text-xs text-[#DC2626] mt-1" style={{ fontFamily: "var(--font-sans)" }}>
-                  {t("অপেক্ষা করুন:", "Wait:")} {formatNumber(lockTimer)}s
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {isLoading && (
-          <div className="mb-4 bg-[#ECFDF5] border border-[#059669] rounded-lg p-3 flex items-center gap-2">
-            <Loader2 className="w-5 h-5 text-[#059669] animate-spin" />
-            <p className="text-sm text-[#059669] font-medium" style={{ fontFamily: "var(--font-bangla)" }}>
-              {t("যাচাই করা হচ্ছে...", "Verifying...")}
-            </p>
-          </div>
-        )}
-
-        {/* Numeric Keypad */}
-        <div className="grid grid-cols-3 gap-3 max-w-[300px] w-full mx-auto mb-4 touch-manipulation select-none">
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-            <button
-              key={num}
-              onClick={() => handleNumberPress(num.toString())}
-              disabled={isLocked || isLoading}
-              className={`relative aspect-square rounded-full font-semibold text-2xl transition-transform duration-150 ease-out ${
-                isLocked || isLoading
-                  ? 'bg-[#F3F4F6] text-[#9CA3AF] cursor-not-allowed'
-                  : 'bg-white/80 backdrop-blur-md text-[#111827] border border-white/70 shadow-[0_4px_16px_rgba(5,150,105,0.08)] hover:shadow-[0_8px_24px_rgba(5,150,105,0.18)] hover:bg-gradient-to-br hover:from-[#ECFDF5] hover:to-white hover:border-[#059669]/30 active:scale-90 active:bg-[#D1FAE5]'
-              }`}
-              style={{ fontFamily: "var(--font-sans)" }}
+              role="alert"
             >
-              {num}
-            </button>
-          ))}
-          <div />
-          <button
-            onClick={() => handleNumberPress("0")}
-            disabled={isLocked || isLoading}
-            className={`relative aspect-square rounded-full font-semibold text-2xl transition-transform duration-150 ease-out ${
-              isLocked || isLoading
-                ? 'bg-[#F3F4F6] text-[#9CA3AF] cursor-not-allowed'
-                : 'bg-white/80 backdrop-blur-md text-[#111827] border border-white/70 shadow-[0_4px_16px_rgba(5,150,105,0.08)] hover:shadow-[0_8px_24px_rgba(5,150,105,0.18)] hover:bg-gradient-to-br hover:from-[#ECFDF5] hover:to-white hover:border-[#059669]/30 active:scale-90 active:bg-[#D1FAE5]'
-            }`}
-            style={{ fontFamily: "var(--font-sans)" }}
-          >
-            0
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={isLocked || isLoading}
-            aria-label="Delete"
-            className={`relative aspect-square rounded-full flex items-center justify-center transition-all duration-200 ${
-              isLocked || isLoading
-                ? 'bg-[#F3F4F6] text-[#9CA3AF] cursor-not-allowed'
-                : 'bg-[#FEF2F2]/80 backdrop-blur-md text-[#DC2626] border border-[#FECACA] shadow-[0_4px_16px_rgba(220,38,38,0.08)] hover:shadow-[0_8px_24px_rgba(220,38,38,0.2)] hover:bg-gradient-to-br hover:from-[#FEE2E2] hover:to-[#FEF2F2] hover:border-[#DC2626]/40 active:scale-90'
-            }`}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-7 w-7"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2.2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 00-2-2h-8.172a2 2 0 00-1.414.586L3 12z"
-              />
-            </svg>
-          </button>
-        </div>
-
-        {/* Biometric Option */}
-        {!isLocked && (
-          <div className="flex flex-col items-center gap-2 mt-auto">
-            <button
-              className="flex flex-col items-center gap-1.5 text-[#059669] hover:text-[#047857] transition-colors active:scale-95"
-              disabled={isLoading}
-              onClick={handleBiometricLogin}
-            >
-              <div className="w-12 h-12 rounded-full bg-[#ECFDF5] flex items-center justify-center">
-                <Fingerprint className="w-6 h-6" />
+              <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${isLocked ? "bg-[#fbe3e2]" : "bg-[#fbeecb]"}`}>!</span>
+              <div>
+                <p className="font-[var(--font-bangla)] text-sm font-medium">{error}</p>
+                {isLocked && lockTimer > 0 && (
+                  <p className="mt-0.5 font-[var(--font-sans)] text-xs">
+                    {t("অপেক্ষা করুন:", "Wait:")} {formatNumber(lockTimer)}s
+                  </p>
+                )}
               </div>
-              <span className="text-xs font-medium" style={{ fontFamily: "var(--font-bangla)" }}>
-                {t("ফিঙ্গারপ্রিন্ট দিয়ে লগইন", "Login with fingerprint")}
+            </div>
+          )}
+
+          {isLoading && !error && (
+            <div className="flex items-center gap-3 rounded-2xl border border-[#b9e4d0] bg-[#effbf5] px-3.5 py-2.5">
+              <Loader2 className="h-5 w-5 shrink-0 animate-spin text-[#09845e]" />
+              <p className="font-[var(--font-bangla)] text-sm font-bold text-[#087a58]">{t("যাচাই করা হচ্ছে...", "Verifying...")}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex-1 max-h-6" />
+
+        <div>
+          <PinPad
+            value={pin}
+            onChange={handlePinChange}
+            disabled={isLocked || isLoading}
+            shake={shake}
+            variant="setup"
+          />
+
+          {biometricEnabled && !isLocked && (
+            <button
+              type="button"
+              onClick={handleBiometricLogin}
+              disabled={isLoading}
+              className="mt-2.5 flex min-h-[44px] w-full items-center gap-3 rounded-2xl border border-[#d9ebe2] bg-white/70 px-4 text-left transition-all active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#eaf6f0] text-[#0c7658]">
+                <Fingerprint className="h-4.5 w-4.5" strokeWidth={1.8} />
               </span>
+              <span className="flex-1 font-[var(--font-bangla)] text-[13px] font-semibold text-[#245747]">
+                {t("ফিঙ্গারপ্রিন্ট দিয়ে লগইন করুন", "Use fingerprint to sign in")}
+              </span>
+              <CheckCircle2 className="h-4 w-4 text-[#bcdacc]" />
+            </button>
+          )}
+
+          <div className="mt-2.5 text-center">
+            <button className="font-[var(--font-bangla)] text-sm font-medium text-[#059669] hover:underline">
+              {t("PIN ভুলে গেছেন?", "Forgot PIN?")}
             </button>
           </div>
-        )}
 
-        {/* Forgot PIN */}
-        <div className="text-center mt-3">
-          <button
-            className="text-sm text-[#6B7280] hover:text-[#059669]"
-            style={{ fontFamily: "var(--font-bangla)" }}
-          >
-            {t("PIN ভুলে গেছেন?", "Forgot PIN?")}
-          </button>
+          <p className="mt-2 px-4 text-center font-[var(--font-bangla)] text-[11px] leading-5 text-[#7b988d]">
+            {t("আপনার PIN শুধুমাত্র এই ডিভাইসেই সুরক্ষিতভাবে সংরক্ষিত থাকবে।", "Your PIN stays securely stored on this device.")}
+          </p>
         </div>
       </div>
-    </div>
+    </Shell>
   );
 }
+
+export default PINLogin;

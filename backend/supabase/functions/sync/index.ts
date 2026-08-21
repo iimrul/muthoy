@@ -1,4 +1,5 @@
 import { HttpError, verifyCallerJwt } from "./_shared/auth.ts";
+import { createServerAuthTiming, type ServerAuthTiming } from "./_shared/authTiming.ts";
 import { deviceLogin } from "./deviceLogin.ts";
 import { linkDevice } from "./linkDevice.ts";
 import { pull } from "./pull.ts";
@@ -26,24 +27,45 @@ function clientIp(request: Request): string | null {
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers });
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+  let authTiming: ServerAuthTiming | undefined;
   try {
     const rawBody: unknown = await request.json();
     if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) throw new HttpError(400, "Invalid request body");
     const body = rawBody as Record<string, unknown>;
+    authTiming = createServerAuthTiming(body);
+    authTiming?.mark("request_received");
     // The ONE unauthenticated action, and necessarily so: it is what a device
     // with no session calls to get one. It authenticates by phone + PIN
     // instead, behind its own rate limiter (see deviceLogin.ts).
-    if (body.action === "device-login") return json(await deviceLogin(body, clientIp(request)));
+    if (body.action === "device-login") {
+      const result = authTiming
+        ? await authTiming.measure(
+          "device_login_server_processing",
+          () => deviceLogin(body, clientIp(request), authTiming),
+        )
+        : await deviceLogin(body, clientIp(request));
+      authTiming?.mark("response_ready");
+      return json(result);
+    }
 
-    const caller = await verifyCallerJwt(request);
+    const caller = authTiming
+      ? await authTiming.measure("claims_session_validation", () => verifyCallerJwt(request))
+      : await verifyCallerJwt(request);
     if (body.action === "push") return json(await push(caller, body));
-    if (body.action === "pull") return json(await pull(caller, body));
+    if (body.action === "pull") {
+      const result = authTiming
+        ? await authTiming.measure("pull_server_processing", () => pull(caller, body))
+        : await pull(caller, body);
+      authTiming?.mark("response_ready");
+      return json(result);
+    }
     if (body.action === "link-device") return json(await linkDevice(caller, body));
     // Requires a phone-OTP session, which recoverPin re-checks itself rather
     // than trusting this dispatch — a token minted any other way is refused.
     if (body.action === "recover-pin") return json(await recoverPin(caller, body));
     throw new HttpError(400, "Unsupported action");
   } catch (error) {
+    authTiming?.mark("request_failed", "error");
     if (error instanceof HttpError) {
       return json(
         error.code ? { error: error.message, code: error.code } : { error: error.message },

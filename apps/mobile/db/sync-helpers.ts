@@ -345,6 +345,8 @@ function toSyncPayload(tableName: SyncTableName, row: Record<string, unknown>): 
   }
   if (tableName === "users") {
     delete payload.permissionVersion;
+    delete payload.pinLookupTag;
+    delete payload.pinLookupPinSetAt;
   }
   return payload;
 }

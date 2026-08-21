@@ -36,6 +36,9 @@
 - MMKV (PIN hash + session, fast synchronous storage)
 
 ## Native Features
+- Local Android Expo module backed by `at.favre.lib:bcrypt` 0.10.2 for
+  standard bcrypt at cost 10; Android Keystore HMAC-SHA256 for local-only PIN
+  lookup tags. Requires a development/EAS build, not Expo Go.
 - ML Kit (on-device) — barcode scanning AND text recognition (OCR); one engine,
   two APIs, not two separate libraries
 - Expo Camera
@@ -84,6 +87,7 @@
 ML Kit's camera integration needs an **Expo development build**, not Expo Go —
 confirm this on Day 1's EAS dev build, don't discover it later when scanning
 is actually built (P1, immediately post-beta — see Volume 0's scope lock).
+The local PIN crypto module has the same build requirement.
 
 ## What is intentionally NOT in the stack (yet)
 - A general-purpose public API — deferred until real external demand exists
