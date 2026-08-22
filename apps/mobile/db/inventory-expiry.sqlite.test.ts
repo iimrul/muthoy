@@ -71,6 +71,7 @@ beforeAll(() => {
   applyMigration('0007_staff_device_login.sql');
   applyMigration('0008_native_pin_lookup.sql');
   applyMigration('0009_strong_gargoyle.sql');
+  applyMigration('0010_known_ares.sql');
 
   seedShop(SHOP_ID, 'Expiry Test Shop');
   seedShop(OTHER_SHOP_ID, 'Other Shop');
@@ -117,10 +118,10 @@ describe('listBatchesByExpiry', () => {
     expect(row?.daysUntilExpiry).toBe(2);
   });
 
-  it('marks a batch inside the wider window but past the critical cutoff as warning', async () => {
+  it('uses the B2 Near=30 day default', async () => {
     const rows = await listBatchesByExpiry(SHOP_ID, NOW);
     const row = rows.find((r) => r.id === 'batch-warning');
-    expect(row?.status).toBe('warning');
+    expect(row?.status).toBe('critical');
     expect(row?.daysUntilExpiry).toBe(20);
   });
 

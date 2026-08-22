@@ -219,6 +219,12 @@ beforeAll(() => {
 
   // THE UPGRADE.
   sqlite.exec(migrationSql(LEDGER));
+  for (const fileName of [
+    '0007_staff_device_login.sql',
+    '0008_native_pin_lookup.sql',
+    '0009_strong_gargoyle.sql',
+    '0010_known_ares.sql',
+  ]) sqlite.exec(migrationSql(fileName));
 });
 
 describe('the fixture really is pre-ledger data', () => {

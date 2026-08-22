@@ -96,6 +96,9 @@ beforeAll(() => {
   applyMigration('0007_staff_device_login.sql');
   applyMigration('0008_native_pin_lookup.sql');
   applyMigration('0009_strong_gargoyle.sql');
+  applyMigration('0010_known_ares.sql');
+  applyMigration('0013_owner_dashboard_credit_period.sql');
+  applyMigration('0014_owner_dashboard_credit_period_guard.sql');
 });
 
 beforeEach(async () => {

@@ -4,7 +4,9 @@ import { deviceLogin } from "./deviceLogin.ts";
 import { linkDevice } from "./linkDevice.ts";
 import { pull } from "./pull.ts";
 import { push } from "./push.ts";
+import { pushGroup } from "./pushGroup.ts";
 import { recoverPin } from "./recoverPin.ts";
+import { refundClaim } from "./refundClaim.ts";
 
 const headers = { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, x-client-info, apikey, content-type" };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers });
@@ -52,6 +54,8 @@ Deno.serve(async (request) => {
       ? await authTiming.measure("claims_session_validation", () => verifyCallerJwt(request))
       : await verifyCallerJwt(request);
     if (body.action === "push") return json(await push(caller, body));
+    if (body.action === "push-group") return json(await pushGroup(caller, body));
+    if (body.action === "refund-claim") return json(await refundClaim(caller, body));
     if (body.action === "pull") {
       const result = authTiming
         ? await authTiming.measure("pull_server_processing", () => pull(caller, body))

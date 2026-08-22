@@ -13,6 +13,14 @@ const PERMANENT_AUTHORIZATION_SQLSTATES = new Set([
   "MU013",
   "MU014",
   "MU015",
+  "MU016",
+  "MU017",
+  "MU018",
+  "MU020",
+  "MU021",
+  "MU023",
+  "MU024",
+  "MU025",
 ]);
 
 /** Authorization rejects one row; integrity/transient failures retain ordering. */

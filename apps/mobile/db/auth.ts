@@ -1,6 +1,6 @@
 import { eq, and, desc, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from './client';
-import { auditLogs, shops, roles, users, userPermissions } from './schema';
+import { auditLogs, shopB2Settings, shops, roles, users, userPermissions } from './schema';
 import { generateId } from '../native/id';
 import { createPinLookupTag, hashPin, verifyPinHash } from '../native/crypto';
 import type { AuthTimingTrace } from '../dev/authTiming';
@@ -284,6 +284,19 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
     };
     await tx.insert(shops).values(shopValues);
     recordChange(tx, { shopId, table: 'shops', rowId: shopId, op: 'insert', payload: shopValues });
+
+    const b2SettingsValues = {
+      id: generateId(),
+      shopId,
+      lowStockDefault: 10,
+      expiryNearDays: 30,
+      expiryFarDays: 60,
+      maxRefundDays: 7,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    await tx.insert(shopB2Settings).values(b2SettingsValues);
+    recordChange(tx, { shopId, table: 'shop_b2_settings', rowId: b2SettingsValues.id, op: 'insert', payload: b2SettingsValues });
 
     // All three system roles are created now, even though Manager is unused
     // until the full permission matrix ships (P1) — avoids a backfill

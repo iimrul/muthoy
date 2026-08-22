@@ -7,6 +7,7 @@ import { startInventoryRealtime, stopInventoryRealtime } from './realtime';
 import { startForegroundScheduler } from './scheduler';
 import { notifyIfSyncIsStuck, notifySyncHalted } from './stuckNotification';
 import { isSupabaseConfigured } from './supabaseClient';
+import { recordSuccessfulSync } from './statusStore';
 import { useSessionStore } from '../state/sessionStore';
 import {
   completePendingAuthTimingStage,
@@ -18,7 +19,47 @@ let stopReconnect: (() => void) | null = null;
 let stopScheduler: (() => void) | null = null;
 let removeAppStateListener: (() => void) | null = null;
 let cancelInitialCycle: (() => void) | null = null;
-const cycles = new Map<string, Promise<void>>();
+export type SyncSkipReason =
+  | 'not_configured'
+  | 'inactive_shop'
+  | 'offline'
+  | 'cancelled'
+  | 'push_incomplete';
+
+export type SyncCycleResult =
+  | { status: 'completed'; completedAt: string }
+  | { status: 'skipped'; reason: SyncSkipReason }
+  | { status: 'failed'; error: string };
+
+type SyncCompletionListener = (
+  completedAt: string,
+) => void | Promise<void>;
+
+const cycles = new Map<string, Promise<SyncCycleResult>>();
+const completionListeners = new Map<string, Set<SyncCompletionListener>>();
+
+export function subscribeToSyncCompletion(
+  shopId: string,
+  listener: SyncCompletionListener,
+): () => void {
+  const listeners = completionListeners.get(shopId) ?? new Set();
+  listeners.add(listener);
+  completionListeners.set(shopId, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) completionListeners.delete(shopId);
+  };
+}
+
+async function notifySyncCompletion(
+  shopId: string,
+  completedAt: string,
+): Promise<void> {
+  const listeners = [...(completionListeners.get(shopId) ?? [])];
+  await Promise.allSettled(
+    listeners.map((listener) => listener(completedAt)),
+  );
+}
 
 // Bumped by every stopSyncEngine(). A cycle captures the value it started
 // under and re-checks it at each await boundary, so a device handover
@@ -28,10 +69,19 @@ const cycles = new Map<string, Promise<void>>();
 // seconds the incoming user spends typing their PIN.
 let generation = 0;
 
-async function runCycle(shopId: string, startedAt: number): Promise<void> {
+async function runCycle(
+  shopId: string,
+  startedAt: number,
+): Promise<SyncCycleResult> {
   const isCancelled = () => generation !== startedAt;
-  if (!isSupabaseConfigured || !await hasNetworkConnection() || isCancelled()) {
-    return;
+  if (!isSupabaseConfigured) {
+    return { status: 'skipped', reason: 'not_configured' };
+  }
+  if (!await hasNetworkConnection()) {
+    return { status: 'skipped', reason: 'offline' };
+  }
+  if (isCancelled()) {
+    return { status: 'skipped', reason: 'cancelled' };
   }
   try {
     // The token goes DOWN into push and pull. Checking it only out here would
@@ -39,11 +89,21 @@ async function runCycle(shopId: string, startedAt: number): Promise<void> {
     // loops are where sync_queue and the pull cursor are actually written.
     const pushCompleted = await pushPendingRows(shopId, isCancelled);
     if (isCancelled()) {
-      return;
+      return { status: 'skipped', reason: 'cancelled' };
     }
-    if (pushCompleted) {
-      await pullChanges(shopId, undefined, isCancelled);
+    if (!pushCompleted) {
+      return { status: 'skipped', reason: 'push_incomplete' };
     }
+    const { uploadPendingPrescriptionAttachments } = await import('./attachments');
+    await uploadPendingPrescriptionAttachments(shopId, isCancelled);
+    if (isCancelled()) return { status: 'skipped', reason: 'cancelled' };
+    await pullChanges(shopId, undefined, isCancelled);
+    if (isCancelled()) return { status: 'skipped', reason: 'cancelled' };
+
+    const completedAt = new Date().toISOString();
+    recordSuccessfulSync(shopId, completedAt);
+    await notifySyncCompletion(shopId, completedAt);
+    return { status: 'completed', completedAt };
   } catch (error) {
     if (error instanceof SyncHaltedError && !isCancelled()) {
       await notifySyncHalted(shopId, error.message);
@@ -51,12 +111,16 @@ async function runCycle(shopId: string, startedAt: number): Promise<void> {
     throw error;
   } finally {
     if (!isCancelled()) {
-      await notifyIfSyncIsStuck(shopId);
+      try {
+        await notifyIfSyncIsStuck(shopId);
+      } catch (error) {
+        console.warn('Sync stuck-state check failed', error);
+      }
     }
   }
 }
 
-export function triggerSyncNow(shopId: string): void {
+export function triggerSyncNow(shopId: string): Promise<SyncCycleResult> {
   // Two independent gates, because they answer different questions.
   //
   // `activeShopId` says the engine is armed. That alone is shop-scoped, and a
@@ -69,27 +133,39 @@ export function triggerSyncNow(shopId: string): void {
   //
   // Skipping loses nothing: the write is already durable in sync_queue, so the
   // next login's cycle carries it.
-  if (
-    !isSupabaseConfigured
-    || activeShopId !== shopId
-    || useSessionStore.getState().session?.shopId !== shopId
-    || cycles.has(shopId)
-  ) {
-    return;
+  if (!isSupabaseConfigured) {
+    return Promise.resolve({ status: 'skipped', reason: 'not_configured' });
   }
+  if (
+    activeShopId !== shopId
+    || useSessionStore.getState().session?.shopId !== shopId
+  ) {
+    return Promise.resolve({ status: 'skipped', reason: 'inactive_shop' });
+  }
+  const existingCycle = cycles.get(shopId);
+  if (existingCycle) return existingCycle;
   const startedAt = generation;
   const authTimingId = startPendingAuthTimingStage('initial_sync');
   const cycle = runCycle(shopId, startedAt)
-    .then(() => {
+    .then((result) => {
       if (authTimingId) {
-        completePendingAuthTimingStage('initial_sync', 'ok', authTimingId);
+        completePendingAuthTimingStage(
+          'initial_sync',
+          result.status === 'completed' ? 'ok' : 'error',
+          authTimingId,
+        );
       }
+      return result;
     })
     .catch((error: unknown) => {
       if (authTimingId) {
         completePendingAuthTimingStage('initial_sync', 'error', authTimingId);
       }
       console.warn('Background sync cycle failed', error);
+      return {
+        status: 'failed',
+        error: error instanceof Error ? error.message : 'Sync failed',
+      } satisfies SyncCycleResult;
     })
     .finally(() => {
       if (cycles.get(shopId) === cycle) {
@@ -97,13 +173,14 @@ export function triggerSyncNow(shopId: string): void {
       }
     });
   cycles.set(shopId, cycle);
+  return cycle;
 }
 
 /** Schedules durable outbox work after navigation/interaction rendering. */
 export function triggerSyncAfterInteractions(shopId: string, onStart?: () => void): () => void {
   const task = InteractionManager.runAfterInteractions(() => {
     onStart?.();
-    triggerSyncNow(shopId);
+    void triggerSyncNow(shopId);
   });
   return () => task.cancel();
 }
@@ -117,20 +194,20 @@ function scheduleInitialCycle(shopId: string): void {
 
 export function startSyncEngine(shopId: string): void {
   if (activeShopId === shopId) {
-    triggerSyncNow(shopId);
+    void triggerSyncNow(shopId);
     return;
   }
   stopSyncEngine();
   activeShopId = shopId;
-  stopReconnect = subscribeToReconnect(() => triggerSyncNow(shopId));
-  stopScheduler = startForegroundScheduler(() => triggerSyncNow(shopId));
+  stopReconnect = subscribeToReconnect(() => void triggerSyncNow(shopId));
+  stopScheduler = startForegroundScheduler(() => void triggerSyncNow(shopId));
   // Another device's sale or purchase bumps this shop's batches rows; pull
   // immediately rather than waiting out the scheduler interval, so the two
   // phones show the same quantity within seconds instead of minutes.
-  startInventoryRealtime(shopId, () => triggerSyncNow(shopId));
+  startInventoryRealtime(shopId, () => void triggerSyncNow(shopId));
   const appStateSubscription = AppState.addEventListener('change', (status: AppStateStatus) => {
     if (status === 'active') {
-      triggerSyncNow(shopId);
+      void triggerSyncNow(shopId);
     }
   });
   removeAppStateListener = () => appStateSubscription.remove();
@@ -167,3 +244,5 @@ export function stopSyncEngine(): void {
 }
 
 export { handleAppStateChangeForAuthRefresh } from './supabaseClient';
+export { claimRefundAuthority } from './refundClaim';
+export { getLastSuccessfulSyncAt } from './statusStore';

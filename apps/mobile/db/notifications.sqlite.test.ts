@@ -71,7 +71,8 @@ describe('notification DB queries on real SQLite', () => {
     applyMigration('0006_inventory_movement_ledger.sql');
     applyMigration('0007_staff_device_login.sql');
     applyMigration('0008_native_pin_lookup.sql');
-    applyMigration('0009_strong_gargoyle.sql');
+  applyMigration('0009_strong_gargoyle.sql');
+  applyMigration('0010_known_ares.sql');
     sqlite.prepare('INSERT INTO shops (id, owner_id, name, phone) VALUES (?, ?, ?, ?)').run('shop-1', 'owner-1', 'Shop One', '01700000001');
     sqlite.prepare('INSERT INTO shops (id, owner_id, name, phone) VALUES (?, ?, ?, ?)').run('shop-2', 'owner-2', 'Shop Two', '01700000002');
     sqlite.prepare("INSERT INTO roles (id, shop_id, name, is_system) VALUES ('role-owner-1', 'shop-1', 'owner', 1)").run();

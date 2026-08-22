@@ -12,7 +12,7 @@
 
 import { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { resolveCameraPermissionState, type CameraPermissionState } from '../domain/cameraPermissionState';
 
 export type { CameraPermissionState };
@@ -24,12 +24,19 @@ export interface ScannerCameraHandle {
 
 export interface ScannerCameraProps {
   onPermissionStateChange: (state: CameraPermissionState) => void;
+  onBarcodeScanned?: (result: BarcodeScanningResult) => void;
+  barcodeEnabled?: boolean;
   ref?: React.Ref<ScannerCameraHandle>;
 }
 
 const CAPTURE_OPTIONS = { quality: 0.8, skipProcessing: true } as const;
 
-export function ScannerCamera({ onPermissionStateChange, ref }: ScannerCameraProps) {
+export function ScannerCamera({
+  onPermissionStateChange,
+  onBarcodeScanned,
+  barcodeEnabled = false,
+  ref,
+}: ScannerCameraProps) {
   const cameraViewRef = useRef<CameraView>(null);
   const isCameraReadyRef = useRef(false);
   const [permission, requestPermission, getPermission] = useCameraPermissions();
@@ -100,6 +107,10 @@ export function ScannerCamera({ onPermissionStateChange, ref }: ScannerCameraPro
       ref={cameraViewRef}
       style={{ flex: 1 }}
       facing="back"
+      barcodeScannerSettings={{
+        barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'code39', 'qr'],
+      }}
+      onBarcodeScanned={barcodeEnabled ? onBarcodeScanned : undefined}
       onCameraReady={() => {
         isCameraReadyRef.current = true;
       }}

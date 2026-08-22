@@ -11,6 +11,11 @@ import m0006 from './0006_inventory_movement_ledger.sql';
 import m0007 from './0007_staff_device_login.sql';
 import m0008 from './0008_native_pin_lookup.sql';
 import m0009 from './0009_strong_gargoyle.sql';
+import m0010 from './0010_known_ares.sql';
+import m0011 from './0011_black_zarda.sql';
+import m0012 from './0012_small_meltdown.sql';
+import m0013 from './0013_owner_dashboard_credit_period.sql';
+import m0014 from './0014_owner_dashboard_credit_period_guard.sql';
 
 export default {
   journal,
@@ -25,5 +30,10 @@ export default {
     m0007,
     m0008,
     m0009,
+    m0010,
+    m0011,
+    m0012,
+    m0013,
+    m0014,
   },
 };

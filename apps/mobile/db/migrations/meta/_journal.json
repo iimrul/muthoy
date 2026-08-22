@@ -71,6 +71,41 @@
       "when": 1787292455696,
       "tag": "0009_strong_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1787325843821,
+      "tag": "0010_known_ares",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1787330563126,
+      "tag": "0011_black_zarda",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1787331602519,
+      "tag": "0012_small_meltdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1787379953191,
+      "tag": "0013_owner_dashboard_credit_period",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1787381000000,
+      "tag": "0014_owner_dashboard_credit_period_guard",
+      "breakpoints": true
     }
   ]
 }

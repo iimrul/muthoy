@@ -1,314 +1,429 @@
-import { useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { router } from 'expo-router';
-import { fromTaka, subtractPaisa, type Paisa } from '@muthoy/types';
-import { formatMoney } from '@muthoy/utils';
-import { checkoutCustomerSchema, tenderedAmountSchema } from '@muthoy/validation';
-import { StandardHeader } from '../../components/ui/StandardHeader';
-import { listCustomers, type CustomerListItem } from '../../db/customers';
-import { listBatchesForMedicine } from '../../db/inventory';
-import { createSaleTransaction } from '../../db/sales';
-import { deduct, InsufficientStockError } from '../../domain/fefo';
-import { runNotificationChecks } from '../../native/notifications';
-import { useCartStore } from '../../state/cartStore';
-import { captureSessionFor } from '../../state/sessionGuard';
-import { useSessionStore } from '../../state/sessionStore';
-import { triggerSyncNow } from '../../sync';
+import { useRef, useState } from "react";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { router } from "expo-router";
+import { asPaisa, subtractPaisa, type Paisa } from "@muthoy/types";
+import { formatMoney, parseTakaTextToPaisa } from "@muthoy/utils";
+import { checkoutCustomerSchema } from "@muthoy/validation";
+import { MedicineTextScanner } from "../../components/scanner/MedicineTextScanner";
+import { StandardHeader } from "../../components/ui/StandardHeader";
+import { listCustomers, type CustomerListItem } from "../../db/customers";
+import { createSaleTransaction, SaleQuoteChangedError } from "../../db/sales";
+import {
+  checkoutDiscountAmount,
+  type CheckoutDiscount,
+} from "../../domain/pricing";
+import type { SalePaymentRequest } from "../../domain/salePayment";
+import { runNotificationChecks } from "../../native/notifications";
+import { useCartStore } from "../../state/cartStore";
+import { captureSessionFor } from "../../state/sessionGuard";
+import { useSessionStore } from "../../state/sessionStore";
+import { usePermission } from "../../state/usePermission";
+import { triggerSyncNow } from "../../sync";
 
-type PaymentType = 'cash' | 'credit';
+type PaymentType = "cash" | "credit" | "split";
+type DiscountType = "none" | "amount" | "percentage";
+
+function percentBasisPoints(text: string): number {
+  const match = /^(\d{1,3})(?:\.(\d{1,2}))?$/.exec(text.trim());
+  if (!match) throw new Error("Enter a percentage from 0 to 100.");
+  const value =
+    Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  if (value > 10_000) throw new Error("Discount cannot exceed 100%.");
+  return value;
+}
 
 export default function CheckoutScreen() {
   const session = useSessionStore((state) => state.session);
+  const { isAllowed: canDiscount } = usePermission("sale_discount");
   const items = useCartStore((state) => state.items);
-  const total = useCartStore((state) => state.total());
+  const subtotal = useCartStore((state) => state.total());
   const clearCart = useCartStore((state) => state.clear);
-  const [paymentType, setPaymentType] = useState<PaymentType>('cash');
-  const [amountTendered, setAmountTendered] = useState('');
+  const resumedDraftId = useCartStore((state) => state.resumedDraftId);
+  const resumedDraftDeviceId = useCartStore(
+    (state) => state.resumedDraftDeviceId,
+  );
+  const [paymentType, setPaymentType] = useState<PaymentType>("cash");
+  const [cashText, setCashText] = useState("");
+  const [discountType, setDiscountType] = useState<DiscountType>("none");
+  const [discountText, setDiscountText] = useState("");
   const [customers, setCustomers] = useState<CustomerListItem[]>([]);
-  const [customerQuery, setCustomerQuery] = useState('');
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-  const [isNewCustomer, setIsNewCustomer] = useState(false);
-  const [newCustomerName, setNewCustomerName] = useState('');
-  const [newCustomerPhone, setNewCustomerPhone] = useState('');
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [newCustomer, setNewCustomer] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [prescriptionNo, setPrescriptionNo] = useState("");
+  const [patientName, setPatientName] = useState("");
+  const [prescriberName, setPrescriberName] = useState("");
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [refreshedTotal, setRefreshedTotal] = useState<Paisa | null>(null);
+  const [quoteConfirmed, setQuoteConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const customerRequestId = useRef(0);
+  const [submitting, setSubmitting] = useState(false);
+  const customerRequest = useRef(0);
+  if (!session) return null;
 
-  if (!session) {
-    return null;
+  let discount: CheckoutDiscount | undefined;
+  let discountError: string | null = null;
+  try {
+    if (canDiscount && discountType === "amount" && discountText.trim())
+      discount = { type: "amount", amount: parseTakaTextToPaisa(discountText) };
+    if (canDiscount && discountType === "percentage" && discountText.trim())
+      discount = {
+        type: "percentage",
+        basisPoints: percentBasisPoints(discountText),
+      };
+  } catch (caught) {
+    discountError =
+      caught instanceof Error ? caught.message : "Invalid discount.";
   }
+  const discountAmount = discount
+    ? checkoutDiscountAmount(subtotal, discount)
+    : asPaisa(0);
+  const total = refreshedTotal ?? asPaisa(subtotal - discountAmount);
 
   const loadCustomers = async (query?: string) => {
-    const currentRequest = ++customerRequestId.current;
+    const request = ++customerRequest.current;
     try {
-      const matches = await listCustomers(session.shopId, query);
-      if (currentRequest === customerRequestId.current) {
-        setCustomers(matches);
-      }
+      const rows = await listCustomers(session.shopId, query);
+      if (request === customerRequest.current) setCustomers(rows);
     } catch {
-      if (currentRequest === customerRequestId.current) {
-        setError('Customer search failed. Try again.');
-      }
+      if (request === customerRequest.current)
+        setError("Customer search failed.");
     }
   };
-
-  const handlePaymentTypeChange = (next: PaymentType) => {
-    setPaymentType(next);
+  const choosePayment = (type: PaymentType) => {
+    setPaymentType(type);
     setError(null);
-    if (next === 'credit') {
-      void loadCustomers();
-    }
+    if (type !== "cash") void loadCustomers();
   };
-
-  const handleCustomerQueryChange = (value: string) => {
-    setCustomerQuery(value);
-    setSelectedCustomerId(null);
-    void loadCustomers(value);
-  };
-
-  const parsedTendered = tenderedAmountSchema.safeParse(amountTendered);
-  const tenderedPaisa = parsedTendered.success ? fromTaka(parsedTendered.data) : undefined;
-  const displayedChange = tenderedPaisa !== undefined && tenderedPaisa >= total
-    ? subtractPaisa(tenderedPaisa, total)
-    : undefined;
-
-  const handleConfirm = async () => {
-    // handleConfirm captures `session` and `items` at the render that created
-    // it, and both survive a device handover that lands mid-await. Attribution
-    // belongs to whoever is logged in AT COMMIT TIME, so this unit of work is
-    // pinned to the login it started under (Volume 0 Days 5/11;
-    // state/switchUser.ts). An epoch, not a user id: owner → staff → owner is
-    // two real handovers that a userId comparison cannot see, and the cart it
-    // would commit was cleared in between.
-    // captureSessionFor, not captureSession: the store is written
-    // synchronously but React re-renders afterwards, so a press landing in
-    // that window would otherwise pin a FRESH epoch to the OUTGOING session
-    // this closure still holds, and the guard could never go stale.
-    const guard = captureSessionFor(session);
-    if (!guard) {
-      return;
+  const customerFields = () => {
+    if (paymentType === "cash") return {};
+    if (!newCustomer) {
+      if (!customerId)
+        throw new Error("Select a customer or create a new customer.");
+      return { customerId };
     }
-    setError(null);
-    if (items.length === 0) {
-      setError('Cart is empty.');
-      return;
-    }
-
-    let cashTendered: Paisa | undefined;
-    let newCustomer: { name: string; phone?: string } | undefined;
-    if (paymentType === 'cash') {
-      const parsed = tenderedAmountSchema.safeParse(amountTendered);
-      if (!parsed.success) {
-        setError(parsed.error.issues[0]?.message ?? 'Enter a valid tendered amount.');
-        return;
-      }
-      cashTendered = fromTaka(parsed.data);
-      if (cashTendered < total) {
-        setError('Amount tendered is less than the total.');
-        return;
-      }
-    } else if (isNewCustomer) {
-      const parsed = checkoutCustomerSchema.safeParse({ name: newCustomerName, phone: newCustomerPhone });
-      if (!parsed.success) {
-        setError(parsed.error.issues[0]?.message ?? 'Enter valid customer details.');
-        return;
-      }
-      newCustomer = parsed.data;
-    } else if (!selectedCustomerId) {
-      setError('Select a customer or create a new customer.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const freshBatches = await Promise.all(
-        items.map((item) => listBatchesForMedicine(session.shopId, item.medicineId)),
+    const parsed = checkoutCustomerSchema.safeParse({
+      name: customerName,
+      phone: customerPhone,
+    });
+    if (!parsed.success)
+      throw new Error(
+        parsed.error.issues[0]?.message ?? "Enter valid customer details.",
       );
-      const lines = items.map((item, index) => ({
-        medicineId: item.medicineId,
-        deductions: deduct(item.medicineId, item.quantity, freshBatches[index] ?? []),
-        unitPrice: item.unitPrice,
-        discount: item.discount,
-      }));
-      // The device changed hands while the batches were being read. The
-      // outgoing user's cart is already gone from the store; committing it
-      // now would stamp their staff_id on a sale nobody is standing behind
-      // and silently deduct real stock.
-      if (guard.isStale()) {
-        setError('The active user changed. This sale was not saved.');
-        return;
-      }
+    return { newCustomer: parsed.data };
+  };
+  const payment = (): SalePaymentRequest => {
+    if (total === 0) return { type: "free" };
+    if (paymentType === "credit") return { type: "credit" };
+    const amount = parseTakaTextToPaisa(cashText);
+    return paymentType === "split"
+      ? { type: "split", cashApplied: amount }
+      : { type: "cash", tendered: amount };
+  };
+
+  const confirm = async () => {
+    const guard = captureSessionFor(session);
+    if (!guard) return;
+    setError(null);
+    if (!items.length) return setError("Cart is empty.");
+    if (discountError) return setError(discountError);
+    try {
+      const selectedPayment = payment();
+      const customer = customerFields();
+      setSubmitting(true);
       const result = await createSaleTransaction({
         shopId: session.shopId,
         staffId: session.userId,
-        // Re-checked inside the transaction itself. The check above cannot
-        // cover the await on requirePermission inside createSaleTransaction.
         isStillActive: guard.isStillActive,
-        paymentType,
-        amountTendered: cashTendered,
-        customerId: paymentType === 'credit' && !isNewCustomer ? selectedCustomerId ?? undefined : undefined,
-        newCustomer,
-        lines,
+        payment: selectedPayment,
+        ...customer,
+        discount,
+        quotedTotal: total,
+        confirmQuoteChange: quoteConfirmed,
+        quotedAllocation: items.map((item) => ({
+          batchId: item.batchId,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        })),
+        prescription: {
+          prescriptionNo: prescriptionNo.trim() || undefined,
+          patientName: patientName.trim() || undefined,
+          prescriberName: prescriberName.trim() || undefined,
+        },
+        prescriptionImageUri: imageUri ?? undefined,
+        draftId: resumedDraftId ?? undefined,
+        currentDeviceId: resumedDraftId
+          ? (resumedDraftDeviceId ?? undefined)
+          : undefined,
+        lines: items.map((item) => ({
+          medicineId: item.medicineId,
+          quantity: item.quantity,
+        })),
       });
-      // Committed under a verified-live session, so the cart it came from is
-      // this session's cart and clearing it is correct.
       clearCart();
       void triggerSyncNow(session.shopId);
-
-      // The sale is already committed. Notification failures must not affect it.
-      void runNotificationChecks(session.shopId).catch((error: unknown) => {
-        console.warn('Post-sale notification check failed', error);
-      });
-      // Last boundary: a handover during the commit leaves a correctly
-      // attributed sale that cannot be unwound, so it is kept — but the
-      // outgoing user's invoice and change due must never land on the
-      // incoming user's screen. app/index.tsx's gate routes them to PIN Login.
-      if (guard.isStale()) {
-        return;
-      }
-      router.replace({
-        pathname: './confirmation',
-        params: {
-          invoiceNo: result.invoiceNo,
-          total: String(result.total),
-          paymentType,
-          change: String(result.change),
-        },
-      });
+      void runNotificationChecks(session.shopId).catch(() => undefined);
+      if (!guard.isStale())
+        router.replace({
+          pathname: "./confirmation",
+          params: {
+            invoiceNo: result.invoiceNo,
+            total: String(result.total),
+            paymentType: selectedPayment.type,
+            change: String(result.change),
+          },
+        });
     } catch (caught) {
-      if (caught instanceof InsufficientStockError) {
-        const item = items.find((candidate) => candidate.medicineId === caught.medicineId);
-        setError(`${item?.medicineName ?? 'Medicine'} has only ${caught.available} in stock. Cart was not changed.`);
-      } else {
-        setError(caught instanceof Error ? caught.message : 'Checkout failed. Cart was not changed.');
-      }
+      if (caught instanceof SaleQuoteChangedError) {
+        setRefreshedTotal(caught.refreshedTotal);
+        setQuoteConfirmed(true);
+        setError("Price or stock changed. Review total and confirm again.");
+      } else
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Checkout failed. Cart was not changed.",
+        );
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
     }
+  };
+
+  let change: Paisa | null = null;
+  let remainingCredit: Paisa | null = null;
+  try {
+    const cash = parseTakaTextToPaisa(cashText);
+    if (paymentType === "cash" && cash >= total)
+      change = subtractPaisa(cash, total);
+    if (paymentType === "split" && cash < total)
+      remainingCredit = asPaisa(total - cash);
+  } catch {
+    /* validate on submit */
+  }
+  const resetQuote = () => {
+    setRefreshedTotal(null);
+    setQuoteConfirmed(false);
   };
 
   return (
     <View className="flex-1 bg-brand-softGreen">
       <StandardHeader title="Checkout" onBackPress={() => router.back()} />
-      <ScrollView contentContainerClassName="gap-5 p-4" keyboardShouldPersistTaps="handled">
-        <View className="flex-row items-center justify-between rounded-lg bg-white p-4">
-          <Text className="font-sans-bold text-lg text-richBlack">Total</Text>
-          <Text className="font-mono text-xl text-brand-green">{formatMoney(total)}</Text>
+      <ScrollView
+        contentContainerClassName="gap-4 p-4"
+        keyboardShouldPersistTaps="handled"
+      >
+        <View className="gap-2 rounded-lg bg-white p-4">
+          <View className="flex-row justify-between">
+            <Text>Subtotal</Text>
+            <Text className="font-mono">{formatMoney(subtotal)}</Text>
+          </View>
+          {discountAmount > 0 ? (
+            <View className="flex-row justify-between">
+              <Text>Discount</Text>
+              <Text>-{formatMoney(discountAmount)}</Text>
+            </View>
+          ) : null}
+          <View className="flex-row justify-between">
+            <Text className="font-sans-bold text-lg">Total</Text>
+            <Text className="font-mono text-xl text-brand-green">
+              {formatMoney(total)}
+            </Text>
+          </View>
         </View>
-
-        <View className="flex-row gap-3">
-          {(['cash', 'credit'] as const).map((type) => (
+        {canDiscount ? (
+          <View className="gap-3 rounded-lg bg-white p-4">
+            <Text className="font-sans-semibold">Checkout discount</Text>
+            <View className="flex-row gap-2">
+              {(["none", "amount", "percentage"] as const).map((type) => (
+                <Pressable
+                  key={type}
+                  onPress={() => {
+                    setDiscountType(type);
+                    resetQuote();
+                  }}
+                  className={`flex-1 items-center rounded border py-2 ${discountType === type ? "border-brand-green" : "border-midGray"}`}
+                >
+                  <Text>{type === "percentage" ? "%" : type}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {discountType !== "none" ? (
+              <TextInput
+                value={discountText}
+                onChangeText={(value) => {
+                  setDiscountText(value);
+                  resetQuote();
+                }}
+                keyboardType="decimal-pad"
+                placeholder={
+                  discountType === "amount" ? "Amount (৳)" : "Percent"
+                }
+                className="rounded border border-midGray p-3"
+              />
+            ) : null}
+            {discountError ? (
+              <Text className="text-error">{discountError}</Text>
+            ) : null}
+          </View>
+        ) : null}
+        <View className="flex-row gap-2">
+          {(["cash", "credit", "split"] as const).map((type) => (
             <Pressable
               key={type}
-              onPress={() => handlePaymentTypeChange(type)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: paymentType === type }}
-              className={`flex-1 items-center rounded-lg py-3 ${paymentType === type ? 'bg-brand-green' : 'bg-white'}`}
+              onPress={() => choosePayment(type)}
+              className={`flex-1 items-center rounded-lg py-3 ${paymentType === type ? "bg-brand-green" : "bg-white"}`}
             >
-              <Text className={`font-sans-semibold text-base ${paymentType === type ? 'text-white' : 'text-richBlack'}`}>
-                {type === 'cash' ? 'Cash' : 'Credit'}
+              <Text className={paymentType === type ? "text-white" : ""}>
+                {type}
               </Text>
             </Pressable>
           ))}
         </View>
-
-        {paymentType === 'cash' ? (
-          <View className="gap-3 rounded-lg bg-white p-4">
-            <Text className="font-sans-medium text-sm text-richBlack">Amount tendered (৳)</Text>
+        {paymentType !== "credit" ? (
+          <View className="gap-2 rounded-lg bg-white p-4">
+            <Text>
+              {paymentType === "split"
+                ? "Cash amount (৳)"
+                : "Amount tendered (৳)"}
+            </Text>
             <TextInput
-              value={amountTendered}
-              onChangeText={setAmountTendered}
+              value={cashText}
+              onChangeText={setCashText}
               keyboardType="decimal-pad"
-              accessibilityLabel="Amount tendered"
-              placeholder="0.00"
-              className="rounded-lg border border-midGray px-4 py-3 font-mono text-base text-richBlack"
+              accessibilityLabel={
+                paymentType === "split" ? "Cash amount" : "Amount tendered"
+              }
+              className="rounded border border-midGray p-3"
             />
-            <View className="flex-row justify-between">
-              <Text className="font-sans text-sm text-midGray">Change</Text>
-              <Text className="font-mono text-base text-richBlack">
-                {displayedChange === undefined ? '—' : formatMoney(displayedChange)}
-              </Text>
-            </View>
+            <Text>
+              {paymentType === "split"
+                ? `Remaining credit: ${remainingCredit === null ? "—" : formatMoney(remainingCredit)}`
+                : `Change: ${change === null ? "—" : formatMoney(change)}`}
+            </Text>
           </View>
-        ) : (
-          <View className="gap-4 rounded-lg bg-white p-4">
-            <View className="flex-row gap-3">
+        ) : null}
+        {paymentType !== "cash" ? (
+          <View className="gap-3 rounded-lg bg-white p-4">
+            <View className="flex-row gap-2">
               <Pressable
-                onPress={() => setIsNewCustomer(false)}
-                className={`flex-1 items-center rounded-lg border py-3 ${!isNewCustomer ? 'border-brand-green' : 'border-midGray'}`}
+                onPress={() => setNewCustomer(false)}
+                className="flex-1 rounded border p-2"
               >
-                <Text className="font-sans-medium text-sm text-richBlack">Existing</Text>
+                <Text>Existing</Text>
               </Pressable>
               <Pressable
-                onPress={() => {
-                  setIsNewCustomer(true);
-                  setSelectedCustomerId(null);
-                }}
-                className={`flex-1 items-center rounded-lg border py-3 ${isNewCustomer ? 'border-brand-green' : 'border-midGray'}`}
+                onPress={() => setNewCustomer(true)}
+                className="flex-1 rounded border p-2"
               >
-                <Text className="font-sans-medium text-sm text-richBlack">New customer</Text>
+                <Text>New customer</Text>
               </Pressable>
             </View>
-
-            {isNewCustomer ? (
+            {newCustomer ? (
               <>
                 <TextInput
-                  value={newCustomerName}
-                  onChangeText={setNewCustomerName}
+                  value={customerName}
+                  onChangeText={setCustomerName}
                   placeholder="Customer name"
-                  accessibilityLabel="Customer name"
-                  className="rounded-lg border border-midGray px-4 py-3 font-sans text-base text-richBlack"
+                  className="rounded border border-midGray p-3"
                 />
                 <TextInput
-                  value={newCustomerPhone}
-                  onChangeText={setNewCustomerPhone}
+                  value={customerPhone}
+                  onChangeText={setCustomerPhone}
                   placeholder="Phone (optional)"
-                  keyboardType="phone-pad"
-                  accessibilityLabel="Customer phone"
-                  className="rounded-lg border border-midGray px-4 py-3 font-sans text-base text-richBlack"
+                  className="rounded border border-midGray p-3"
                 />
               </>
             ) : (
               <>
                 <TextInput
                   value={customerQuery}
-                  onChangeText={handleCustomerQueryChange}
-                  placeholder="Search customer name or phone"
-                  accessibilityLabel="Search customers"
-                  className="rounded-lg border border-midGray px-4 py-3 font-sans text-base text-richBlack"
+                  onChangeText={(value) => {
+                    setCustomerQuery(value);
+                    setCustomerId(null);
+                    void loadCustomers(value);
+                  }}
+                  placeholder="Search customers"
+                  className="rounded border border-midGray p-3"
                 />
-                {customers.length === 0 ? (
-                  <Text className="font-sans text-sm text-midGray">No customers found.</Text>
-                ) : (
-                  customers.map((customer) => (
-                    <Pressable
-                      key={customer.id}
-                      onPress={() => setSelectedCustomerId(customer.id)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: selectedCustomerId === customer.id }}
-                      className={`rounded-lg border p-3 ${selectedCustomerId === customer.id ? 'border-brand-green' : 'border-midGray'}`}
-                    >
-                      <Text className="font-sans-medium text-sm text-richBlack">{customer.name}</Text>
-                      {customer.phone ? <Text className="font-sans text-xs text-midGray">{customer.phone}</Text> : null}
-                    </Pressable>
-                  ))
-                )}
+                {customers.map((row) => (
+                  <Pressable
+                    key={row.id}
+                    onPress={() => setCustomerId(row.id)}
+                    className={`rounded border p-3 ${customerId === row.id ? "border-brand-green" : "border-midGray"}`}
+                  >
+                    <Text>{row.name}</Text>
+                    <Text className="text-xs text-midGray">{row.phone}</Text>
+                  </Pressable>
+                ))}
               </>
             )}
           </View>
-        )}
-
-        {error ? <Text className="font-sans text-sm text-error">{error}</Text> : null}
+        ) : null}
+        <View className="gap-3 rounded-lg bg-white p-4">
+          <Text className="font-sans-semibold">Prescription (optional)</Text>
+          <TextInput
+            value={prescriptionNo}
+            onChangeText={setPrescriptionNo}
+            placeholder="Prescription number"
+            className="rounded border border-midGray p-3"
+          />
+          <TextInput
+            value={patientName}
+            onChangeText={setPatientName}
+            placeholder="Patient name"
+            className="rounded border border-midGray p-3"
+          />
+          <TextInput
+            value={prescriberName}
+            onChangeText={setPrescriberName}
+            placeholder="Prescriber name"
+            className="rounded border border-midGray p-3"
+          />
+          <Pressable
+            onPress={() => setScannerVisible(true)}
+            className="items-center rounded border border-brand-green p-3"
+          >
+            <Text className="text-brand-green">
+              {imageUri
+                ? "Retake prescription image"
+                : "Attach prescription image"}
+            </Text>
+          </Pressable>
+          {imageUri ? (
+            <Text className="text-xs text-midGray">
+              Image captured. Sale is not blocked by image upload.
+            </Text>
+          ) : null}
+        </View>
+        {error ? <Text className="text-error">{error}</Text> : null}
         <Pressable
-          onPress={handleConfirm}
-          disabled={isSubmitting}
-          accessibilityRole="button"
-          accessibilityLabel="Confirm sale"
-          className="items-center rounded-lg bg-brand-green py-3.5 active:opacity-80 disabled:opacity-50"
+          onPress={confirm}
+          disabled={submitting}
+          accessibilityLabel={
+            quoteConfirmed ? "Confirm refreshed total" : "Confirm sale"
+          }
+          className="items-center rounded-lg bg-brand-green py-4 disabled:opacity-50"
         >
-          <Text className="font-sans-semibold text-base text-white">{isSubmitting ? 'Saving…' : 'Confirm sale'}</Text>
+          <Text className="font-sans-semibold text-white">
+            {submitting
+              ? "Saving…"
+              : quoteConfirmed
+                ? "Confirm refreshed total"
+                : "Confirm sale"}
+          </Text>
         </Pressable>
       </ScrollView>
+      <MedicineTextScanner
+        visible={scannerVisible}
+        mode="prefill"
+        captureOnly
+        onClose={() => setScannerVisible(false)}
+        onTextRecognized={() => undefined}
+        onImageCaptured={setImageUri}
+      />
     </View>
   );
 }

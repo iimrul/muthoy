@@ -99,8 +99,10 @@ function seedSale(
   const prefix = fixture.shopId.slice(0, 8);
   const saleId = `${prefix}-0000-4000-9000-${suffix.padStart(12, '0')}`;
   db.insert(sales).values({
-    id: saleId, shopId: fixture.shopId, invoiceNo: `INV-TEST-${suffix}`, total: asPaisa(total),
+    id: saleId, shopId: fixture.shopId, invoiceNo: `INV-TEST-${suffix}`, subtotal: asPaisa(total), total: asPaisa(total),
     paid: paymentType === 'cash' ? asPaisa(total) : ZERO_PAISA, change: ZERO_PAISA,
+    cashApplied: paymentType === 'cash' ? asPaisa(total) : ZERO_PAISA,
+    creditAmount: paymentType === 'credit' ? asPaisa(total) : ZERO_PAISA,
     paymentType, customerId: paymentType === 'credit' ? fixture.customerId : null,
     staffId: fixture.ownerId, createdAt: now, updatedAt: now,
   }).run();
@@ -157,6 +159,7 @@ beforeAll(() => {
   applyMigration('0007_staff_device_login.sql');
   applyMigration('0008_native_pin_lookup.sql');
   applyMigration('0009_strong_gargoyle.sql');
+  applyMigration('0010_known_ares.sql');
 });
 
 describe('expense recording and its cash impact', () => {

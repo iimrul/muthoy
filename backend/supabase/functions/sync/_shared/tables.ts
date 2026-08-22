@@ -1,9 +1,11 @@
 export const SYNCED_TABLES = [
   "shops", "subscriptions", "roles", "permissions", "users", "user_permissions",
-  "medicines", "batches", "inventory_movements", "customers", "sales",
-  "sale_items", "sales_returns", "suppliers", "purchases", "purchase_items",
-  "purchase_returns", "credits", "expenses", "payments", "cash_drawer",
-  "audit_logs",
+  "shop_b2_settings", "medicines", "batches", "batch_promotions",
+  "inventory_movements", "customers", "sales", "sale_items", "sale_drafts",
+  "sale_draft_items", "sale_attachments", "sale_refunds", "sales_returns",
+  "refund_tenders", "suppliers", "purchases", "purchase_items", "purchase_returns",
+  "credits", "credit_payment_allocations", "credit_reconciliation_states",
+  "expenses", "payments", "cash_drawer", "inventory_imports", "audit_logs",
 ] as const;
 
 export type SyncTableName = typeof SYNCED_TABLES[number];

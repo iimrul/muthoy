@@ -1,16 +1,28 @@
 // SQLite-backed customer directory, credit ledger, and collections.
 
-import { and, eq, like, or } from 'drizzle-orm';
-import { ZERO_PAISA, asPaisa, type Paisa } from '@muthoy/types';
-import { expectedCash } from '../domain/cashFormula';
-import { remainingBalance } from '../domain/credit';
-import { generateId } from '../native/id';
-import { requirePermission } from './auth';
-import { assertBusinessDateOpen, getCashSummarySync } from './cash';
-import { assertSessionLive } from './errors';
-import { db, sqliteConnection } from './client';
-import { cashDrawer, customers, payments, users } from './schema';
-import { recordChange, stampUpdatedAt } from './sync-helpers';
+import { and, asc, eq, gt, like, or } from "drizzle-orm";
+import { ZERO_PAISA, asPaisa, type Paisa } from "@muthoy/types";
+import { dhakaBusinessDate } from "@muthoy/utils";
+import { expectedCash } from "../domain/cashFormula";
+import { remainingBalance } from "../domain/credit";
+import { generateId } from "../native/id";
+import { requirePermission } from "./auth";
+import { assertBusinessDateOpen, getCashSummarySync } from "./cash";
+import { assertSessionLive } from "./errors";
+import { db, sqliteConnection } from "./client";
+import {
+  cashDrawer,
+  creditPaymentAllocations,
+  credits,
+  customers,
+  payments,
+  users,
+} from "./schema";
+import {
+  recordChange,
+  stampUpdatedAt,
+  type SyncOperationGroup,
+} from "./sync-helpers";
 
 export interface CustomerListItem {
   id: string;
@@ -23,13 +35,19 @@ export interface Customer extends CustomerListItem {
   notes: string | null;
 }
 
-export async function listCustomers(shopId: string, query?: string): Promise<CustomerListItem[]> {
+export async function listCustomers(
+  shopId: string,
+  query?: string,
+): Promise<CustomerListItem[]> {
   const search = query?.trim();
   const where = search
     ? and(
         eq(customers.shopId, shopId),
         eq(customers.isDeleted, false),
-        or(like(customers.name, `%${search}%`), like(customers.phone, `%${search}%`)),
+        or(
+          like(customers.name, `%${search}%`),
+          like(customers.phone, `%${search}%`),
+        ),
       )
     : and(eq(customers.shopId, shopId), eq(customers.isDeleted, false));
 
@@ -57,10 +75,12 @@ export interface CreateCustomerInput {
   notes?: string;
 }
 
-export async function createCustomer(input: CreateCustomerInput): Promise<Customer> {
+export async function createCustomer(
+  input: CreateCustomerInput,
+): Promise<Customer> {
   // Standalone customer creation lives on the same owner-only admin surface as
   // the rest of app/credit/* — checked before any row is written.
-  await requirePermission(input.shopId, input.actorUserId, 'credit_management');
+  await requirePermission(input.shopId, input.actorUserId, "credit_management");
 
   const customer: Customer = {
     id: generateId(),
@@ -72,48 +92,72 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
   db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
     const now = new Date().toISOString();
-    const values = { ...customer, shopId: input.shopId, createdAt: now, updatedAt: now };
+    const values = {
+      ...customer,
+      shopId: input.shopId,
+      createdAt: now,
+      updatedAt: now,
+    };
     tx.insert(customers).values(values).run();
-    recordChange(tx, { shopId: input.shopId, table: 'customers', rowId: customer.id, op: 'insert', payload: values });
+    recordChange(tx, {
+      shopId: input.shopId,
+      table: "customers",
+      rowId: customer.id,
+      op: "insert",
+      payload: values,
+    });
   });
   return customer;
 }
 
-export async function getCustomer(shopId: string, actorUserId: string, customerId: string): Promise<Customer> {
-  await requirePermission(shopId, actorUserId, 'credit_view');
-  const customer = db.select({
-    id: customers.id,
-    name: customers.name,
-    phone: customers.phone,
-    address: customers.address,
-    notes: customers.notes,
-  }).from(customers).where(and(
-    eq(customers.id, customerId),
-    eq(customers.shopId, shopId),
-    eq(customers.isDeleted, false),
-  )).get();
+export async function getCustomer(
+  shopId: string,
+  actorUserId: string,
+  customerId: string,
+): Promise<Customer> {
+  await requirePermission(shopId, actorUserId, "credit_view");
+  const customer = db
+    .select({
+      id: customers.id,
+      name: customers.name,
+      phone: customers.phone,
+      address: customers.address,
+      notes: customers.notes,
+    })
+    .from(customers)
+    .where(
+      and(
+        eq(customers.id, customerId),
+        eq(customers.shopId, shopId),
+        eq(customers.isDeleted, false),
+      ),
+    )
+    .get();
 
   if (!customer) {
-    throw new Error('Customer does not belong to this shop');
+    throw new Error("Customer does not belong to this shop");
   }
   return customer;
 }
 
 export interface CreditLedgerRow {
   id: string;
-  type: 'credit_sale' | 'collection';
+  type: "credit_sale" | "collection";
   amount: Paisa;
   createdAt: string;
 }
 
 interface RawCreditLedgerRow {
   id: string;
-  type: 'credit_sale' | 'collection';
+  type: "credit_sale" | "collection";
   amount: number;
   createdAt: string;
 }
 
-function getCustomerLedgerRowsSync(shopId: string, customerId: string): CreditLedgerRow[] {
+function getCustomerLedgerRowsSync(
+  shopId: string,
+  customerId: string,
+): CreditLedgerRow[] {
   const rows = sqliteConnection.getAllSync<RawCreditLedgerRow>(
     `SELECT id, type, amount, createdAt
        FROM (
@@ -137,7 +181,7 @@ export async function getCustomerCreditLedger(
   actorUserId: string,
   customerId: string,
 ): Promise<CreditLedgerRow[]> {
-  await requirePermission(shopId, actorUserId, 'credit_view');
+  await requirePermission(shopId, actorUserId, "credit_view");
   return getCustomerLedgerRowsSync(shopId, customerId);
 }
 
@@ -155,11 +199,11 @@ export async function listCustomersWithBalance(
   actorUserId: string,
   query?: string,
 ): Promise<(Customer & { balance: Paisa })[]> {
-  await requirePermission(shopId, actorUserId, 'credit_view');
+  await requirePermission(shopId, actorUserId, "credit_view");
   const search = query?.trim();
   const searchClause = search
     ? `AND (c.name LIKE $search OR c.phone LIKE $search)`
-    : '';
+    : "";
   const rows = sqliteConnection.getAllSync<CustomerBalanceRow>(
     `SELECT c.id, c.name, c.phone, c.address, c.notes,
             COALESCE((SELECT SUM(cr.amount)
@@ -184,13 +228,8 @@ export async function listCustomersWithBalance(
   return rows.map((row) => ({ ...row, balance: asPaisa(row.balance) }));
 }
 
-// Standalone credit creation is deliberately outside Day 9 scope. Checkout's
-// createSaleTransaction already creates sale-backed credit rows atomically.
-export async function recordCreditSale(_saleId: string, _customerId: string, _amount: Paisa): Promise<void> {
-  throw new Error('TODO: implement credit sale recording (Volume 0 Day 9)');
-}
-
-export type CustomerPaymentMethod = 'cash' | 'bkash' | 'nagad' | 'rocket' | 'card' | 'bank' | 'other';
+export type CustomerPaymentMethod =
+  "cash" | "bkash" | "nagad" | "rocket" | "card" | "bank" | "other";
 
 export interface CollectPaymentInput {
   shopId: string;
@@ -202,50 +241,59 @@ export interface CollectPaymentInput {
   method?: CustomerPaymentMethod;
 }
 
-function localBusinessDate(now: Date): string {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-export async function collectPayment(input: CollectPaymentInput): Promise<void> {
+export async function collectPayment(
+  input: CollectPaymentInput,
+): Promise<void> {
   // Owner-only (Volume 0 Day 11 P0: Staff is sales + inventory-view only).
   // Checked before the transaction opens and against SQLite's role, not the
   // session store, so a Staff/Manager login reaching this by direct
   // navigation writes no payment row, touches no cash drawer, and enqueues
   // nothing to the outbox.
-  await requirePermission(input.shopId, input.staffId, 'credit_management');
+  await requirePermission(input.shopId, input.staffId, "credit_management");
 
   if (!Number.isInteger(input.amount) || input.amount <= ZERO_PAISA) {
-    throw new Error('Collection amount must be a positive whole number of paisa');
+    throw new Error(
+      "Collection amount must be a positive whole number of paisa",
+    );
   }
 
-  const method = input.method ?? 'cash';
+  const method = input.method ?? "cash";
   const now = new Date();
-  const businessDate = localBusinessDate(now);
+  const businessDate = dhakaBusinessDate(now);
 
   // Keep this callback synchronous/no-await: the balance check and payment
   // write rely on sharing one uninterrupted SQLite transaction.
   db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
-    const customer = tx.select({ id: customers.id }).from(customers).where(and(
-      eq(customers.id, input.customerId),
-      eq(customers.shopId, input.shopId),
-      eq(customers.isDeleted, false),
-    )).get();
+    const customer = tx
+      .select({ id: customers.id })
+      .from(customers)
+      .where(
+        and(
+          eq(customers.id, input.customerId),
+          eq(customers.shopId, input.shopId),
+          eq(customers.isDeleted, false),
+        ),
+      )
+      .get();
     if (!customer) {
-      throw new Error('Customer does not belong to this shop');
+      throw new Error("Customer does not belong to this shop");
     }
 
-    const staff = tx.select({ id: users.id }).from(users).where(and(
-      eq(users.id, input.staffId),
-      eq(users.shopId, input.shopId),
-      eq(users.isActive, true),
-      eq(users.isDeleted, false),
-    )).get();
+    const staff = tx
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        and(
+          eq(users.id, input.staffId),
+          eq(users.shopId, input.shopId),
+          eq(users.isActive, true),
+          eq(users.isDeleted, false),
+        ),
+      )
+      .get();
     if (!staff) {
-      throw new Error('Active staff session does not belong to this shop');
+      throw new Error("Active staff session does not belong to this shop");
     }
 
     // Codex-flagged gap: creditCollected in a closed day's EOD snapshot sums
@@ -253,39 +301,141 @@ export async function collectPayment(input: CollectPaymentInput): Promise<void> 
     // must be blocked too, not just the cash-drawer-touching branch below.
     assertBusinessDateOpen(tx, input.shopId, businessDate);
 
-    const balance = remainingBalance(getCustomerLedgerRowsSync(input.shopId, input.customerId));
+    const balance = remainingBalance(
+      getCustomerLedgerRowsSync(input.shopId, input.customerId),
+    );
     if (input.amount > balance) {
-      throw new Error('Collection amount exceeds outstanding balance');
+      throw new Error("Collection amount exceeds outstanding balance");
     }
 
     const paymentId = generateId();
     const paymentNow = new Date().toISOString();
+    const openCredits = tx
+      .select({ id: credits.id, balance: credits.balance })
+      .from(credits)
+      .where(
+        and(
+          eq(credits.shopId, input.shopId),
+          eq(credits.customerId, input.customerId),
+          eq(credits.isDeleted, false),
+          gt(credits.balance, ZERO_PAISA),
+        ),
+      )
+      .orderBy(asc(credits.createdAt), asc(credits.id))
+      .all();
+    let plannedRemaining = input.amount;
+    let allocationCount = 0;
+    for (const credit of openCredits) {
+      if (plannedRemaining === ZERO_PAISA) break;
+      plannedRemaining = asPaisa(
+        plannedRemaining - Math.min(plannedRemaining, credit.balance),
+      );
+      allocationCount += 1;
+    }
+    if (plannedRemaining !== ZERO_PAISA)
+      throw new Error("Collection could not be allocated to sale credits");
+    const existingDrawer =
+      method === "cash"
+        ? tx
+            .select({ id: cashDrawer.id, isDeleted: cashDrawer.isDeleted })
+            .from(cashDrawer)
+            .where(
+              and(
+                eq(cashDrawer.shopId, input.shopId),
+                eq(cashDrawer.businessDate, businessDate),
+              ),
+            )
+            .get()
+        : undefined;
+    if (existingDrawer?.isDeleted)
+      throw new Error(
+        "Today's cash drawer row is deleted and cannot be reused",
+      );
+    const expectedCount =
+      1 +
+      allocationCount * 2 +
+      (method === "cash" ? (existingDrawer ? 1 : 2) : 0);
+    let sequence = 0;
+    const operation = (): SyncOperationGroup => ({
+      id: paymentId,
+      kind: "credit_collection",
+      sequence: sequence++,
+      expectedCount,
+    });
     const paymentValues = {
       id: paymentId,
       shopId: input.shopId,
-      type: 'customer_payment' as const,
+      type: "customer_payment" as const,
       partyId: input.customerId,
       amount: input.amount,
       method,
       refId: null,
       createdBy: input.staffId,
-      createdAt: paymentNow, updatedAt: paymentNow,
+      createdAt: paymentNow,
+      updatedAt: paymentNow,
     };
     tx.insert(payments).values(paymentValues).run();
-    recordChange(tx, { shopId: input.shopId, table: 'payments', rowId: paymentId, op: 'insert', payload: paymentValues });
+    recordChange(tx, {
+      shopId: input.shopId,
+      table: "payments",
+      rowId: paymentId,
+      op: "insert",
+      payload: paymentValues,
+      operation: operation(),
+    });
 
-    if (method !== 'cash') {
+    let remainingToAllocate = input.amount;
+    for (const credit of openCredits) {
+      if (remainingToAllocate === ZERO_PAISA) break;
+      const amount = asPaisa(Math.min(remainingToAllocate, credit.balance));
+      const allocationId = generateId();
+      const allocationValues = {
+        id: allocationId,
+        shopId: input.shopId,
+        customerId: input.customerId,
+        paymentId,
+        creditId: credit.id,
+        amount,
+        createdAt: paymentNow,
+        updatedAt: paymentNow,
+      };
+      tx.insert(creditPaymentAllocations).values(allocationValues).run();
+      recordChange(tx, {
+        shopId: input.shopId,
+        table: "credit_payment_allocations",
+        rowId: allocationId,
+        op: "insert",
+        payload: allocationValues,
+        operation: operation(),
+      });
+      const creditValues = stampUpdatedAt({
+        balance: asPaisa(credit.balance - amount),
+        isDirty: true,
+      });
+      tx.update(credits)
+        .set(creditValues)
+        .where(and(eq(credits.id, credit.id), eq(credits.shopId, input.shopId)))
+        .run();
+      recordChange(tx, {
+        shopId: input.shopId,
+        table: "credits",
+        rowId: credit.id,
+        op: "update",
+        payload: creditValues,
+        operation: operation(),
+      });
+      remainingToAllocate = asPaisa(remainingToAllocate - amount);
+    }
+    if (remainingToAllocate !== ZERO_PAISA) {
+      throw new Error("Collection could not be allocated to sale credits");
+    }
+
+    if (method !== "cash") {
+      if (sequence !== expectedCount)
+        throw new Error("Credit collection operation count mismatch");
       return;
     }
 
-    const existingDrawer = tx.select({ id: cashDrawer.id, isDeleted: cashDrawer.isDeleted })
-      .from(cashDrawer).where(and(
-        eq(cashDrawer.shopId, input.shopId),
-        eq(cashDrawer.businessDate, businessDate),
-      )).get();
-    if (existingDrawer?.isDeleted) {
-      throw new Error("Today's cash drawer row is deleted and cannot be reused");
-    }
     const drawerId = existingDrawer?.id ?? generateId();
     if (!existingDrawer) {
       const drawerValues = {
@@ -294,19 +444,44 @@ export async function collectPayment(input: CollectPaymentInput): Promise<void> 
         businessDate,
         openingCash: ZERO_PAISA,
         openedBy: input.staffId,
-        openedAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString(),
+        openedAt: now.toISOString(),
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
       };
       tx.insert(cashDrawer).values(drawerValues).run();
-      recordChange(tx, { shopId: input.shopId, table: 'cash_drawer', rowId: drawerId, op: 'insert', payload: drawerValues });
+      recordChange(tx, {
+        shopId: input.shopId,
+        table: "cash_drawer",
+        rowId: drawerId,
+        op: "insert",
+        payload: drawerValues,
+        operation: operation(),
+      });
     }
 
-    const closingExpected = expectedCash(getCashSummarySync(input.shopId, businessDate));
+    const closingExpected = expectedCash(
+      getCashSummarySync(input.shopId, businessDate),
+    );
     const drawerValues = stampUpdatedAt({ closingExpected, isDirty: true });
-    const drawerUpdate = tx.update(cashDrawer).set(drawerValues)
-      .where(and(eq(cashDrawer.id, drawerId), eq(cashDrawer.shopId, input.shopId))).run();
+    const drawerUpdate = tx
+      .update(cashDrawer)
+      .set(drawerValues)
+      .where(
+        and(eq(cashDrawer.id, drawerId), eq(cashDrawer.shopId, input.shopId)),
+      )
+      .run();
     if (drawerUpdate.changes !== 1) {
-      throw new Error('Cash drawer could not be updated');
+      throw new Error("Cash drawer could not be updated");
     }
-    recordChange(tx, { shopId: input.shopId, table: 'cash_drawer', rowId: drawerId, op: 'update', payload: drawerValues });
+    recordChange(tx, {
+      shopId: input.shopId,
+      table: "cash_drawer",
+      rowId: drawerId,
+      op: "update",
+      payload: drawerValues,
+      operation: operation(),
+    });
+    if (sequence !== expectedCount)
+      throw new Error("Credit collection operation count mismatch");
   });
 }

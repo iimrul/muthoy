@@ -21,7 +21,10 @@ import {
 import { StandardHeader } from "../../components/ui/StandardHeader";
 import {
   changeOwnPin,
+  getB2Settings,
   getShopProfile,
+  updateB2Settings,
+  type B2Settings,
   updateShopProfile,
   type ShopProfile,
 } from "../../db/settings";
@@ -103,13 +106,20 @@ export default function SettingsScreen() {
   const { t } = useI18n();
   const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [b2Settings, setB2Settings] = useState<B2Settings | null>(null);
+  const [b2SettingsOpen, setB2SettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     if (!session || session.role !== "owner") return;
     try {
-      setProfile(await getShopProfile(session.shopId, session.userId));
+      const [nextProfile, nextB2Settings] = await Promise.all([
+        getShopProfile(session.shopId, session.userId),
+        getB2Settings(session.shopId),
+      ]);
+      setProfile(nextProfile);
+      setB2Settings(nextB2Settings);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Settings failed");
@@ -164,8 +174,16 @@ export default function SettingsScreen() {
             label={t("printer")}
             onPress={() => router.push("/settings/printer-settings")}
           />
-          <Row label={t("lowStockExpiryRules")} value="B2" disabled />
-          <Row label={t("creditRefundRules")} value="B2/B3" disabled />
+          <Row
+            label={t("lowStockExpiryRules")}
+            value={b2Settings ? `${b2Settings.lowStockDefault} · ${b2Settings.expiryNearDays}/${b2Settings.expiryFarDays}d` : "…"}
+            onPress={() => setB2SettingsOpen(true)}
+          />
+          <Row
+            label="Refund window"
+            value={b2Settings ? `${b2Settings.maxRefundDays} days` : "…"}
+            onPress={() => setB2SettingsOpen(true)}
+          />
           <Row label={t("closingTax")} value="B3" disabled />
         </View>
         <View className="rounded-xl bg-white px-4">
@@ -209,6 +227,113 @@ export default function SettingsScreen() {
           onClose={() => setPinOpen(false)}
         />
       ) : null}
+      {b2Settings && b2SettingsOpen ? (
+        <B2SettingsModal
+          visible
+          settings={b2Settings}
+          session={session}
+          onClose={() => setB2SettingsOpen(false)}
+          onSaved={() => {
+            setB2SettingsOpen(false);
+            void load();
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function B2SettingsModal({
+  visible,
+  settings,
+  session,
+  onClose,
+  onSaved,
+}: {
+  visible: boolean;
+  settings: B2Settings;
+  session: Session;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState(settings);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (draft.expiryNearDays >= draft.expiryFarDays) {
+      setError("Near expiry must be less than Far expiry.");
+      return;
+    }
+    const guard = captureSessionFor(session);
+    if (!guard) return;
+    setSaving(true);
+    try {
+      await updateB2Settings(session.shopId, session.userId, draft, guard.isStillActive);
+      void triggerSyncNow(session.shopId);
+      guard.ifLive(onSaved);
+    } catch (cause) {
+      guard.ifLive(() => setError(cause instanceof Error ? cause.message : "Save failed"));
+    } finally {
+      guard.ifLive(() => setSaving(false));
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View className="flex-1 items-center justify-center bg-black/50 p-5">
+        <View className="w-full gap-4 rounded-2xl bg-white p-5">
+          <Text className="font-sans-bold text-lg">Sales & inventory rules</Text>
+          {error ? <Text className="font-sans text-sm text-error">{error}</Text> : null}
+          <NumberSetting
+            label="Low-stock fallback"
+            value={draft.lowStockDefault}
+            onChange={(lowStockDefault) => setDraft({ ...draft, lowStockDefault })}
+          />
+          <NumberSetting
+            label="Near expiry (days)"
+            value={draft.expiryNearDays}
+            onChange={(expiryNearDays) => setDraft({ ...draft, expiryNearDays })}
+          />
+          <NumberSetting
+            label="Far expiry (days)"
+            value={draft.expiryFarDays}
+            onChange={(expiryFarDays) => setDraft({ ...draft, expiryFarDays })}
+          />
+          <NumberSetting
+            label="Refund window (days)"
+            value={draft.maxRefundDays}
+            onChange={(maxRefundDays) => setDraft({ ...draft, maxRefundDays })}
+          />
+          <View className="flex-row gap-2">
+            <Pressable onPress={onClose} className="flex-1 items-center rounded-xl bg-brand-softGreen p-3">
+              <Text>Cancel</Text>
+            </Pressable>
+            <Pressable disabled={saving} onPress={() => void save()} className="flex-1 items-center rounded-xl bg-brand-green p-3 disabled:opacity-50">
+              <Text className="text-white">{saving ? "Saving…" : "Save"}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function NumberSetting({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+  return (
+    <View className="gap-2">
+      <Text className="font-sans-medium text-sm text-richBlack">{label}</Text>
+      <TextInput
+        value={String(value)}
+        onChangeText={(next) => {
+          const parsed = Number.parseInt(next, 10);
+          if (Number.isInteger(parsed) && parsed >= 0) onChange(parsed);
+        }}
+        selectTextOnFocus
+        keyboardType="number-pad"
+        accessibilityLabel={label}
+        className="rounded-xl border border-midGray p-3 font-mono text-base text-richBlack"
+      />
     </View>
   );
 }

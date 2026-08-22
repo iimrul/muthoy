@@ -28,6 +28,7 @@ beforeAll(() => {
     '0007_staff_device_login.sql',
     '0008_native_pin_lookup.sql',
     '0009_strong_gargoyle.sql',
+    '0010_known_ares.sql',
   ]) migrate(name);
 });
 
@@ -70,7 +71,7 @@ describe('Manager Staff Active metric', () => {
     await recordSuccessfulLogin(staffSession);
     sqliteConnection.execSync(`
       INSERT INTO audit_logs (id, shop_id, actor_id, action, created_at, updated_at) VALUES
-        ('login-old', '${SHOP_ID}', '${STAFF_TWO_ID}', 'user_login', datetime('now', 'localtime', '-1 day'), datetime('now', 'localtime')),
+        ('login-old', '${SHOP_ID}', '${STAFF_TWO_ID}', 'user_login', '2000-01-01T00:00:00.000Z', datetime('now', 'localtime')),
         ('login-self', '${SHOP_ID}', '${MANAGER_ID}', 'user_login', datetime('now', 'localtime'), datetime('now', 'localtime')),
         ('login-other-shop', '${OTHER_SHOP_ID}', '82000000-0000-4000-8000-000000000002', 'user_login', datetime('now', 'localtime'), datetime('now', 'localtime'));
     `);

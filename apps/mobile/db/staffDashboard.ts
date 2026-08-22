@@ -99,11 +99,21 @@ interface RawPerformance extends Omit<
 
 export type PerformanceRange = "today" | "week" | "all";
 
+export interface StaffPerformanceOptions {
+  /**
+   * Keep only staff who actually sold in the range. The Owner Dashboard's
+   * "Today's Active Staff" strip needs this; the roster views (Staff
+   * Management, Staff Detail) still want every active member listed at zero.
+   */
+  soldOnly?: boolean;
+}
+
 export async function getStaffPerformance(
   shopId: string,
   actorUserId: string,
   range: PerformanceRange = "today",
   targetUserId?: string,
+  options: StaffPerformanceOptions = {},
 ): Promise<StaffPerformanceRow[]> {
   const context = await getActiveSessionContext(actorUserId, shopId);
   if (
@@ -119,16 +129,22 @@ export async function getStaffPerformance(
       : range === "week"
         ? `AND date(s.created_at, 'localtime') >= date('now', 'localtime', '-6 days')`
         : "";
+  // Every completed sale counts, whatever it was paid with. This used to be
+  // `CASE WHEN s.payment_type = 'cash'`, which silently valued a staff
+  // member's credit, split, and free sales at zero — and disagreed with
+  // getStaffDashboard above, so the same person's own screen showed a
+  // different number than the Owner saw for them.
   const rows = sqliteConnection.getAllSync<RawPerformance>(
     `SELECT u.id AS userId, u.name, r.name AS role,
-            COALESCE(SUM(CASE WHEN s.payment_type = 'cash' THEN s.total ELSE 0 END), 0) AS sales,
-            COALESCE(SUM(CASE WHEN s.payment_type = 'cash' THEN 1 ELSE 0 END), 0) AS transactionCount,
-            COALESCE(AVG(CASE WHEN s.payment_type = 'cash' THEN s.total END), 0) AS averageBill
+            COALESCE(SUM(s.total), 0) AS sales,
+            COUNT(s.id) AS transactionCount,
+            COALESCE(AVG(s.total), 0) AS averageBill
        FROM users u JOIN roles r ON r.id = u.role_id
        LEFT JOIN sales s ON s.staff_id = u.id AND s.shop_id = u.shop_id AND s.is_deleted = 0 ${dateClause}
       WHERE u.shop_id = $shopId AND u.is_active = 1 AND u.is_deleted = 0 AND r.name IN ('staff','manager')
         ${targetUserId ? "AND u.id = $targetUserId" : ""}
       GROUP BY u.id, u.name, r.name
+      ${options.soldOnly ? "HAVING COUNT(s.id) > 0" : ""}
       ORDER BY sales DESC, transactionCount DESC, u.name ASC`,
     targetUserId
       ? { $shopId: shopId, $targetUserId: targetUserId }

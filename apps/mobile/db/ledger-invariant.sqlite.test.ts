@@ -85,6 +85,7 @@ beforeAll(() => {
   applyMigration('0007_staff_device_login.sql');
   applyMigration('0008_native_pin_lookup.sql');
   applyMigration('0009_strong_gargoyle.sql');
+  applyMigration('0010_known_ares.sql');
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: OWNER_ID, name: 'Invariant Shop', phone: '01700000902', createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: 'owner', isSystem: true, createdAt: NOW, updatedAt: NOW }).run();

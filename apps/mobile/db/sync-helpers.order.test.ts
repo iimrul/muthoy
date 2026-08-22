@@ -20,7 +20,7 @@ function hydrationOrder(): string[] {
 
 function syncedSchemaTables(): string[] {
   const localOnly = new Set(["notifications", "notification_receipts", "sync_queue", "conflict_queue"]);
-  return [...schemaSource.matchAll(/sqliteTable\(["']([^"']+)["']/g)]
+  return [...schemaSource.matchAll(/sqliteTable\(\s*["']([^"']+)["']/g)]
     .map((match) => match[1])
     .filter((table): table is string => table !== undefined)
     .filter((table) => !localOnly.has(table));
@@ -34,12 +34,12 @@ interface ForeignKeyEdge {
 function foreignKeyEdges(): ForeignKeyEdge[] {
   const variableToTable = new Map(
     [
-      ...schemaSource.matchAll(/export const (\w+) = sqliteTable\(["']([^"']+)["']/g),
+      ...schemaSource.matchAll(/export const (\w+) = sqliteTable\(\s*["']([^"']+)["']/g),
     ].map((match) => [match[1], match[2]] as const),
   );
   const edges: ForeignKeyEdge[] = [];
   const tableBlocks = schemaSource.matchAll(
-    /export const (\w+) = sqliteTable\(["']([^"']+)["'], \{([\s\S]*?)\n\}, \(t\)/g,
+    /export const (\w+) = sqliteTable\(\s*["']([^"']+)["'],\s*\{([\s\S]*?)\n\s*\},\s*\(t\)/g,
   );
   for (const block of tableBlocks) {
     const source = block[2];
@@ -58,8 +58,8 @@ function foreignKeyEdges(): ForeignKeyEdge[] {
 describe("HYDRATION_TABLE_ORDER", () => {
   it("contains every syncable table exactly once", () => {
     const order = hydrationOrder();
-    // 22 since migration 0007 added user_permissions.
-    expect(order).toHaveLength(22);
+    // B2 adds ten synced settings/sale/refund/import tables.
+    expect(order).toHaveLength(32);
     expect(new Set(order).size).toBe(order.length);
     expect(new Set(order)).toEqual(new Set(syncedSchemaTables()));
   });

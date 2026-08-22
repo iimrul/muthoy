@@ -312,8 +312,8 @@ export function getCashSummarySync(shopId: string, businessDate: string): CashFo
     `SELECT
       COALESCE((SELECT opening_cash FROM cash_drawer
         WHERE shop_id = $shopId AND business_date = $businessDate AND is_deleted = 0 LIMIT 1), 0) AS openingCash,
-      COALESCE((SELECT SUM(total) FROM sales
-        WHERE shop_id = $shopId AND payment_type = 'cash' AND is_deleted = 0
+      COALESCE((SELECT SUM(cash_applied) FROM sales
+        WHERE shop_id = $shopId AND cash_applied > 0 AND is_deleted = 0
           AND date(created_at, 'localtime') = $businessDate), 0) AS cashSales,
       COALESCE((SELECT SUM(amount) FROM payments
         WHERE shop_id = $shopId AND type = 'customer_payment' AND method = 'cash' AND is_deleted = 0
@@ -321,8 +321,13 @@ export function getCashSummarySync(shopId: string, businessDate: string): CashFo
       COALESCE((SELECT SUM(amount) FROM expenses
         WHERE shop_id = $shopId AND is_deleted = 0
           AND date(created_at, 'localtime') = $businessDate), 0) AS expenses,
-      COALESCE((SELECT SUM(refund_amount) FROM sales_returns
-        WHERE shop_id = $shopId AND refund_method = 'cash' AND is_deleted = 0
+      COALESCE((SELECT SUM(amount) FROM refund_tenders
+        WHERE shop_id = $shopId
+          AND (kind = 'cash' OR (kind = 'collection_refund' AND method = 'cash'))
+          AND is_deleted = 0
+          AND date(created_at, 'localtime') = $businessDate), 0)
+      + COALESCE((SELECT SUM(refund_amount) FROM sales_returns
+        WHERE shop_id = $shopId AND refund_id IS NULL AND refund_method = 'cash' AND is_deleted = 0
           AND date(created_at, 'localtime') = $businessDate), 0) AS refunds,
       COALESCE((SELECT SUM(amount) FROM payments
         WHERE shop_id = $shopId AND type = 'supplier_payment' AND method = 'cash' AND is_deleted = 0

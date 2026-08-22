@@ -22,10 +22,11 @@ export async function pull(caller: Caller, body: Record<string, unknown>) {
   // hard as a write: a deactivated staff member's still-valid token must not
   // keep downloading sales, prices and customer balances after the owner has
   // revoked them.
-  await assertCallerCurrent(caller);
+  const actor = await assertCallerCurrent(caller);
   const since = parseCursor(body.since);
-  const { data, error } = await supabaseAdmin.rpc("sync_pull_changes", {
-    p_shop_id: shopId, p_since_updated_at: since?.updatedAt ?? null,
+  const { data, error } = await supabaseAdmin.rpc("sync_pull_changes_b2", {
+    p_shop_id: shopId, p_app_user_id: actor.appUserId,
+    p_since_updated_at: since?.updatedAt ?? null,
     p_since_table: since?.tableName ?? null, p_since_id: since?.rowId ?? null,
     p_limit: PAGE_SIZE,
   });

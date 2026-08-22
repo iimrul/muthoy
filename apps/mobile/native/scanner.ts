@@ -13,9 +13,6 @@
 //   - Add Medicine: prefills form fields, REQUIRES user confirmation before
 //     saving — never auto-saves a scanned value (Volume 4 OCR).
 //
-// OCR implemented (docs/plans/ocr.md). Barcode remains a P1 stub — not
-// implemented this pass, per the explicit "OCR only" scope for this change.
-
 import { recognizeText } from '@infinitered/react-native-mlkit-text-recognition';
 
 export interface BarcodeScanResult {
@@ -23,9 +20,12 @@ export interface BarcodeScanResult {
   format: string;
 }
 
-// TODO(P1): ML Kit barcode scanning API.
-export async function scanBarcode(): Promise<BarcodeScanResult | null> {
-  throw new Error('TODO: implement ML Kit barcode scanning (P1 — post-beta, Volume 4 BARCODE)');
+// expo-camera's CameraView delegates barcode recognition to the platform ML
+// Kit scanner. Keep normalization in native/ so components never depend on a
+// native event shape and blank/whitespace payloads cannot reach a DB lookup.
+export function scanBarcode(data: string, format: string): BarcodeScanResult | null {
+  const normalized = data.trim();
+  return normalized ? { data: normalized, format } : null;
 }
 
 export interface TextScanResult {

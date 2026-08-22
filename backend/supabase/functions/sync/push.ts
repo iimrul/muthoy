@@ -253,6 +253,12 @@ export async function push(caller: Caller, body: Record<string, unknown>) {
   // revoked device cannot land the first half of a batch.
   const record = await assertCallerCurrent(caller);
   const appUserId = record.appUserId;
+  const deviceId =
+    typeof body.deviceId === "string" &&
+    body.deviceId.length > 0 &&
+    body.deviceId.length <= 200
+      ? body.deviceId
+      : null;
   const rows = parseRows(body.rows);
   const results = [];
   let halted = false;
@@ -282,6 +288,36 @@ export async function push(caller: Caller, body: Record<string, unknown>) {
         rejection(row.queueId, "permanent", "rowId does not match payload.id"),
       );
       halted = true;
+      continue;
+    }
+    const movementNeedsGroup =
+      row.tableName === "inventory_movements" &&
+      ["sale", "return", "csv_import"].includes(String(row.payload.reason));
+    const customerPaymentNeedsGroup =
+      row.tableName === "payments" && row.payload.type === "customer_payment";
+    if (
+      [
+        "sales",
+        "sale_items",
+        "sale_refunds",
+        "sales_returns",
+        "refund_tenders",
+        "inventory_imports",
+        "credits",
+        "credit_payment_allocations",
+        "sale_drafts",
+        "sale_draft_items",
+      ].includes(String(row.tableName)) ||
+      customerPaymentNeedsGroup ||
+      movementNeedsGroup
+    ) {
+      results.push(
+        rejection(
+          row.queueId,
+          "permanent",
+          "Row requires an atomic operation group",
+        ),
+      );
       continue;
     }
     const authorization = await authorizeRow(
@@ -323,6 +359,7 @@ export async function push(caller: Caller, body: Record<string, unknown>) {
       // whether the caller may edit this particular user, and whether an
       // attributed row names somebody other than the caller.
       p_caller_user_id: appUserId,
+      p_device_id: deviceId,
     });
     if (error) {
       const disposition = classifySyncSqlError(error.code);

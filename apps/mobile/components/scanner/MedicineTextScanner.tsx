@@ -16,7 +16,7 @@ import {
   ScannerCamera,
   type ScannerCameraHandle,
 } from "../../native/ScannerCamera";
-import { scanText } from "../../native/scanner";
+import { scanBarcode, scanText } from "../../native/scanner";
 import { useI18n } from "../../state/localeStore";
 
 // components/scanner/MedicineTextScanner.tsx — polished, reusable full-screen
@@ -36,7 +36,11 @@ export interface MedicineTextScannerProps {
   visible: boolean;
   mode: ScannerMode;
   onClose: () => void;
-  onTextRecognized: (recognizedText: string) => void;
+  onTextRecognized: (recognizedText: string) => void | Promise<void>;
+  onBarcodeRecognized?: (data: string, format: string) => void | Promise<void>;
+  keepOpenOnResult?: boolean;
+  captureOnly?: boolean;
+  onImageCaptured?: (uri: string) => void | Promise<void>;
 }
 
 type CaptureState = "ready" | "capturing" | "processing" | "error";
@@ -46,6 +50,10 @@ export function MedicineTextScanner({
   mode,
   onClose,
   onTextRecognized,
+  onBarcodeRecognized,
+  keepOpenOnResult = false,
+  captureOnly = false,
+  onImageCaptured,
 }: MedicineTextScannerProps) {
   const { t } = useI18n();
   const cameraRef = useRef<ScannerCameraHandle>(null);
@@ -61,6 +69,7 @@ export function MedicineTextScanner({
   // in-place retry instead of forcing the user to close and reopen the whole
   // modal (docs/plans/ocr.md — "no dead scanner state").
   const [cameraInstanceKey, setCameraInstanceKey] = useState(0);
+  const barcodeLockedRef = useRef(false);
 
   // Resets before calling onClose (rather than reacting to `visible` via an
   // effect) so every exit path leaves state clean for the next open, with no
@@ -111,19 +120,55 @@ export function MedicineTextScanner({
 
     setCaptureState("processing");
     try {
+      if (captureOnly) {
+        await onImageCaptured?.(uri);
+        if (keepOpenOnResult) setCaptureState("ready");
+        else resetAndClose();
+        return;
+      }
       const result = await scanText(uri);
       if (!result) {
         setCaptureState("error");
         setErrorMessage(t("cameraNoText"));
         return;
       }
-      onTextRecognized(result.recognizedText);
-      resetAndClose();
+      await onTextRecognized(result.recognizedText);
+      if (keepOpenOnResult) {
+        setCaptureState("ready");
+      } else {
+        resetAndClose();
+      }
     } catch {
       setCaptureState("error");
       setErrorMessage(t("cameraReadFailed"));
     }
-  }, [onTextRecognized, resetAndClose, t]);
+  }, [captureOnly, keepOpenOnResult, onImageCaptured, onTextRecognized, resetAndClose, t]);
+
+  const handleBarcode = useCallback(
+    async ({ data, type }: { data: string; type: string }) => {
+      if (!onBarcodeRecognized || barcodeLockedRef.current || captureState !== "ready") return;
+      const result = scanBarcode(data, type);
+      if (!result) return;
+      barcodeLockedRef.current = true;
+      setCaptureState("processing");
+      try {
+        await onBarcodeRecognized(result.data, result.format);
+        if (keepOpenOnResult) {
+          setCaptureState("ready");
+          setTimeout(() => {
+            barcodeLockedRef.current = false;
+          }, 900);
+        } else {
+          resetAndClose();
+        }
+      } catch {
+        barcodeLockedRef.current = false;
+        setCaptureState("error");
+        setErrorMessage(t("scanSearchFailed"));
+      }
+    },
+    [captureState, keepOpenOnResult, onBarcodeRecognized, resetAndClose, t],
+  );
 
   const handleRetry = useCallback(() => {
     setCaptureState("ready");
@@ -146,6 +191,8 @@ export function MedicineTextScanner({
           key={cameraInstanceKey}
           ref={cameraRef}
           onPermissionStateChange={setPermissionState}
+          barcodeEnabled={Boolean(onBarcodeRecognized)}
+          onBarcodeScanned={(result) => void handleBarcode(result)}
         />
 
         <View className="absolute inset-0">
@@ -235,9 +282,14 @@ export function MedicineTextScanner({
             ) : null}
 
             {permissionState === "granted" && captureState === "ready" ? (
-              <Text className="text-center font-sans text-sm text-white/80">
-                {t(mode === "lookup" ? "cameraLookup" : "cameraPrefill")}
-              </Text>
+              <View className="gap-1">
+                <Text className="text-center font-sans text-sm text-white/80">
+                  {t(mode === "lookup" ? "cameraLookup" : "cameraPrefill")}
+                </Text>
+                {onBarcodeRecognized ? (
+                  <Text className="text-center font-sans text-xs text-white/60">Point at a barcode, or capture text.</Text>
+                ) : null}
+              </View>
             ) : null}
 
             {permissionState === "granted" &&

@@ -2,7 +2,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { batches, inventoryMovements } from './schema';
 import { db } from './client';
 import { generateId } from '../native/id';
-import { recordChange } from './sync-helpers';
+import { recordChange, type SyncOperationGroup } from './sync-helpers';
 
 // db/stockLedger.ts — the ONLY way stock changes, on every device.
 //
@@ -24,11 +24,13 @@ import { recordChange } from './sync-helpers';
 // Re-delivery conflicts on the primary key, inserts nothing, and therefore
 // never fires the apply trigger a second time.
 
-export type StockChangeReason = 'sale' | 'purchase' | 'return' | 'adjustment';
+export type StockChangeReason = 'sale' | 'purchase' | 'return' | 'adjustment' | 'csv_import' | 'expiry_disposal' | 'reconciliation';
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export interface StockMovementInput {
+  /** Deterministic identity for replay-safe grouped operations such as refunds. */
+  movementId?: string;
   shopId: string;
   batchId: string;
   /** Signed delta. Negative consumes stock, positive adds it. Never zero. */
@@ -37,6 +39,7 @@ export interface StockMovementInput {
   /** The sale / purchase / return row this movement accounts for. */
   refId?: string | null;
   createdBy: string;
+  operation?: SyncOperationGroup;
 }
 
 /**
@@ -95,7 +98,7 @@ export function recordStockMovement(tx: DbTransaction, input: StockMovementInput
     throw new Error(`Stock movement for batch ${input.batchId} must be a non-zero integer delta`);
   }
 
-  const movementId = generateId();
+  const movementId = input.movementId ?? generateId();
   const now = new Date().toISOString();
   const values = {
     id: movementId,
@@ -116,6 +119,7 @@ export function recordStockMovement(tx: DbTransaction, input: StockMovementInput
     rowId: movementId,
     op: 'insert',
     payload: values,
+    operation: input.operation,
   });
   return movementId;
 }
@@ -177,7 +181,7 @@ export function addStock(
  */
 export function adjustStock(
   tx: DbTransaction,
-  input: Omit<StockMovementInput, 'reason'> & { reason?: Extract<StockChangeReason, 'adjustment' | 'return'> },
+  input: Omit<StockMovementInput, 'reason'> & { reason?: Extract<StockChangeReason, 'adjustment' | 'return' | 'expiry_disposal' | 'reconciliation'> },
 ): string {
   return recordStockMovement(tx, { ...input, reason: input.reason ?? 'adjustment' });
 }

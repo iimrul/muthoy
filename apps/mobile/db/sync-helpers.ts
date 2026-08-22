@@ -2,11 +2,15 @@ import { and, asc, count, eq, max } from "drizzle-orm";
 import { db } from "./client";
 import {
   auditLogs,
+  batchPromotions,
   batches,
   cashDrawer,
+  creditPaymentAllocations,
+  creditReconciliationStates,
   credits,
   customers,
   expenses,
+  inventoryImports,
   inventoryMovements,
   medicines,
   payments,
@@ -14,10 +18,16 @@ import {
   purchaseItems,
   purchaseReturns,
   purchases,
+  refundTenders,
   roles,
+  saleAttachments,
+  saleDraftItems,
+  saleDrafts,
   saleItems,
+  saleRefunds,
   sales,
   salesReturns,
+  shopB2Settings,
   shops,
   subscriptions,
   suppliers,
@@ -34,21 +44,31 @@ export const TABLE_REGISTRY = {
   permissions,
   users,
   user_permissions: userPermissions,
+  shop_b2_settings: shopB2Settings,
   medicines,
   batches,
+  batch_promotions: batchPromotions,
   inventory_movements: inventoryMovements,
   customers,
   sales,
   sale_items: saleItems,
+  sale_drafts: saleDrafts,
+  sale_draft_items: saleDraftItems,
+  sale_attachments: saleAttachments,
+  sale_refunds: saleRefunds,
   sales_returns: salesReturns,
+  refund_tenders: refundTenders,
   suppliers,
   purchases,
   purchase_items: purchaseItems,
   purchase_returns: purchaseReturns,
   credits,
+  credit_payment_allocations: creditPaymentAllocations,
+  credit_reconciliation_states: creditReconciliationStates,
   expenses,
   payments,
   cash_drawer: cashDrawer,
+  inventory_imports: inventoryImports,
   audit_logs: auditLogs,
 } as const;
 
@@ -68,21 +88,31 @@ export const HYDRATION_TABLE_ORDER = [
   // After `users` — every row points at one, so a fresh device that applied an
   // override before its user would hit the foreign key and roll the page back.
   "user_permissions",
+  "shop_b2_settings",
   "medicines",
   "suppliers",
   "customers",
   "batches",
+  "batch_promotions",
   "purchases",
   "purchase_items",
   "sales",
+  "sale_drafts",
+  "sale_draft_items",
   "sale_items",
+  "sale_attachments",
+  "sale_refunds",
   "sales_returns",
+  "refund_tenders",
   "purchase_returns",
   "inventory_movements",
   "credits",
   "payments",
+  "credit_payment_allocations",
+  "credit_reconciliation_states",
   "expenses",
   "cash_drawer",
+  "inventory_imports",
   "audit_logs",
 ] as const satisfies readonly SyncTableName[];
 export type SyncOperation = "insert" | "update" | "delete";
@@ -125,6 +155,24 @@ export interface PendingSyncRow {
   op: SyncOperation;
   payload: string;
   attempts: number;
+  operationGroupId: string | null;
+  operationKind: string | null;
+  operationSequence: number | null;
+  operationExpectedCount: number | null;
+}
+
+export interface SyncOperationGroup {
+  id: string;
+  kind:
+    | "sale"
+    | "refund"
+    | "inventory_import"
+    | "draft_complete"
+    | "credit_collection"
+    | "draft_hold"
+    | "draft_cancel";
+  sequence: number;
+  expectedCount: number;
 }
 
 export function stampUpdatedAt<T extends object>(
@@ -208,6 +256,14 @@ function readCompleteRow(
           .where(eq(userPermissions.id, rowId))
           .get() ?? missingRow(tableName, rowId)
       );
+    case "shop_b2_settings":
+      return (
+        tx
+          .select()
+          .from(shopB2Settings)
+          .where(eq(shopB2Settings.id, rowId))
+          .get() ?? missingRow(tableName, rowId)
+      );
     case "medicines":
       return (
         tx.select().from(medicines).where(eq(medicines.id, rowId)).get() ??
@@ -217,6 +273,14 @@ function readCompleteRow(
       return (
         tx.select().from(batches).where(eq(batches.id, rowId)).get() ??
         missingRow(tableName, rowId)
+      );
+    case "batch_promotions":
+      return (
+        tx
+          .select()
+          .from(batchPromotions)
+          .where(eq(batchPromotions.id, rowId))
+          .get() ?? missingRow(tableName, rowId)
       );
     case "inventory_movements":
       return (
@@ -241,12 +305,46 @@ function readCompleteRow(
         tx.select().from(saleItems).where(eq(saleItems.id, rowId)).get() ??
         missingRow(tableName, rowId)
       );
+    case "sale_drafts":
+      return (
+        tx.select().from(saleDrafts).where(eq(saleDrafts.id, rowId)).get() ??
+        missingRow(tableName, rowId)
+      );
+    case "sale_draft_items":
+      return (
+        tx
+          .select()
+          .from(saleDraftItems)
+          .where(eq(saleDraftItems.id, rowId))
+          .get() ?? missingRow(tableName, rowId)
+      );
+    case "sale_attachments":
+      return (
+        tx
+          .select()
+          .from(saleAttachments)
+          .where(eq(saleAttachments.id, rowId))
+          .get() ?? missingRow(tableName, rowId)
+      );
+    case "sale_refunds":
+      return (
+        tx.select().from(saleRefunds).where(eq(saleRefunds.id, rowId)).get() ??
+        missingRow(tableName, rowId)
+      );
     case "sales_returns":
       return (
         tx
           .select()
           .from(salesReturns)
           .where(eq(salesReturns.id, rowId))
+          .get() ?? missingRow(tableName, rowId)
+      );
+    case "refund_tenders":
+      return (
+        tx
+          .select()
+          .from(refundTenders)
+          .where(eq(refundTenders.id, rowId))
           .get() ?? missingRow(tableName, rowId)
       );
     case "suppliers":
@@ -280,6 +378,22 @@ function readCompleteRow(
         tx.select().from(credits).where(eq(credits.id, rowId)).get() ??
         missingRow(tableName, rowId)
       );
+    case "credit_payment_allocations":
+      return (
+        tx
+          .select()
+          .from(creditPaymentAllocations)
+          .where(eq(creditPaymentAllocations.id, rowId))
+          .get() ?? missingRow(tableName, rowId)
+      );
+    case "credit_reconciliation_states":
+      return (
+        tx
+          .select()
+          .from(creditReconciliationStates)
+          .where(eq(creditReconciliationStates.id, rowId))
+          .get() ?? missingRow(tableName, rowId)
+      );
     case "expenses":
       return (
         tx.select().from(expenses).where(eq(expenses.id, rowId)).get() ??
@@ -294,6 +408,14 @@ function readCompleteRow(
       return (
         tx.select().from(cashDrawer).where(eq(cashDrawer.id, rowId)).get() ??
         missingRow(tableName, rowId)
+      );
+    case "inventory_imports":
+      return (
+        tx
+          .select()
+          .from(inventoryImports)
+          .where(eq(inventoryImports.id, rowId))
+          .get() ?? missingRow(tableName, rowId)
       );
     case "audit_logs":
       return (
@@ -314,6 +436,7 @@ function buildDeletePayload(
     table: SyncTableName;
     rowId: string;
     payload: Record<string, unknown>;
+    operation?: SyncOperationGroup;
   },
 ): Record<string, unknown> {
   const markers = {
@@ -338,7 +461,10 @@ function buildDeletePayload(
   }
   return { ...markers, shopId: params.shopId };
 }
-function toSyncPayload(tableName: SyncTableName, row: Record<string, unknown>): Record<string, unknown> {
+function toSyncPayload(
+  tableName: SyncTableName,
+  row: Record<string, unknown>,
+): Record<string, unknown> {
   const payload = { ...row };
   if (tableName === "shops") {
     delete payload.cloudLinkedAt;
@@ -347,6 +473,11 @@ function toSyncPayload(tableName: SyncTableName, row: Record<string, unknown>): 
     delete payload.permissionVersion;
     delete payload.pinLookupTag;
     delete payload.pinLookupPinSetAt;
+  }
+  if (tableName === "sale_attachments") {
+    delete payload.localUri;
+    delete payload.uploadStatus;
+    delete payload.uploadError;
   }
   return payload;
 }
@@ -358,12 +489,16 @@ export function recordChange(
     rowId: string;
     op: SyncOperation;
     payload: Record<string, unknown>;
+    operation?: SyncOperationGroup;
   },
 ): void {
   const outgoingPayload =
     params.op === "delete"
       ? buildDeletePayload(tx, params)
-      : toSyncPayload(params.table, readCompleteRow(tx, params.table, params.rowId));
+      : toSyncPayload(
+          params.table,
+          readCompleteRow(tx, params.table, params.rowId),
+        );
 
   tx.insert(syncQueue)
     .values({
@@ -374,6 +509,10 @@ export function recordChange(
       rowId: params.rowId,
       op: params.op,
       payload: JSON.stringify(toSnakeCasePayload(outgoingPayload)),
+      operationGroupId: params.operation?.id ?? null,
+      operationKind: params.operation?.kind ?? null,
+      operationSequence: params.operation?.sequence ?? null,
+      operationExpectedCount: params.operation?.expectedCount ?? null,
       status: "pending",
     })
     .run();
@@ -418,7 +557,9 @@ function applyToTable<T extends SyncTableName>(
     // the next page's apply, and hold the cursor until it lands.
     const batchId = row.batchId;
     if (typeof batchId !== "string") {
-      throw new Error(`Remote inventory_movements row ${rowId} has no batch_id`);
+      throw new Error(
+        `Remote inventory_movements row ${rowId} has no batch_id`,
+      );
     }
     const parent = tx
       .select({ id: batches.id })
@@ -479,14 +620,92 @@ function applyToTable<T extends SyncTableName>(
     // local figure (0 for a batch this device has not seen) lets the movements
     // that follow build the correct sum exactly once, and keeps unpushed local
     // deltas from being erased by a server figure that cannot include them yet.
-    const preserved = local ? { stock: local.stock, oversoldAt: local.oversoldAt } : { stock: 0, oversoldAt: null };
+    const preserved = local
+      ? { stock: local.stock, oversoldAt: local.oversoldAt }
+      : { stock: 0, oversoldAt: null };
     upsertRemoteRow(tx, tableName, { ...row, ...preserved });
     return "applied";
   }
 
   // Every non-audit table uses strict LWW: equal timestamps are no-ops.
   upsertRemoteRow(tx, tableName, row);
+  if (tableName === "inventory_movements") {
+    reactivateArchivedMovementAncestors(tx, row);
+  }
   return "applied";
+}
+
+function reactivateArchivedMovementAncestors(
+  tx: DbTransaction,
+  movement: Record<string, unknown>,
+): void {
+  const movementId = movement.id;
+  const batchId = movement.batchId;
+  const actorId = movement.createdBy;
+  const updatedAt = movement.updatedAt;
+  if (
+    typeof movementId !== "string" ||
+    typeof batchId !== "string" ||
+    typeof actorId !== "string" ||
+    typeof updatedAt !== "string"
+  ) {
+    throw new Error(
+      "Remote inventory movement is missing archive-reactivation metadata",
+    );
+  }
+  const batch = tx
+    .select({
+      id: batches.id,
+      shopId: batches.shopId,
+      medicineId: batches.medicineId,
+      isDeleted: batches.isDeleted,
+    })
+    .from(batches)
+    .where(eq(batches.id, batchId))
+    .get();
+  if (!batch?.isDeleted) return;
+
+  tx.update(batches)
+    .set({
+      isDeleted: false,
+      deletedAt: null,
+      deletedBy: null,
+      updatedAt,
+      isDirty: false,
+    })
+    .where(eq(batches.id, batch.id))
+    .run();
+  tx.update(medicines)
+    .set({
+      isDeleted: false,
+      deletedAt: null,
+      deletedBy: null,
+      updatedAt,
+      isDirty: false,
+    })
+    .where(
+      and(
+        eq(medicines.id, batch.medicineId),
+        eq(medicines.shopId, batch.shopId),
+      ),
+    )
+    .run();
+
+  const auditId = movementId;
+  tx.insert(auditLogs)
+    .values({
+      id: auditId,
+      shopId: batch.shopId,
+      actorId,
+      action: "archived_batch_reactivated",
+      target: batch.id,
+      meta: JSON.stringify({ movementId, medicineId: batch.medicineId }),
+      createdAt: updatedAt,
+      updatedAt,
+      isDirty: false,
+    })
+    .onConflictDoNothing({ target: auditLogs.id })
+    .run();
 }
 
 function readCompleteRowOrNull(
@@ -528,6 +747,12 @@ function upsertRemoteRow(
         .onConflictDoUpdate({ target: subscriptions.id, set: row })
         .run();
       break;
+    case "shop_b2_settings":
+      tx.insert(shopB2Settings)
+        .values(row as typeof shopB2Settings.$inferInsert)
+        .onConflictDoUpdate({ target: shopB2Settings.id, set: row })
+        .run();
+      break;
     case "roles":
       tx.insert(roles)
         .values(row as typeof roles.$inferInsert)
@@ -564,6 +789,12 @@ function upsertRemoteRow(
         .onConflictDoUpdate({ target: batches.id, set: row })
         .run();
       break;
+    case "batch_promotions":
+      tx.insert(batchPromotions)
+        .values(row as typeof batchPromotions.$inferInsert)
+        .onConflictDoUpdate({ target: batchPromotions.id, set: row })
+        .run();
+      break;
     case "inventory_movements":
       // DO NOTHING, not DO UPDATE: the ledger is append-only and a movement's
       // id is its operation id. A row redelivered by a retry, a crash-replay,
@@ -594,10 +825,40 @@ function upsertRemoteRow(
         .onConflictDoUpdate({ target: saleItems.id, set: row })
         .run();
       break;
+    case "sale_drafts":
+      tx.insert(saleDrafts)
+        .values(row as typeof saleDrafts.$inferInsert)
+        .onConflictDoUpdate({ target: saleDrafts.id, set: row })
+        .run();
+      break;
+    case "sale_draft_items":
+      tx.insert(saleDraftItems)
+        .values(row as typeof saleDraftItems.$inferInsert)
+        .onConflictDoUpdate({ target: saleDraftItems.id, set: row })
+        .run();
+      break;
+    case "sale_attachments":
+      tx.insert(saleAttachments)
+        .values(row as typeof saleAttachments.$inferInsert)
+        .onConflictDoUpdate({ target: saleAttachments.id, set: row })
+        .run();
+      break;
+    case "sale_refunds":
+      tx.insert(saleRefunds)
+        .values(row as typeof saleRefunds.$inferInsert)
+        .onConflictDoNothing({ target: saleRefunds.id })
+        .run();
+      break;
     case "sales_returns":
       tx.insert(salesReturns)
         .values(row as typeof salesReturns.$inferInsert)
         .onConflictDoUpdate({ target: salesReturns.id, set: row })
+        .run();
+      break;
+    case "refund_tenders":
+      tx.insert(refundTenders)
+        .values(row as typeof refundTenders.$inferInsert)
+        .onConflictDoNothing({ target: refundTenders.id })
         .run();
       break;
     case "suppliers":
@@ -630,6 +891,18 @@ function upsertRemoteRow(
         .onConflictDoUpdate({ target: credits.id, set: row })
         .run();
       break;
+    case "credit_payment_allocations":
+      tx.insert(creditPaymentAllocations)
+        .values(row as typeof creditPaymentAllocations.$inferInsert)
+        .onConflictDoNothing({ target: creditPaymentAllocations.id })
+        .run();
+      break;
+    case "credit_reconciliation_states":
+      tx.insert(creditReconciliationStates)
+        .values(row as typeof creditReconciliationStates.$inferInsert)
+        .onConflictDoUpdate({ target: creditReconciliationStates.id, set: row })
+        .run();
+      break;
     case "expenses":
       tx.insert(expenses)
         .values(row as typeof expenses.$inferInsert)
@@ -646,6 +919,12 @@ function upsertRemoteRow(
       tx.insert(cashDrawer)
         .values(row as typeof cashDrawer.$inferInsert)
         .onConflictDoUpdate({ target: cashDrawer.id, set: row })
+        .run();
+      break;
+    case "inventory_imports":
+      tx.insert(inventoryImports)
+        .values(row as typeof inventoryImports.$inferInsert)
+        .onConflictDoNothing({ target: inventoryImports.id })
         .run();
       break;
     case "audit_logs":
@@ -732,6 +1011,10 @@ export function listPendingSyncRows(
       op: syncQueue.op,
       payload: syncQueue.payload,
       attempts: syncQueue.attempts,
+      operationGroupId: syncQueue.operationGroupId,
+      operationKind: syncQueue.operationKind,
+      operationSequence: syncQueue.operationSequence,
+      operationExpectedCount: syncQueue.operationExpectedCount,
     })
     .from(syncQueue)
     .where(and(eq(syncQueue.shopId, shopId), eq(syncQueue.status, "pending")))

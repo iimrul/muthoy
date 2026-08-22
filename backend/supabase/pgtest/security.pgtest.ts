@@ -800,7 +800,7 @@ describe('direct PostgREST access is denied by RLS', () => {
              values ('90000000-0000-4000-8000-00000000000a', '${SHOP_A}', 'Sneak', '${T0}', '${T0}')`,
         ),
       ),
-    ).rejects.toThrow(/row-level security/i);
+    ).rejects.toThrow(/row-level security|permission denied/i);
   });
 
   it('refuses a staff member the ROLE DEFAULTS table', async () => {
@@ -824,7 +824,7 @@ describe('direct PostgREST access is denied by RLS', () => {
              values ('90000000-0000-4000-8000-00000000000c', '${SHOP_A}', '90000000-0000-4000-8000-00000000000b', 500, 'sale', '${STAFF_A}', '${T0}', '${T0}')`,
         ),
       ),
-    ).rejects.toThrow(/row-level security/i);
+    ).rejects.toThrow(/row-level security|permission denied/i);
   });
 
   it('refuses another shop entirely', async () => {

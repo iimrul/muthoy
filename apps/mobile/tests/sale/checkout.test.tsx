@@ -66,6 +66,9 @@ vi.mock('expo-router', () => ({ router: routerMock }));
 vi.mock('../../components/ui/StandardHeader', () => ({
   StandardHeader: ({ title }: { title: string }) => createElement('h1', null, title),
 }));
+vi.mock('../../components/scanner/MedicineTextScanner', () => ({
+  MedicineTextScanner: () => null,
+}));
 
 const deps = vi.hoisted(() => ({
   listCustomers: vi.fn(),
@@ -78,7 +81,12 @@ const deps = vi.hoisted(() => ({
 
 vi.mock('../../db/customers', () => ({ listCustomers: deps.listCustomers }));
 vi.mock('../../db/inventory', () => ({ listBatchesForMedicine: deps.listBatchesForMedicine }));
-vi.mock('../../db/sales', () => ({ createSaleTransaction: deps.createSaleTransaction }));
+vi.mock('../../db/sales', () => ({
+  createSaleTransaction: deps.createSaleTransaction,
+  SaleQuoteChangedError: class SaleQuoteChangedError extends Error {
+    constructor(readonly refreshedTotal: number) { super('Quote changed'); }
+  },
+}));
 vi.mock('../../native/notifications', () => ({ runNotificationChecks: deps.runNotificationChecks }));
 // state/switchUser.ts imports stopSyncEngine from this same module, so the
 // real switch below runs against the mock rather than the native engine.
@@ -186,10 +194,12 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
   // survive a switch that lands mid-await, so without the live re-read the
   // outgoing user's already-cleared cart would still commit under their id.
   it('commits nothing and shows no confirmation when the device changes hands mid-await', async () => {
-    let releaseBatches: () => void = () => undefined;
-    deps.listBatchesForMedicine.mockReturnValueOnce(
-      new Promise((resolve) => {
-        releaseBatches = () => resolve([]);
+    let releaseCommit: () => void = () => undefined;
+    deps.createSaleTransaction.mockImplementationOnce(
+      (input: { isStillActive?: () => boolean }) => new Promise((resolve, reject) => {
+        releaseCommit = () => input.isStillActive?.()
+          ? resolve({ saleId: 's1', invoiceNo: 'INV-1', total: asPaisa(1000), change: asPaisa(9000) })
+          : reject(new StaleSessionError());
       }),
     );
 
@@ -199,15 +209,15 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
 
     fireEvent.change(screen.getByLabelText('Amount tendered'), { target: { value: '100' } });
     fireEvent.click(screen.getByLabelText('Confirm sale'));
+    await waitFor(() => expect(deps.createSaleTransaction).toHaveBeenCalled());
 
     act(() => switchUser());
     act(() => useSessionStore.getState().login(STAFF));
     await act(async () => {
-      releaseBatches();
+      releaseCommit();
     });
 
-    await waitFor(() => expect(deps.listBatchesForMedicine).toHaveBeenCalled());
-    expect(deps.createSaleTransaction).not.toHaveBeenCalled();
+    expect(deps.createSaleTransaction).toHaveBeenCalledTimes(1);
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(deps.triggerSyncNow).not.toHaveBeenCalled();
   });
@@ -216,10 +226,12 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
   // same on both sides of two real handovers, and the cart it would commit
   // was cleared in between. Only the session epoch sees this.
   it('refuses a stale checkout when the OWNER hands the phone over and takes it straight back', async () => {
-    let releaseBatches: () => void = () => undefined;
-    deps.listBatchesForMedicine.mockReturnValueOnce(
-      new Promise((resolve) => {
-        releaseBatches = () => resolve([]);
+    let releaseCommit: () => void = () => undefined;
+    deps.createSaleTransaction.mockImplementationOnce(
+      (input: { isStillActive?: () => boolean }) => new Promise((resolve, reject) => {
+        releaseCommit = () => input.isStillActive?.()
+          ? resolve({ saleId: 's1', invoiceNo: 'INV-1', total: asPaisa(1000), change: asPaisa(9000) })
+          : reject(new StaleSessionError());
       }),
     );
 
@@ -229,7 +241,7 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
 
     fireEvent.change(screen.getByLabelText('Amount tendered'), { target: { value: '100' } });
     fireEvent.click(screen.getByLabelText('Confirm sale'));
-    await waitFor(() => expect(deps.listBatchesForMedicine).toHaveBeenCalled());
+    await waitFor(() => expect(deps.createSaleTransaction).toHaveBeenCalled());
 
     act(() => switchUser());
     act(() => useSessionStore.getState().login(STAFF));
@@ -239,10 +251,10 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
     expect(useCartStore.getState().items).toEqual([]);
 
     await act(async () => {
-      releaseBatches();
+      releaseCommit();
     });
 
-    expect(deps.createSaleTransaction).not.toHaveBeenCalled();
+    expect(deps.createSaleTransaction).toHaveBeenCalledTimes(1);
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(deps.triggerSyncNow).not.toHaveBeenCalled();
   });

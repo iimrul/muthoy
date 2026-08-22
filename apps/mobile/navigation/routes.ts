@@ -1,5 +1,6 @@
 import type { Href } from 'expo-router';
 import { resolvePermission, type Permission } from '../domain/permissions';
+import type { CatalogKey } from '../i18n/catalog';
 import type { Session } from '../state/sessionStore';
 
 export type AuthenticatedHomePath = '/dashboard' | '/staff-home';
@@ -77,6 +78,31 @@ export interface MoreRoute {
   ownerOnly?: boolean;
   multiShopOnly?: boolean;
 }
+
+export interface OwnerQuickLink {
+  key: string;
+  labelKey: CatalogKey;
+  href: Href;
+}
+
+/** Single registry for the Owner Dashboard's approved 15 Quick Links. */
+export const OWNER_QUICK_LINKS: readonly OwnerQuickLink[] = [
+  { key: 'sale', labelKey: 'sale', href: '/sale' },
+  { key: 'inventory', labelKey: 'inventory', href: '/inventory' },
+  { key: 'credit', labelKey: 'credit', href: '/credit/credit-sales' },
+  { key: 'expense', labelKey: 'expense', href: '/expenses' },
+  { key: 'history', labelKey: 'salesHistory', href: '/reports/sales-history' },
+  { key: 'expiry', labelKey: 'expiry', href: '/inventory/expiry' },
+  { key: 'invoices', labelKey: 'supplierInvoices', href: '/suppliers/purchase-create' },
+  { key: 'suppliers', labelKey: 'suppliers', href: '/suppliers/list' },
+  { key: 'report', labelKey: 'report', href: '/reports/report' },
+  { key: 'staff', labelKey: 'staffManagement', href: '/staff/management' },
+  { key: 'staff-sales', labelKey: 'staffSales', href: '/staff/sales-view' },
+  { key: 'export', labelKey: 'dataExport', href: '/reports/data-export' },
+  { key: 'printer', labelKey: 'printer', href: '/settings/printer-settings' },
+  { key: 'settings', labelKey: 'settings', href: '/settings/settings' },
+  { key: 'plans', labelKey: 'plans', href: '/settings/plans' },
+];
 
 export const MORE_ROUTES: readonly MoreRoute[] = [
   { key: 'history', labelKey: 'salesHistory', href: '/reports/sales-history', permission: 'sale_history' },

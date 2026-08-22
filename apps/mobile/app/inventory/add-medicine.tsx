@@ -1,19 +1,35 @@
-import { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, Switch, Text, View } from 'react-native';
-import { router } from 'expo-router';
-import { Controller, useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { addMedicineSchema, isoDateSchema, type AddMedicineInput, type AddMedicineOutput } from '@muthoy/validation';
-import { fromTaka } from '@muthoy/types';
-import { MedicineTextScanner } from '../../components/scanner/MedicineTextScanner';
-import { FormField } from '../../components/forms/FormField';
-import { AccessDenied } from '../../components/ui/AccessDenied';
-import { StandardHeader } from '../../components/ui/StandardHeader';
-import { createMedicineWithBatch } from '../../db/inventory';
-import { parseScannedMedicineStrip } from '../../domain/ocrText';
-import { captureSessionFor } from '../../state/sessionGuard';
-import { usePermission } from '../../state/usePermission';
-import { triggerSyncNow } from '../../sync';
+import { useCallback, useState } from "react";
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { router } from "expo-router";
+import { Controller, useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  addMedicineSchema,
+  isoDateSchema,
+  type AddMedicineInput,
+  type AddMedicineOutput,
+} from "@muthoy/validation";
+import { fromTaka } from "@muthoy/types";
+import { MedicineTextScanner } from "../../components/scanner/MedicineTextScanner";
+import { FormField } from "../../components/forms/FormField";
+import { AccessDenied } from "../../components/ui/AccessDenied";
+import { StandardHeader } from "../../components/ui/StandardHeader";
+import {
+  createMedicineWithBatch,
+  listManufacturerSuggestions,
+} from "../../db/inventory";
+import { parseScannedMedicineStrip } from "../../domain/ocrText";
+import { captureSessionFor } from "../../state/sessionGuard";
+import { usePermission } from "../../state/usePermission";
+import { triggerSyncNow } from "../../sync";
 
 // Add Medicine — Volume 4 INVENTORY, Volume 0 Day 8. React Hook Form + Zod
 // (addMedicineSchema, packages/validation): name, generic, manufacturer,
@@ -29,19 +45,25 @@ import { triggerSyncNow } from '../../sync';
 export default function AddMedicineScreen() {
   // Volume 0 Day 11: Staff is inventory-VIEW only, so creating a medicine and
   // its first batch is owner-only. Browsing inventory stays open to both.
-  const { session, isAllowed } = usePermission('inventory_write');
+  const { session, isAllowed } = usePermission("inventory_write");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isScannerVisible, setIsScannerVisible] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
+  const [manufacturerSuggestions, setManufacturerSuggestions] = useState<
+    string[]
+  >([]);
 
-  const { control, handleSubmit, getValues, setValue } = useForm<AddMedicineInput, unknown, AddMedicineOutput>({
+  const { control, handleSubmit, getValues, setValue } = useForm<
+    AddMedicineInput,
+    unknown,
+    AddMedicineOutput
+  >({
     resolver: zodResolver(addMedicineSchema),
     defaultValues: {
-      name: '',
-      unitOfMeasure: 'piece',
+      name: "",
+      unitOfMeasure: "piece",
       requiresPrescription: false,
-      threshold: 20,
-      firstBatch: { batchNo: '', quantity: 0, purchasePrice: 0, salePrice: 0 },
+      firstBatch: { batchNo: "", quantity: 0, purchasePrice: 0, salePrice: 0 },
     },
   });
 
@@ -55,24 +77,26 @@ export default function AddMedicineScreen() {
     const parsed = parseScannedMedicineStrip(recognizedText);
     let prefilledAny = false;
 
-    if (parsed.name && !getValues('name')) {
-      setValue('name', parsed.name, { shouldDirty: true });
+    if (parsed.name && !getValues("name")) {
+      setValue("name", parsed.name, { shouldDirty: true });
       prefilledAny = true;
     }
-    if (parsed.batchNo && !getValues('firstBatch.batchNo')) {
-      setValue('firstBatch.batchNo', parsed.batchNo, { shouldDirty: true });
+    if (parsed.batchNo && !getValues("firstBatch.batchNo")) {
+      setValue("firstBatch.batchNo", parsed.batchNo, { shouldDirty: true });
       prefilledAny = true;
     }
-    if (parsed.expiryDate && !getValues('firstBatch.expiryDate')) {
+    if (parsed.expiryDate && !getValues("firstBatch.expiryDate")) {
       const checked = isoDateSchema.safeParse(parsed.expiryDate);
       if (checked.success && checked.data) {
-        setValue('firstBatch.expiryDate', checked.data, { shouldDirty: true });
+        setValue("firstBatch.expiryDate", checked.data, { shouldDirty: true });
         prefilledAny = true;
       }
     }
 
     setScanNotice(
-      prefilledAny ? 'Prefilled from scan — review before saving.' : 'Nothing recognized. Fill in manually.',
+      prefilledAny
+        ? "Prefilled from scan — review before saving."
+        : "Nothing recognized. Fill in manually.",
     );
   };
 
@@ -115,7 +139,9 @@ export default function AddMedicineScreen() {
         // handover app/index.tsx's gate owns where the device goes next.
         guard.ifLive(() => router.back());
       } catch {
-        guard.ifLive(() => Alert.alert('Something went wrong', 'Please try again.'));
+        guard.ifLive(() =>
+          Alert.alert("Something went wrong", "Please try again."),
+        );
       } finally {
         setIsSubmitting(false);
       }
@@ -132,7 +158,10 @@ export default function AddMedicineScreen() {
   return (
     <View className="flex-1 bg-brand-softGreen">
       <StandardHeader title="Add medicine" onBackPress={() => router.back()} />
-      <ScrollView contentContainerClassName="gap-5 p-6" keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerClassName="gap-5 p-6"
+        keyboardShouldPersistTaps="handled"
+      >
         <Pressable
           onPress={() => setIsScannerVisible(true)}
           accessibilityRole="button"
@@ -140,37 +169,158 @@ export default function AddMedicineScreen() {
           className="flex-row items-center justify-center gap-2 rounded-lg border border-brand-green bg-white py-3 active:opacity-80"
         >
           <Text className="text-lg">📷</Text>
-          <Text className="font-sans-semibold text-sm text-brand-green">Scan strip to prefill</Text>
+          <Text className="font-sans-semibold text-sm text-brand-green">
+            Scan strip to prefill
+          </Text>
         </Pressable>
-        {scanNotice ? <Text className="font-sans text-sm text-midGray">{scanNotice}</Text> : null}
+        {scanNotice ? (
+          <Text className="font-sans text-sm text-midGray">{scanNotice}</Text>
+        ) : null}
 
-        <FormField control={control} name="name" label="Medicine name" placeholder="e.g. Napa Extra" />
-        <FormField control={control} name="generic" label="Generic name" placeholder="e.g. Paracetamol" />
-        <FormField control={control} name="manufacturer" label="Manufacturer" placeholder="e.g. Beximco" />
-        <FormField control={control} name="strength" label="Strength" placeholder="e.g. 500mg" />
-        <FormField control={control} name="category" label="Category" placeholder="e.g. Analgesic" />
-        <FormField control={control} name="unitOfMeasure" label="Unit of measure" placeholder="piece" />
-        <FormField control={control} name="barcode" label="Barcode" placeholder="Optional" />
-        <FormField control={control} name="threshold" label="Low-stock threshold" numeric />
+        <FormField
+          control={control}
+          name="name"
+          label="Medicine name"
+          placeholder="e.g. Napa Extra"
+        />
+        <FormField
+          control={control}
+          name="generic"
+          label="Generic name"
+          placeholder="e.g. Paracetamol"
+        />
+        <View className="gap-2">
+          <Text className="font-sans-medium text-sm">Manufacturer</Text>
+          <Controller
+            control={control}
+            name="manufacturer"
+            render={({
+              field: { value, onChange, onBlur },
+              fieldState: { error },
+            }) => (
+              <>
+                <TextInput
+                  value={value ?? ""}
+                  onBlur={onBlur}
+                  onFocus={() =>
+                    void listManufacturerSuggestions(session.shopId).then(
+                      setManufacturerSuggestions,
+                    )
+                  }
+                  onChangeText={(text) => {
+                    onChange(text);
+                    void listManufacturerSuggestions(session.shopId, text).then(
+                      setManufacturerSuggestions,
+                    );
+                  }}
+                  placeholder="e.g. Beximco"
+                  className="rounded-lg border border-midGray bg-white px-4 py-3"
+                />
+                {manufacturerSuggestions.length ? (
+                  <View className="flex-row flex-wrap gap-2">
+                    {manufacturerSuggestions.map((name) => (
+                      <Pressable
+                        key={name}
+                        onPress={() => {
+                          onChange(name);
+                          setManufacturerSuggestions([]);
+                        }}
+                        className="rounded-full bg-white px-3 py-2"
+                      >
+                        <Text className="text-xs text-brand-green">{name}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+                {error ? (
+                  <Text className="text-sm text-error">{error.message}</Text>
+                ) : null}
+              </>
+            )}
+          />
+        </View>
+        <FormField
+          control={control}
+          name="strength"
+          label="Strength"
+          placeholder="e.g. 500mg"
+        />
+        <FormField
+          control={control}
+          name="category"
+          label="Category"
+          placeholder="e.g. Analgesic"
+        />
+        <FormField
+          control={control}
+          name="unitOfMeasure"
+          label="Unit of measure"
+          placeholder="piece"
+        />
+        <FormField
+          control={control}
+          name="barcode"
+          label="Barcode"
+          placeholder="Optional"
+        />
+        <FormField
+          control={control}
+          name="threshold"
+          label="Low-stock override (optional; shop default 10)"
+          numeric
+        />
 
         <View className="flex-row items-center justify-between rounded-lg bg-white px-4 py-3">
-          <Text className="font-sans-medium text-sm text-richBlack">Requires prescription</Text>
+          <Text className="font-sans-medium text-sm text-richBlack">
+            Requires prescription
+          </Text>
           <Controller
             control={control}
             name="requiresPrescription"
             render={({ field: { value, onChange } }) => (
-              <Switch value={value} onValueChange={onChange} accessibilityLabel="Requires prescription" />
+              <Switch
+                value={value}
+                onValueChange={onChange}
+                accessibilityLabel="Requires prescription"
+              />
             )}
           />
         </View>
 
         <View className="gap-4 rounded-lg bg-white p-4">
-          <Text className="font-sans-bold text-base text-richBlack">First batch</Text>
-          <FormField control={control} name="firstBatch.batchNo" label="Batch number" placeholder="e.g. B-2024-01" />
-          <FormField control={control} name="firstBatch.expiryDate" label="Expiry date" placeholder="YYYY-MM-DD" />
-          <FormField control={control} name="firstBatch.quantity" label="Quantity" numeric />
-          <FormField control={control} name="firstBatch.purchasePrice" label="Purchase price (৳)" numeric />
-          <FormField control={control} name="firstBatch.salePrice" label="Sale price (৳)" numeric />
+          <Text className="font-sans-bold text-base text-richBlack">
+            First batch
+          </Text>
+          <FormField
+            control={control}
+            name="firstBatch.batchNo"
+            label="Batch number"
+            placeholder="e.g. B-2024-01"
+          />
+          <FormField
+            control={control}
+            name="firstBatch.expiryDate"
+            label="Expiry date"
+            placeholder="YYYY-MM-DD"
+          />
+          <FormField
+            control={control}
+            name="firstBatch.quantity"
+            label="Quantity"
+            numeric
+          />
+          <FormField
+            control={control}
+            name="firstBatch.purchasePrice"
+            label="Purchase price (৳)"
+            numeric
+          />
+          <FormField
+            control={control}
+            name="firstBatch.salePrice"
+            label="Sale price (৳)"
+            numeric
+          />
         </View>
 
         <Pressable
@@ -180,7 +330,9 @@ export default function AddMedicineScreen() {
           accessibilityLabel="Save medicine"
           className="items-center rounded-lg bg-brand-green py-3.5 active:opacity-80"
         >
-          <Text className="font-sans-semibold text-base text-white">{isSubmitting ? 'Saving…' : 'Save medicine'}</Text>
+          <Text className="font-sans-semibold text-base text-white">
+            {isSubmitting ? "Saving…" : "Save medicine"}
+          </Text>
         </Pressable>
       </ScrollView>
       <MedicineTextScanner

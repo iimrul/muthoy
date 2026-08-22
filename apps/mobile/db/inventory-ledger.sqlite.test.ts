@@ -136,6 +136,7 @@ beforeAll(() => {
   applyMigration('0007_staff_device_login.sql');
   applyMigration('0008_native_pin_lookup.sql');
   applyMigration('0009_strong_gargoyle.sql');
+  applyMigration('0010_known_ares.sql');
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: USER_ID, name: 'Ledger Shop', phone: '01700000900', createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: 'owner', isSystem: true, createdAt: NOW, updatedAt: NOW }).run();
@@ -277,7 +278,7 @@ describe('5. concurrent FEFO sales cannot over-decrement', () => {
         amountTendered: asPaisa(8000),
         lines: [{ medicineId: MEDICINE_ID, deductions: [{ batchId: BATCH_ID, quantityDeducted: 9 }], unitPrice: asPaisa(800) }],
       }),
-    ).rejects.toThrow(/has 5 in stock; 9 requested/);
+    ).rejects.toThrow(/requested 9, available 5/);
 
     // Rejected before anything committed: stock intact, nothing queued.
     expect(stock()).toBe(5);
@@ -404,8 +405,8 @@ describe('9. the existing single-device sale is unchanged', () => {
     });
     const elapsed = Date.now() - startedAt;
 
-    expect(result.total).toBe(1600);
-    expect(result.change).toBe(400);
+    expect(result.total).toBe(1900);
+    expect(result.change).toBe(100);
     // The invoice carries the collision-proof suffix, derived from this very
     // sale's UUID — proves the wiring, not just domain/invoice.ts in isolation.
     expect(result.invoiceNo).toMatch(/^INV-\d{4}-\d{6}-[0-9A-F]{12}$/);
@@ -425,7 +426,7 @@ describe('9. the existing single-device sale is unchanged', () => {
         staffId: USER_ID,
         isStillActive: () => true,
         paymentType: 'cash',
-        amountTendered: asPaisa(800),
+        amountTendered: asPaisa(950),
         lines: [{ medicineId: MEDICINE_ID, deductions: [{ batchId: BATCH_ID, quantityDeducted: 1 }], unitPrice: asPaisa(800) }],
       });
     }

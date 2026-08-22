@@ -34,6 +34,7 @@ import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
 import { switchUser } from "../../state/switchUser";
 import { useUnreadCount } from "../../state/useUnreadCount";
+import { formatUnreadBadge } from "../../domain/dashboard";
 import { triggerSyncNow } from "../../sync";
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -248,11 +249,7 @@ export function ManagerDashboard() {
               <Pressable onPress={() => router.push("/notifications")}>
                 <Text className="text-xl text-white">
                   🔔
-                  {unread > 0
-                    ? unread > 10
-                      ? "10+"
-                      : formatNumber(unread)
-                    : ""}
+                  {formatUnreadBadge(unread, formatNumber)}
                 </Text>
               </Pressable>
               <LanguageToggle />

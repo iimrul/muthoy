@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 // Volume 0 Day 8: Add Medicine (name, generic, manufacturer, strength,
 // category, unit_of_measure, requires_prescription, threshold, barcode) plus
@@ -18,38 +18,64 @@ import { z } from 'zod';
 // split note below).
 export const isoDateSchema = z
   .string()
-  .refine((value) => value === '' || /^\d{4}-\d{2}-\d{2}$/.test(value), 'Enter a valid date (YYYY-MM-DD)')
+  .refine(
+    (value) => value === "" || /^\d{4}-\d{2}-\d{2}$/.test(value),
+    "Enter a valid date (YYYY-MM-DD)",
+  )
   .refine((value) => {
-    if (value === '') {
+    if (value === "") return true;
+    const [year, month, day] = value.split("-").map(Number);
+    const parsed = new Date(Date.UTC(year!, month! - 1, day));
+    return (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === month! - 1 &&
+      parsed.getUTCDate() === day
+    );
+  }, "Enter a real calendar date")
+  .refine((value) => {
+    if (value === "") {
       return true;
     }
-    const today = new Date(new Date().toDateString());
-    return new Date(`${value}T00:00:00`) >= today;
-  }, 'Expiry date must be today or later')
-  .transform((value) => (value === '' ? undefined : value))
+    const dhakaToday = new Date(Date.now() + 6 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    return value >= dhakaToday;
+  }, "Expiry date must be today or later")
+  .transform((value) => (value === "" ? undefined : value))
   .optional();
 
 export const batchFieldsSchema = z.object({
-  batchNo: z.string().trim().min(1, 'Batch number is required'),
+  batchNo: z.string().trim().min(1, "Batch number is required"),
   // db/schema.ts's batches.expiry_date is nullable — omitting it here is
   // valid and sorts the batch last in FEFO (domain/fefo.ts).
   expiryDate: isoDateSchema,
-  quantity: z.number().int('Quantity must be a whole number').min(0, 'Quantity cannot be negative'),
-  purchasePrice: z.number().min(0, 'Purchase price cannot be negative'),
-  salePrice: z.number().min(0, 'Sale price cannot be negative'),
+  quantity: z
+    .number()
+    .int("Quantity must be a whole number")
+    .min(0, "Quantity cannot be negative"),
+  purchasePrice: z.number().min(0, "Purchase price cannot be negative"),
+  salePrice: z.number().min(0, "Sale price cannot be negative"),
 });
 
 export const addBatchSchema = batchFieldsSchema;
 
 export const addMedicineSchema = z.object({
-  name: z.string().trim().min(2, 'Medicine name is too short'),
+  name: z.string().trim().min(2, "Medicine name is too short"),
   generic: z.string().trim().optional(),
   manufacturer: z.string().trim().optional(),
   strength: z.string().trim().optional(),
   category: z.string().trim().optional(),
-  unitOfMeasure: z.string().trim().min(1, 'Unit of measure is required').default('piece'),
+  unitOfMeasure: z
+    .string()
+    .trim()
+    .min(1, "Unit of measure is required")
+    .default("piece"),
   requiresPrescription: z.boolean(),
-  threshold: z.number().int('Threshold must be a whole number').min(0, 'Threshold cannot be negative').default(20),
+  threshold: z
+    .number()
+    .int("Threshold must be a whole number")
+    .min(0, "Threshold cannot be negative")
+    .optional(),
   barcode: z.string().trim().optional(),
   firstBatch: batchFieldsSchema,
 });
@@ -57,8 +83,8 @@ export const addMedicineSchema = z.object({
 // zodResolver v5 (zod v4) types the resolver as
 // Resolver<z.input<Schema>, Context, z.output<Schema>> — the raw,
 // pre-default/pre-transform shape RHF's Controller fields actually hold vs.
-// the parsed shape handleSubmit's callback receives. unitOfMeasure/threshold
-// use .default(), so those two types genuinely differ; export both rather
+// the parsed shape handleSubmit's callback receives. unitOfMeasure uses
+// .default(), so those two types genuinely differ; export both rather
 // than a single z.infer (which is z.output and would type-mismatch useForm's
 // TFieldValues).
 export type BatchFieldsInput = z.input<typeof batchFieldsSchema>;
@@ -69,3 +95,12 @@ export type AddBatchOutput = z.output<typeof addBatchSchema>;
 
 export type AddMedicineInput = z.input<typeof addMedicineSchema>;
 export type AddMedicineOutput = z.output<typeof addMedicineSchema>;
+
+export const medicineMetadataSchema = z.object({
+  name: z.string().trim().min(2, "Medicine name is too short"),
+  generic: z.string().trim().optional(),
+  manufacturer: z.string().trim().optional(),
+  barcode: z.string().trim().optional(),
+  requiresPrescription: z.boolean(),
+  lowStockThresholdOverride: z.number().int().min(0).nullable(),
+});

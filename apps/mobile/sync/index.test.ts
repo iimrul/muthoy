@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   online: vi.fn(),
   pull: vi.fn(),
   push: vi.fn(),
+  uploadAttachments: vi.fn(),
   notify: vi.fn(),
   notifyHalted: vi.fn(),
   addEventListener: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock("./connectivity", () => ({
 }));
 vi.mock("./pull", () => ({ pullChanges: mocks.pull }));
 vi.mock("./push", () => ({ pushPendingRows: mocks.push }));
+vi.mock("./attachments", () => ({ uploadPendingPrescriptionAttachments: mocks.uploadAttachments }));
 vi.mock("./scheduler", () => ({ startForegroundScheduler: mocks.startForegroundScheduler }));
 vi.mock("./stuckNotification", () => ({
   notifyIfSyncIsStuck: mocks.notify,
@@ -54,11 +56,18 @@ vi.mock("./realtime", () => ({
 
 // Vitest mocks must be registered before importing the module under test.
 // eslint-disable-next-line import/first
-import { startSyncEngine, stopSyncEngine, triggerSyncNow } from "./index";
+import {
+  startSyncEngine,
+  stopSyncEngine,
+  subscribeToSyncCompletion,
+  triggerSyncNow,
+} from "./index";
 // eslint-disable-next-line import/first
 import { SyncHaltedError } from "./invoke";
 // eslint-disable-next-line import/first
 import { useSessionStore } from "../state/sessionStore";
+// eslint-disable-next-line import/first
+import { getLastSuccessfulSyncAt } from "./statusStore";
 
 /** Puts a real logged-in session on `shopId`, as PIN Login would. */
 function loginTo(shopId: string): void {
@@ -88,6 +97,7 @@ function resetEngine(): void {
   mocks.notify.mockResolvedValue(undefined);
   mocks.notifyHalted.mockResolvedValue(undefined);
   mocks.pull.mockResolvedValue(undefined);
+  mocks.uploadAttachments.mockResolvedValue(undefined);
   mocks.push.mockResolvedValue(true);
   mocks.addEventListener.mockReturnValue({ remove: vi.fn() });
   mocks.subscribeToReconnect.mockReturnValue(vi.fn());
@@ -111,6 +121,97 @@ describe("sync cycle orchestration", () => {
     await vi.waitFor(() => expect(mocks.notify).toHaveBeenCalled());
 
     expect(mocks.pull).toHaveBeenCalledWith("shop-complete", undefined, expect.any(Function));
+  });
+
+  it("notifies focused consumers only after a background pull has applied", async () => {
+    let finishPull: (() => void) | undefined;
+    mocks.pull.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishPull = resolve;
+      }),
+    );
+    const listener = vi.fn();
+    const unsubscribe = subscribeToSyncCompletion(
+      "shop-background-refresh",
+      listener,
+    );
+    loginTo("shop-background-refresh");
+
+    startSyncEngine("shop-background-refresh");
+    await vi.waitFor(() => expect(mocks.pull).toHaveBeenCalledTimes(1));
+    expect(listener).not.toHaveBeenCalled();
+
+    finishPull?.();
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
+    expect(getLastSuccessfulSyncAt("shop-background-refresh")).toBe(
+      listener.mock.calls[0]?.[0],
+    );
+    unsubscribe();
+  });
+
+  it("returns the in-flight cycle and waits for pull, listeners, and persistence", async () => {
+    let finishPull: (() => void) | undefined;
+    let finishRefresh: (() => void) | undefined;
+    mocks.pull.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishPull = resolve;
+      }),
+    );
+    const unsubscribe = subscribeToSyncCompletion(
+      "shop-awaited",
+      () =>
+        new Promise<void>((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+    loginTo("shop-awaited");
+    startSyncEngine("shop-awaited");
+    await vi.waitFor(() => expect(mocks.pull).toHaveBeenCalledTimes(1));
+
+    const first = triggerSyncNow("shop-awaited");
+    const second = triggerSyncNow("shop-awaited");
+    expect(second).toBe(first);
+    let settled = false;
+    void first.then(() => {
+      settled = true;
+    });
+
+    finishPull?.();
+    await vi.waitFor(() => expect(finishRefresh).toBeTypeOf("function"));
+    expect(settled).toBe(false);
+
+    finishRefresh?.();
+    await expect(first).resolves.toMatchObject({ status: "completed" });
+    expect(getLastSuccessfulSyncAt("shop-awaited")).not.toBeNull();
+    unsubscribe();
+  });
+
+  it("reports offline and pull failures without publishing false success", async () => {
+    mocks.online.mockResolvedValue(false);
+    loginTo("shop-offline-result");
+    startSyncEngine("shop-offline-result");
+    await settle();
+
+    await expect(triggerSyncNow("shop-offline-result")).resolves.toEqual({
+      status: "skipped",
+      reason: "offline",
+    });
+    expect(getLastSuccessfulSyncAt("shop-offline-result")).toBeNull();
+
+    mocks.online.mockResolvedValue(true);
+    mocks.pull.mockRejectedValueOnce(new Error("pull failed"));
+    const listener = vi.fn();
+    const unsubscribe = subscribeToSyncCompletion(
+      "shop-offline-result",
+      listener,
+    );
+    await expect(triggerSyncNow("shop-offline-result")).resolves.toEqual({
+      status: "failed",
+      error: "pull failed",
+    });
+    expect(listener).not.toHaveBeenCalled();
+    expect(getLastSuccessfulSyncAt("shop-offline-result")).toBeNull();
+    unsubscribe();
   });
 
   it("does not start network work until post-navigation interactions complete", async () => {

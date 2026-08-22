@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { asPaisa } from '@muthoy/types';
-import { activeBatch, deduct, InsufficientStockError, sortByExpiry, type Batch } from './fefo';
+import { activeBatch, activeSellableBatch, deduct, deductSellable, InsufficientStockError, isBatchSellable, sortByExpiry, type Batch } from './fefo';
 
 // Volume 7 INVENTORY TESTING: "FEFO active-batch selection correct across 2,
 // 1, and 5+ batch medicines, including a null-expiry batch (must sort last)."
@@ -167,5 +167,22 @@ describe('deduct', () => {
     const snapshot = batches.map((batch) => ({ ...batch }));
     deduct('med-1', 6, batches);
     expect(batches).toEqual(snapshot);
+  });
+});
+
+describe('sellable FEFO', () => {
+  it('sells through printed expiry date, then hard-blocks next Dhaka business day', () => {
+    const batch = makeBatch({ expiryDate: '2027-01-01' });
+    expect(isBatchSellable(batch, '2027-01-01')).toBe(true);
+    expect(isBatchSellable(batch, '2027-01-02')).toBe(false);
+  });
+  it('keeps null expiry sellable and null-last', () => {
+    const batches = [makeBatch({ id: 'none', expiryDate: null }), makeBatch({ id: 'expired', expiryDate: '2026-01-01' })];
+    expect(activeSellableBatch('med-1', batches, '2027-01-01')?.id).toBe('none');
+  });
+  it('excludes expired stock from spill and insufficiency availability', () => {
+    const batches = [makeBatch({ id: 'expired', expiryDate: '2026-01-01', quantityAvailable: 99 }), makeBatch({ id: 'valid', expiryDate: '2028-01-01', quantityAvailable: 2 })];
+    expect(deductSellable('med-1', 2, batches, '2027-01-01')).toEqual([{ batchId: 'valid', quantityDeducted: 2 }]);
+    expect(() => deductSellable('med-1', 3, batches, '2027-01-01')).toThrow(InsufficientStockError);
   });
 });

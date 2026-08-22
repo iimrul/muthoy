@@ -29,6 +29,7 @@ vi.mock('../db/sync-helpers', () => ({
   markSyncRowTransientFailure: mocks.markSyncRowTransientFailure,
   markSyncRowPermanentFailure: mocks.markSyncRowPermanentFailure,
 }));
+vi.mock('../native/deviceId', () => ({ getDeviceId: () => 'device-a' }));
 
 // Vitest mocks must be registered before importing the module under test.
 // eslint-disable-next-line import/first
@@ -43,6 +44,10 @@ interface QueueRow {
   op: string;
   payload: string;
   attempts: number;
+  operationGroupId?: string | null;
+  operationKind?: string | null;
+  operationSequence?: number | null;
+  operationExpectedCount?: number | null;
 }
 
 function queueRows(prefix: string, count: number): QueueRow[] {
@@ -83,6 +88,48 @@ beforeEach(() => {
 });
 
 describe('push authorization and claim control flow', () => {
+  it('sends a complete operation as one atomic grouped request', async () => {
+    const rows = queueRows('group', 3).map((row, index) => ({
+      ...row,
+      payload: JSON.stringify({ id: row.rowId, shop_id: SHOP }),
+      operationGroupId: '10000000-0000-4000-8000-000000000001',
+      operationKind: 'sale',
+      operationSequence: index,
+      operationExpectedCount: 3,
+    }));
+    mocks.listPendingSyncRows.mockReturnValueOnce(rows).mockReturnValueOnce(rows).mockReturnValue([]);
+    mocks.invoke.mockResolvedValue(applied(rows));
+
+    await expect(pushPendingRows(SHOP)).resolves.toBe(true);
+
+    const request = mocks.invoke.mock.calls[0]?.[1] as { body: Record<string, unknown> };
+    expect(request.body).toMatchObject({
+      action: 'push-group',
+      operationId: rows[0]?.operationGroupId,
+      operationKind: 'sale',
+      expectedRowCount: 3,
+      deviceId: 'device-a',
+    });
+    expect(mocks.markSyncRowSent).toHaveBeenCalledTimes(3);
+  });
+
+  it('never sends or partially advances an incomplete operation group', async () => {
+    const rows = queueRows('broken', 2).map((row, index) => ({
+      ...row,
+      operationGroupId: '10000000-0000-4000-8000-000000000002',
+      operationKind: 'refund',
+      operationSequence: index,
+      operationExpectedCount: 3,
+    }));
+    mocks.listPendingSyncRows.mockReturnValue(rows);
+
+    await expect(pushPendingRows(SHOP)).resolves.toBe(false);
+
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(mocks.markSyncRowPermanentFailure).toHaveBeenCalledTimes(2);
+    expect(mocks.markSyncRowSent).not.toHaveBeenCalled();
+  });
+
   it('permanently rejects one authorization row while the outbox tail survives', async () => {
     const rows = queueRows('auth', 2);
     const first = rows[0]!;

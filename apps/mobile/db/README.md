@@ -4,10 +4,11 @@ The ONLY code in this app that imports Drizzle or touches SQLite directly.
 SQLite is the app's single source of truth (CLAUDE.md rule 1).
 
 ## Live (Day 2)
+
 - `schema.ts` — the full local schema, 24 tables. Money columns are INTEGER
   paisa typed as `Paisa`; see DECISIONS.md.
 - `client.ts` — opens `muthoy.db` and sets both required PRAGMAs. **`PRAGMA
-  foreign_keys = ON` is per-connection and must stay in the open path** —
+foreign_keys = ON` is per-connection and must stay in the open path** —
   SQLite disables FK enforcement by default, which would make every
   `onDelete` policy decorative.
 - `init.ts` — `useDatabaseMigrations()`, run once per app start from
@@ -48,6 +49,7 @@ local critical path. **PHYSICAL TIMING VALIDATION: PENDING.**
 
 `users.pin_set_at` is the deterministic PIN-completion marker. The newest
 applicable owner row routes as follows:
+
 - none → `/register`
 - incomplete (`pin_set_at IS NULL`) → `/pin-setup`
 - complete → validate the persisted session, then Dashboard or `/pin-login`
@@ -199,7 +201,7 @@ credit only and never touch the drawer. `collectPayment` keeps its transaction
 callback synchronous/no-await so the balance check and payment write remain in
 one uninterrupted transaction.
 
-Standalone `recordCreditSale` remains an intentional stub/out of scope. Checkout
+Standalone credit mutation is not exposed. Checkout
 already creates sale-backed credit rows atomically.
 
 Standalone credit management (`createCustomer`, `collectPayment` — the
@@ -282,9 +284,10 @@ yet; the ledger's `reason` vocabulary supports it structurally but no screen
 uses it.
 
 ## Still stubs
+
 Unimplemented APIs remain in `settings.ts` (`getShopProfile`,
 `updateShopProfile`, `restoreFromBackupKey`) and `reports.ts`; `customers.ts`
-retains only the intentionally out-of-scope `recordCreditSale` stub. Verify
+routes credit through the atomic sale graph. Verify
 individual exports in source.
 
 ## Sync outbox (Day 13)

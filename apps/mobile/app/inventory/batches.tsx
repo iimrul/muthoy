@@ -1,24 +1,28 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { addBatchSchema, type AddBatchInput, type AddBatchOutput } from '@muthoy/validation';
-import { fromTaka } from '@muthoy/types';
-import { daysUntilExpiry, formatMoney, formatNumber } from '@muthoy/utils';
-import { FormField } from '../../components/forms/FormField';
-import { StandardHeader } from '../../components/ui/StandardHeader';
+import { useCallback, useEffect, useState } from "react";
+import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { router, useLocalSearchParams } from "expo-router";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  addBatchSchema,
+  type AddBatchInput,
+  type AddBatchOutput,
+} from "@muthoy/validation";
+import { fromTaka } from "@muthoy/types";
+import { daysUntilExpiry, formatMoney, formatNumber } from "@muthoy/utils";
+import { FormField } from "../../components/forms/FormField";
+import { StandardHeader } from "../../components/ui/StandardHeader";
 import {
   addBatchToMedicine,
   getMedicine,
   listBatchesForMedicine,
   type BatchDetailRow,
   type MedicineDetail,
-} from '../../db/inventory';
-import { DuplicateBatchError } from '../../db/errors';
-import { captureSessionFor } from '../../state/sessionGuard';
-import { usePermission } from '../../state/usePermission';
-import { triggerSyncNow } from '../../sync';
+} from "../../db/inventory";
+import { DuplicateBatchError } from "../../db/errors";
+import { captureSessionFor } from "../../state/sessionGuard";
+import { usePermission } from "../../state/usePermission";
+import { triggerSyncNow } from "../../sync";
 
 // Medicine detail: batch list + Add Batch — Volume 4 INVENTORY, Volume 0 Day
 // 8. This is the path that adds a batch to an EXISTING medicine, which is
@@ -32,20 +36,20 @@ export default function BatchDetailScreen() {
   // Mixed screen: the batch LIST is inventory-view, which Staff keeps
   // (Volume 0 Day 11). Only the Add Batch half is gated on inventory_write,
   // so the route itself is not blocked for Staff — the write is.
-  const { session, isAllowed: canWriteInventory } = usePermission('inventory_write');
+  const { session, isAllowed: canWriteInventory } =
+    usePermission("inventory_write");
   const [medicine, setMedicine] = useState<MedicineDetail | null>(null);
   const [batches, setBatches] = useState<BatchDetailRow[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const {
-    control,
-    handleSubmit,
-    setError,
-    reset,
-  } = useForm<AddBatchInput, unknown, AddBatchOutput>({
+  const { control, handleSubmit, setError, reset } = useForm<
+    AddBatchInput,
+    unknown,
+    AddBatchOutput
+  >({
     resolver: zodResolver(addBatchSchema),
-    defaultValues: { batchNo: '', quantity: 0, purchasePrice: 0, salePrice: 0 },
+    defaultValues: { batchNo: "", quantity: 0, purchasePrice: 0, salePrice: 0 },
   });
 
   const reload = useCallback(async () => {
@@ -102,10 +106,10 @@ export default function BatchDetailScreen() {
           return;
         }
         if (err instanceof DuplicateBatchError) {
-          setError('batchNo', { message: err.message });
+          setError("batchNo", { message: err.message });
           return;
         }
-        Alert.alert('Something went wrong', 'Please try again.');
+        Alert.alert("Something went wrong", "Please try again.");
       } finally {
         setIsSubmitting(false);
       }
@@ -119,20 +123,78 @@ export default function BatchDetailScreen() {
 
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title={medicine?.name ?? 'Batches'} onBackPress={() => router.back()} />
-      <ScrollView contentContainerClassName="gap-4 p-6" keyboardShouldPersistTaps="handled">
+      <StandardHeader
+        title={medicine?.name ?? "Batches"}
+        onBackPress={() => router.back()}
+      />
+      <ScrollView
+        contentContainerClassName="gap-4 p-6"
+        keyboardShouldPersistTaps="handled"
+      >
+        {canWriteInventory ? (
+          <Pressable
+            onPress={() =>
+              router.push({
+                pathname: "/inventory/edit-medicine",
+                params: { medicineId },
+              })
+            }
+            className="items-center rounded-lg border border-brand-green bg-white py-3"
+          >
+            <Text className="text-brand-green">Edit medicine</Text>
+          </Pressable>
+        ) : null}
         {batches.map((batch) => (
-          <BatchRow key={batch.id} batch={batch} />
+          <BatchRow
+            key={batch.id}
+            batch={batch}
+            onEdit={
+              canWriteInventory
+                ? () =>
+                    router.push({
+                      pathname: "/inventory/edit-batch" as never,
+                      params: { medicineId, batchId: batch.id },
+                    })
+                : undefined
+            }
+          />
         ))}
 
         {!canWriteInventory ? null : isAdding ? (
           <View className="gap-4 rounded-lg bg-white p-4">
-            <Text className="font-sans-bold text-base text-richBlack">Add batch</Text>
-            <FormField control={control} name="batchNo" label="Batch number" placeholder="e.g. B-2024-02" />
-            <FormField control={control} name="expiryDate" label="Expiry date" placeholder="YYYY-MM-DD" />
-            <FormField control={control} name="quantity" label="Quantity" numeric />
-            <FormField control={control} name="purchasePrice" label="Purchase price (৳)" numeric />
-            <FormField control={control} name="salePrice" label="Sale price (৳)" numeric />
+            <Text className="font-sans-bold text-base text-richBlack">
+              Add batch
+            </Text>
+            <FormField
+              control={control}
+              name="batchNo"
+              label="Batch number"
+              placeholder="e.g. B-2024-02"
+            />
+            <FormField
+              control={control}
+              name="expiryDate"
+              label="Expiry date"
+              placeholder="YYYY-MM-DD"
+            />
+            <FormField
+              control={control}
+              name="quantity"
+              label="Quantity"
+              numeric
+            />
+            <FormField
+              control={control}
+              name="purchasePrice"
+              label="Purchase price (৳)"
+              numeric
+            />
+            <FormField
+              control={control}
+              name="salePrice"
+              label="Sale price (৳)"
+              numeric
+            />
             <View className="flex-row gap-4">
               <Pressable
                 onPress={() => {
@@ -143,7 +205,9 @@ export default function BatchDetailScreen() {
                 accessibilityLabel="Cancel"
                 className="flex-1 items-center rounded-lg border border-midGray py-3"
               >
-                <Text className="font-sans-medium text-base text-richBlack">Cancel</Text>
+                <Text className="font-sans-medium text-base text-richBlack">
+                  Cancel
+                </Text>
               </Pressable>
               <Pressable
                 onPress={handleSubmit(onSubmit)}
@@ -152,7 +216,9 @@ export default function BatchDetailScreen() {
                 accessibilityLabel="Save batch"
                 className="flex-1 items-center rounded-lg bg-brand-green py-3"
               >
-                <Text className="font-sans-semibold text-base text-white">{isSubmitting ? 'Saving…' : 'Save batch'}</Text>
+                <Text className="font-sans-semibold text-base text-white">
+                  {isSubmitting ? "Saving…" : "Save batch"}
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -163,7 +229,9 @@ export default function BatchDetailScreen() {
             accessibilityLabel="Add batch"
             className="items-center rounded-lg bg-brand-green py-3.5 active:opacity-80"
           >
-            <Text className="font-sans-semibold text-base text-white">Add batch</Text>
+            <Text className="font-sans-semibold text-base text-white">
+              Add batch
+            </Text>
           </Pressable>
         )}
       </ScrollView>
@@ -171,19 +239,39 @@ export default function BatchDetailScreen() {
   );
 }
 
-function BatchRow({ batch }: { batch: BatchDetailRow }) {
+function BatchRow({
+  batch,
+  onEdit,
+}: {
+  batch: BatchDetailRow;
+  onEdit?: () => void;
+}) {
   const days = daysUntilExpiry(batch.expiryDate, new Date());
-  const expiryLabel = days === null ? 'No expiry' : days < 0 ? 'Expired' : `${formatNumber(days)}d left`;
+  const expiryLabel =
+    days === null
+      ? "No expiry"
+      : days < 0
+        ? "Expired"
+        : `${formatNumber(days)}d left`;
 
   return (
-    <View className="flex-row items-center justify-between rounded-lg bg-white p-4">
+    <Pressable
+      onPress={onEdit}
+      disabled={!onEdit}
+      className="flex-row items-center justify-between rounded-lg bg-white p-4"
+    >
       <View className="gap-1">
-        <Text className="font-sans-medium text-base text-richBlack">{batch.batchNo}</Text>
+        <Text className="font-sans-medium text-base text-richBlack">
+          {batch.batchNo}
+        </Text>
         <Text className="font-sans text-xs text-midGray">
           {formatNumber(batch.quantityAvailable)} in stock · {expiryLabel}
         </Text>
       </View>
-      <Text className="font-mono text-base text-brand-green">{formatMoney(batch.salePrice)}</Text>
-    </View>
+      <Text className="font-mono text-base text-brand-green">
+        {formatMoney(batch.salePrice)}
+      </Text>
+      {onEdit ? <Text className="ml-3 text-brand-green">Edit</Text> : null}
+    </Pressable>
   );
 }

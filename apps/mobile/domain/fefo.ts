@@ -64,6 +64,24 @@ export function activeBatch(medicineId: string, batches: Batch[]): Batch | undef
   return sortByExpiry(candidates)[0];
 }
 
+/** Printed expiry date remains sellable for that full Asia/Dhaka business day. */
+export function isBatchSellable(batch: Pick<Batch, 'expiryDate' | 'quantityAvailable'>, businessDate: string): boolean {
+  return batch.quantityAvailable > 0 && (batch.expiryDate === null || batch.expiryDate >= businessDate);
+}
+
+export function activeSellableBatch(medicineId: string, batches: Batch[], businessDate: string): Batch | undefined {
+  return sortByExpiry(batches.filter((batch) => batch.medicineId === medicineId && isBatchSellable(batch, businessDate)))[0];
+}
+
+export function deductSellable(
+  medicineId: string,
+  quantity: number,
+  batches: Batch[],
+  businessDate: string,
+): DeductionResult[] {
+  return deduct(medicineId, quantity, batches.filter((batch) => isBatchSellable(batch, businessDate)));
+}
+
 // Resolve `quantity` earliest-expiry-first, spilling into later batches.
 export function deduct(medicineId: string, quantity: number, batches: Batch[]): DeductionResult[] {
   const candidates = sortByExpiry(

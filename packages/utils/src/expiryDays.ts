@@ -8,14 +8,20 @@
  * the date is in the past. `null` in (no expiry recorded, per db/schema.ts's
  * nullable batches.expiry_date) always yields `null` out.
  */
-export function daysUntilExpiry(isoDate: string | null, now: Date): number | null {
+export function daysUntilExpiry(
+  isoDate: string | null,
+  now: Date,
+): number | null {
   if (isoDate === null) {
     return null;
   }
 
-  const MS_PER_DAY = 24 * 60 * 60 * 1000;
-  const expiry = new Date(`${isoDate}T00:00:00`);
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  return Math.round((expiry.getTime() - today.getTime()) / MS_PER_DAY);
+  const dhakaToday = new Date(now.getTime() + 6 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  return (
+    (Date.parse(`${isoDate}T00:00:00Z`) -
+      Date.parse(`${dhakaToday}T00:00:00Z`)) /
+    86_400_000
+  );
 }

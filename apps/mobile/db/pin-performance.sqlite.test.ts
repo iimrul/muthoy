@@ -30,6 +30,9 @@ beforeAll(() => {
     '0007_staff_device_login.sql',
     '0008_native_pin_lookup.sql',
     '0009_strong_gargoyle.sql',
+    '0010_known_ares.sql',
+    '0013_owner_dashboard_credit_period.sql',
+    '0014_owner_dashboard_credit_period_guard.sql',
   ]) migrate(name);
 });
 

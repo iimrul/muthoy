@@ -11,3 +11,4 @@ export * from './sales';
 export * from './purchases';
 export * from './customers';
 export * from './expenses';
+export * from './b2';

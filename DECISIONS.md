@@ -984,3 +984,70 @@ Targets: enrolled login <=2 seconds (ideally <1 second), Staff creation <=2–3
 seconds on target Android hardware. Development timings now separate lookup,
 bcrypt compare/hash, SQLite/permissions/outbox, Edge/session, hydration,
 navigation, and background-sync start. **PHYSICAL TIMING VALIDATION: PENDING.**
+
+---
+
+## 2026-08-21 — Phase B2 sales and inventory contracts
+
+Phase B2 follows `docs/plans/phase-b2-sales-inventory.md`. Locked rules:
+
+- Stock expired before the Asia/Dhaka business date is unsellable; null expiry
+  remains sellable and FEFO-last. Checkout allocates and prices every consumed
+  batch inside one SQLite transaction, using integer paisa and requiring
+  reconfirmation after a changed quote.
+- Per-batch percentage promotions apply before one sale-level amount/percentage
+  checkout discount. Split tender is cash plus customer credit only. Holds do
+  not reserve stock. Prescription metadata and image are optional/non-blocking.
+- Refund is full-sale only, reason-required, deterministic/idempotent, and
+  reverses the exact original payment components. Before any physical payout or
+  local refund mutation, `sync/` must obtain the sale's sole active server claim.
+  Offline Refund stays disabled with “Internet required for refund” and changes
+  no sale, stock, cash, credit, or ledger state. Claims never auto-expire or
+  reassign; only their bound operation/device can resume until server commit.
+- Shop low-stock fallback is 10 with a nullable medicine override. Expiry bands
+  are Near 0–30 and Far 31–60 days. Duplicate same-shop barcodes are allowed and
+  require an ambiguity picker. Archive is soft and requires zero ledger stock,
+  no unresolved oversell, and no active promotion. Owner CSV import is previewed,
+  validated, and committed as one ledger/outbox operation.
+
+The founder approved the B2 safety gate for local implementation only. Remote
+migration push/execution, deployment, and commit remain separately prohibited.
+
+---
+
+## 2026-08-22 — Owner Dashboard functional parity
+
+Follows `docs/plans/owner-dashboard-parity-recovery.md`. The prototype's
+`MorningDashboard` is the functional source of truth; production SQLite, the
+fixed cash formula, FEFO, the stock ledger, permissions, and sync remain the
+implementation authority. Founder decisions, approved 2026-08-22:
+
+1. **Alert previews.** Expiry and Low Stock each show at most 3 rows, and
+   "+N more" is computed from the unbounded SQLite COUNT. This supersedes the
+   prototype, which rendered 2 rows from a list already capped at 5 and could
+   therefore never report more than "+3" however many batches were expiring.
+2. **Credit period.** New synced `shop_b2_settings.credit_max_days`, default 7,
+   mirroring `max_refund_days`. A credit is overdue once its local creation
+   date is older than that many days — `credits` carries no due date — and the
+   overdue figure counts distinct customers, not rows.
+3. **Expected Cash card.** Shows the exact expected total from
+   `domain/cashFormula.expectedCash` plus a Details link into Cash Summary.
+   No partial "open + sales − expenses" subtitle: three of the seven fixed
+   terms would disagree with Cash Summary the moment a refund, collection,
+   supplier payment, or withdrawal existed (CLAUDE.md rule 4).
+4. **Complete Day.** The dashboard card routes to the existing `/end-of-day`
+   and its real `closeDay`. The prototype's three-step modal, whose success
+   step wrote a fake `dailyHistory` archive, is superseded.
+5. **New Sale button.** Removed from the Owner Dashboard. The prototype reaches
+   Sale through the bottom navigation shell, which B1 already ships.
+
+Two money-correctness defects were fixed ahead of any new surface:
+`getStaffPerformance` valued a staff member's credit, split, and free sales at
+zero (`CASE WHEN payment_type = 'cash'`) and listed non-selling staff under
+"Today's Active Staff"; and the dashboard rendered a blank screen for a
+non-owner and swallowed load failures as unhandled rejections.
+
+Local implementation only. Remote migration push/execution, deployment, and
+commit remain separately prohibited: `0013_owner_dashboard_credit_period.sql`
+and `20260822000000_owner_dashboard_credit_period.sql` are written and tested
+locally but unpushed.

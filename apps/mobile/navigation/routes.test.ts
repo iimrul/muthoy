@@ -3,6 +3,7 @@ import {
   authenticatedHome,
   authenticatedHomeCorrection,
   canAccessPath,
+  OWNER_QUICK_LINKS,
   visibleMoreRoutes,
 } from './routes';
 import { PERMISSION_PRESETS } from '../domain/permissions';
@@ -35,4 +36,23 @@ describe('B1 routes', () => {
   it('guards owner and staff homes', () => { expect(canAccessPath(owner, '/dashboard')).toBe(true); expect(canAccessPath(manager, '/dashboard')).toBe(false); expect(canAccessPath(manager, '/staff-home')).toBe(true); expect(canAccessPath(owner, '/staff-home')).toBe(false); });
   it('guards scan and deep links by exact permission', () => { expect(canAccessPath(cashier, '/scan')).toBe(true); expect(canAccessPath({ ...cashier, permissions: { sale_entry: false } }, '/scan')).toBe(false); expect(canAccessPath(cashier, '/reports/report')).toBe(false); expect(canAccessPath(manager, '/reports/report')).toBe(true); });
   it('uses exact More visibility/order', () => { expect(visibleMoreRoutes(cashier).map((item) => item.key)).toEqual([]); expect(visibleMoreRoutes(manager).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report']); expect(visibleMoreRoutes(owner).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales']); });
+  it('keeps the approved Owner Quick Links in one exact registry', () => {
+    expect(OWNER_QUICK_LINKS.map((item) => [item.labelKey, item.href])).toEqual([
+      ['sale', '/sale'],
+      ['inventory', '/inventory'],
+      ['credit', '/credit/credit-sales'],
+      ['expense', '/expenses'],
+      ['salesHistory', '/reports/sales-history'],
+      ['expiry', '/inventory/expiry'],
+      ['supplierInvoices', '/suppliers/purchase-create'],
+      ['suppliers', '/suppliers/list'],
+      ['report', '/reports/report'],
+      ['staffManagement', '/staff/management'],
+      ['staffSales', '/staff/sales-view'],
+      ['dataExport', '/reports/data-export'],
+      ['printer', '/settings/printer-settings'],
+      ['settings', '/settings/settings'],
+      ['plans', '/settings/plans'],
+    ]);
+  });
 });

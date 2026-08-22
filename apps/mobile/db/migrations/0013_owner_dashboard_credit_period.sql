@@ -1,0 +1,1 @@
+ALTER TABLE `shop_b2_settings` ADD `credit_max_days` integer DEFAULT 7 NOT NULL;

@@ -6,10 +6,86 @@ import { and, eq } from 'drizzle-orm';
 import { assertPinUnique, requireOwner } from './auth';
 import { assertSessionLive } from './errors';
 import { db } from './client';
-import { auditLogs, shops, users } from './schema';
+import { auditLogs, shopB2Settings, shops, users } from './schema';
 import { hashPin, verifyPinHash } from '../native/crypto';
 import { generateId } from '../native/id';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
+import {
+  DEFAULT_FAR_EXPIRY_DAYS,
+  DEFAULT_LOW_STOCK_THRESHOLD,
+  DEFAULT_NEAR_EXPIRY_DAYS,
+} from '../domain/inventoryRules';
+import { DEFAULT_CREDIT_MAX_DAYS } from '../domain/dashboard';
+
+export const DEFAULT_MAX_REFUND_DAYS = 7;
+
+export interface B2Settings {
+  lowStockDefault: number;
+  expiryNearDays: number;
+  expiryFarDays: number;
+  maxRefundDays: number;
+  /** Owner Dashboard dues card. See domain/dashboard.overdueBeforeDate. */
+  creditMaxDays: number;
+}
+
+export const DEFAULT_B2_SETTINGS: B2Settings = {
+  lowStockDefault: DEFAULT_LOW_STOCK_THRESHOLD,
+  expiryNearDays: DEFAULT_NEAR_EXPIRY_DAYS,
+  expiryFarDays: DEFAULT_FAR_EXPIRY_DAYS,
+  maxRefundDays: DEFAULT_MAX_REFUND_DAYS,
+  creditMaxDays: DEFAULT_CREDIT_MAX_DAYS,
+};
+
+function assertB2Settings(settings: B2Settings): void {
+  const values = Object.values(settings);
+  if (values.some((value) => !Number.isInteger(value) || value < 0)) {
+    throw new Error('B2 settings must be non-negative integers');
+  }
+  if (settings.expiryNearDays >= settings.expiryFarDays) {
+    throw new Error('Near-expiry days must be less than far-expiry days');
+  }
+}
+
+export async function getB2Settings(shopId: string): Promise<B2Settings> {
+  const row = db.select({
+    lowStockDefault: shopB2Settings.lowStockDefault,
+    expiryNearDays: shopB2Settings.expiryNearDays,
+    expiryFarDays: shopB2Settings.expiryFarDays,
+    maxRefundDays: shopB2Settings.maxRefundDays,
+    creditMaxDays: shopB2Settings.creditMaxDays,
+  }).from(shopB2Settings).where(and(
+    eq(shopB2Settings.shopId, shopId),
+    eq(shopB2Settings.isDeleted, false),
+  )).get();
+  return row ?? DEFAULT_B2_SETTINGS;
+}
+
+export async function updateB2Settings(
+  shopId: string,
+  actorUserId: string,
+  settings: B2Settings,
+  isStillActive: () => boolean,
+): Promise<void> {
+  await requireOwner(shopId, actorUserId);
+  assertB2Settings(settings);
+  db.transaction((tx) => {
+    assertSessionLive(isStillActive);
+    const existing = tx.select({ id: shopB2Settings.id }).from(shopB2Settings).where(
+      and(eq(shopB2Settings.shopId, shopId), eq(shopB2Settings.isDeleted, false)),
+    ).get();
+    const now = new Date().toISOString();
+    if (existing) {
+      const values = stampUpdatedAt({ ...settings, isDirty: true });
+      tx.update(shopB2Settings).set(values).where(eq(shopB2Settings.id, existing.id)).run();
+      recordChange(tx, { shopId, table: 'shop_b2_settings', rowId: existing.id, op: 'update', payload: values });
+    } else {
+      const id = generateId();
+      const values = { id, shopId, ...settings, createdAt: now, updatedAt: now };
+      tx.insert(shopB2Settings).values(values).run();
+      recordChange(tx, { shopId, table: 'shop_b2_settings', rowId: id, op: 'insert', payload: values });
+    }
+  });
+}
 
 export interface ShopProfile {
   id: string;
