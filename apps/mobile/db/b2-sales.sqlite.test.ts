@@ -38,6 +38,13 @@ beforeAll(() => {
     "0008_native_pin_lookup.sql",
     "0009_strong_gargoyle.sql",
     "0010_known_ares.sql",
+    "0011_black_zarda.sql",
+    "0012_small_meltdown.sql",
+    "0013_owner_dashboard_credit_period.sql",
+    "0014_owner_dashboard_credit_period_guard.sql",
+    "0015_b3_shop_settings.sql",
+    "0016_payment_note.sql",
+    "0017_cash_reconcile.sql",
   ])
     applyMigration(name);
   const timestamp = now();

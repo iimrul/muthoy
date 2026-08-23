@@ -113,6 +113,20 @@
       "when": 1787401467056,
       "tag": "0015_b3_shop_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1787457630322,
+      "tag": "0016_payment_note",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1787457743420,
+      "tag": "0017_cash_reconcile",
+      "breakpoints": true
     }
   ]
 }

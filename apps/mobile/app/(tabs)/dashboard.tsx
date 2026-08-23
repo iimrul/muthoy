@@ -79,6 +79,8 @@ export default function MorningDashboardScreen() {
   const [isOpeningCashPrompt, setIsOpeningCashPrompt] = useState(false);
   const [previousDay, setPreviousDay] = useState<DaySummary | null>(null);
   const [previousDayOpen, setPreviousDayOpen] = useState(false);
+  const [openCashAfterPreviousDay, setOpenCashAfterPreviousDay] =
+    useState(false);
 
   useEffect(
     () => completePendingAuthTimingStage("navigation_render_completion"),
@@ -138,8 +140,8 @@ export default function MorningDashboardScreen() {
   }, [reload, session]);
 
   const openPreviousDay = useCallback(
-    async (businessDate: string) => {
-      if (!session || session.role !== "owner") return;
+    async (businessDate: string): Promise<boolean> => {
+      if (!session || session.role !== "owner") return false;
       const guard = captureSessionFor(session);
       try {
         const summary = await getDaySummary(
@@ -147,14 +149,15 @@ export default function MorningDashboardScreen() {
           session.userId,
           businessDate,
         );
-        guard?.ifLive(() => {
-          setPreviousDay(summary);
-          setPreviousDayOpen(true);
-        });
+        if (!guard || guard.isStale()) return false;
+        setPreviousDay(summary);
+        setPreviousDayOpen(true);
+        return true;
       } catch {
         // A summary sheet is not worth blocking the dashboard for; the same
         // figures are already on the Yesterday card.
         guard?.ifLive(() => setPreviousDayOpen(false));
+        return false;
       }
     },
     [session],
@@ -172,19 +175,30 @@ export default function MorningDashboardScreen() {
         return;
       }
       markBusinessDateSeen(session.shopId, businessDate);
-      if (rollover.previousBusinessDate) {
-        void openPreviousDay(rollover.previousBusinessDate);
-      }
       const guard = captureSessionFor(session);
-      void hasCashDrawerForDate(session.shopId, businessDate)
-        .then((exists) => {
-          guard?.ifLive(() => {
-            if (exists) return;
+      void (async () => {
+        try {
+          const exists = await hasCashDrawerForDate(
+            session.shopId,
+            businessDate,
+          );
+          if (!guard || guard.isStale()) return;
+          if (rollover.previousBusinessDate) {
+            setOpenCashAfterPreviousDay(!exists);
+            const opened = await openPreviousDay(rollover.previousBusinessDate);
+            if (opened || exists || guard.isStale()) return;
+            // If yesterday's optional summary cannot load, do not lose the
+            // required opening-cash prompt behind it.
+            setOpenCashAfterPreviousDay(false);
             setIsOpeningCashPrompt(true);
             setOpeningCashOpen(true);
-          });
-        })
-        .catch((caught: unknown) => {
+            return;
+          }
+          setOpenCashAfterPreviousDay(false);
+          if (exists) return;
+          setIsOpeningCashPrompt(true);
+          setOpeningCashOpen(true);
+        } catch (caught: unknown) {
           guard?.ifLive(() =>
             setError(
               caught instanceof Error
@@ -192,9 +206,19 @@ export default function MorningDashboardScreen() {
                 : t("dashboardLoadFailed"),
             ),
           );
-        });
+        }
+      })();
     }, [openPreviousDay, session, t]),
   );
+
+  const handleClosePreviousDay = useCallback(() => {
+    setPreviousDayOpen(false);
+    if (!openCashAfterPreviousDay || !session || session.role !== "owner")
+      return;
+    setOpenCashAfterPreviousDay(false);
+    setIsOpeningCashPrompt(true);
+    setOpeningCashOpen(true);
+  }, [openCashAfterPreviousDay, session]);
 
   const handleSync = useCallback(async () => {
     if (!session) return;
@@ -724,14 +748,17 @@ export default function MorningDashboardScreen() {
 
       <OpeningCashModal
         visible={openingCashOpen}
-        onClose={() => setOpeningCashOpen(false)}
+        onClose={() => {
+          setOpeningCashOpen(false);
+          setIsOpeningCashPrompt(false);
+        }}
         onSubmit={handleSaveOpeningCash}
         isDismissable={!isOpeningCashPrompt}
       />
 
       <PreviousDaySummaryModal
         visible={previousDayOpen}
-        onClose={() => setPreviousDayOpen(false)}
+        onClose={handleClosePreviousDay}
         summary={previousDay}
         dateLabel={dateLabel(
           previousDay?.businessDate ?? data.yesterday.businessDate,

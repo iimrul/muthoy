@@ -46,3 +46,23 @@ export const endOfDayFormSchema = z.object({
 });
 
 export type EndOfDayFormInput = z.input<typeof endOfDayFormSchema>;
+
+// B3 Group 2 (D-2, contract §5.9): the MID-DAY reconcile count. Same shape as
+// endOfDayFormSchema above but kept as its own named schema — the two counts
+// are deliberately different acts (reconcile never locks the day; only
+// End of Day's close does) and must never be conflated, including at the
+// validation layer.
+export const cashReconcileFormSchema = z.object({
+  countedCashTaka: takaAmount.min(0, 'Counted cash cannot be negative'),
+});
+
+export type CashReconcileFormInput = z.input<typeof cashReconcileFormSchema>;
+
+// B3 Group 2: cash pulled out of the drawer. Positive-only — a zero or
+// negative withdrawal has no meaning.
+export const withdrawalFormSchema = z.object({
+  amountTaka: takaAmount.positive('Amount must be greater than zero'),
+  note: optionalText,
+});
+
+export type WithdrawalFormInput = z.input<typeof withdrawalFormSchema>;

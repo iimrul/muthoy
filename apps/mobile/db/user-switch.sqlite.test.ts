@@ -167,6 +167,8 @@ beforeAll(async () => {
   applyMigration('0013_owner_dashboard_credit_period.sql');
   applyMigration('0014_owner_dashboard_credit_period_guard.sql');
   applyMigration('0015_b3_shop_settings.sql');
+  applyMigration('0016_payment_note.sql');
+  applyMigration('0017_cash_reconcile.sql');
 
   // Day 4: the owner registers, sets a PIN, and the device gets linked.
   const registration = await createShopAndOwner({

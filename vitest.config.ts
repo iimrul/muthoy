@@ -92,10 +92,12 @@ export default defineConfig({
       // at the module boundary), so the default node environment below is
       // unaffected.
       "apps/mobile/state/switchUser.test.tsx",
+      "apps/mobile/state/businessDayStore.test.ts",
       "apps/mobile/tests/sale/checkout.test.tsx",
       // The six sibling actor-stamping write screens, driven across a real
       // OWNER → STAFF → OWNER handover with only db/ and sync/ mocked.
       "apps/mobile/tests/switch-user-writes.test.tsx",
+      "apps/mobile/tests/dashboard-rollover.test.tsx",
       "apps/mobile/tests/app-layout.test.tsx",
       "apps/mobile/tests/authenticated-routing.test.tsx",
       "apps/mobile/tests/auth-pin-latency.test.tsx",
@@ -113,6 +115,7 @@ export default defineConfig({
       "backend/supabase/pgtest/migration.pgtest.ts",
       "backend/supabase/pgtest/security.pgtest.ts",
       "backend/supabase/pgtest/b2.pgtest.ts",
+      "backend/supabase/pgtest/b3-group2.pgtest.ts",
       "backend/supabase/functions/sync/grants.test.ts",
       // Same text-reading technique again, for the separate-device login: that
       // the lockout precedes bcrypt, that every credential failure is

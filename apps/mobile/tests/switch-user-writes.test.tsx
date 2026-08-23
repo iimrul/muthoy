@@ -20,17 +20,24 @@
 // session store, switchUser, captureSessionFor, react-hook-form and every
 // zod schema are the real implementations.
 
-import { createElement, type ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createElement, type ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 
-const SHOP_ID = '7c2f1a30-0000-4000-8000-000000000001';
-const OWNER_ID = '7c2f1a30-0000-4000-8000-000000000002';
-const STAFF_ID = '7c2f1a30-0000-4000-8000-000000000003';
-const CUSTOMER_ID = '7c2f1a30-0000-4000-8000-000000000004';
-const SUPPLIER_ID = '7c2f1a30-0000-4000-8000-000000000005';
-const MEDICINE_ID = '7c2f1a30-0000-4000-8000-000000000006';
-const BUSINESS_DATE = '2026-08-17';
+const SHOP_ID = "7c2f1a30-0000-4000-8000-000000000001";
+const OWNER_ID = "7c2f1a30-0000-4000-8000-000000000002";
+const STAFF_ID = "7c2f1a30-0000-4000-8000-000000000003";
+const CUSTOMER_ID = "7c2f1a30-0000-4000-8000-000000000004";
+const SUPPLIER_ID = "7c2f1a30-0000-4000-8000-000000000005";
+const MEDICINE_ID = "7c2f1a30-0000-4000-8000-000000000006";
+const BUSINESS_DATE = "2026-08-17";
 
 const mmkv = vi.hoisted(() => {
   const stores = new Map<string, Map<string, string>>();
@@ -48,7 +55,7 @@ const mmkv = vi.hoisted(() => {
   };
 });
 
-vi.mock('react-native-mmkv', () => ({ createMMKV: mmkv.createMMKV }));
+vi.mock("react-native-mmkv", () => ({ createMMKV: mmkv.createMMKV }));
 
 interface StubProps {
   children?: ReactNode;
@@ -58,21 +65,38 @@ interface StubProps {
   value?: string;
   onChangeText?: (value: string) => void;
   disabled?: boolean;
+  visible?: boolean;
 }
 
-vi.mock('react-native', () => ({
-  View: ({ children }: StubProps) => createElement('div', null, children),
-  Text: ({ children }: StubProps) => createElement('span', null, children),
-  ScrollView: ({ children }: StubProps) => createElement('div', null, children),
+vi.mock("react-native", () => ({
+  View: ({ children }: StubProps) => createElement("div", null, children),
+  Text: ({ children }: StubProps) => createElement("span", null, children),
+  ScrollView: ({ children }: StubProps) => createElement("div", null, children),
   Pressable: ({ children, onPress, accessibilityLabel, disabled }: StubProps) =>
-    createElement('button', { onClick: onPress, 'aria-label': accessibilityLabel, disabled }, children),
-  TextInput: ({ value, onChangeText, accessibilityLabel, placeholder }: StubProps) =>
-    createElement('input', {
-      value: value ?? '',
-      'aria-label': accessibilityLabel,
+    createElement(
+      "button",
+      { onClick: onPress, "aria-label": accessibilityLabel, disabled },
+      children,
+    ),
+  TextInput: ({
+    value,
+    onChangeText,
+    accessibilityLabel,
+    placeholder,
+  }: StubProps) =>
+    createElement("input", {
+      value: value ?? "",
+      "aria-label": accessibilityLabel,
       placeholder,
-      onChange: (event: { target: { value: string } }) => onChangeText?.(event.target.value),
+      onChange: (event: { target: { value: string } }) =>
+        onChangeText?.(event.target.value),
     }),
+  // B3 Group 2: OpeningCashModal/WithdrawSheet render RN's Modal, which RN
+  // itself only mounts children while `visible` — mirrored here rather than
+  // always rendering, so a closed sheet's fields are genuinely absent from
+  // the DOM (matching how getByLabelText assertions distinguish open/closed).
+  Modal: ({ children, visible }: StubProps) =>
+    visible ? createElement("div", null, children) : null,
 }));
 
 const routerMock = vi.hoisted(() => ({
@@ -81,24 +105,33 @@ const routerMock = vi.hoisted(() => ({
   back: vi.fn(),
   params: { value: {} as Record<string, string> },
 }));
+const focusMock = vi.hoisted(() => ({
+  callback: null as null | (() => void | (() => void)),
+}));
 
-vi.mock('expo-router', () => ({
+vi.mock("expo-router", () => ({
   router: routerMock,
   useLocalSearchParams: () => routerMock.params.value,
   // useUnreadCount subscribes through this; the badge is not under test.
-  useFocusEffect: () => undefined,
+  useFocusEffect: (callback: () => void | (() => void)) => {
+    focusMock.callback = callback;
+  },
 }));
 
-vi.mock('../components/ui/StandardHeader', () => ({
-  StandardHeader: ({ title }: { title: string }) => createElement('h1', null, title),
+vi.mock("../components/ui/StandardHeader", () => ({
+  StandardHeader: ({ title }: { title: string }) =>
+    createElement("h1", null, title),
 }));
-vi.mock('../components/ui/AccessDenied', () => ({
-  AccessDenied: () => createElement('p', null, 'Access denied'),
+vi.mock("../components/ui/AccessDenied", () => ({
+  AccessDenied: () => createElement("p", null, "Access denied"),
 }));
 
 const deps = vi.hoisted(() => ({
   currentBusinessDate: vi.fn(),
   getCashSummary: vi.fn(),
+  getCashBreakdown: vi.fn(),
+  recordWithdrawal: vi.fn(),
+  reconcileCashDrawer: vi.fn(),
   setOpeningCash: vi.fn(),
   listExpenses: vi.fn(),
   recordExpense: vi.fn(),
@@ -115,54 +148,64 @@ const deps = vi.hoisted(() => ({
   createPurchase: vi.fn(),
   getUnreadCount: vi.fn(),
   triggerSyncNow: vi.fn(),
+  subscribeToSyncCompletion: vi.fn(
+    (_shopId: string, _listener: () => void | Promise<void>) => vi.fn(),
+  ),
   stopSyncEngine: vi.fn(),
 }));
 
-vi.mock('../db/cash', () => ({
+vi.mock("../db/cash", () => ({
   currentBusinessDate: deps.currentBusinessDate,
   getCashSummary: deps.getCashSummary,
+  getCashBreakdown: deps.getCashBreakdown,
+  recordWithdrawal: deps.recordWithdrawal,
+  reconcileCashDrawer: deps.reconcileCashDrawer,
   setOpeningCash: deps.setOpeningCash,
   listExpenses: deps.listExpenses,
   recordExpense: deps.recordExpense,
   getEndOfDaySummary: deps.getEndOfDaySummary,
   closeDay: deps.closeDay,
 }));
-vi.mock('../db/customers', () => ({
+vi.mock("../db/customers", () => ({
   listCustomersWithBalance: deps.listCustomersWithBalance,
   createCustomer: deps.createCustomer,
   getCustomer: deps.getCustomer,
   getCustomerCreditLedger: deps.getCustomerCreditLedger,
   collectPayment: deps.collectPayment,
 }));
-vi.mock('../db/purchases', () => ({
+vi.mock("../db/purchases", () => ({
   searchMedicinesForPurchase: deps.searchMedicinesForPurchase,
   createPurchase: deps.createPurchase,
 }));
-vi.mock('../db/suppliers', () => ({ listSuppliers: deps.listSuppliers }));
-vi.mock('../db/notifications', () => ({ getUnreadCount: deps.getUnreadCount }));
-vi.mock('../db/settings', () => ({ getB2Settings: deps.getB2Settings }));
+vi.mock("../db/suppliers", () => ({ listSuppliers: deps.listSuppliers }));
+vi.mock("../db/notifications", () => ({ getUnreadCount: deps.getUnreadCount }));
+vi.mock("../db/settings", () => ({ getB2Settings: deps.getB2Settings }));
 // state/switchUser.ts pulls stopSyncEngine from here, so the real handover
 // below runs against the mock rather than the native engine.
-vi.mock('../sync', () => ({
+vi.mock("../sync", () => ({
   triggerSyncNow: deps.triggerSyncNow,
+  subscribeToSyncCompletion: deps.subscribeToSyncCompletion,
   stopSyncEngine: deps.stopSyncEngine,
 }));
 
-const { asPaisa } = await import('@muthoy/types');
-const { useSessionStore } = await import('../state/sessionStore');
-type Session = import('../state/sessionStore').Session;
-const { switchUser } = await import('../state/switchUser');
-const { captureSessionFor } = await import('../state/sessionGuard');
+const { asPaisa } = await import("@muthoy/types");
+const { useLocaleStore } = await import("../state/localeStore");
+const { useSessionStore } = await import("../state/sessionStore");
+type Session = import("../state/sessionStore").Session;
+const { switchUser } = await import("../state/switchUser");
+const { captureSessionFor } = await import("../state/sessionGuard");
 
-const CashSummaryScreen = (await import('../app/cash-summary')).default;
-const ExpensesScreen = (await import('../app/expenses')).default;
-const EndOfDayScreen = (await import('../app/end-of-day')).default;
-const CreditSalesScreen = (await import('../app/credit/credit-sales')).default;
-const CustomerDetailScreen = (await import('../app/credit/customer-detail')).default;
-const PurchaseCreateScreen = (await import('../app/suppliers/purchase-create')).default;
+const CashSummaryScreen = (await import("../app/cash-summary")).default;
+const ExpensesScreen = (await import("../app/expenses")).default;
+const EndOfDayScreen = (await import("../app/end-of-day")).default;
+const CreditSalesScreen = (await import("../app/credit/credit-sales")).default;
+const CustomerDetailScreen = (await import("../app/credit/customer-detail"))
+  .default;
+const PurchaseCreateScreen = (await import("../app/suppliers/purchase-create"))
+  .default;
 
-const OWNER: Session = { shopId: SHOP_ID, userId: OWNER_ID, role: 'owner' };
-const STAFF: Session = { shopId: SHOP_ID, userId: STAFF_ID, role: 'staff' };
+const OWNER: Session = { shopId: SHOP_ID, userId: OWNER_ID, role: "owner" };
+const STAFF: Session = { shopId: SHOP_ID, userId: STAFF_ID, role: "staff" };
 
 const ZERO_FORMULA = {
   openingCash: asPaisa(0),
@@ -172,6 +215,29 @@ const ZERO_FORMULA = {
   refunds: asPaisa(0),
   supplierPayments: asPaisa(0),
   withdrawals: asPaisa(0),
+};
+
+const ZERO_CASH_BREAKDOWN = {
+  businessDate: BUSINESS_DATE,
+  openingCash: asPaisa(0),
+  cashSales: {
+    total: asPaisa(0),
+    owner: asPaisa(0),
+    staff: asPaisa(0),
+    staffBreakdown: [],
+  },
+  creditCollections: { total: asPaisa(0), details: [] },
+  expenses: { total: asPaisa(0), details: [] },
+  withdrawals: { total: asPaisa(0) },
+  supplierPayments: { total: asPaisa(0) },
+  expectedCash: asPaisa(0),
+  reconciled: {
+    countedAmount: null,
+    at: null,
+    by: null,
+    status: "unknown" as const,
+    diff: null,
+  },
 };
 
 const OPEN_DAY_SUMMARY = {
@@ -189,7 +255,7 @@ const OPEN_DAY_SUMMARY = {
   creditCollected: asPaisa(0),
   countedCash: null,
   variance: null,
-  openedByName: 'Owner',
+  openedByName: "Owner",
   closedByName: null,
   openedAt: null,
   closedAt: null,
@@ -222,7 +288,9 @@ function ownerLendsPhoneAndTakesItBack(): void {
 
 /** The liveness callback the screen handed to the db layer on its last call. */
 function livenessOf(write: { mock: { calls: unknown[][] } }): () => boolean {
-  const input = write.mock.calls.at(-1)?.[0] as { isStillActive?: () => boolean };
+  const input = write.mock.calls.at(-1)?.[0] as {
+    isStillActive?: () => boolean;
+  };
   return input.isStillActive!;
 }
 
@@ -247,21 +315,36 @@ function valueOf(label: string): string {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  focusMock.callback = null;
   mmkv.stores.forEach((store) => store.clear());
   useSessionStore.setState({ session: null, epoch: 0 });
+  // B3 Group 2: CashSummaryScreen now renders through useI18n (OpeningCashModal
+  // and WithdrawSheet always did) — the app's default locale is Bangla
+  // (state/localeStore.ts), so every English-string selector in this file
+  // needs the store pinned to 'en' rather than asserting on Bangla text.
+  useLocaleStore.getState().setLocale("en");
   routerMock.params.value = {};
 
   deps.currentBusinessDate.mockReturnValue(BUSINESS_DATE);
   deps.getCashSummary.mockResolvedValue(ZERO_FORMULA);
+  deps.getCashBreakdown.mockResolvedValue(ZERO_CASH_BREAKDOWN);
   deps.listExpenses.mockResolvedValue([]);
   deps.getEndOfDaySummary.mockResolvedValue(OPEN_DAY_SUMMARY);
   deps.getB2Settings.mockResolvedValue({ closingHour: 20 });
   deps.listCustomersWithBalance.mockResolvedValue([]);
-  deps.getCustomer.mockResolvedValue({ id: CUSTOMER_ID, name: 'Rahim', phone: null, address: null, notes: null });
+  deps.getCustomer.mockResolvedValue({
+    id: CUSTOMER_ID,
+    name: "Rahim",
+    phone: null,
+    address: null,
+    notes: null,
+  });
   deps.getCustomerCreditLedger.mockResolvedValue([]);
-  deps.listSuppliers.mockResolvedValue([{ id: SUPPLIER_ID, name: 'Square Pharmaceuticals' }]);
+  deps.listSuppliers.mockResolvedValue([
+    { id: SUPPLIER_ID, name: "Square Pharmaceuticals" },
+  ]);
   deps.searchMedicinesForPurchase.mockResolvedValue([
-    { medicineId: MEDICINE_ID, name: 'Napa', generic: 'Paracetamol' },
+    { medicineId: MEDICINE_ID, name: "Napa", generic: "Paracetamol" },
   ]);
   deps.getUnreadCount.mockResolvedValue(0);
 });
@@ -270,8 +353,8 @@ afterEach(() => {
   cleanup();
 });
 
-describe('captureSessionFor pins a write to the login that rendered it', () => {
-  it('refuses when the store has already moved past that session', () => {
+describe("captureSessionFor pins a write to the login that rendered it", () => {
+  it("refuses when the store has already moved past that session", () => {
     useSessionStore.getState().login(OWNER);
     useSessionStore.getState().clearActiveUser();
     useSessionStore.getState().login(STAFF);
@@ -282,14 +365,14 @@ describe('captureSessionFor pins a write to the login that rendered it', () => {
     expect(captureSessionFor(OWNER)).toBeNull();
   });
 
-  it('refuses when nobody is logged in at all', () => {
+  it("refuses when nobody is logged in at all", () => {
     useSessionStore.getState().login(OWNER);
     useSessionStore.getState().clearActiveUser();
 
     expect(captureSessionFor(OWNER)).toBeNull();
   });
 
-  it('goes stale across a handover that returns to the same user', () => {
+  it("goes stale across a handover that returns to the same user", () => {
     useSessionStore.getState().login(OWNER);
     const guard = captureSessionFor(OWNER)!;
     expect(guard.isStale()).toBe(false);
@@ -303,20 +386,81 @@ describe('captureSessionFor pins a write to the login that rendered it', () => {
   });
 });
 
-describe('cash-summary: opening cash', () => {
-  async function openScreen(): Promise<void> {
+describe("cash-summary: opening cash (via OpeningCashModal, B3 Group 2)", () => {
+  async function openScreenAndModal(): Promise<void> {
     useSessionStore.getState().login(OWNER);
     render(createElement(CashSummaryScreen));
-    await waitFor(() => expect(screen.getByLabelText('Opening cash amount')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Edit Opening")).toBeTruthy());
+    await act(async () => {
+      clickText("Edit Opening");
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Or enter an amount")).toBeTruthy(),
+    );
   }
 
-  it('cannot commit or clear the form when the phone changes hands mid-write', async () => {
+  it("localizes the header and every visible formula term in Bangla", async () => {
+    useLocaleStore.getState().setLocale("bn");
+    deps.getCashBreakdown.mockResolvedValueOnce({
+      ...ZERO_CASH_BREAKDOWN,
+      openingCash: asPaisa(100),
+      cashSales: { ...ZERO_CASH_BREAKDOWN.cashSales, total: asPaisa(200) },
+      creditCollections: { total: asPaisa(300), details: [] },
+      expenses: { total: asPaisa(400), details: [] },
+      withdrawals: { total: asPaisa(500) },
+    });
+    useSessionStore.getState().login(OWNER);
+    render(createElement(CashSummaryScreen));
+
+    await waitFor(() =>
+      expect(screen.getByText("নগদ সারসংক্ষেপ")).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(/শুরু .*বিক্রি .*আদায় .*খরচ .*উত্তোলন/),
+    ).toBeTruthy();
+  });
+
+  it("reloads after a successful sync completion only through the focused subscription", async () => {
+    useSessionStore.getState().login(OWNER);
+    render(createElement(CashSummaryScreen));
+    await waitFor(() => expect(deps.getCashBreakdown).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      focusMock.callback?.();
+    });
+    await waitFor(() => expect(deps.getCashBreakdown).toHaveBeenCalledTimes(2));
+    expect(deps.subscribeToSyncCompletion).toHaveBeenCalledWith(
+      SHOP_ID,
+      expect.any(Function),
+    );
+
+    const listener = deps.subscribeToSyncCompletion.mock
+      .calls[0]?.[1] as () => Promise<void>;
+    await act(async () => {
+      await listener();
+    });
+    expect(deps.getCashBreakdown).toHaveBeenCalledTimes(3);
+    const unsubscribe = deps.subscribeToSyncCompletion.mock.results[0]?.value;
+    unsubscribe?.();
+  });
+
+  // The write itself can never commit under a stale actor — db/cash.ts's
+  // assertSessionLive re-checks this INSIDE the transaction, proven
+  // independently by db/user-switch.sqlite.test.ts. What differs from the
+  // pre-B3 inline-input screen: OpeningCashModal is a shared, presentational
+  // component that closes/clears its own local field on any non-throwing
+  // resolution of onSubmit, since it has no notion of session staleness.
+  // handleSaveOpeningCash intentionally returns (not throws) on a stale
+  // write, so the modal closes rather than surfacing a raw error to
+  // whichever actor happens to be looking at the screen next — a deliberate
+  // trade documented in this session's DEVIATIONS.
+  it("cannot commit under the outgoing owner when the phone changes hands mid-write", async () => {
     const pending = deferred<void>();
     deps.setOpeningCash.mockReturnValueOnce(pending.promise);
-    await openScreen();
+    await openScreenAndModal();
 
-    type('Opening cash amount', '500');
-    clickText('Set opening cash');
+    type("Or enter an amount", "500");
+    clickText("Save Opening Cash");
     await waitFor(() => expect(deps.setOpeningCash).toHaveBeenCalledTimes(1));
 
     ownerLendsPhoneAndTakesItBack();
@@ -324,41 +468,172 @@ describe('cash-summary: opening cash', () => {
       pending.resolve();
     });
 
-    // db/cash.ts calls this as the transaction's first statement.
+    // db/cash.ts calls this as the transaction's first statement — the
+    // write itself never commits under the stale actor.
     expect(livenessOf(deps.setOpeningCash)()).toBe(false);
-    expect(valueOf('Opening cash amount')).toBe('500');
+    // getCashBreakdown is called twice: once on mount, and once more when
+    // reload's useCallback identity changes on the OWNER's re-login (its
+    // deps include `session`) and the mount effect re-fires — correctly
+    // refetching under the RETURNING owner's now-valid session. What must
+    // NOT happen is a THIRD call caused by the stale write's own guarded
+    // reload(), which the guard.isStale() check above skips entirely.
+    expect(deps.getCashBreakdown).toHaveBeenCalledTimes(2);
   });
 
-  it('still saves and clears on the owner normal path', async () => {
+  it("still saves and closes the modal on the owner normal path", async () => {
     deps.setOpeningCash.mockResolvedValue(undefined);
-    await openScreen();
+    await openScreenAndModal();
 
-    type('Opening cash amount', '500');
+    type("Or enter an amount", "500");
     await act(async () => {
-      clickText('Set opening cash');
+      clickText("Save Opening Cash");
     });
 
     expect(deps.setOpeningCash).toHaveBeenCalledTimes(1);
-    expect(deps.setOpeningCash.mock.calls[0]?.[0]).toMatchObject({ shopId: SHOP_ID, staffId: OWNER_ID });
+    expect(deps.setOpeningCash.mock.calls[0]?.[0]).toMatchObject({
+      shopId: SHOP_ID,
+      staffId: OWNER_ID,
+    });
     expect(livenessOf(deps.setOpeningCash)()).toBe(true);
-    expect(valueOf('Opening cash amount')).toBe('');
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Or enter an amount")).toBeNull(),
+    );
+  });
+
+  it("keeps Save disabled for an explicit zero on the Cash Summary edit flow", async () => {
+    await openScreenAndModal();
+    type("Or enter an amount", "0");
+    expect(
+      screen.getByText("Save Opening Cash").closest("button")?.disabled,
+    ).toBe(true);
+    expect(deps.setOpeningCash).not.toHaveBeenCalled();
   });
 });
 
-describe('expenses: record expense', () => {
+describe("cash-summary: withdraw (via WithdrawSheet, B3 Group 2)", () => {
+  async function openSheet(): Promise<void> {
+    useSessionStore.getState().login(OWNER);
+    render(createElement(CashSummaryScreen));
+    await waitFor(() => expect(screen.getByText("Withdraw")).toBeTruthy());
+    await act(async () => {
+      clickText("Withdraw");
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText("Note (optional)")).toBeTruthy(),
+    );
+  }
+
+  it("cannot commit under the outgoing owner when the phone changes hands mid-write", async () => {
+    const pending = deferred<void>();
+    deps.recordWithdrawal.mockReturnValueOnce(pending.promise);
+    await openSheet();
+
+    type("Withdraw", "750");
+    clickText("Save");
+    await waitFor(() => expect(deps.recordWithdrawal).toHaveBeenCalledTimes(1));
+
+    ownerLendsPhoneAndTakesItBack();
+    await act(async () => {
+      pending.resolve();
+    });
+
+    expect(livenessOf(deps.recordWithdrawal)()).toBe(false);
+    // See the equivalent opening-cash test above: 2 is mount + the OWNER's
+    // re-login refresh, not a leak from the stale write's guarded reload.
+    expect(deps.getCashBreakdown).toHaveBeenCalledTimes(2);
+  });
+
+  it("still withdraws and closes the sheet on the owner normal path", async () => {
+    deps.recordWithdrawal.mockResolvedValue({ paymentId: "p1" });
+    await openSheet();
+
+    type("Withdraw", "750");
+    await act(async () => {
+      clickText("Save");
+    });
+
+    expect(deps.recordWithdrawal.mock.calls[0]?.[0]).toMatchObject({
+      shopId: SHOP_ID,
+      staffId: OWNER_ID,
+    });
+    expect(livenessOf(deps.recordWithdrawal)()).toBe(true);
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Note (optional)")).toBeNull(),
+    );
+  });
+});
+
+describe("cash-summary: mid-day reconcile (D-2, B3 Group 2)", () => {
+  async function openScreen(): Promise<void> {
+    useSessionStore.getState().login(OWNER);
+    render(createElement(CashSummaryScreen));
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("How much cash is actually in the drawer?"),
+      ).toBeTruthy(),
+    );
+  }
+
+  it("cannot commit under the outgoing owner when the phone changes hands mid-write", async () => {
+    const pending = deferred<void>();
+    deps.reconcileCashDrawer.mockReturnValueOnce(pending.promise);
+    await openScreen();
+
+    type("How much cash is actually in the drawer?", "900");
+    clickText("Reconcile");
+    await waitFor(() =>
+      expect(deps.reconcileCashDrawer).toHaveBeenCalledTimes(1),
+    );
+
+    ownerLendsPhoneAndTakesItBack();
+    await act(async () => {
+      pending.resolve();
+    });
+
+    expect(livenessOf(deps.reconcileCashDrawer)()).toBe(false);
+    // See the equivalent opening-cash test above: 2 is mount + the OWNER's
+    // re-login refresh, not a leak from the stale write's guarded reload.
+    expect(deps.getCashBreakdown).toHaveBeenCalledTimes(2);
+  });
+
+  it("still reconciles on the owner normal path", async () => {
+    deps.reconcileCashDrawer.mockResolvedValue({
+      status: "match",
+      countedCash: asPaisa(900),
+      expectedCash: asPaisa(900),
+      diff: asPaisa(0),
+    });
+    await openScreen();
+
+    type("How much cash is actually in the drawer?", "900");
+    await act(async () => {
+      clickText("Reconcile");
+    });
+
+    expect(deps.reconcileCashDrawer.mock.calls[0]?.[0]).toMatchObject({
+      shopId: SHOP_ID,
+      staffId: OWNER_ID,
+    });
+    expect(livenessOf(deps.reconcileCashDrawer)()).toBe(true);
+  });
+});
+
+describe("expenses: record expense", () => {
   async function openScreen(): Promise<void> {
     useSessionStore.getState().login(OWNER);
     render(createElement(ExpensesScreen));
-    await waitFor(() => expect(screen.getByLabelText('Expense amount')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByLabelText("Expense amount")).toBeTruthy(),
+    );
   }
 
-  it('cannot commit or clear the form when the phone changes hands mid-write', async () => {
+  it("cannot commit or clear the form when the phone changes hands mid-write", async () => {
     const pending = deferred<void>();
     deps.recordExpense.mockReturnValueOnce(pending.promise);
     await openScreen();
 
-    type('Expense amount', '250');
-    clickText('Save expense');
+    type("Expense amount", "250");
+    clickText("Save expense");
     await waitFor(() => expect(deps.recordExpense).toHaveBeenCalledTimes(1));
 
     ownerLendsPhoneAndTakesItBack();
@@ -367,38 +642,43 @@ describe('expenses: record expense', () => {
     });
 
     expect(livenessOf(deps.recordExpense)()).toBe(false);
-    expect(valueOf('Expense amount')).toBe('250');
+    expect(valueOf("Expense amount")).toBe("250");
   });
 
-  it('still saves and clears on the owner normal path', async () => {
+  it("still saves and clears on the owner normal path", async () => {
     deps.recordExpense.mockResolvedValue(undefined);
     await openScreen();
 
-    type('Expense amount', '250');
+    type("Expense amount", "250");
     await act(async () => {
-      clickText('Save expense');
+      clickText("Save expense");
     });
 
-    expect(deps.recordExpense.mock.calls[0]?.[0]).toMatchObject({ shopId: SHOP_ID, staffId: OWNER_ID });
+    expect(deps.recordExpense.mock.calls[0]?.[0]).toMatchObject({
+      shopId: SHOP_ID,
+      staffId: OWNER_ID,
+    });
     expect(livenessOf(deps.recordExpense)()).toBe(true);
-    expect(valueOf('Expense amount')).toBe('');
+    expect(valueOf("Expense amount")).toBe("");
   });
 });
 
-describe('end-of-day: close the day', () => {
+describe("end-of-day: close the day", () => {
   async function openScreen(): Promise<void> {
     useSessionStore.getState().login(OWNER);
     render(createElement(EndOfDayScreen));
-    await waitFor(() => expect(screen.getByLabelText('Counted cash amount')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByLabelText("Counted cash amount")).toBeTruthy(),
+    );
   }
 
-  it('cannot lock the day or clear the form when the phone changes hands mid-write', async () => {
+  it("cannot lock the day or clear the form when the phone changes hands mid-write", async () => {
     const pending = deferred<void>();
     deps.closeDay.mockReturnValueOnce(pending.promise);
     await openScreen();
 
-    type('Counted cash amount', '1200');
-    clickText('Close the day');
+    type("Counted cash amount", "1200");
+    clickText("Close the day");
     await waitFor(() => expect(deps.closeDay).toHaveBeenCalledTimes(1));
 
     ownerLendsPhoneAndTakesItBack();
@@ -407,43 +687,48 @@ describe('end-of-day: close the day', () => {
     });
 
     expect(livenessOf(deps.closeDay)()).toBe(false);
-    expect(valueOf('Counted cash amount')).toBe('1200');
+    expect(valueOf("Counted cash amount")).toBe("1200");
   });
 
-  it('still closes and clears on the owner normal path', async () => {
+  it("still closes and clears on the owner normal path", async () => {
     deps.closeDay.mockResolvedValue(undefined);
     await openScreen();
 
-    type('Counted cash amount', '1200');
+    type("Counted cash amount", "1200");
     await act(async () => {
-      clickText('Close the day');
+      clickText("Close the day");
     });
 
-    expect(deps.closeDay.mock.calls[0]?.[0]).toMatchObject({ shopId: SHOP_ID, closedBy: OWNER_ID });
+    expect(deps.closeDay.mock.calls[0]?.[0]).toMatchObject({
+      shopId: SHOP_ID,
+      closedBy: OWNER_ID,
+    });
     expect(livenessOf(deps.closeDay)()).toBe(true);
-    expect(valueOf('Counted cash amount')).toBe('');
+    expect(valueOf("Counted cash amount")).toBe("");
   });
 });
 
-describe('credit-sales: create customer', () => {
+describe("credit-sales: create customer", () => {
   async function openForm(): Promise<void> {
     useSessionStore.getState().login(OWNER);
     render(createElement(CreditSalesScreen));
-    await waitFor(() => expect(deps.listCustomersWithBalance).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(deps.listCustomersWithBalance).toHaveBeenCalledTimes(1),
+    );
     await act(async () => {
-      clickText('Add customer');
+      clickText("Add customer");
     });
-    type('Customer name', 'Rahim Uddin');
+    type("Customer name", "Rahim Uddin");
   }
 
   // react-hook-form awaits its zod resolver BEFORE handleCreate runs, so a
   // handover can land in that gap. This is the one screen where the write is
   // provably never reached at all.
-  it('never reaches the database when the handover lands in the resolver gap', async () => {
+  it("never reaches the database when the handover lands in the resolver gap", async () => {
     deps.createCustomer.mockResolvedValue(undefined);
     await openForm();
 
-    clickText('Save customer');
+    clickText("Save customer");
     act(() => switchUser());
     act(() => useSessionStore.getState().login(STAFF));
     await act(async () => {
@@ -453,13 +738,13 @@ describe('credit-sales: create customer', () => {
     expect(deps.createCustomer).not.toHaveBeenCalled();
   });
 
-  it('cannot commit or close the form when the phone changes hands mid-write', async () => {
+  it("cannot commit or close the form when the phone changes hands mid-write", async () => {
     const pending = deferred<void>();
     deps.createCustomer.mockReturnValueOnce(pending.promise);
     await openForm();
 
     await act(async () => {
-      clickText('Save customer');
+      clickText("Save customer");
     });
     expect(deps.createCustomer).toHaveBeenCalledTimes(1);
 
@@ -471,38 +756,45 @@ describe('credit-sales: create customer', () => {
     expect(livenessOf(deps.createCustomer)()).toBe(false);
     // reset() + setIsAdding(false) is this screen's success signal. The form
     // is still open, still holding what the outgoing owner typed.
-    expect(valueOf('Customer name')).toBe('Rahim Uddin');
+    expect(valueOf("Customer name")).toBe("Rahim Uddin");
   });
 
-  it('still saves and closes the form on the owner normal path', async () => {
+  it("still saves and closes the form on the owner normal path", async () => {
     deps.createCustomer.mockResolvedValue(undefined);
     await openForm();
 
     await act(async () => {
-      clickText('Save customer');
+      clickText("Save customer");
     });
 
-    expect(deps.createCustomer.mock.calls[0]?.[0]).toMatchObject({ shopId: SHOP_ID, actorUserId: OWNER_ID });
+    expect(deps.createCustomer.mock.calls[0]?.[0]).toMatchObject({
+      shopId: SHOP_ID,
+      actorUserId: OWNER_ID,
+    });
     expect(livenessOf(deps.createCustomer)()).toBe(true);
-    await waitFor(() => expect(screen.queryByLabelText('Customer name')).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Customer name")).toBeNull(),
+    );
   });
 });
 
-describe('credit/customer-detail: collect payment', () => {
+describe("credit/customer-detail: collect payment", () => {
   async function openScreen(): Promise<void> {
     routerMock.params.value = { customerId: CUSTOMER_ID };
     useSessionStore.getState().login(OWNER);
     render(createElement(CustomerDetailScreen));
-    await waitFor(() => expect(screen.getByLabelText('Collection amount')).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByLabelText("Collection amount")).toBeTruthy(),
+    );
   }
 
-  it('cannot commit or clear the form when the phone changes hands mid-write', async () => {
+  it("cannot commit or clear the form when the phone changes hands mid-write", async () => {
     const pending = deferred<void>();
     deps.collectPayment.mockReturnValueOnce(pending.promise);
     await openScreen();
 
-    type('Collection amount', '300');
-    clickText('Collect cash');
+    type("Collection amount", "300");
+    clickText("Collect cash");
     await waitFor(() => expect(deps.collectPayment).toHaveBeenCalledTimes(1));
 
     ownerLendsPhoneAndTakesItBack();
@@ -511,16 +803,16 @@ describe('credit/customer-detail: collect payment', () => {
     });
 
     expect(livenessOf(deps.collectPayment)()).toBe(false);
-    expect(valueOf('Collection amount')).toBe('300');
+    expect(valueOf("Collection amount")).toBe("300");
   });
 
-  it('still collects and clears on the owner normal path', async () => {
+  it("still collects and clears on the owner normal path", async () => {
     deps.collectPayment.mockResolvedValue(undefined);
     await openScreen();
 
-    type('Collection amount', '300');
+    type("Collection amount", "300");
     await act(async () => {
-      clickText('Collect cash');
+      clickText("Collect cash");
     });
 
     expect(deps.collectPayment.mock.calls[0]?.[0]).toMatchObject({
@@ -529,36 +821,38 @@ describe('credit/customer-detail: collect payment', () => {
       customerId: CUSTOMER_ID,
     });
     expect(livenessOf(deps.collectPayment)()).toBe(true);
-    expect(valueOf('Collection amount')).toBe('');
+    expect(valueOf("Collection amount")).toBe("");
   });
 });
 
-describe('suppliers/purchase-create: save purchase', () => {
+describe("suppliers/purchase-create: save purchase", () => {
   async function openScreenWithOneLine(): Promise<void> {
     useSessionStore.getState().login(OWNER);
     render(createElement(PurchaseCreateScreen));
     await waitFor(() => expect(deps.listSuppliers).toHaveBeenCalledTimes(1));
 
-    fireEvent.change(screen.getByPlaceholderText('Search medicine'), { target: { value: 'Napa' } });
-    await waitFor(() => expect(screen.getByText('Napa')).toBeTruthy());
-    clickText('Napa');
+    fireEvent.change(screen.getByPlaceholderText("Search medicine"), {
+      target: { value: "Napa" },
+    });
+    await waitFor(() => expect(screen.getByText("Napa")).toBeTruthy());
+    clickText("Napa");
 
-    type('Batch number', 'B-100');
-    type('Expiry date', '2099-01-01');
-    type('Quantity', '10');
-    type('Purchase price (৳)', '5');
-    type('Sale price (৳)', '8');
+    type("Batch number", "B-100");
+    type("Expiry date", "2099-01-01");
+    type("Quantity", "10");
+    type("Purchase price (৳)", "5");
+    type("Sale price (৳)", "8");
     await act(async () => {
-      clickText('Add line');
+      clickText("Add line");
     });
   }
 
-  it('cannot commit or navigate when the phone changes hands mid-write', async () => {
+  it("cannot commit or navigate when the phone changes hands mid-write", async () => {
     const pending = deferred<void>();
     deps.createPurchase.mockReturnValueOnce(pending.promise);
     await openScreenWithOneLine();
 
-    clickText('Save purchase');
+    clickText("Save purchase");
     await waitFor(() => expect(deps.createPurchase).toHaveBeenCalledTimes(1));
 
     ownerLendsPhoneAndTakesItBack();
@@ -571,7 +865,7 @@ describe('suppliers/purchase-create: save purchase', () => {
     expect(routerMock.replace).not.toHaveBeenCalled();
   });
 
-  it('shows no stale error to the incoming user when a failed write lands late', async () => {
+  it("shows no stale error to the incoming user when a failed write lands late", async () => {
     let rejectCommit: (reason: unknown) => void = () => undefined;
     deps.createPurchase.mockReturnValueOnce(
       new Promise((_resolve, reject) => {
@@ -580,24 +874,24 @@ describe('suppliers/purchase-create: save purchase', () => {
     );
     await openScreenWithOneLine();
 
-    clickText('Save purchase');
+    clickText("Save purchase");
     await waitFor(() => expect(deps.createPurchase).toHaveBeenCalledTimes(1));
 
     ownerLendsPhoneAndTakesItBack();
     await act(async () => {
-      rejectCommit(new Error('Supplier is no longer available.'));
+      rejectCommit(new Error("Supplier is no longer available."));
     });
 
-    expect(screen.queryByText('Supplier is no longer available.')).toBeNull();
+    expect(screen.queryByText("Supplier is no longer available.")).toBeNull();
     expect(routerMock.replace).not.toHaveBeenCalled();
   });
 
-  it('still saves and navigates on the owner normal path', async () => {
+  it("still saves and navigates on the owner normal path", async () => {
     deps.createPurchase.mockResolvedValue(undefined);
     await openScreenWithOneLine();
 
     await act(async () => {
-      clickText('Save purchase');
+      clickText("Save purchase");
     });
 
     expect(deps.createPurchase.mock.calls[0]?.[0]).toMatchObject({
@@ -607,7 +901,7 @@ describe('suppliers/purchase-create: save purchase', () => {
     });
     expect(livenessOf(deps.createPurchase)()).toBe(true);
     expect(routerMock.replace).toHaveBeenCalledWith({
-      pathname: '/suppliers/detail',
+      pathname: "/suppliers/detail",
       params: { supplierId: SUPPLIER_ID },
     });
   });

@@ -5,18 +5,28 @@
 // domain/cashFormula.ts. This file only fetches the raw numbers and hands
 // them to expectedCash() — it never re-derives or approximates the formula.
 
-import { and, eq } from 'drizzle-orm';
-import type { ExpenseCategory } from '@muthoy/validation';
-import { ZERO_PAISA, asPaisa, subtractPaisa, type Paisa } from '@muthoy/types';
-import { DHAKA_SQL_OFFSET, dhakaBusinessDate } from '@muthoy/utils';
-import { expectedCash, type CashFormulaInput } from '../domain/cashFormula';
-import { generateId } from '../native/id';
-import { requireOwner, requirePermission } from './auth';
-import { permissionForDataGate } from './dataAccessGates';
-import { db, sqliteConnection } from './client';
-import { assertSessionLive, DayClosedError } from './errors';
-import { cashDrawer, expenses, payments, users } from './schema';
-import { recordChange, stampUpdatedAt } from './sync-helpers';
+import { and, eq } from "drizzle-orm";
+import type { ExpenseCategory } from "@muthoy/validation";
+import {
+  ZERO_PAISA,
+  addPaisa,
+  asPaisa,
+  subtractPaisa,
+  type Paisa,
+} from "@muthoy/types";
+import { DHAKA_SQL_OFFSET, dhakaBusinessDate } from "@muthoy/utils";
+import { expectedCash, type CashFormulaInput } from "../domain/cashFormula";
+import { generateId } from "../native/id";
+import { requireOwner, requirePermission } from "./auth";
+import { permissionForDataGate } from "./dataAccessGates";
+import { db, sqliteConnection } from "./client";
+import { assertSessionLive, DayClosedError } from "./errors";
+import { cashDrawer, expenses, payments, users } from "./schema";
+import {
+  recordChange,
+  stampUpdatedAt,
+  type SyncOperationGroup,
+} from "./sync-helpers";
 
 // Same alias sync-helpers.ts declares for itself; it is not exported there.
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -28,11 +38,16 @@ export function currentBusinessDate(now: Date = new Date()): string {
   return dhakaBusinessDate(now);
 }
 
-export async function hasCashDrawerForDate(shopId: string, businessDate: string): Promise<boolean> {
-  return Boolean(sqliteConnection.getFirstSync<{ id: string }>(
-    `SELECT id FROM cash_drawer WHERE shop_id=$shopId AND business_date=$businessDate AND is_deleted=0 LIMIT 1`,
-    { $shopId: shopId, $businessDate: businessDate },
-  ));
+export async function hasCashDrawerForDate(
+  shopId: string,
+  businessDate: string,
+): Promise<boolean> {
+  return Boolean(
+    sqliteConnection.getFirstSync<{ id: string }>(
+      `SELECT id FROM cash_drawer WHERE shop_id=$shopId AND business_date=$businessDate AND is_deleted=0 LIMIT 1`,
+      { $shopId: shopId, $businessDate: businessDate },
+    ),
+  );
 }
 
 // Centralized closed-day guard (Codex finding, post-Day-10 fix): a closed
@@ -46,11 +61,20 @@ export async function hasCashDrawerForDate(shopId: string, businessDate: string)
 // transaction back, so a blocked write leaves no partial rows or outbox
 // entries. This function only READS cash_drawer; it never reopens or
 // modifies a closed drawer.
-export function assertBusinessDateOpen(tx: DbTransaction, shopId: string, businessDate: string): void {
+export function assertBusinessDateOpen(
+  tx: DbTransaction,
+  shopId: string,
+  businessDate: string,
+): void {
   const drawer = tx
     .select({ closedAt: cashDrawer.closedAt })
     .from(cashDrawer)
-    .where(and(eq(cashDrawer.shopId, shopId), eq(cashDrawer.businessDate, businessDate)))
+    .where(
+      and(
+        eq(cashDrawer.shopId, shopId),
+        eq(cashDrawer.businessDate, businessDate),
+      ),
+    )
     .get() as { closedAt: string | null } | undefined;
   if (drawer?.closedAt) {
     throw new DayClosedError(businessDate);
@@ -71,17 +95,25 @@ function ensureOpenDrawer(
   businessDate: string,
   openedBy: string,
   now: Date,
+  operation?: () => SyncOperationGroup,
 ): string {
   assertBusinessDateOpen(tx, shopId, businessDate);
 
   const existing = tx
     .select({ id: cashDrawer.id, isDeleted: cashDrawer.isDeleted })
     .from(cashDrawer)
-    .where(and(eq(cashDrawer.shopId, shopId), eq(cashDrawer.businessDate, businessDate)))
+    .where(
+      and(
+        eq(cashDrawer.shopId, shopId),
+        eq(cashDrawer.businessDate, businessDate),
+      ),
+    )
     .get() as DrawerLookupRow | undefined;
 
   if (existing?.isDeleted) {
-    throw new Error("This day's cash drawer row is deleted and cannot be reused");
+    throw new Error(
+      "This day's cash drawer row is deleted and cannot be reused",
+    );
   }
   if (existing) {
     return existing.id;
@@ -100,7 +132,14 @@ function ensureOpenDrawer(
     updatedAt: timestamp,
   };
   tx.insert(cashDrawer).values(drawerValues).run();
-  recordChange(tx, { shopId, table: 'cash_drawer', rowId: drawerId, op: 'insert', payload: drawerValues });
+  recordChange(tx, {
+    shopId,
+    table: "cash_drawer",
+    rowId: drawerId,
+    op: "insert",
+    payload: drawerValues,
+    operation: operation?.(),
+  });
   return drawerId;
 }
 
@@ -113,21 +152,43 @@ function refreshClosingExpected(
   businessDate: string,
   drawerId: string,
   extraValues: Record<string, unknown> = {},
+  operation?: () => SyncOperationGroup,
+  updatedAtOverride?: string,
 ): void {
-  const closingExpected = expectedCash(getCashSummarySync(shopId, businessDate));
-  const drawerValues = stampUpdatedAt({ ...extraValues, closingExpected, isDirty: true });
+  const closingExpected = expectedCash(
+    getCashSummarySync(shopId, businessDate),
+  );
+  const stampedValues = stampUpdatedAt({
+    ...extraValues,
+    closingExpected,
+    isDirty: true,
+  });
+  const drawerValues = updatedAtOverride
+    ? { ...stampedValues, updatedAt: updatedAtOverride }
+    : stampedValues;
   const drawerUpdate = tx
     .update(cashDrawer)
     .set(drawerValues)
     .where(and(eq(cashDrawer.id, drawerId), eq(cashDrawer.shopId, shopId)))
     .run();
   if (drawerUpdate.changes !== 1) {
-    throw new Error('Cash drawer could not be updated');
+    throw new Error("Cash drawer could not be updated");
   }
-  recordChange(tx, { shopId, table: 'cash_drawer', rowId: drawerId, op: 'update', payload: drawerValues });
+  recordChange(tx, {
+    shopId,
+    table: "cash_drawer",
+    rowId: drawerId,
+    op: "update",
+    payload: drawerValues,
+    operation: operation?.(),
+  });
 }
 
-function requireActiveUser(tx: DbTransaction, shopId: string, userId: string): void {
+function requireActiveUser(
+  tx: DbTransaction,
+  shopId: string,
+  userId: string,
+): void {
   const user = tx
     .select({ id: users.id })
     .from(users)
@@ -141,7 +202,7 @@ function requireActiveUser(tx: DbTransaction, shopId: string, userId: string): v
     )
     .get();
   if (!user) {
-    throw new Error('Active staff session does not belong to this shop');
+    throw new Error("Active staff session does not belong to this shop");
   }
 }
 
@@ -164,7 +225,9 @@ export interface RecordExpenseInput {
 // `expenses` table with no method filter, so a non-cash expense would still
 // reduce expected cash. Supporting one would require changing the formula,
 // and the formula is fixed (CLAUDE.md rule 4).
-export async function recordExpense(input: RecordExpenseInput): Promise<{ expenseId: string }> {
+export async function recordExpense(
+  input: RecordExpenseInput,
+): Promise<{ expenseId: string }> {
   // Volume 0 Day 11 / founder decision D-3: expenses are owner-only, full
   // stop — not merely gated behind the cash_drawer permission a Manager can
   // hold by default. Matches the route rule (navigation/routes.ts: '/expenses'
@@ -173,7 +236,7 @@ export async function recordExpense(input: RecordExpenseInput): Promise<{ expens
   await requireOwner(input.shopId, input.staffId);
 
   if (!Number.isInteger(input.amount) || input.amount <= ZERO_PAISA) {
-    throw new Error('Expense amount must be a positive whole number of paisa');
+    throw new Error("Expense amount must be a positive whole number of paisa");
   }
 
   const now = new Date();
@@ -183,7 +246,13 @@ export async function recordExpense(input: RecordExpenseInput): Promise<{ expens
   db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
     requireActiveUser(tx, input.shopId, input.staffId);
-    const drawerId = ensureOpenDrawer(tx, input.shopId, businessDate, input.staffId, now);
+    const drawerId = ensureOpenDrawer(
+      tx,
+      input.shopId,
+      businessDate,
+      input.staffId,
+      now,
+    );
 
     const timestamp = new Date().toISOString();
     const expenseValues = {
@@ -198,23 +267,35 @@ export async function recordExpense(input: RecordExpenseInput): Promise<{ expens
       updatedAt: timestamp,
     };
     tx.insert(expenses).values(expenseValues).run();
-    recordChange(tx, { shopId: input.shopId, table: 'expenses', rowId: expenseId, op: 'insert', payload: expenseValues });
+    recordChange(tx, {
+      shopId: input.shopId,
+      table: "expenses",
+      rowId: expenseId,
+      op: "insert",
+      payload: expenseValues,
+    });
 
     const paymentId = generateId();
     const paymentValues = {
       id: paymentId,
       shopId: input.shopId,
-      type: 'expense' as const,
+      type: "expense" as const,
       partyId: null,
       amount: input.amount,
-      method: 'cash' as const,
+      method: "cash" as const,
       refId: expenseId,
       createdBy: input.staffId,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
     tx.insert(payments).values(paymentValues).run();
-    recordChange(tx, { shopId: input.shopId, table: 'payments', rowId: paymentId, op: 'insert', payload: paymentValues });
+    recordChange(tx, {
+      shopId: input.shopId,
+      table: "payments",
+      rowId: paymentId,
+      op: "insert",
+      payload: paymentValues,
+    });
 
     refreshClosingExpected(tx, input.shopId, businessDate, drawerId);
   });
@@ -230,7 +311,7 @@ export interface ExpenseRow {
   createdAt: string;
 }
 
-interface RawExpenseRow extends Omit<ExpenseRow, 'amount'> {
+interface RawExpenseRow extends Omit<ExpenseRow, "amount"> {
   amount: number;
 }
 
@@ -264,17 +345,31 @@ export interface SetOpeningCashInput {
 // CLAUDE.md rule 5: opening cash defaults to 0 and is SET BY THE USER. It is
 // only ever written for the business date passed in, so yesterday's value can
 // never be inherited.
-export async function setOpeningCash(input: SetOpeningCashInput): Promise<void> {
-  await requirePermission(input.shopId, input.staffId, permissionForDataGate('cashDrawer'));
+export async function setOpeningCash(
+  input: SetOpeningCashInput,
+): Promise<void> {
+  await requirePermission(
+    input.shopId,
+    input.staffId,
+    permissionForDataGate("cashDrawer"),
+  );
 
   if (!Number.isInteger(input.openingCash) || input.openingCash < ZERO_PAISA) {
-    throw new Error('Opening cash must be a non-negative whole number of paisa');
+    throw new Error(
+      "Opening cash must be a non-negative whole number of paisa",
+    );
   }
 
   db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
     requireActiveUser(tx, input.shopId, input.staffId);
-    const drawerId = ensureOpenDrawer(tx, input.shopId, input.businessDate, input.staffId, new Date());
+    const drawerId = ensureOpenDrawer(
+      tx,
+      input.shopId,
+      input.businessDate,
+      input.staffId,
+      new Date(),
+    );
     refreshClosingExpected(tx, input.shopId, input.businessDate, drawerId, {
       openingCash: input.openingCash,
     });
@@ -305,7 +400,10 @@ interface CashSummaryRow {
 // synchronous so they could not await a guard anyway. Gating it would break a
 // Staff sale, which legitimately has to refresh the drawer it just changed.
 // Screens must use the gated getCashSummary/getEndOfDaySummary below.
-export function getCashSummarySync(shopId: string, businessDate: string): CashFormulaInput {
+export function getCashSummarySync(
+  shopId: string,
+  businessDate: string,
+): CashFormulaInput {
   const row = sqliteConnection.getFirstSync<CashSummaryRow>(
     `SELECT
       COALESCE((SELECT opening_cash FROM cash_drawer
@@ -337,7 +435,7 @@ export function getCashSummarySync(shopId: string, businessDate: string): CashFo
   );
 
   if (!row) {
-    throw new Error('Cash summary query returned no row');
+    throw new Error("Cash summary query returned no row");
   }
 
   return {
@@ -359,8 +457,432 @@ export async function getCashSummary(
   actorUserId: string,
   businessDate: string,
 ): Promise<CashFormulaInput> {
-  await requirePermission(shopId, actorUserId, permissionForDataGate('cashDrawer'));
+  await requirePermission(
+    shopId,
+    actorUserId,
+    permissionForDataGate("cashDrawer"),
+  );
   return getCashSummarySync(shopId, businessDate);
+}
+
+export interface RecordWithdrawalInput {
+  shopId: string;
+  staffId: string;
+  /** Device-handover guard — see db/errors.ts assertSessionLive. */
+  isStillActive: () => boolean;
+  amount: Paisa;
+  note?: string;
+}
+
+// B3 Group 2: cash pulled OUT of the drawer for a bank deposit, personal use,
+// etc. Owner-gated — not merely cash_drawer-permitted, unlike setOpeningCash
+// and reconcileCashDrawer below: physically removing cash is more sensitive
+// than counting or setting the opening figure, which a Manager holding
+// cash_drawer can already do. Mirrors recordExpense's shape (one payments
+// row + a drawer recompute in one transaction). The same rows are one atomic
+// sync operation: an existing drawer produces payment+drawer (2 rows), while
+// the first withdrawal of a day also creates the drawer (3 rows). Without the
+// group, a network failure could leave the cloud with the payment but not the
+// recomputed drawer.
+export async function recordWithdrawal(
+  input: RecordWithdrawalInput,
+): Promise<{ paymentId: string }> {
+  await requireOwner(input.shopId, input.staffId);
+
+  if (!Number.isInteger(input.amount) || input.amount <= ZERO_PAISA) {
+    throw new Error(
+      "Withdrawal amount must be a positive whole number of paisa",
+    );
+  }
+
+  const now = new Date();
+  const businessDate = dhakaBusinessDate(now);
+  const paymentId = generateId();
+
+  db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
+    requireActiveUser(tx, input.shopId, input.staffId);
+    assertBusinessDateOpen(tx, input.shopId, businessDate);
+    const existingDrawer = tx
+      .select({ id: cashDrawer.id, isDeleted: cashDrawer.isDeleted })
+      .from(cashDrawer)
+      .where(
+        and(
+          eq(cashDrawer.shopId, input.shopId),
+          eq(cashDrawer.businessDate, businessDate),
+        ),
+      )
+      .get() as DrawerLookupRow | undefined;
+    if (existingDrawer?.isDeleted) {
+      throw new Error(
+        "This day's cash drawer row is deleted and cannot be reused",
+      );
+    }
+    const expectedCount = existingDrawer ? 2 : 3;
+    let sequence = 0;
+    const operation = (): SyncOperationGroup => ({
+      id: paymentId,
+      kind: "withdrawal",
+      sequence: sequence++,
+      expectedCount,
+    });
+    const drawerId = ensureOpenDrawer(
+      tx,
+      input.shopId,
+      businessDate,
+      input.staffId,
+      now,
+      operation,
+    );
+
+    const timestamp = new Date().toISOString();
+    const paymentValues = {
+      id: paymentId,
+      shopId: input.shopId,
+      type: "withdrawal" as const,
+      partyId: null,
+      amount: input.amount,
+      method: "cash" as const,
+      refId: null,
+      note: input.note?.trim() ? input.note.trim() : null,
+      createdBy: input.staffId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    tx.insert(payments).values(paymentValues).run();
+    recordChange(tx, {
+      shopId: input.shopId,
+      table: "payments",
+      rowId: paymentId,
+      op: "insert",
+      payload: paymentValues,
+      operation: operation(),
+    });
+
+    refreshClosingExpected(
+      tx,
+      input.shopId,
+      businessDate,
+      drawerId,
+      {},
+      operation,
+      existingDrawer ? undefined : new Date(now.getTime() + 1).toISOString(),
+    );
+    if (sequence !== expectedCount) {
+      throw new Error("Withdrawal operation count mismatch");
+    }
+  });
+
+  return { paymentId };
+}
+
+export type CashReconcileStatus = "match" | "surplus" | "shortage";
+
+export interface CashReconcileResult {
+  status: CashReconcileStatus;
+  countedCash: Paisa;
+  expectedCash: Paisa;
+  /** countedCash − expectedCash. Zero on match, negative on shortage. */
+  diff: Paisa;
+}
+
+export interface ReconcileCashDrawerInput {
+  shopId: string;
+  staffId: string;
+  /** Device-handover guard — see db/errors.ts assertSessionLive. */
+  isStillActive: () => boolean;
+  businessDate: string;
+  countedCash: Paisa;
+}
+
+// B3 Group 2 (founder decision D-2, contract §5.9): a MID-DAY cash count,
+// distinct from End of Day's close. May be saved any number of times before
+// close; NEVER writes closing_counted/closed_by/closed_at and never locks
+// the business date — only closeDay does that. Gated the same as
+// setOpeningCash/getCashSummary (cash_drawer permission), not owner-only:
+// counting the drawer mid-shift is the same tier of action as setting the
+// opening figure.
+//
+// Match is EXACT paisa equality, not a fuzz band. The prototype allowed
+// |diff| < ৳0.50 to absorb its own floating-point taka arithmetic — a
+// workaround for a bug production doesn't have (S-2: integer paisa carries
+// no drift to absorb).
+export async function reconcileCashDrawer(
+  input: ReconcileCashDrawerInput,
+): Promise<CashReconcileResult> {
+  await requirePermission(
+    input.shopId,
+    input.staffId,
+    permissionForDataGate("cashDrawer"),
+  );
+
+  if (!Number.isInteger(input.countedCash) || input.countedCash < ZERO_PAISA) {
+    throw new Error(
+      "Counted cash must be a non-negative whole number of paisa",
+    );
+  }
+
+  const now = new Date();
+  let expected: Paisa = ZERO_PAISA;
+
+  db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
+    requireActiveUser(tx, input.shopId, input.staffId);
+    const drawerId = ensureOpenDrawer(
+      tx,
+      input.shopId,
+      input.businessDate,
+      input.staffId,
+      now,
+    );
+
+    // Read fresh, inside the same transaction as the write below — the
+    // counted amount is judged against the ledger's current state, not a
+    // figure the caller might be holding stale.
+    expected = expectedCash(
+      getCashSummarySync(input.shopId, input.businessDate),
+    );
+
+    const drawerValues = stampUpdatedAt({
+      reconciledCountedAmount: input.countedCash,
+      reconciledAt: now.toISOString(),
+      reconciledBy: input.staffId,
+      isDirty: true,
+    });
+    const drawerUpdate = tx
+      .update(cashDrawer)
+      .set(drawerValues)
+      .where(
+        and(eq(cashDrawer.id, drawerId), eq(cashDrawer.shopId, input.shopId)),
+      )
+      .run();
+    if (drawerUpdate.changes !== 1) {
+      throw new Error("Cash drawer could not be updated");
+    }
+    recordChange(tx, {
+      shopId: input.shopId,
+      table: "cash_drawer",
+      rowId: drawerId,
+      op: "update",
+      payload: drawerValues,
+    });
+  });
+
+  const diff = subtractPaisa(input.countedCash, expected);
+  const status: CashReconcileStatus =
+    diff === ZERO_PAISA ? "match" : diff > ZERO_PAISA ? "surplus" : "shortage";
+  return {
+    status,
+    countedCash: input.countedCash,
+    expectedCash: expected,
+    diff,
+  };
+}
+
+export interface CashBreakdownStaffRow {
+  staffId: string;
+  name: string;
+  total: Paisa;
+  txnCount: number;
+}
+
+export interface CashBreakdownDetailRow {
+  id: string;
+  label: string;
+  amount: Paisa;
+}
+
+export interface CashBreakdown {
+  businessDate: string;
+  openingCash: Paisa;
+  cashSales: {
+    total: Paisa;
+    owner: Paisa;
+    staff: Paisa;
+    staffBreakdown: CashBreakdownStaffRow[];
+  };
+  creditCollections: { total: Paisa; details: CashBreakdownDetailRow[] };
+  expenses: { total: Paisa; details: CashBreakdownDetailRow[] };
+  withdrawals: { total: Paisa };
+  supplierPayments: { total: Paisa };
+  expectedCash: Paisa;
+  reconciled: {
+    countedAmount: Paisa | null;
+    at: string | null;
+    by: string | null;
+    status: CashReconcileStatus | "unknown";
+    diff: Paisa | null;
+  };
+}
+
+interface CashSalesSellerRow {
+  staffId: string;
+  name: string;
+  role: string;
+  total: number;
+  txnCount: number;
+}
+
+interface CashCreditDetailRow {
+  id: string;
+  customerName: string;
+  amount: number;
+}
+
+interface CashExpenseDetailRow {
+  id: string;
+  category: string;
+  description: string | null;
+  amount: number;
+}
+
+interface CashDrawerReconcileRow {
+  reconciledCountedAmount: number | null;
+  reconciledAt: string | null;
+  reconciledByName: string | null;
+}
+
+// B3 Group 2: the full breakdown behind Cash Summary's expandable sheet —
+// owner/staff cash-sales split, Credit Collections and Expenses detail rows,
+// and the live reconcile state. Every total here is the SAME figure
+// getCashSummarySync feeds the fixed formula with (same WHERE clauses), so
+// e.g. cashSales.owner + cashSales.staff always sums to cashSales.total
+// exactly — there is no second definition of "today's cash sales" to drift
+// from the first. Gated like getCashSummary/getEndOfDaySummary
+// (cash_drawer), not owner-only: expense line items are already implied by
+// the plain expenses total that screen already shows to anyone holding this
+// permission; D-3's owner-only rule governs RECORDING an expense, not
+// reading it back inside an already-gated cash breakdown.
+export async function getCashBreakdown(
+  shopId: string,
+  actorUserId: string,
+  businessDate: string,
+): Promise<CashBreakdown> {
+  await requirePermission(
+    shopId,
+    actorUserId,
+    permissionForDataGate("cashDrawer"),
+  );
+
+  const formula = getCashSummarySync(shopId, businessDate);
+  const expected = expectedCash(formula);
+
+  const sellerRows = sqliteConnection.getAllSync<CashSalesSellerRow>(
+    `SELECT s.staff_id AS staffId, u.name AS name, r.name AS role,
+            SUM(s.cash_applied) AS total, COUNT(*) AS txnCount
+       FROM sales s
+       JOIN users u ON u.id = s.staff_id
+       JOIN roles r ON r.id = u.role_id
+      WHERE s.shop_id = $shopId AND s.cash_applied > 0 AND s.is_deleted = 0
+        AND date(s.created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
+      GROUP BY s.staff_id, u.name, r.name`,
+    { $shopId: shopId, $businessDate: businessDate },
+  );
+
+  let ownerCash: Paisa = ZERO_PAISA;
+  let staffCash: Paisa = ZERO_PAISA;
+  const staffBreakdown: CashBreakdownStaffRow[] = [];
+  for (const row of sellerRows) {
+    const amount = asPaisa(row.total);
+    if (row.role === "owner") {
+      ownerCash = addPaisa(ownerCash, amount);
+    } else {
+      staffCash = addPaisa(staffCash, amount);
+      staffBreakdown.push({
+        staffId: row.staffId,
+        name: row.name,
+        total: amount,
+        txnCount: row.txnCount,
+      });
+    }
+  }
+
+  const creditDetailRows = sqliteConnection.getAllSync<CashCreditDetailRow>(
+    `SELECT p.id AS id, c.name AS customerName, p.amount AS amount
+       FROM payments p
+       JOIN customers c ON c.id = p.party_id
+      WHERE p.shop_id = $shopId AND p.type = 'customer_payment' AND p.method = 'cash' AND p.is_deleted = 0
+        AND date(p.created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
+      ORDER BY p.created_at ASC, p.id ASC`,
+    { $shopId: shopId, $businessDate: businessDate },
+  );
+
+  const expenseRows = sqliteConnection.getAllSync<CashExpenseDetailRow>(
+    `SELECT id, category, description, amount
+       FROM expenses
+      WHERE shop_id = $shopId AND is_deleted = 0
+        AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
+      ORDER BY created_at ASC, id ASC`,
+    { $shopId: shopId, $businessDate: businessDate },
+  );
+
+  const drawerRow = sqliteConnection.getFirstSync<CashDrawerReconcileRow>(
+    `SELECT d.reconciled_counted_amount AS reconciledCountedAmount,
+            d.reconciled_at AS reconciledAt,
+            u.name AS reconciledByName
+       FROM cash_drawer d
+       LEFT JOIN users u ON u.id = d.reconciled_by
+      WHERE d.shop_id = $shopId AND d.business_date = $businessDate AND d.is_deleted = 0
+      LIMIT 1`,
+    { $shopId: shopId, $businessDate: businessDate },
+  );
+
+  const reconciledCounted =
+    drawerRow?.reconciledCountedAmount === null ||
+    drawerRow?.reconciledCountedAmount === undefined
+      ? null
+      : asPaisa(drawerRow.reconciledCountedAmount);
+  const reconciledDiff =
+    reconciledCounted === null
+      ? null
+      : subtractPaisa(reconciledCounted, expected);
+  const reconciledStatus: CashReconcileStatus | "unknown" =
+    reconciledDiff === null
+      ? "unknown"
+      : reconciledDiff === ZERO_PAISA
+        ? "match"
+        : reconciledDiff > ZERO_PAISA
+          ? "surplus"
+          : "shortage";
+
+  return {
+    businessDate,
+    openingCash: formula.openingCash,
+    cashSales: {
+      total: formula.cashSales,
+      owner: ownerCash,
+      staff: staffCash,
+      staffBreakdown,
+    },
+    creditCollections: {
+      total: formula.creditCollections,
+      details: creditDetailRows.map((row) => ({
+        id: row.id,
+        label: row.customerName,
+        amount: asPaisa(row.amount),
+      })),
+    },
+    expenses: {
+      total: formula.expenses,
+      details: expenseRows.map((row) => ({
+        id: row.id,
+        label: row.description
+          ? `${row.category} — ${row.description}`
+          : row.category,
+        amount: asPaisa(row.amount),
+      })),
+    },
+    withdrawals: { total: formula.withdrawals },
+    supplierPayments: { total: formula.supplierPayments },
+    expectedCash: expected,
+    reconciled: {
+      countedAmount: reconciledCounted,
+      at: drawerRow?.reconciledAt ?? null,
+      by: drawerRow?.reconciledByName ?? null,
+      status: reconciledStatus,
+      diff: reconciledDiff,
+    },
+  };
 }
 
 export interface EndOfDaySummary {
@@ -413,7 +935,11 @@ export async function getEndOfDaySummary(
 ): Promise<EndOfDaySummary> {
   // Profit, COGS, credit and the drawer variance — the most owner-sensitive
   // read in the app. Gated at the API, not just behind a hidden route.
-  await requirePermission(shopId, actorUserId, permissionForDataGate('cashDrawer'));
+  await requirePermission(
+    shopId,
+    actorUserId,
+    permissionForDataGate("cashDrawer"),
+  );
 
   const aggregates = sqliteConnection.getFirstSync<EndOfDayAggregateRow>(
     `SELECT
@@ -433,7 +959,7 @@ export async function getEndOfDaySummary(
     { $shopId: shopId, $businessDate: businessDate },
   );
   if (!aggregates) {
-    throw new Error('End-of-day summary query returned no row');
+    throw new Error("End-of-day summary query returned no row");
   }
 
   const drawer = sqliteConnection.getFirstSync<EndOfDayDrawerRow>(
@@ -455,7 +981,10 @@ export async function getEndOfDaySummary(
   const totalSales = asPaisa(aggregates.totalSales);
   const cogs = asPaisa(aggregates.cogs);
   const rawCounted = drawer?.closingCounted;
-  const countedCash = rawCounted === null || rawCounted === undefined ? null : asPaisa(rawCounted);
+  const countedCash =
+    rawCounted === null || rawCounted === undefined
+      ? null
+      : asPaisa(rawCounted);
 
   return {
     businessDate,
@@ -471,7 +1000,8 @@ export async function getEndOfDaySummary(
     newCreditGiven: asPaisa(aggregates.newCreditGiven),
     creditCollected: asPaisa(aggregates.creditCollected),
     countedCash,
-    variance: countedCash === null ? null : subtractPaisa(countedCash, expected),
+    variance:
+      countedCash === null ? null : subtractPaisa(countedCash, expected),
     openedByName: drawer?.openedByName ?? null,
     closedByName: drawer?.closedByName ?? null,
     openedAt: drawer?.openedAt ?? null,
@@ -495,10 +1025,16 @@ export interface CloseDayInput {
 // figure that gets locked in must come from the ledger, not from whatever the
 // screen last rendered.
 export async function closeDay(input: CloseDayInput): Promise<void> {
-  await requirePermission(input.shopId, input.closedBy, permissionForDataGate('cashDrawer'));
+  await requirePermission(
+    input.shopId,
+    input.closedBy,
+    permissionForDataGate("cashDrawer"),
+  );
 
   if (!Number.isInteger(input.countedCash) || input.countedCash < ZERO_PAISA) {
-    throw new Error('Counted cash must be a non-negative whole number of paisa');
+    throw new Error(
+      "Counted cash must be a non-negative whole number of paisa",
+    );
   }
 
   const now = new Date();
@@ -507,7 +1043,13 @@ export async function closeDay(input: CloseDayInput): Promise<void> {
     requireActiveUser(tx, input.shopId, input.closedBy);
     // A day with only credit sales has no drawer row yet; it still closes.
     // ensureOpenDrawer also rejects a second close of an already-closed day.
-    const drawerId = ensureOpenDrawer(tx, input.shopId, input.businessDate, input.closedBy, now);
+    const drawerId = ensureOpenDrawer(
+      tx,
+      input.shopId,
+      input.businessDate,
+      input.closedBy,
+      now,
+    );
     refreshClosingExpected(tx, input.shopId, input.businessDate, drawerId, {
       closingCounted: input.countedCash,
       closedBy: input.closedBy,

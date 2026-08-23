@@ -22,6 +22,7 @@ const KINDS = new Set([
   "inventory_import",
   "draft_complete",
   "credit_collection",
+  "withdrawal",
   "draft_hold",
   "draft_cancel",
 ]);

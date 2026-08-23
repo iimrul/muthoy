@@ -17,6 +17,8 @@ import m0012 from './0012_small_meltdown.sql';
 import m0013 from './0013_owner_dashboard_credit_period.sql';
 import m0014 from './0014_owner_dashboard_credit_period_guard.sql';
 import m0015 from './0015_b3_shop_settings.sql';
+import m0016 from './0016_payment_note.sql';
+import m0017 from './0017_cash_reconcile.sql';
 
 export default {
   journal,
@@ -37,5 +39,7 @@ export default {
     m0013,
     m0014,
     m0015,
+    m0016,
+    m0017,
   },
 };

@@ -868,6 +868,10 @@ export const payments = sqliteTable(
     createdBy: text("created_by")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
+    // B3 Group 2: carries a withdrawal's reason ("bank deposit", "personal
+    // use"...) or a supplier-payment note. Nullable — every other payment
+    // type leaves it unset.
+    note: text("note"),
   },
   (t) => ({
     shopIdx: index("payments_shop_idx").on(t.shopId),
@@ -979,6 +983,15 @@ export const cashDrawer = sqliteTable(
     closedAt: text("closed_at"),
     closingExpected: integer("closing_expected").$type<Paisa>(),
     closingCounted: integer("closing_counted").$type<Paisa>(),
+    // B3 Group 2 (D-2, contract §5.9): the mid-day reconcile count. Distinct
+    // from closing_counted/closed_by/closed_at above — this may be
+    // overwritten any number of times before close and NEVER locks the
+    // business date. Only End of Day's closeDay writes the closing_* trio.
+    reconciledCountedAmount: integer("reconciled_counted_amount").$type<Paisa>(),
+    reconciledAt: text("reconciled_at"),
+    reconciledBy: text("reconciled_by").references(() => users.id, {
+      onDelete: "restrict",
+    }),
   },
   (t) => ({
     shopDateUnique: uniqueIndex("cash_drawer_shop_date_unique").on(

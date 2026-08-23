@@ -23,6 +23,8 @@ interface OpeningCashModalProps {
    * the backdrop does not dismiss. Cancel always does.
    */
   isDismissable: boolean;
+  /** Cash Summary prototype parity: an explicit zero is not a save action. */
+  requiresPositiveAmount?: boolean;
 }
 
 export function OpeningCashModal({
@@ -30,6 +32,7 @@ export function OpeningCashModal({
   onClose,
   onSubmit,
   isDismissable,
+  requiresPositiveAmount = false,
 }: OpeningCashModalProps) {
   const { t, formatNumber } = useI18n();
   const [amount, setAmount] = useState("");
@@ -48,10 +51,18 @@ export function OpeningCashModal({
   const parsed = openingCashFormSchema.safeParse({
     openingCashTaka: Number(amount.trim()),
   });
-  const canSave = amount.trim().length > 0 && parsed.success && !isSaving;
+  const canSave =
+    amount.trim().length > 0 &&
+    parsed.success &&
+    (!requiresPositiveAmount || parsed.data.openingCashTaka > 0) &&
+    !isSaving;
 
   const handleSave = async () => {
-    if (!parsed.success || !amount.trim()) {
+    if (
+      !parsed.success ||
+      !amount.trim() ||
+      (requiresPositiveAmount && parsed.data.openingCashTaka <= 0)
+    ) {
       setError(t("openingCashInvalid"));
       return;
     }

@@ -137,6 +137,13 @@ beforeAll(() => {
   applyMigration('0008_native_pin_lookup.sql');
   applyMigration('0009_strong_gargoyle.sql');
   applyMigration('0010_known_ares.sql');
+  applyMigration('0011_black_zarda.sql');
+  applyMigration('0012_small_meltdown.sql');
+  applyMigration('0013_owner_dashboard_credit_period.sql');
+  applyMigration('0014_owner_dashboard_credit_period_guard.sql');
+  applyMigration('0015_b3_shop_settings.sql');
+  applyMigration('0016_payment_note.sql');
+  applyMigration('0017_cash_reconcile.sql');
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: USER_ID, name: 'Ledger Shop', phone: '01700000900', createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: 'owner', isSystem: true, createdAt: NOW, updatedAt: NOW }).run();
