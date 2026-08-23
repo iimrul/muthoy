@@ -31,6 +31,7 @@ import {
 } from "../domain/fefo";
 import type { ExpiryStatus } from "../domain/notificationRules";
 import { requirePermission } from "./auth";
+import { permissionForDataGate } from "./dataAccessGates";
 import {
   assertSessionLive,
   DuplicateBatchError,
@@ -215,7 +216,7 @@ export async function createMedicineWithBatch(
   // Volume 0 Day 11: Staff is inventory-VIEW only. Reads below stay open to
   // both roles; every stock-changing write is gated here, before the
   // transaction, so a denial writes nothing.
-  await requirePermission(input.shopId, input.actorUserId, "inventory_write");
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("inventoryEdit"));
 
   const medicineId = generateId();
   const batchId = generateId();
@@ -308,7 +309,7 @@ export interface AddBatchInput {
 export async function addBatchToMedicine(
   input: AddBatchInput,
 ): Promise<{ batchId: string }> {
-  await requirePermission(input.shopId, input.actorUserId, "inventory_write");
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("inventoryEdit"));
 
   const batchId = generateId();
   try {
@@ -711,7 +712,7 @@ export interface UpdateMedicineInput {
 export async function updateMedicine(
   input: UpdateMedicineInput,
 ): Promise<void> {
-  await requirePermission(input.shopId, input.actorUserId, "inventory_edit");
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("inventoryEdit"));
   if (input.values.name !== undefined && input.values.name.trim().length < 2) {
     throw new Error("Medicine name is too short");
   }
@@ -762,7 +763,7 @@ export interface UpdateBatchInput {
 }
 
 export async function updateBatch(input: UpdateBatchInput): Promise<void> {
-  await requirePermission(input.shopId, input.actorUserId, "inventory_edit");
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("inventoryEdit"));
   if (input.values.batchNo !== undefined && !input.values.batchNo.trim())
     throw new Error("Batch number is required");
   if (input.values.expiryDate) assertIsoDate(input.values.expiryDate);
@@ -816,9 +817,9 @@ export async function adjustBatchStock(input: {
   kind?: "adjustment" | "expiry_disposal" | "reconciliation";
   isStillActive: () => boolean;
 }): Promise<void> {
-  await requirePermission(input.shopId, input.actorUserId, "inventory_edit");
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("inventoryEdit"));
   if (input.kind === "expiry_disposal")
-    await requirePermission(input.shopId, input.actorUserId, "expiry_manage");
+    await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("expiryManage"));
   if (!input.reason.trim())
     throw new Error("Stock adjustment reason is required");
   if (!Number.isInteger(input.changeQty) || input.changeQty === 0)
@@ -925,7 +926,7 @@ export async function archiveBatch(
   batchId: string,
   isStillActive: () => boolean,
 ): Promise<void> {
-  await requirePermission(shopId, actorUserId, "inventory_edit");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("inventoryEdit"));
   db.transaction((tx) => {
     assertSessionLive(isStillActive);
     assertBatchArchivable(tx, shopId, batchId);
@@ -955,7 +956,7 @@ export async function archiveMedicine(
   medicineId: string,
   isStillActive: () => boolean,
 ): Promise<void> {
-  await requirePermission(shopId, actorUserId, "inventory_edit");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("inventoryEdit"));
   db.transaction((tx) => {
     assertSessionLive(isStillActive);
     const children = tx
@@ -1002,7 +1003,7 @@ export async function setBatchPromotion(input: {
   isStillActive: () => boolean;
   now?: Date;
 }): Promise<{ promotionId: string }> {
-  await requirePermission(input.shopId, input.actorUserId, "expiry_manage");
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("expiryManage"));
   await requirePermission(input.shopId, input.actorUserId, "sale_discount");
   if (
     !Number.isInteger(input.discountBps) ||
@@ -1110,7 +1111,7 @@ export async function reverseBatchPromotion(
   batchId: string,
   isStillActive: () => boolean,
 ): Promise<void> {
-  await requirePermission(shopId, actorUserId, "expiry_manage");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("expiryManage"));
   await requirePermission(shopId, actorUserId, "sale_discount");
   db.transaction((tx) => {
     assertSessionLive(isStillActive);
@@ -1155,7 +1156,7 @@ export async function setBulkBatchPromotion(input: {
   isStillActive: () => boolean;
   now?: Date;
 }): Promise<number> {
-  await requirePermission(input.shopId, input.actorUserId, "expiry_manage");
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("expiryManage"));
   await requirePermission(input.shopId, input.actorUserId, "sale_discount");
   if (
     !Number.isInteger(input.discountBps) ||

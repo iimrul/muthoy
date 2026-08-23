@@ -33,6 +33,7 @@ beforeAll(() => {
     '0010_known_ares.sql',
     '0013_owner_dashboard_credit_period.sql',
     '0014_owner_dashboard_credit_period_guard.sql',
+    '0015_b3_shop_settings.sql',
   ]) migrate(name);
 });
 

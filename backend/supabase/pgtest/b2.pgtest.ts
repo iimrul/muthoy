@@ -229,3 +229,99 @@ describe("B2 reconciliation backfill parity (M2)", () => {
     }
   }, 180_000);
 });
+
+describe("B3 Group 1 settings sync mirror", () => {
+  beforeEach(async () => {
+    await h.exec(`insert into shop_b2_settings(id,shop_id,created_at,updated_at)
+      values('8b000000-0000-4000-8000-000000000001','${SHOP_A}','2026-08-22T08:00:00Z','2026-08-22T08:00:00Z')`);
+  });
+
+  it("applies every old and new settings field and returns them through pull", async () => {
+    const patch = {
+      updated_at: "2099-08-22T10:00:00.000Z",
+      low_stock_default: 14,
+      expiry_near_days: 21,
+      expiry_far_days: 75,
+      max_refund_days: 9,
+      credit_max_days: 11,
+      closing_hour: 23,
+      tax_rate_bp: 750,
+      tax_label: "MUSHOK",
+    };
+    await h.one(
+      `select sync_apply_row(
+         'shop_b2_settings','update',to_jsonb(s) || $1::jsonb,$2,$3,null
+       ) result from shop_b2_settings s where s.shop_id=$2`,
+      [JSON.stringify(patch), SHOP_A, OWNER_A],
+    );
+
+    const stored = await h.one<{
+      low_stock_default: number;
+      expiry_near_days: number;
+      expiry_far_days: number;
+      max_refund_days: number;
+      credit_max_days: number;
+      closing_hour: number;
+      tax_rate_bp: number;
+      tax_label: string;
+    }>(
+      `select low_stock_default,expiry_near_days,expiry_far_days,max_refund_days,
+              credit_max_days,closing_hour,tax_rate_bp,tax_label
+         from shop_b2_settings where shop_id=$1`,
+      [SHOP_A],
+    );
+    expect(stored).toEqual({
+      low_stock_default: 14,
+      expiry_near_days: 21,
+      expiry_far_days: 75,
+      max_refund_days: 9,
+      credit_max_days: 11,
+      closing_hour: 23,
+      tax_rate_bp: 750,
+      tax_label: "MUSHOK",
+    });
+
+    const pulled = await h.all<{ table_name: string; row_data: Record<string, unknown> }>(
+      `select table_name,row_data from sync_pull_changes_b2($1,$2,null,null,null,500)
+        where table_name='shop_b2_settings'`,
+      [SHOP_A, OWNER_A],
+    );
+    expect(pulled).toHaveLength(1);
+    const { updated_at: expectedUpdatedAt, ...expectedFields } = patch;
+    expect(pulled[0]!.row_data).toMatchObject(expectedFields);
+    expect(Date.parse(String(pulled[0]!.row_data.updated_at))).toBe(Date.parse(expectedUpdatedAt));
+  });
+
+  it("preserves new settings fields when an older complete-row payload omits them", async () => {
+    await h.exec(`update shop_b2_settings set
+      credit_max_days=12,closing_hour=22,tax_rate_bp=500,tax_label='VAT',
+      updated_at='2099-08-22T09:00:00Z' where shop_id='${SHOP_A}'`);
+    await h.one(
+      `select sync_apply_row(
+         'shop_b2_settings','update',
+         (to_jsonb(s)-'credit_max_days'-'closing_hour'-'tax_rate_bp'-'tax_label')
+           || '{"updated_at":"2099-08-22T10:00:00Z","low_stock_default":16}'::jsonb,
+         $1,$2,null
+       ) result from shop_b2_settings s where s.shop_id=$1`,
+      [SHOP_A, OWNER_A],
+    );
+    const stored = await h.one<{
+      low_stock_default: number;
+      credit_max_days: number;
+      closing_hour: number;
+      tax_rate_bp: number;
+      tax_label: string;
+    }>(
+      `select low_stock_default,credit_max_days,closing_hour,tax_rate_bp,tax_label
+         from shop_b2_settings where shop_id=$1`,
+      [SHOP_A],
+    );
+    expect(stored).toEqual({
+      low_stock_default: 16,
+      credit_max_days: 12,
+      closing_hour: 22,
+      tax_rate_bp: 500,
+      tax_label: "VAT",
+    });
+  });
+});

@@ -18,8 +18,9 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { asPaisa } from '@muthoy/types';
+import { dhakaBusinessDate } from '@muthoy/utils';
 import { buildPurchaseInvoiceNo, invoiceSuffix } from '../domain/invoice';
 import { sqlite } from './test/expo-sqlite';
 import { ALWAYS_LIVE } from './errors';
@@ -39,9 +40,13 @@ function applyMigration(fileName: string): void {
   sqlite.exec(readFileSync(resolve('apps/mobile/db/migrations', fileName), 'utf8'));
 }
 
-/** The year createPurchase itself counts by: local time, not UTC. */
+/**
+ * The year createPurchase itself counts by: Asia/Dhaka's business date (W-1),
+ * never the device's own local calendar year — matches db/purchases.ts's
+ * `Number(dhakaBusinessDate(now).slice(0, 4))` exactly.
+ */
 function localYear(): number {
-  return new Date().getFullYear();
+  return Number(dhakaBusinessDate(new Date()).slice(0, 4));
 }
 
 function receiveStock(batchNo: string) {
@@ -158,5 +163,38 @@ describe('two devices at the same local sequence', () => {
       issued.add(purchase.invoiceNo);
     }
     expect(issued.size).toBe(12);
+  });
+});
+
+describe('business date — Asia/Dhaka everywhere, not device-local (W-1)', () => {
+  // A UTC instant that is already the next calendar day in Asia/Dhaka
+  // (2026-08-21 01:00 +06:00) while still 2026-08-20 in every timezone west
+  // of UTC+5 — which covers virtually every CI runner and developer machine.
+  // Before the fix, db/purchases.ts derived its business date (and the year
+  // it counts invoices by) from the DEVICE's local calendar day; a COD
+  // purchase's cash_drawer row and everything else money-related posted on
+  // the SAME Dhaka business day could end up split across two rows.
+  const PINNED_INSTANT = new Date('2026-08-20T19:00:00.000Z');
+  const EXPECTED_BUSINESS_DATE = '2026-08-21';
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('posts a COD purchase to the Dhaka business date, not the device-local one', async () => {
+    expect(dhakaBusinessDate(PINNED_INSTANT)).toBe(EXPECTED_BUSINESS_DATE);
+    forgetLocalPurchases();
+    sqlite.exec(`DELETE FROM cash_drawer WHERE shop_id = '${SHOP_ID}'`);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(PINNED_INSTANT);
+
+    const purchase = await receiveStock('DHAKA-BOUNDARY');
+
+    expect(purchase.invoiceNo.startsWith(`PUR-${EXPECTED_BUSINESS_DATE.slice(0, 4)}-`)).toBe(true);
+    const drawer = sqlite
+      .prepare('SELECT business_date FROM cash_drawer WHERE shop_id = ?')
+      .get(SHOP_ID) as unknown as { business_date: string } | undefined;
+    expect(drawer?.business_date).toBe(EXPECTED_BUSINESS_DATE);
   });
 });

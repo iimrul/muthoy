@@ -22,6 +22,7 @@ import { useDatabaseMigrations } from '../db';
 import {
   registerNotificationBackgroundTaskAsync,
   runNotificationChecks,
+  syncClosingTimeScheduleAsync,
 } from '../native/notifications';
 import { useSessionStore } from '../state/sessionStore';
 import { handleAppStateChangeForAuthRefresh } from '../sync/supabaseClient';
@@ -107,6 +108,19 @@ export default function RootLayout() {
       subscription.remove();
       stopSyncEngine();
     };
+  }, [isDatabaseReady, session]);
+
+  useEffect(() => {
+    if (!isDatabaseReady || !session) {
+      return;
+    }
+    // D-11: (re)establish the OS-scheduled closing-time trigger once per
+    // session identity — a fresh login, a switched user, or an app relaunch —
+    // so it survives even when the app never comes to the foreground again
+    // before closing time. Settings itself resyncs immediately on a
+    // closing-hour or notification-preference change; this covers everything
+    // else (a cold boot into an already-live session).
+    void syncClosingTimeScheduleAsync(session.shopId);
   }, [isDatabaseReady, session]);
 
   if (!isBootComplete) {

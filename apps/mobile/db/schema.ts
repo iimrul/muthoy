@@ -398,6 +398,14 @@ export const shopB2Settings = sqliteTable(
     // Owner Dashboard dues card: a credit is overdue once its local creation
     // date is older than this many days. `credits` has no due date of its own.
     creditMaxDays: integer("credit_max_days").notNull().default(7),
+    // B3 Group 1 (W-5, D-11): the hour the shop closes, read by the
+    // daily-summary notification's OS-scheduled trigger. 0..23.
+    closingHour: integer("closing_hour").notNull().default(20),
+    // B3 migration 0015 lays these two down now so Group 9's tax feature is
+    // additive; no B3 Group 1 read/write path touches them yet (contract 5.16
+    // is out of this group's scope).
+    taxRateBp: integer("tax_rate_bp").notNull().default(0),
+    taxLabel: text("tax_label").notNull().default("VAT"),
   },
   (t) => ({
     shopUnique: uniqueIndex("shop_b2_settings_shop_unique").on(t.shopId),

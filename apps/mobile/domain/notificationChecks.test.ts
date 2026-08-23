@@ -42,10 +42,12 @@ const mocks = vi.hoisted(() => ({
     resolvedAt: string | null;
   }[],
   scheduled: vi.fn(),
+  cancelScheduled: vi.fn(),
   setChannel: vi.fn(),
   getPermissions: vi.fn(async () => ({ granted: true })),
   requestPermissions: vi.fn(async () => ({ granted: true })),
   registerTask: vi.fn(),
+  closingHour: 20,
   cashInput: {
     openingCash: 10_000,
     cashSales: 5_000,
@@ -71,8 +73,10 @@ vi.mock("expo-task-manager", () => ({
 vi.mock("expo-notifications", () => ({
   AndroidNotificationPriority: { HIGH: "high" },
   AndroidImportance: { HIGH: 4 },
+  SchedulableTriggerInputTypes: { DAILY: "daily" },
   setNotificationHandler: vi.fn(),
   scheduleNotificationAsync: mocks.scheduled,
+  cancelScheduledNotificationAsync: mocks.cancelScheduled,
   setNotificationChannelAsync: mocks.setChannel,
   getPermissionsAsync: mocks.getPermissions,
   requestPermissionsAsync: mocks.requestPermissions,
@@ -154,8 +158,16 @@ vi.mock("../db/notifications", () => ({
       (row) => row.type === "daily_summary" && row.refId === date,
     ),
   ),
-  localBusinessDate: (now: Date) =>
-    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
+}));
+vi.mock("../db/settings", () => ({
+  getB2Settings: vi.fn(async () => ({
+    lowStockDefault: 10,
+    expiryNearDays: 30,
+    expiryFarDays: 60,
+    maxRefundDays: 7,
+    creditMaxDays: 7,
+    closingHour: mocks.closingHour,
+  })),
 }));
 
 // Mocks must register before the native module's global task definition runs.
@@ -164,18 +176,22 @@ import {
   registerNotificationBackgroundTaskAsync,
   requestNotificationPermissionsAsync,
   runNotificationChecks,
+  syncClosingTimeScheduleAsync,
 } from "../native/notifications";
 
 describe("runNotificationChecks", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-12T20:30:00"));
+    // 20:30 Asia/Dhaka. Explicit UTC keeps this invariant under a non-Dhaka TZ.
+    vi.setSystemTime(new Date("2026-08-12T14:30:00Z"));
     mocks.session = { shopId: "shop-1", userId: "owner-1", role: "owner" };
     mocks.activeRole = "owner";
     mocks.medicines = [];
     mocks.batches.clear();
     mocks.rows.length = 0;
+    mocks.closingHour = 20;
     mocks.scheduled.mockClear();
+    mocks.cancelScheduled.mockClear();
     mocks.setChannel.mockClear();
     mocks.getPermissions.mockClear();
     mocks.requestPermissions.mockClear();
@@ -270,6 +286,7 @@ describe("runNotificationChecks", () => {
     await runNotificationChecks("shop-1");
     const dailyRows = mocks.rows.filter((row) => row.type === "daily_summary");
     expect(dailyRows).toHaveLength(1);
+    expect(mocks.scheduled).not.toHaveBeenCalled();
     expect(localizeStoredText(dailyRows[0]!.body, "en")).toBe(
       `Expected cash in drawer: ${formatMoney(
         expectedCash({
@@ -289,5 +306,103 @@ describe("runNotificationChecks", () => {
     mocks.session = { shopId: "shop-2", userId: "owner-2", role: "owner" };
     await runNotificationChecks("shop-1");
     expect(mocks.rows).toHaveLength(0);
+  });
+
+  // W-5: the closing hour is a configurable shop setting (0..23), not the
+  // prototype's hardcoded 20. System time is fixed at 20:30 (beforeEach).
+  it("respects a configured closing hour of 0 (fires any time after midnight)", async () => {
+    mocks.closingHour = 0;
+    await runNotificationChecks("shop-1");
+    expect(
+      mocks.rows.filter((row) => row.type === "daily_summary"),
+    ).toHaveLength(1);
+  });
+
+  it("respects a configured closing hour of 20 (fires at or after 20:00)", async () => {
+    mocks.closingHour = 20;
+    await runNotificationChecks("shop-1");
+    expect(
+      mocks.rows.filter((row) => row.type === "daily_summary"),
+    ).toHaveLength(1);
+  });
+
+  it("respects a configured closing hour of 23 (does not fire before 23:00)", async () => {
+    mocks.closingHour = 23;
+    await runNotificationChecks("shop-1");
+    expect(
+      mocks.rows.filter((row) => row.type === "daily_summary"),
+    ).toHaveLength(0);
+  });
+});
+
+describe("syncClosingTimeScheduleAsync", () => {
+  beforeEach(() => {
+    mocks.session = { shopId: "shop-1", userId: "owner-1", role: "owner" };
+    mocks.activeRole = "owner";
+    mocks.closingHour = 20;
+    mocks.scheduled.mockClear();
+    mocks.cancelScheduled.mockClear();
+    mocks.getPermissions.mockClear();
+  });
+
+  it("replaces by stable identifier without cancelling the working schedule first", async () => {
+    await syncClosingTimeScheduleAsync("shop-1");
+    expect(mocks.cancelScheduled).not.toHaveBeenCalled();
+    expect(mocks.scheduled).toHaveBeenCalledWith(
+      expect.objectContaining({ identifier: "muthoy-closing-time" }),
+    );
+  });
+
+  it("schedules at the device wall time representing the next Dhaka close", async () => {
+    mocks.closingHour = 23;
+    await syncClosingTimeScheduleAsync("shop-1");
+    const nextClose = new Date("2026-08-12T17:00:00Z");
+    expect(mocks.scheduled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identifier: "muthoy-closing-time",
+        trigger: expect.objectContaining({
+          type: "daily",
+          hour: nextClose.getHours(),
+          minute: nextClose.getMinutes(),
+        }),
+      }),
+    );
+  });
+
+  it("updates the stable schedule when closing hour changes", async () => {
+    mocks.closingHour = 20;
+    await syncClosingTimeScheduleAsync("shop-1");
+    mocks.closingHour = 23;
+    await syncClosingTimeScheduleAsync("shop-1");
+    expect(mocks.scheduled).toHaveBeenCalledTimes(2);
+    expect(mocks.scheduled.mock.calls.map(([request]) => request.identifier)).toEqual([
+      "muthoy-closing-time",
+      "muthoy-closing-time",
+    ]);
+    expect(mocks.scheduled.mock.calls.map(([request]) => request.trigger.hour)).toEqual([
+      new Date("2026-08-12T14:00:00Z").getHours(),
+      new Date("2026-08-12T17:00:00Z").getHours(),
+    ]);
+  });
+
+  it("leaves the existing reminder intact when replacement scheduling fails", async () => {
+    mocks.scheduled.mockRejectedValueOnce(new Error("scheduler unavailable"));
+    await expect(syncClosingTimeScheduleAsync("shop-1")).resolves.toBeUndefined();
+    expect(mocks.cancelScheduled).not.toHaveBeenCalled();
+  });
+
+  it("only cancels, never schedules, when OS permission is not granted", async () => {
+    mocks.getPermissions.mockResolvedValueOnce({ granted: false });
+    await syncClosingTimeScheduleAsync("shop-1");
+    expect(mocks.cancelScheduled).toHaveBeenCalled();
+    expect(mocks.scheduled).not.toHaveBeenCalled();
+  });
+
+  it("only cancels, never schedules, for a non-owner session", async () => {
+    mocks.session = { shopId: "shop-1", userId: "staff-1", role: "staff" };
+    mocks.activeRole = "staff";
+    await syncClosingTimeScheduleAsync("shop-1");
+    expect(mocks.cancelScheduled).toHaveBeenCalled();
+    expect(mocks.scheduled).not.toHaveBeenCalled();
   });
 });

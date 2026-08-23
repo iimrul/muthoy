@@ -45,7 +45,7 @@ import { triggerSyncNow } from "../../sync";
 export default function AddMedicineScreen() {
   // Volume 0 Day 11: Staff is inventory-VIEW only, so creating a medicine and
   // its first batch is owner-only. Browsing inventory stays open to both.
-  const { session, isAllowed } = usePermission("inventory_write");
+  const { session, isAllowed } = usePermission("inventory_edit");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isScannerVisible, setIsScannerVisible] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);

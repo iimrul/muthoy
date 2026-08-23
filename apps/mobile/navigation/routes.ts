@@ -2,26 +2,35 @@ import type { Href } from 'expo-router';
 import { resolvePermission, type Permission } from '../domain/permissions';
 import type { CatalogKey } from '../i18n/catalog';
 import type { Session } from '../state/sessionStore';
+import {
+  DATA_ACCESS_GATES,
+  type DataAccessGate,
+  type DataAccessGateKey,
+} from '../db/dataAccessGates';
 
 export type AuthenticatedHomePath = '/dashboard' | '/staff-home';
 
-export type RouteRule = { kind: 'authenticated' } | { kind: 'owner' } | { kind: 'staffHome' } | { kind: 'permission'; permission: Permission };
+export type RouteRule = DataAccessGate;
 
-const RULES: readonly { prefixes: readonly string[]; rule: RouteRule }[] = [
-  { prefixes: ['/dashboard'], rule: { kind: 'owner' } },
-  { prefixes: ['/staff-home'], rule: { kind: 'staffHome' } },
-  { prefixes: ['/sale', '/scan'], rule: { kind: 'permission', permission: 'sale_entry' } },
-  { prefixes: ['/inventory/add-medicine'], rule: { kind: 'permission', permission: 'inventory_edit' } },
-  { prefixes: ['/inventory/expiry'], rule: { kind: 'permission', permission: 'expiry_manage' } },
-  { prefixes: ['/inventory'], rule: { kind: 'permission', permission: 'inventory_view' } },
-  { prefixes: ['/credit'], rule: { kind: 'permission', permission: 'credit_view' } },
-  { prefixes: ['/cash-summary', '/end-of-day'], rule: { kind: 'permission', permission: 'cash_drawer' } },
-  { prefixes: ['/reports/sales-history'], rule: { kind: 'permission', permission: 'sale_history' } },
-  { prefixes: ['/reports/report', '/reports/monthly-report'], rule: { kind: 'permission', permission: 'reports' } },
-  { prefixes: ['/staff/management'], rule: { kind: 'permission', permission: 'staff_manage' } },
-  { prefixes: ['/expenses', '/suppliers', '/staff/sales-view', '/reports/data-export'], rule: { kind: 'owner' } },
-  { prefixes: ['/settings'], rule: { kind: 'owner' } },
-  { prefixes: ['/notifications'], rule: { kind: 'authenticated' } },
+export const RULES: readonly {
+  prefixes: readonly string[];
+  dataGate: DataAccessGateKey;
+  rule: RouteRule;
+}[] = [
+  { prefixes: ['/dashboard'], dataGate: 'owner', rule: DATA_ACCESS_GATES.owner },
+  { prefixes: ['/staff-home'], dataGate: 'staffHome', rule: DATA_ACCESS_GATES.staffHome },
+  { prefixes: ['/sale', '/scan'], dataGate: 'saleEntry', rule: DATA_ACCESS_GATES.saleEntry },
+  { prefixes: ['/inventory/add-medicine'], dataGate: 'inventoryEdit', rule: DATA_ACCESS_GATES.inventoryEdit },
+  { prefixes: ['/inventory/expiry'], dataGate: 'expiryManage', rule: DATA_ACCESS_GATES.expiryManage },
+  { prefixes: ['/inventory'], dataGate: 'inventoryView', rule: DATA_ACCESS_GATES.inventoryView },
+  { prefixes: ['/credit'], dataGate: 'creditView', rule: DATA_ACCESS_GATES.creditView },
+  { prefixes: ['/cash-summary', '/end-of-day'], dataGate: 'cashDrawer', rule: DATA_ACCESS_GATES.cashDrawer },
+  { prefixes: ['/reports/sales-history'], dataGate: 'saleHistory', rule: DATA_ACCESS_GATES.saleHistory },
+  { prefixes: ['/reports/report', '/reports/monthly-report'], dataGate: 'reports', rule: DATA_ACCESS_GATES.reports },
+  { prefixes: ['/staff/management'], dataGate: 'staffManage', rule: DATA_ACCESS_GATES.staffManage },
+  { prefixes: ['/expenses', '/suppliers', '/staff/sales-view', '/reports/data-export'], dataGate: 'owner', rule: DATA_ACCESS_GATES.owner },
+  { prefixes: ['/settings'], dataGate: 'owner', rule: DATA_ACCESS_GATES.owner },
+  { prefixes: ['/notifications'], dataGate: 'authenticated', rule: DATA_ACCESS_GATES.authenticated },
 ];
 
 const AUTH_PREFIXES = ['/role-select', '/register', '/otp-verify', '/pin-setup', '/pin-login', '/forgot-pin', '/device-login'];

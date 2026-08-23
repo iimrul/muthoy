@@ -99,6 +99,7 @@ beforeAll(() => {
   applyMigration('0010_known_ares.sql');
   applyMigration('0013_owner_dashboard_credit_period.sql');
   applyMigration('0014_owner_dashboard_credit_period_guard.sql');
+  applyMigration('0015_b3_shop_settings.sql');
 });
 
 beforeEach(async () => {

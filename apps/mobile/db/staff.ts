@@ -13,6 +13,7 @@ import {
   requireOwner,
 } from './auth';
 import { assertSessionLive, DuplicatePhoneError, isUniqueConstraintViolation } from './errors';
+import { permissionForDataGate } from './dataAccessGates';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
 import {
   CASHIER_DEFAULT_PERMISSIONS,
@@ -81,7 +82,7 @@ async function getManageableStaffTarget(staffId: string): Promise<{ shopId: stri
 // the shop, and who is deactivated, is not something a Staff login gets to
 // enumerate by navigating straight to the screen.
 export async function listStaff(shopId: string, actorUserId: string): Promise<StaffMember[]> {
-  await requirePermission(shopId, actorUserId, 'staff_manage');
+  await requirePermission(shopId, actorUserId, permissionForDataGate('staffManage'));
 
   const rows = await db
     .select({ id: users.id, name: users.name, phone: users.phone, isActive: users.isActive, role: roles.name })
@@ -263,7 +264,7 @@ export async function createStaff(
 ): Promise<StaffMember> {
   // Volume 0 Day 11: only an owner can add a login to the shop. Gated before
   // the PIN is hashed or any row is written.
-  const checkPermission = () => requirePermission(shopId, actorUserId, 'staff_manage');
+  const checkPermission = () => requirePermission(shopId, actorUserId, permissionForDataGate('staffManage'));
   if (timing) await timing.measure('permission_check', checkPermission);
   else await checkPermission();
 

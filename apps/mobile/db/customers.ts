@@ -7,6 +7,7 @@ import { expectedCash } from "../domain/cashFormula";
 import { remainingBalance } from "../domain/credit";
 import { generateId } from "../native/id";
 import { requirePermission } from "./auth";
+import { permissionForDataGate } from "./dataAccessGates";
 import { assertBusinessDateOpen, getCashSummarySync } from "./cash";
 import { assertSessionLive } from "./errors";
 import { db, sqliteConnection } from "./client";
@@ -80,7 +81,7 @@ export async function createCustomer(
 ): Promise<Customer> {
   // Standalone customer creation lives on the same owner-only admin surface as
   // the rest of app/credit/* — checked before any row is written.
-  await requirePermission(input.shopId, input.actorUserId, "credit_management");
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("creditManage"));
 
   const customer: Customer = {
     id: generateId(),
@@ -115,7 +116,7 @@ export async function getCustomer(
   actorUserId: string,
   customerId: string,
 ): Promise<Customer> {
-  await requirePermission(shopId, actorUserId, "credit_view");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("creditView"));
   const customer = db
     .select({
       id: customers.id,
@@ -181,7 +182,7 @@ export async function getCustomerCreditLedger(
   actorUserId: string,
   customerId: string,
 ): Promise<CreditLedgerRow[]> {
-  await requirePermission(shopId, actorUserId, "credit_view");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("creditView"));
   return getCustomerLedgerRowsSync(shopId, customerId);
 }
 
@@ -199,7 +200,7 @@ export async function listCustomersWithBalance(
   actorUserId: string,
   query?: string,
 ): Promise<(Customer & { balance: Paisa })[]> {
-  await requirePermission(shopId, actorUserId, "credit_view");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("creditView"));
   const search = query?.trim();
   const searchClause = search
     ? `AND (c.name LIKE $search OR c.phone LIKE $search)`
@@ -249,7 +250,7 @@ export async function collectPayment(
   // session store, so a Staff/Manager login reaching this by direct
   // navigation writes no payment row, touches no cash drawer, and enqueues
   // nothing to the outbox.
-  await requirePermission(input.shopId, input.staffId, "credit_management");
+  await requirePermission(input.shopId, input.staffId, permissionForDataGate("creditManage"));
 
   if (!Number.isInteger(input.amount) || input.amount <= ZERO_PAISA) {
     throw new Error(

@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { asPaisa, fromTaka, type Paisa } from '@muthoy/types';
-import { formatMoney } from '@muthoy/utils';
+import { formatMoney, isBeforeDhakaClosing } from '@muthoy/utils';
 import { endOfDayFormSchema } from '@muthoy/validation';
 import { AccessDenied } from '../components/ui/AccessDenied';
 import { StandardHeader } from '../components/ui/StandardHeader';
 import { closeDay, currentBusinessDate, getEndOfDaySummary, type EndOfDaySummary } from '../db/cash';
+import { getB2Settings } from '../db/settings';
 import { captureSessionFor } from '../state/sessionGuard';
 import { usePermission } from '../state/usePermission';
 import { triggerSyncNow } from '../sync';
@@ -38,10 +39,11 @@ export default function EndOfDayScreen() {
   // Volume 0 Day 11: closing the day is owner-only — Staff is sales +
   // inventory-view. Attribution is unchanged: closed_by is still whoever is
   // logged in, now necessarily an owner.
-  const { session, isAllowed } = usePermission('cash_management');
+  const { session, isAllowed } = usePermission('cash_drawer');
   const [summary, setSummary] = useState<EndOfDaySummary | null>(null);
   const [countedText, setCountedText] = useState('');
   const [isClosing, setIsClosing] = useState(false);
+  const [isTodaySoFar, setIsTodaySoFar] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const businessDate = currentBusinessDate();
@@ -54,11 +56,15 @@ export default function EndOfDayScreen() {
     // lands after the handover must not paint it for the incoming user.
     const guard = captureSessionFor(session);
     try {
-      const next = await getEndOfDaySummary(session.shopId, session.userId, businessDate);
+      const [next, settings] = await Promise.all([
+        getEndOfDaySummary(session.shopId, session.userId, businessDate),
+        getB2Settings(session.shopId),
+      ]);
       if (!guard || guard.isStale()) {
         return;
       }
       setSummary(next);
+      setIsTodaySoFar(isBeforeDhakaClosing(new Date(), settings.closingHour));
       setError(null);
     } catch (caught) {
       if (!guard || guard.isStale()) {
@@ -140,7 +146,14 @@ export default function EndOfDayScreen() {
         ) : (
           <>
             <View className="gap-1 rounded-lg bg-white p-4">
-              <Text className="font-sans-medium text-sm text-midGray">{summary.businessDate}</Text>
+              <View className="flex-row items-center justify-between gap-2">
+                <Text className="font-sans-medium text-sm text-midGray">{summary.businessDate}</Text>
+                {isTodaySoFar ? (
+                  <View className="rounded-full bg-brand-softGreen px-3 py-1">
+                    <Text className="font-sans-medium text-xs text-brand-green">◷ আজ পর্যন্ত / Today so far</Text>
+                  </View>
+                ) : null}
+              </View>
               <Text className="font-sans-bold text-lg text-richBlack">
                 {summary.isClosed ? 'Day closed' : 'Day open'}
               </Text>

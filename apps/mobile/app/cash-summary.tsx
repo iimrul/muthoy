@@ -40,7 +40,7 @@ function formulaLines(input: CashFormulaInput): FormulaLine[] {
 
 export default function CashSummaryScreen() {
   // Volume 0 Day 11: cash is owner-only — Staff is sales + inventory-view.
-  const { session, isAllowed } = usePermission('cash_management');
+  const { session, isAllowed } = usePermission('cash_drawer');
   const [summary, setSummary] = useState<CashFormulaInput | null>(null);
   const [openingText, setOpeningText] = useState('');
   const [isSaving, setIsSaving] = useState(false);

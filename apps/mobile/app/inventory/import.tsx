@@ -24,7 +24,7 @@ const REQUIRED = [
 ];
 
 export default function InventoryImportScreen() {
-  const { session, isAllowed } = usePermission("inventory_write");
+  const { session, isAllowed } = usePermission("inventory_edit");
   const [csv, setCsv] = useState("");
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [dbRows, setDbRows] = useState<

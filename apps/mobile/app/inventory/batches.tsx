@@ -37,7 +37,7 @@ export default function BatchDetailScreen() {
   // (Volume 0 Day 11). Only the Add Batch half is gated on inventory_write,
   // so the route itself is not blocked for Staff — the write is.
   const { session, isAllowed: canWriteInventory } =
-    usePermission("inventory_write");
+    usePermission("inventory_edit");
   const [medicine, setMedicine] = useState<MedicineDetail | null>(null);
   const [batches, setBatches] = useState<BatchDetailRow[]>([]);
   const [isAdding, setIsAdding] = useState(false);

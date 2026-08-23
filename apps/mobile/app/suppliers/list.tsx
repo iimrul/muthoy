@@ -14,14 +14,14 @@ import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { createSupplier, listSuppliers } from '../../db/suppliers';
 import { captureSessionFor } from '../../state/sessionGuard';
-import { usePermission } from '../../state/usePermission';
+import { useOwnerAccess } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
 export default function SupplierListScreen() {
   // Supplier/purchase management is owner-only (already enforced in
   // db/suppliers.ts). The route check now resolves through the same grant
   // table instead of comparing the role string here.
-  const { session, isAllowed } = usePermission('inventory_write');
+  const { session, isAllowed } = useOwnerAccess();
   const [supplierRows, setSupplierRows] = useState<Awaited<ReturnType<typeof listSuppliers>>>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);

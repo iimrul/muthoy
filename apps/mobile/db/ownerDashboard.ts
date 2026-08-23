@@ -14,6 +14,7 @@
 // Manager reuse cannot quietly widen access.
 
 import { asPaisa, ZERO_PAISA, type Paisa } from "@muthoy/types";
+import { DHAKA_SQL_OFFSET } from "@muthoy/utils";
 import {
   ALERT_PREVIEW_ROWS,
   alertPreview,
@@ -26,6 +27,7 @@ import {
 } from "../domain/dashboard";
 import { type CashFormulaInput, expectedCash } from "../domain/cashFormula";
 import { requireOwner, requirePermission } from "./auth";
+import { permissionForDataGate } from "./dataAccessGates";
 import {
   currentBusinessDate,
   getCashSummary,
@@ -71,7 +73,7 @@ function dayTransactionCount(shopId: string, businessDate: string): number {
       `SELECT COUNT(*) AS count
          FROM sales
         WHERE shop_id = $shopId AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate`,
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate`,
       { $shopId: shopId, $businessDate: businessDate },
     )?.count ?? 0
   );
@@ -83,7 +85,7 @@ function dayTotalSales(shopId: string, businessDate: string): Paisa {
       `SELECT COALESCE(SUM(total), 0) AS total
          FROM sales
         WHERE shop_id = $shopId AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate`,
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate`,
       { $shopId: shopId, $businessDate: businessDate },
     )?.total ?? 0,
   );
@@ -105,7 +107,7 @@ function dayTopItems(
        JOIN sales AS s ON s.id = si.sale_id AND s.shop_id = si.shop_id
        LEFT JOIN medicines AS m ON m.id = si.medicine_id AND m.shop_id = si.shop_id
       WHERE si.shop_id = $shopId AND si.is_deleted = 0 AND s.is_deleted = 0
-        AND date(s.created_at, 'localtime') = $businessDate
+        AND date(s.created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
       GROUP BY medicineName, unit
       ORDER BY quantity DESC, medicineName ASC
       LIMIT $limit`,
@@ -165,7 +167,7 @@ export async function getRecentSaleLines(
   actorUserId: string,
   limit: number = RECENT_ACTIVITY_ROWS,
 ): Promise<RecentSaleLine[]> {
-  await requirePermission(shopId, actorUserId, "sale_history");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("saleHistory"));
   return sqliteConnection.getAllSync<RecentSaleLine>(
     `SELECT si.id,
             COALESCE(si.medicine_name_snapshot, m.name, 'Item') AS medicineName,
@@ -201,7 +203,7 @@ export async function getCreditSummary(
   businessDate: string,
   creditMaxDays: number,
 ): Promise<CreditSummary> {
-  await requirePermission(shopId, actorUserId, "credit_view");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("creditView"));
   const row = sqliteConnection.getFirstSync<{
     outstanding: number;
     customerCount: number;
@@ -209,7 +211,7 @@ export async function getCreditSummary(
   }>(
     `SELECT COALESCE(SUM(balance), 0) AS outstanding,
             COUNT(DISTINCT customer_id) AS customerCount,
-            COUNT(DISTINCT CASE WHEN date(created_at, 'localtime') < $overdueBefore
+            COUNT(DISTINCT CASE WHEN date(created_at, '${DHAKA_SQL_OFFSET}') < $overdueBefore
                                 THEN customer_id END) AS overdueCount
        FROM credits
       WHERE shop_id = $shopId AND is_deleted = 0 AND balance > 0`,

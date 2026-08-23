@@ -22,7 +22,7 @@ import {
 import { listSuppliers } from '../../db/suppliers';
 import type { PurchasePaymentType } from '../../domain/purchases';
 import { captureSessionFor } from '../../state/sessionGuard';
-import { usePermission } from '../../state/usePermission';
+import { useOwnerAccess } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
 interface DraftLine {
@@ -36,7 +36,7 @@ function lineTotal(line: DraftLine): Paisa {
 
 export default function PurchaseCreateScreen() {
   const params = useLocalSearchParams<{ supplierId?: string }>();
-  const { session, isAllowed } = usePermission('inventory_write');
+  const { session, isAllowed } = useOwnerAccess();
   const [supplierRows, setSupplierRows] = useState<Awaited<ReturnType<typeof listSuppliers>>>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState(params.supplierId ?? '');
   const [paymentType, setPaymentType] = useState<PurchasePaymentType>('cod');

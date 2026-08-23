@@ -576,12 +576,8 @@ describe('roles the session store cannot vouch for', () => {
     // and the suite deliberately stacks many shops into one database.
   }, 30_000);
 
-  it('grants manager expense and sales operations by default', async () => {
+  it('grants manager sale entry by default', async () => {
     const fixture = seedShop();
-
-    await expect(
-      recordExpense({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, staffId: fixture.managerId, category: 'rent', amount: asPaisa(100) }),
-    ).resolves.toBeDefined();
 
     await expect(
       createSaleTransaction({ isStillActive: ALWAYS_LIVE,
@@ -591,6 +587,25 @@ describe('roles the session store cannot vouch for', () => {
     ).resolves.toBeDefined();
 
     expect(countRows('sales', fixture.shopId)).toBe(1);
+  });
+
+  // B3 Group 1 (W-2): expenses are owner-only everywhere, not merely gated
+  // behind the cash_drawer permission a Manager holds by default — matching
+  // navigation/routes.ts's '/expenses' route rule (`{ kind: 'owner' }`) and
+  // founder decision D-3. Before this fix, a Manager reaching recordExpense
+  // by direct call (not navigation) could write an expense the route itself
+  // would never let them open.
+  it('denies manager expense recording — owner-only (D-3)', async () => {
+    const fixture = seedShop();
+    const queueBefore = queuedCount(fixture.shopId);
+
+    await expect(
+      recordExpense({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, staffId: fixture.managerId, category: 'rent', amount: asPaisa(100) }),
+    ).rejects.toThrow(/Owner access only/);
+
+    expect(countRows('expenses', fixture.shopId)).toBe(0);
+    expect(countRows('payments', fixture.shopId)).toBe(0);
+    expect(queuedCount(fixture.shopId)).toBe(queueBefore);
   });
 
   it('grants manager standalone credit management by default', async () => {

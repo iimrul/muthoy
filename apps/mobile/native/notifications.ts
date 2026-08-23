@@ -2,7 +2,14 @@ import { Platform } from "react-native";
 import * as BackgroundTask from "expo-background-task";
 import * as Notifications from "expo-notifications";
 import * as TaskManager from "expo-task-manager";
-import { daysUntilExpiry, formatMoney, formatNumber } from "@muthoy/utils";
+import {
+  daysUntilExpiry,
+  deviceDailyTriggerForDhakaClosing,
+  dhakaBusinessDate,
+  formatMoney,
+  formatNumber,
+  isBeforeDhakaClosing,
+} from "@muthoy/utils";
 import { expectedCash } from "../domain/cashFormula";
 import { sortByExpiry } from "../domain/fefo";
 import {
@@ -20,10 +27,10 @@ import {
   findUnresolvedLowStockAlert,
   hasDailySummaryToday,
   hasExpiryAlert,
-  localBusinessDate,
   resolveLowStockAlert,
   type NotificationSeverity,
 } from "../db/notifications";
+import { getB2Settings } from "../db/settings";
 import { readPersistedSessionSync } from "../state/sessionStore";
 import { readNotificationPreferences } from "../state/notificationPreferencesStore";
 import { useLocaleStore } from "../state/localeStore";
@@ -35,6 +42,9 @@ export const NOTIFICATION_BACKGROUND_TASK =
   "com.expo.modules.backgroundtask.processing";
 const ANDROID_CHANNEL_ID = "muthoy-alerts";
 const BACKGROUND_MINIMUM_INTERVAL_MINUTES = 15;
+// D-11: a stable identifier so re-scheduling (a settings save, a fresh login)
+// replaces the previous OS trigger instead of stacking duplicates.
+const CLOSING_TIME_NOTIFICATION_ID = "muthoy-closing-time";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -172,18 +182,18 @@ async function runDailySummaryCheck(shopId: string, now: Date): Promise<void> {
   const session = readPersistedSessionSync();
   // Cash-summary notifications remain Owner-only even though an operational
   // Manager may use the cash drawer.
-  if (
-    !session ||
-    session.shopId !== shopId ||
-    session.role !== "owner" ||
-    now.getHours() < 20
-  ) {
+  if (!session || session.shopId !== shopId || session.role !== "owner") {
+    return;
+  }
+  // W-5: closing_hour is Asia/Dhaka shop time, never the device wall clock.
+  const { closingHour } = await getB2Settings(shopId);
+  if (isBeforeDhakaClosing(now, closingHour)) {
     return;
   }
   if ((await getActiveSessionRole(session.userId, shopId)) !== "owner") {
     return;
   }
-  const businessDate = localBusinessDate(now);
+  const businessDate = dhakaBusinessDate(now);
   if (await hasDailySummaryToday(shopId, businessDate)) {
     return;
   }
@@ -207,7 +217,8 @@ async function runDailySummaryCheck(shopId: string, now: Date): Promise<void> {
     body,
     businessDate,
   );
-  await presentLocalNotification(title, body, "info");
+  // The OS schedule is the only daily-summary banner path. This check only
+  // materializes the deduped in-app row, avoiding a second delivery.
 }
 
 let activeCheck: Promise<void> | null = null;
@@ -281,4 +292,78 @@ export async function requestNotificationPermissionsAsync(): Promise<boolean> {
     await registerNotificationBackgroundTaskAsync();
   }
   return result.granted;
+}
+
+/**
+ * D-11: the closing-time reminder must fire even with the app fully closed,
+ * which `runNotificationChecks`'s foreground/background-task check cannot
+ * guarantee (it only runs while the app is opened or opportunistically
+ * background-woken). This schedules a real OS daily trigger at the shop's
+ * configured closing hour instead.
+ *
+ * Idempotent and safe to call often: the stable identifier replaces the
+ * previous trigger. A failed replacement therefore leaves the working
+ * reminder intact. Never requests OS permission
+ * itself — that stays the explicit Settings toggle's job
+ * (requestNotificationPermissionsAsync); this only acts on a permission
+ * already granted, matching how the rest of this module treats local
+ * delivery as best-effort, never a forced prompt.
+ */
+export async function syncClosingTimeScheduleAsync(shopId: string): Promise<void> {
+  const preferences = readNotificationPreferences(shopId);
+  if (!preferences.all || !preferences.dailyCash) {
+    await cancelClosingTimeScheduleAsync();
+    return;
+  }
+  const session = readPersistedSessionSync();
+  if (!session || session.shopId !== shopId || session.role !== "owner") {
+    await cancelClosingTimeScheduleAsync();
+    return;
+  }
+  if ((await getActiveSessionRole(session.userId, shopId)) !== "owner") {
+    await cancelClosingTimeScheduleAsync();
+    return;
+  }
+
+  const permission = await Notifications.getPermissionsAsync();
+  if (!permission.granted) {
+    await cancelClosingTimeScheduleAsync();
+    return;
+  }
+
+  const { closingHour } = await getB2Settings(shopId);
+  try {
+    await ensureAndroidNotificationChannelAsync();
+    const locale = useLocaleStore.getState().locale;
+    const title = encodeLocalizedText("Time to count the drawer", "ড্রয়ার গোনার সময়");
+    const body = encodeLocalizedText(
+      "Open Cash Summary to record today's count.",
+      "আজকের গণনা রেকর্ড করতে ক্যাশ সারাংশ খুলুন।",
+    );
+    const triggerTime = deviceDailyTriggerForDhakaClosing(new Date(), closingHour);
+    await Notifications.scheduleNotificationAsync({
+      identifier: CLOSING_TIME_NOTIFICATION_ID,
+      content: {
+        title: localizeStoredText(title, locale),
+        body: localizeStoredText(body, locale),
+        data: { route: "/cash-summary" },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DAILY,
+        hour: triggerTime.hour,
+        minute: triggerTime.minute,
+        channelId: Platform.OS === "android" ? ANDROID_CHANNEL_ID : undefined,
+      },
+    });
+  } catch (error) {
+    console.warn("Closing-time schedule failed", error);
+  }
+}
+
+async function cancelClosingTimeScheduleAsync(): Promise<void> {
+  try {
+    await Notifications.cancelScheduledNotificationAsync(CLOSING_TIME_NOTIFICATION_ID);
+  } catch (error) {
+    console.warn("Closing-time schedule cancellation failed", error);
+  }
 }

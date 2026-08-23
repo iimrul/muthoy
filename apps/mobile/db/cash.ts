@@ -8,9 +8,11 @@
 import { and, eq } from 'drizzle-orm';
 import type { ExpenseCategory } from '@muthoy/validation';
 import { ZERO_PAISA, asPaisa, subtractPaisa, type Paisa } from '@muthoy/types';
+import { DHAKA_SQL_OFFSET, dhakaBusinessDate } from '@muthoy/utils';
 import { expectedCash, type CashFormulaInput } from '../domain/cashFormula';
 import { generateId } from '../native/id';
-import { requirePermission } from './auth';
+import { requireOwner, requirePermission } from './auth';
+import { permissionForDataGate } from './dataAccessGates';
 import { db, sqliteConnection } from './client';
 import { assertSessionLive, DayClosedError } from './errors';
 import { cashDrawer, expenses, payments, users } from './schema';
@@ -19,17 +21,11 @@ import { recordChange, stampUpdatedAt } from './sync-helpers';
 // Same alias sync-helpers.ts declares for itself; it is not exported there.
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-// CLAUDE.md rule 5: the business date is the LOCAL calendar day, so a drawer
-// resets at local midnight and never inherits yesterday's row.
-function localBusinessDate(now: Date): string {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
+// CLAUDE.md rule 5: the business date resets at midnight and never inherits
+// yesterday's row. Locked 2026-08-22: that midnight is Asia/Dhaka's, not the
+// device's — the single definition every money read/write shares (W-1).
 export function currentBusinessDate(now: Date = new Date()): string {
-  return localBusinessDate(now);
+  return dhakaBusinessDate(now);
 }
 
 export async function hasCashDrawerForDate(shopId: string, businessDate: string): Promise<boolean> {
@@ -169,17 +165,19 @@ export interface RecordExpenseInput {
 // reduce expected cash. Supporting one would require changing the formula,
 // and the formula is fixed (CLAUDE.md rule 4).
 export async function recordExpense(input: RecordExpenseInput): Promise<{ expenseId: string }> {
-  // Volume 0 Day 11: cash is owner-only. Checked before the transaction opens
-  // and against SQLite's role, not the session store — so a Staff login that
-  // reaches this by direct navigation writes nothing at all.
-  await requirePermission(input.shopId, input.staffId, 'cash_management');
+  // Volume 0 Day 11 / founder decision D-3: expenses are owner-only, full
+  // stop — not merely gated behind the cash_drawer permission a Manager can
+  // hold by default. Matches the route rule (navigation/routes.ts: '/expenses'
+  // is `{ kind: 'owner' }`), closing the drift where a Manager reaching this
+  // by direct call, not navigation, could otherwise write an expense.
+  await requireOwner(input.shopId, input.staffId);
 
   if (!Number.isInteger(input.amount) || input.amount <= ZERO_PAISA) {
     throw new Error('Expense amount must be a positive whole number of paisa');
   }
 
   const now = new Date();
-  const businessDate = localBusinessDate(now);
+  const businessDate = dhakaBusinessDate(now);
   const expenseId = generateId();
 
   db.transaction((tx) => {
@@ -241,13 +239,13 @@ export async function listExpenses(
   actorUserId: string,
   businessDate: string,
 ): Promise<ExpenseRow[]> {
-  await requirePermission(shopId, actorUserId, 'cash_management');
+  await requireOwner(shopId, actorUserId);
 
   const rows = sqliteConnection.getAllSync<RawExpenseRow>(
     `SELECT id, category, amount, description, created_at AS createdAt
        FROM expenses
       WHERE shop_id = $shopId AND is_deleted = 0
-        AND date(created_at, 'localtime') = $businessDate
+        AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
       ORDER BY created_at DESC, id DESC`,
     { $shopId: shopId, $businessDate: businessDate },
   );
@@ -267,7 +265,7 @@ export interface SetOpeningCashInput {
 // only ever written for the business date passed in, so yesterday's value can
 // never be inherited.
 export async function setOpeningCash(input: SetOpeningCashInput): Promise<void> {
-  await requirePermission(input.shopId, input.staffId, 'cash_management');
+  await requirePermission(input.shopId, input.staffId, permissionForDataGate('cashDrawer'));
 
   if (!Number.isInteger(input.openingCash) || input.openingCash < ZERO_PAISA) {
     throw new Error('Opening cash must be a non-negative whole number of paisa');
@@ -314,27 +312,27 @@ export function getCashSummarySync(shopId: string, businessDate: string): CashFo
         WHERE shop_id = $shopId AND business_date = $businessDate AND is_deleted = 0 LIMIT 1), 0) AS openingCash,
       COALESCE((SELECT SUM(cash_applied) FROM sales
         WHERE shop_id = $shopId AND cash_applied > 0 AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate), 0) AS cashSales,
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS cashSales,
       COALESCE((SELECT SUM(amount) FROM payments
         WHERE shop_id = $shopId AND type = 'customer_payment' AND method = 'cash' AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate), 0) AS creditCollections,
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS creditCollections,
       COALESCE((SELECT SUM(amount) FROM expenses
         WHERE shop_id = $shopId AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate), 0) AS expenses,
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS expenses,
       COALESCE((SELECT SUM(amount) FROM refund_tenders
         WHERE shop_id = $shopId
           AND (kind = 'cash' OR (kind = 'collection_refund' AND method = 'cash'))
           AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate), 0)
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0)
       + COALESCE((SELECT SUM(refund_amount) FROM sales_returns
         WHERE shop_id = $shopId AND refund_id IS NULL AND refund_method = 'cash' AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate), 0) AS refunds,
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS refunds,
       COALESCE((SELECT SUM(amount) FROM payments
         WHERE shop_id = $shopId AND type = 'supplier_payment' AND method = 'cash' AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate), 0) AS supplierPayments,
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS supplierPayments,
       COALESCE((SELECT SUM(amount) FROM payments
         WHERE shop_id = $shopId AND type = 'withdrawal' AND method = 'cash' AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate), 0) AS withdrawals`,
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS withdrawals`,
     { $shopId: shopId, $businessDate: businessDate },
   );
 
@@ -361,7 +359,7 @@ export async function getCashSummary(
   actorUserId: string,
   businessDate: string,
 ): Promise<CashFormulaInput> {
-  await requirePermission(shopId, actorUserId, 'cash_management');
+  await requirePermission(shopId, actorUserId, permissionForDataGate('cashDrawer'));
   return getCashSummarySync(shopId, businessDate);
 }
 
@@ -415,23 +413,23 @@ export async function getEndOfDaySummary(
 ): Promise<EndOfDaySummary> {
   // Profit, COGS, credit and the drawer variance — the most owner-sensitive
   // read in the app. Gated at the API, not just behind a hidden route.
-  await requirePermission(shopId, actorUserId, 'cash_management');
+  await requirePermission(shopId, actorUserId, permissionForDataGate('cashDrawer'));
 
   const aggregates = sqliteConnection.getFirstSync<EndOfDayAggregateRow>(
     `SELECT
       COALESCE((SELECT SUM(total) FROM sales
         WHERE shop_id = $shopId AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate), 0) AS totalSales,
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS totalSales,
       COALESCE((SELECT SUM(si.cogs) FROM sale_items AS si
                   JOIN sales AS s ON s.id = si.sale_id
         WHERE si.shop_id = $shopId AND si.is_deleted = 0 AND s.is_deleted = 0
-          AND date(s.created_at, 'localtime') = $businessDate), 0) AS cogs,
+          AND date(s.created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS cogs,
       COALESCE((SELECT SUM(amount) FROM credits
         WHERE shop_id = $shopId AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate), 0) AS newCreditGiven,
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS newCreditGiven,
       COALESCE((SELECT SUM(amount) FROM payments
         WHERE shop_id = $shopId AND type = 'customer_payment' AND is_deleted = 0
-          AND date(created_at, 'localtime') = $businessDate), 0) AS creditCollected`,
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS creditCollected`,
     { $shopId: shopId, $businessDate: businessDate },
   );
   if (!aggregates) {
@@ -497,7 +495,7 @@ export interface CloseDayInput {
 // figure that gets locked in must come from the ledger, not from whatever the
 // screen last rendered.
 export async function closeDay(input: CloseDayInput): Promise<void> {
-  await requirePermission(input.shopId, input.closedBy, 'cash_management');
+  await requirePermission(input.shopId, input.closedBy, permissionForDataGate('cashDrawer'));
 
   if (!Number.isInteger(input.countedCash) || input.countedCash < ZERO_PAISA) {
     throw new Error('Counted cash must be a non-negative whole number of paisa');

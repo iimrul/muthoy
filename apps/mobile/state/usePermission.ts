@@ -34,3 +34,12 @@ export function usePermission(permission: AuthorizationPermission): PermissionCh
     isAllowed: role !== null && resolvePermission(role, permission, session?.permissions),
   };
 }
+
+/** UI mirror of db/auth.requireOwner for hard owner-only routes. */
+export function useOwnerAccess(): PermissionCheck {
+  const session = useSessionStore((state) => state.session);
+  return {
+    session,
+    isAllowed: session !== null && toRole(session.role) === 'owner',
+  };
+}

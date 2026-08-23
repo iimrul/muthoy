@@ -7,11 +7,11 @@ import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { listPurchasesForSupplier, type PurchaseListRow } from '../../db/purchases';
 import { getSupplierDetail, type Supplier } from '../../db/suppliers';
-import { usePermission } from '../../state/usePermission';
+import { useOwnerAccess } from '../../state/usePermission';
 
 export default function SupplierDetailScreen() {
   const { supplierId } = useLocalSearchParams<{ supplierId: string }>();
-  const { session, isAllowed } = usePermission('inventory_write');
+  const { session, isAllowed } = useOwnerAccess();
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [payable, setPayable] = useState<Awaited<ReturnType<typeof getSupplierDetail>>['payable'] | null>(null);
   const [purchaseRows, setPurchaseRows] = useState<PurchaseListRow[]>([]);

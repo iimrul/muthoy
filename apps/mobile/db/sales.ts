@@ -46,6 +46,7 @@ import {
 import { buildSaleInvoiceNo } from "../domain/invoice";
 import { expectedCash } from "../domain/cashFormula";
 import { requirePermission } from "./auth";
+import { permissionForDataGate } from "./dataAccessGates";
 import { assertSessionLive } from "./errors";
 import { assertBusinessDateOpen, getCashSummarySync } from "./cash";
 import { generateId } from "../native/id";
@@ -398,7 +399,7 @@ function paymentRequest(
 export async function createSaleTransaction(
   input: SaleTransactionInput,
 ): Promise<SaleTransactionResult> {
-  await requirePermission(input.shopId, input.staffId, "sale_entry");
+  await requirePermission(input.shopId, input.staffId, permissionForDataGate("saleEntry"));
   if (input.discount)
     await requirePermission(input.shopId, input.staffId, "sale_discount");
   if (input.lines.length === 0)

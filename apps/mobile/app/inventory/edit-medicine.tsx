@@ -23,7 +23,7 @@ import { triggerSyncNow } from "../../sync";
 
 export default function EditMedicineScreen() {
   const { medicineId } = useLocalSearchParams<{ medicineId: string }>();
-  const { session, isAllowed } = usePermission("inventory_write");
+  const { session, isAllowed } = usePermission("inventory_edit");
   const [name, setName] = useState("");
   const [generic, setGeneric] = useState("");
   const [manufacturer, setManufacturer] = useState("");

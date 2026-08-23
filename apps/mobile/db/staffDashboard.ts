@@ -1,4 +1,5 @@
 import { asPaisa, ZERO_PAISA, type Paisa } from "@muthoy/types";
+import { DHAKA_SQL_OFFSET } from "@muthoy/utils";
 import { expectedCash } from "../domain/cashFormula";
 import { resolvePermission } from "../domain/permissions";
 import { currentBusinessDate, getCashSummary } from "./cash";
@@ -61,13 +62,13 @@ export async function getStaffDashboard(
     `SELECT COALESCE(SUM(total), 0) AS total, COUNT(*) AS count,
             COALESCE(AVG(total), 0) AS average
        FROM sales WHERE shop_id = $shopId AND staff_id = $userId AND is_deleted = 0
-        AND date(created_at, 'localtime') = $date`,
+        AND date(created_at, '${DHAKA_SQL_OFFSET}') = $date`,
     { $shopId: shopId, $userId: actorUserId, $date: businessDate },
   ) ?? { total: 0, count: 0, average: 0 };
   const recent = sqliteConnection.getAllSync<RawTransaction>(
     `${transactionSelect}
       WHERE s.shop_id = $shopId AND s.staff_id = $userId AND s.is_deleted = 0
-        AND date(s.created_at, 'localtime') = $date
+        AND date(s.created_at, '${DHAKA_SQL_OFFSET}') = $date
       ORDER BY s.created_at DESC, s.id DESC LIMIT 5`,
     { $shopId: shopId, $userId: actorUserId, $date: businessDate },
   );
@@ -125,9 +126,9 @@ export async function getStaffPerformance(
     throw new Error("Not authorized");
   const dateClause =
     range === "today"
-      ? `AND date(s.created_at, 'localtime') = date('now', 'localtime')`
+      ? `AND date(s.created_at, '${DHAKA_SQL_OFFSET}') = date('now', '${DHAKA_SQL_OFFSET}')`
       : range === "week"
-        ? `AND date(s.created_at, 'localtime') >= date('now', 'localtime', '-6 days')`
+        ? `AND date(s.created_at, '${DHAKA_SQL_OFFSET}') >= date('now', '${DHAKA_SQL_OFFSET}', '-6 days')`
         : "";
   // Every completed sale counts, whatever it was paid with. This used to be
   // `CASE WHEN s.payment_type = 'cash'`, which silently valued a staff
@@ -190,14 +191,14 @@ export async function getManagerDashboard(
   if (can("reports")) {
     const summary = sqliteConnection.getFirstSync<RawSummary>(
       `SELECT COALESCE(SUM(total),0) AS total, COUNT(*) AS count, COALESCE(AVG(total),0) AS average
-       FROM sales WHERE shop_id=$shopId AND is_deleted=0 AND date(created_at,'localtime')=$date`,
+       FROM sales WHERE shop_id=$shopId AND is_deleted=0 AND date(created_at,'${DHAKA_SQL_OFFSET}')=$date`,
       { $shopId: shopId, $date: date },
     ) ?? { total: 0, count: 0, average: 0 };
     result.totalSales = asPaisa(summary.total);
     result.transactionCount = summary.count;
     result.recent = mapTransactions(
       sqliteConnection.getAllSync<RawTransaction>(
-        `${transactionSelect} WHERE s.shop_id=$shopId AND s.is_deleted=0 AND date(s.created_at,'localtime')=$date ORDER BY s.created_at DESC, s.id DESC LIMIT 8`,
+        `${transactionSelect} WHERE s.shop_id=$shopId AND s.is_deleted=0 AND date(s.created_at,'${DHAKA_SQL_OFFSET}')=$date ORDER BY s.created_at DESC, s.id DESC LIMIT 8`,
         { $shopId: shopId, $date: date },
       ),
     );
@@ -233,7 +234,7 @@ export async function getManagerDashboard(
           WHERE a.shop_id=$shopId AND a.actor_id<>$userId
             AND a.action='user_login' AND a.is_deleted=0
             AND u.is_deleted=0 AND r.is_deleted=0 AND r.name IN ('staff','manager')
-            AND date(a.created_at,'localtime')=$date`,
+            AND date(a.created_at,'${DHAKA_SQL_OFFSET}')=$date`,
         { $shopId: shopId, $userId: actorUserId, $date: date },
       )?.count ?? 0;
   }

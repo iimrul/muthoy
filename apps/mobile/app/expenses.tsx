@@ -8,7 +8,7 @@ import { AccessDenied } from '../components/ui/AccessDenied';
 import { StandardHeader } from '../components/ui/StandardHeader';
 import { currentBusinessDate, listExpenses, recordExpense, type ExpenseRow } from '../db/cash';
 import { captureSessionFor } from '../state/sessionGuard';
-import { usePermission } from '../state/usePermission';
+import { useOwnerAccess } from '../state/usePermission';
 import { triggerSyncNow } from '../sync';
 
 // Expense Tracking — Volume 0 Day 10. Not nested under a named subfolder in
@@ -31,7 +31,7 @@ const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
 
 export default function ExpenseTrackingScreen() {
   // Volume 0 Day 11: cash is owner-only — Staff is sales + inventory-view.
-  const { session, isAllowed } = usePermission('cash_management');
+  const { session, isAllowed } = useOwnerAccess();
   const [category, setCategory] = useState<ExpenseCategory>('rent');
   const [amountText, setAmountText] = useState('');
   const [description, setDescription] = useState('');

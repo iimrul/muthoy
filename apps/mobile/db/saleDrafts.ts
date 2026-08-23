@@ -1,5 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { requirePermission } from "./auth";
+import { permissionForDataGate } from "./dataAccessGates";
 import { db } from "./client";
 import { assertSessionLive } from "./errors";
 import { medicines, saleDraftItems, saleDrafts, users } from "./schema";
@@ -38,7 +39,7 @@ export interface SaleDraftRow {
 export async function holdSaleDraft(
   input: HoldSaleDraftInput,
 ): Promise<{ draftId: string }> {
-  await requirePermission(input.shopId, input.actorUserId, "sale_entry");
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("saleEntry"));
   if (!input.originDeviceId.trim())
     throw new Error("Origin device is required");
   if (input.items.length === 0) throw new Error("Cannot hold an empty cart");
@@ -140,7 +141,7 @@ export async function listSaleDrafts(
   actorUserId: string,
   currentDeviceId: string,
 ): Promise<SaleDraftRow[]> {
-  await requirePermission(shopId, actorUserId, "sale_entry");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("saleEntry"));
   const rows = db
     .select({
       id: saleDrafts.id,
@@ -187,7 +188,7 @@ export async function getSaleDraft(
   draft: typeof saleDrafts.$inferSelect;
   items: { medicineId: string; medicineName: string; quantity: number }[];
 }> {
-  await requirePermission(shopId, actorUserId, "sale_entry");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("saleEntry"));
   const draft = db
     .select()
     .from(saleDrafts)
@@ -232,7 +233,7 @@ export async function cancelSaleDraft(
   currentDeviceId: string,
   isStillActive: () => boolean,
 ): Promise<void> {
-  await requirePermission(shopId, actorUserId, "sale_entry");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("saleEntry"));
   db.transaction((tx) => {
     assertSessionLive(isStillActive);
     const draft = tx

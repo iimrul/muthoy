@@ -1,4 +1,5 @@
 import { and, eq, isNull } from 'drizzle-orm';
+import { DHAKA_SQL_OFFSET, dhakaBusinessDate } from '@muthoy/utils';
 import { generateId } from '../native/id';
 import { resolvePermission, type Permission } from '../domain/permissions';
 import { getActiveSessionContext, requireOwner } from './auth';
@@ -142,13 +143,13 @@ export async function createNotification(
   body: string,
   refId?: string,
 ): Promise<void> {
-  const today = localBusinessDate(new Date());
+  const today = dhakaBusinessDate(new Date());
   if (refId) {
     const existing = sqliteConnection.getFirstSync<{ id: string }>(
       `SELECT id FROM notifications
         WHERE shop_id = $shopId AND type = $type AND ref_id = $refId
           AND is_deleted = 0 AND resolved_at IS NULL
-          AND date(created_at, 'localtime') = $today
+          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $today
         ORDER BY created_at DESC LIMIT 1`,
       { $shopId: shopId, $type: type, $refId: refId, $today: today },
     );
@@ -206,11 +207,4 @@ export async function hasDailySummaryToday(shopId: string, businessDate: string)
     eq(notifications.refId, businessDate), eq(notifications.isDeleted, false),
   )).limit(1);
   return Boolean(row);
-}
-
-export function localBusinessDate(now: Date): string {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }

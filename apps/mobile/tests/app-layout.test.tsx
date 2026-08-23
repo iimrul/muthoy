@@ -42,6 +42,7 @@ const native = vi.hoisted(() => ({
   registerNotificationBackgroundTaskAsync: vi.fn(),
   requestNotificationPermissionsAsync: vi.fn(),
   runNotificationChecks: vi.fn(),
+  syncClosingTimeScheduleAsync: vi.fn(),
 }));
 
 vi.mock('react-native', () => ({
@@ -83,6 +84,7 @@ vi.mock('../native/notifications', () => ({
   registerNotificationBackgroundTaskAsync: native.registerNotificationBackgroundTaskAsync,
   requestNotificationPermissionsAsync: native.requestNotificationPermissionsAsync,
   runNotificationChecks: native.runNotificationChecks,
+  syncClosingTimeScheduleAsync: native.syncClosingTimeScheduleAsync,
 }));
 vi.mock('../sync/supabaseClient', () => ({
   handleAppStateChangeForAuthRefresh: native.handleAppStateChangeForAuthRefresh,

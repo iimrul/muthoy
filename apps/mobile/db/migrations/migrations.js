@@ -16,6 +16,7 @@ import m0011 from './0011_black_zarda.sql';
 import m0012 from './0012_small_meltdown.sql';
 import m0013 from './0013_owner_dashboard_credit_period.sql';
 import m0014 from './0014_owner_dashboard_credit_period_guard.sql';
+import m0015 from './0015_b3_shop_settings.sql';
 
 export default {
   journal,
@@ -35,5 +36,6 @@ export default {
     m0012,
     m0013,
     m0014,
+    m0015,
   },
 };

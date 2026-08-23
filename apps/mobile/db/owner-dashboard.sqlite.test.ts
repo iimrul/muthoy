@@ -16,6 +16,9 @@ import {
   getSupplierPayableSummary,
 } from "./ownerDashboard";
 import { getStaffPerformance } from "./staffDashboard";
+import { updateB2Settings } from "./settings";
+import { listPendingSyncRows } from "./sync-helpers";
+import { ALWAYS_LIVE } from "./errors";
 
 const MIGRATIONS = [
   "0000_open_senator_kelly.sql",
@@ -33,6 +36,7 @@ const MIGRATIONS = [
   "0012_small_meltdown.sql",
   "0013_owner_dashboard_credit_period.sql",
   "0014_owner_dashboard_credit_period_guard.sql",
+  "0015_b3_shop_settings.sql",
 ];
 
 const SHOP = "shop-owner-dashboard";
@@ -46,16 +50,21 @@ const TODAY = currentBusinessDate();
 const YESTERDAY = shiftBusinessDate(TODAY, -1);
 const DAY_BEFORE = shiftBusinessDate(TODAY, -2);
 
+const DHAKA_OFFSET_MS = 6 * 60 * 60 * 1000;
+
 /**
- * A UTC instant that is midday LOCAL on `businessDate`, so the production
- * `date(created_at, 'localtime')` boundary resolves back to the same date in
- * whatever timezone this suite runs in.
+ * A UTC instant that is `hour` o'clock Asia/Dhaka time on `businessDate`, so
+ * the production `date(created_at, '+6 hours')` boundary (W-1: Dhaka is fixed,
+ * never the machine's own timezone) resolves back to the same date whatever
+ * timezone this suite happens to run in.
  */
 function at(businessDate: string, hour = 12): string {
   const year = Number(businessDate.slice(0, 4));
   const month = Number(businessDate.slice(5, 7));
   const day = Number(businessDate.slice(8, 10));
-  return new Date(year, month - 1, day, hour, 0, 0).toISOString();
+  return new Date(
+    Date.UTC(year, month - 1, day, hour, 0, 0) - DHAKA_OFFSET_MS,
+  ).toISOString();
 }
 
 function stamp(businessDate: string, hour = 12): string {
@@ -564,6 +573,82 @@ describe("credit summary", () => {
       outstanding: 14_000,
       customerCount: 2,
       overdueCount: 1,
+    });
+  });
+
+  // B3 Group 1: creditMaxDays is now exposed in Settings (W-6). This proves
+  // the full round trip — a Settings save actually changes what the Owner
+  // Dashboard's dues card counts as overdue, not just that the default works.
+  it("round-trips a saved credit_max_days into the dashboard's overdue derivation", async () => {
+    // Widen to 30 days: the 20-day-old credit is no longer overdue.
+    await updateB2Settings(SHOP, OWNER, {
+      lowStockDefault: 10, expiryNearDays: 30, expiryFarDays: 60,
+      maxRefundDays: 7, creditMaxDays: 30, closingHour: 20,
+    }, ALWAYS_LIVE);
+    expect((await getOwnerDashboard(SHOP, OWNER)).credit.overdueCount).toBe(0);
+
+    // Narrow to 5 days: the same 20-day-old credit becomes overdue.
+    await updateB2Settings(SHOP, OWNER, {
+      lowStockDefault: 10, expiryNearDays: 30, expiryFarDays: 60,
+      maxRefundDays: 7, creditMaxDays: 5, closingHour: 20,
+    }, ALWAYS_LIVE);
+    expect((await getOwnerDashboard(SHOP, OWNER)).credit.overdueCount).toBe(1);
+  });
+});
+
+// W-5: closing hour is a shop setting, 0..23 (migration 0015's CHECK
+// constraint mirrors this app-level bound).
+describe.each([0, 20, 23])("closing hour boundary %i", (closingHour) => {
+  it("accepts and round-trips the boundary hour", async () => {
+    await updateB2Settings(SHOP, OWNER, {
+      lowStockDefault: 10, expiryNearDays: 30, expiryFarDays: 60,
+      maxRefundDays: 7, creditMaxDays: 7, closingHour,
+    }, ALWAYS_LIVE);
+    const row = sqlite
+      .prepare("SELECT closing_hour AS value FROM shop_b2_settings WHERE shop_id = ?")
+      .get(SHOP) as unknown as { value: number };
+    expect(row.value).toBe(closingHour);
+  });
+});
+
+describe("closing hour out of range", () => {
+  it("rejects an hour above 23, both at the app layer and the DB trigger", async () => {
+    await expect(updateB2Settings(SHOP, OWNER, {
+      lowStockDefault: 10, expiryNearDays: 30, expiryFarDays: 60,
+      maxRefundDays: 7, creditMaxDays: 7, closingHour: 24,
+    }, ALWAYS_LIVE)).rejects.toThrow(/Closing hour must be between 0 and 23/);
+
+    expect(() => sqlite.exec(
+      `UPDATE shop_b2_settings SET closing_hour = 24 WHERE shop_id = '${SHOP}'`,
+    )).toThrow(/invalid B2 settings/);
+  });
+});
+
+describe("B3 Group 1 settings outbox", () => {
+  it("queues a complete snake-case mirror after save, including inert tax fields", async () => {
+    await updateB2Settings(SHOP, OWNER, {
+      lowStockDefault: 14,
+      expiryNearDays: 21,
+      expiryFarDays: 75,
+      maxRefundDays: 9,
+      creditMaxDays: 11,
+      closingHour: 23,
+    }, ALWAYS_LIVE);
+    const queued = listPendingSyncRows(SHOP, 100).filter(
+      (row) => row.tableName === "shop_b2_settings",
+    );
+    expect(queued).toHaveLength(1);
+    expect(JSON.parse(queued[0]!.payload)).toMatchObject({
+      id: "settings-1",
+      shop_id: SHOP,
+      low_stock_default: 14,
+      expiry_near_days: 21,
+      expiry_far_days: 75,
+      max_refund_days: 9,
+      credit_max_days: 11,
+      closing_hour: 23,
+      tax_rate_bp: 0,
+      tax_label: "VAT",
     });
   });
 });

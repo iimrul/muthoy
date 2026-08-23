@@ -103,6 +103,7 @@ const deps = vi.hoisted(() => ({
   listExpenses: vi.fn(),
   recordExpense: vi.fn(),
   getEndOfDaySummary: vi.fn(),
+  getB2Settings: vi.fn(),
   closeDay: vi.fn(),
   listCustomersWithBalance: vi.fn(),
   createCustomer: vi.fn(),
@@ -139,6 +140,7 @@ vi.mock('../db/purchases', () => ({
 }));
 vi.mock('../db/suppliers', () => ({ listSuppliers: deps.listSuppliers }));
 vi.mock('../db/notifications', () => ({ getUnreadCount: deps.getUnreadCount }));
+vi.mock('../db/settings', () => ({ getB2Settings: deps.getB2Settings }));
 // state/switchUser.ts pulls stopSyncEngine from here, so the real handover
 // below runs against the mock rather than the native engine.
 vi.mock('../sync', () => ({
@@ -253,6 +255,7 @@ beforeEach(() => {
   deps.getCashSummary.mockResolvedValue(ZERO_FORMULA);
   deps.listExpenses.mockResolvedValue([]);
   deps.getEndOfDaySummary.mockResolvedValue(OPEN_DAY_SUMMARY);
+  deps.getB2Settings.mockResolvedValue({ closingHour: 20 });
   deps.listCustomersWithBalance.mockResolvedValue([]);
   deps.getCustomer.mockResolvedValue({ id: CUSTOMER_ID, name: 'Rahim', phone: null, address: null, notes: null });
   deps.getCustomerCreditLedger.mockResolvedValue([]);

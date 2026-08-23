@@ -9,6 +9,7 @@ import {
   subtractPaisa,
   type Paisa,
 } from '@muthoy/types';
+import { DHAKA_SQL_OFFSET, dhakaBusinessDate } from '@muthoy/utils';
 import { resolvePaymentEffect, type PurchasePaymentType } from '../domain/purchases';
 import { buildPurchaseInvoiceNo } from '../domain/invoice';
 import { expectedCash } from '../domain/cashFormula';
@@ -69,13 +70,6 @@ export interface PurchaseMedicineSearchResult {
   medicineId: string;
   name: string;
   generic: string | null;
-}
-
-function localBusinessDate(now: Date): string {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 function toFtsPrefixQuery(query: string): string {
@@ -147,8 +141,11 @@ export async function createPurchase(
   const effect = resolvePaymentEffect(input.paymentType, total);
   const paidAmount = subtractPaisa(total, effect.payableDelta);
   const now = new Date();
-  const businessDate = localBusinessDate(now);
-  const year = now.getFullYear();
+  const businessDate = dhakaBusinessDate(now);
+  // Asia/Dhaka year, not the device's — keeps the yearly invoice sequence
+  // (buildPurchaseInvoiceNo) aligned with the same business date everything
+  // else in this transaction uses (W-1).
+  const year = Number(businessDate.slice(0, 4));
 
   return db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
@@ -183,7 +180,7 @@ export async function createPurchase(
 
     const yearlyCount = tx.select({ value: count() }).from(purchases).where(and(
       eq(purchases.shopId, input.shopId),
-      sql`strftime('%Y', ${purchases.createdAt}, 'localtime') = ${String(year)}`,
+      sql`strftime('%Y', ${purchases.createdAt}, ${DHAKA_SQL_OFFSET}) = ${String(year)}`,
     )).get()?.value ?? 0;
     // The id first: the invoice number derives its uniqueness suffix from it.
     const purchaseId = generateId();

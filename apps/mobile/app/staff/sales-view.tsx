@@ -11,10 +11,10 @@ import {
   type StaffSaleEvent,
   type StaffSalesSummary,
 } from "../../db/saleHistory";
-import { usePermission } from "../../state/usePermission";
+import { useOwnerAccess } from "../../state/usePermission";
 
 export default function StaffSalesViewScreen() {
-  const { session, isAllowed } = usePermission("staff_manage");
+  const { session, isAllowed } = useOwnerAccess();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [rows, setRows] = useState<StaffSalesSummary[]>([]);

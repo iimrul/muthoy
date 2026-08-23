@@ -28,7 +28,10 @@ import {
   updateShopProfile,
   type ShopProfile,
 } from "../../db/settings";
-import { requestNotificationPermissionsAsync } from "../../native/notifications";
+import {
+  requestNotificationPermissionsAsync,
+  syncClosingTimeScheduleAsync,
+} from "../../native/notifications";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useI18n } from "../../state/localeStore";
 import {
@@ -99,6 +102,13 @@ function ToggleRow({
       </View>
     </Pressable>
   );
+}
+
+// Prototype ST-4: "h:00 AM/PM" — display only, never fed back into storage.
+function formatClosingHour(hour: number): string {
+  const period = hour < 12 ? "AM" : "PM";
+  const twelveHour = hour % 12 === 0 ? 12 : hour % 12;
+  return `${twelveHour}:00 ${period}`;
 }
 
 export default function SettingsScreen() {
@@ -184,7 +194,17 @@ export default function SettingsScreen() {
             value={b2Settings ? `${b2Settings.maxRefundDays} days` : "…"}
             onPress={() => setB2SettingsOpen(true)}
           />
-          <Row label={t("closingTax")} value="B3" disabled />
+          <Row
+            label={t("creditRefundRules")}
+            value={b2Settings ? `${b2Settings.creditMaxDays} days` : "…"}
+            onPress={() => setB2SettingsOpen(true)}
+          />
+          <Row
+            label={t("closingTime")}
+            value={b2Settings ? formatClosingHour(b2Settings.closingHour) : "…"}
+            onPress={() => setB2SettingsOpen(true)}
+          />
+          <Row label={t("taxVat")} value="B3" disabled />
         </View>
         <View className="rounded-xl bg-white px-4">
           <Row label={t("changePin")} onPress={() => setPinOpen(true)} />
@@ -265,12 +285,19 @@ function B2SettingsModal({
       setError("Near expiry must be less than Far expiry.");
       return;
     }
+    if (draft.closingHour > 23) {
+      setError("Closing hour must be between 0 and 23.");
+      return;
+    }
     const guard = captureSessionFor(session);
     if (!guard) return;
     setSaving(true);
     try {
       await updateB2Settings(session.shopId, session.userId, draft, guard.isStillActive);
       void triggerSyncNow(session.shopId);
+      // D-11: a closing-hour change must re-point the OS-scheduled reminder
+      // immediately, not wait for the next app open.
+      void syncClosingTimeScheduleAsync(session.shopId);
       guard.ifLive(onSaved);
     } catch (cause) {
       guard.ifLive(() => setError(cause instanceof Error ? cause.message : "Save failed"));
@@ -305,6 +332,17 @@ function B2SettingsModal({
             value={draft.maxRefundDays}
             onChange={(maxRefundDays) => setDraft({ ...draft, maxRefundDays })}
           />
+          <NumberSetting
+            label="Credit period (days)"
+            value={draft.creditMaxDays}
+            onChange={(creditMaxDays) => setDraft({ ...draft, creditMaxDays })}
+          />
+          <NumberSetting
+            label="Closing time (hour, 0-23)"
+            value={draft.closingHour}
+            max={23}
+            onChange={(closingHour) => setDraft({ ...draft, closingHour })}
+          />
           <View className="flex-row gap-2">
             <Pressable onPress={onClose} className="flex-1 items-center rounded-xl bg-brand-softGreen p-3">
               <Text>Cancel</Text>
@@ -319,7 +357,17 @@ function B2SettingsModal({
   );
 }
 
-function NumberSetting({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
+function NumberSetting({
+  label,
+  value,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  max?: number;
+  onChange: (value: number) => void;
+}) {
   return (
     <View className="gap-2">
       <Text className="font-sans-medium text-sm text-richBlack">{label}</Text>
@@ -327,7 +375,7 @@ function NumberSetting({ label, value, onChange }: { label: string; value: numbe
         value={String(value)}
         onChangeText={(next) => {
           const parsed = Number.parseInt(next, 10);
-          if (Number.isInteger(parsed) && parsed >= 0) onChange(parsed);
+          if (Number.isInteger(parsed) && parsed >= 0 && (max === undefined || parsed <= max)) onChange(parsed);
         }}
         selectTextOnFocus
         keyboardType="number-pad"
@@ -466,6 +514,9 @@ function NotificationSettingsModal({
       (await requestNotificationPermissionsAsync());
     saveStored(session.shopId, draft);
     setPermissionDenied(!granted);
+    // D-11: turning the daily cash summary on/off must (de)schedule the
+    // closing-time OS trigger right away, not wait for the next app open.
+    void syncClosingTimeScheduleAsync(session.shopId);
     if (granted) onClose();
   };
   return (

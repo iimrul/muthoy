@@ -1,5 +1,7 @@
 import { asPaisa, type Paisa } from "@muthoy/types";
+import { DHAKA_SQL_OFFSET } from "@muthoy/utils";
 import { requireOwner, requirePermission } from "./auth";
+import { permissionForDataGate } from "./dataAccessGates";
 import { sqliteConnection } from "./client";
 
 export type SaleHistoryStatus = "completed" | "refunded" | "held" | "cancelled";
@@ -41,13 +43,13 @@ export async function listSalesHistory(
   actorUserId: string,
   filter: SaleHistoryFilter = {},
 ): Promise<SaleHistoryRow[]> {
-  await requirePermission(shopId, actorUserId, "sale_history");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("saleHistory"));
   const limit = Math.min(Math.max(filter.limit ?? 50, 1), 100);
   const query = filter.query?.trim();
   const rows = sqliteConnection.getAllSync<RawSaleHistoryRow>(
     `WITH events AS (
        SELECT s.id, s.invoice_no AS invoiceNo,
-              coalesce(s.business_date, date(s.created_at, '+6 hours')) AS businessDate,
+              coalesce(s.business_date, date(s.created_at, '${DHAKA_SQL_OFFSET}')) AS businessDate,
               s.total, s.discount_amount AS discountAmount, s.payment_type AS paymentType,
               coalesce(s.seller_name_snapshot, u.name) AS sellerName,
               coalesce(s.customer_name_snapshot, c.name) AS customerName,
@@ -59,7 +61,7 @@ export async function listSalesHistory(
          LEFT JOIN sale_refunds AS r ON r.sale_id=s.id AND r.shop_id=s.shop_id AND r.is_deleted=0
         WHERE s.shop_id=$shopId AND s.is_deleted=0
        UNION ALL
-       SELECT d.id, 'HOLD-' || substr(d.id,1,8), date(d.created_at, '+6 hours'),
+       SELECT d.id, 'HOLD-' || substr(d.id,1,8), date(d.created_at, '${DHAKA_SQL_OFFSET}'),
               0, 0, NULL, u.name, NULL, d.status, d.actor_id, d.created_at
          FROM sale_drafts AS d JOIN users AS u ON u.id=d.actor_id AND u.shop_id=d.shop_id
         WHERE d.shop_id=$shopId AND d.is_deleted=0 AND d.status IN ('held','cancelled')
@@ -128,10 +130,10 @@ export async function getSaleDetail(
   actorUserId: string,
   saleId: string,
 ): Promise<SaleDetail> {
-  await requirePermission(shopId, actorUserId, "sale_history");
+  await requirePermission(shopId, actorUserId, permissionForDataGate("saleHistory"));
   const sale = sqliteConnection.getFirstSync<RawSaleDetail>(
     `SELECT s.id, s.invoice_no AS invoiceNo,
-            coalesce(s.business_date, date(s.created_at, '+6 hours')) AS businessDate,
+            coalesce(s.business_date, date(s.created_at, '${DHAKA_SQL_OFFSET}')) AS businessDate,
             s.subtotal, s.discount_amount AS discountAmount, s.total,
             s.cash_applied AS cashApplied, s.credit_amount AS creditAmount,
             s.payment_type AS paymentType,
@@ -221,8 +223,8 @@ export async function listStaffSales(
             coalesce(sum((SELECT sr.total_amount FROM sale_refunds AS sr WHERE sr.sale_id = s.id AND sr.shop_id = s.shop_id AND sr.is_deleted = 0)), 0) AS refunds
        FROM users AS u
        LEFT JOIN sales AS s ON s.staff_id = u.id AND s.shop_id = u.shop_id AND s.is_deleted = 0
-        AND ($fromDate IS NULL OR coalesce(s.business_date, date(s.created_at, '+6 hours')) >= $fromDate)
-        AND ($toDate IS NULL OR coalesce(s.business_date, date(s.created_at, '+6 hours')) <= $toDate)
+        AND ($fromDate IS NULL OR coalesce(s.business_date, date(s.created_at, '${DHAKA_SQL_OFFSET}')) >= $fromDate)
+        AND ($toDate IS NULL OR coalesce(s.business_date, date(s.created_at, '${DHAKA_SQL_OFFSET}')) <= $toDate)
       WHERE u.shop_id = $shopId AND u.is_deleted = 0
       GROUP BY u.id, u.name ORDER BY grossSales DESC, u.name`,
     {
@@ -268,7 +270,7 @@ export async function listStaffSaleEvents(
     `WITH events AS (
        SELECT s.id, CASE WHEN s.discount_amount>0 THEN 'discount' ELSE 'sale' END action,
               coalesce(s.seller_name_snapshot,u.name) actorName,s.invoice_no invoiceNo,
-              coalesce(s.business_date,date(s.created_at,'+6 hours')) businessDate,
+              coalesce(s.business_date,date(s.created_at,'${DHAKA_SQL_OFFSET}')) businessDate,
               CASE WHEN s.discount_amount>0 THEN s.discount_amount ELSE s.total END amount,s.staff_id actorId
        FROM sales s JOIN users u ON u.id=s.staff_id AND u.shop_id=s.shop_id
        WHERE s.shop_id=$shopId AND s.is_deleted=0

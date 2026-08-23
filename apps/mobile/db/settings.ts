@@ -18,6 +18,8 @@ import {
 import { DEFAULT_CREDIT_MAX_DAYS } from '../domain/dashboard';
 
 export const DEFAULT_MAX_REFUND_DAYS = 7;
+/** W-5/D-11: the hour the shop closes. Mirrors migration 0015's DB default. */
+export const DEFAULT_CLOSING_HOUR = 20;
 
 export interface B2Settings {
   lowStockDefault: number;
@@ -26,6 +28,8 @@ export interface B2Settings {
   maxRefundDays: number;
   /** Owner Dashboard dues card. See domain/dashboard.overdueBeforeDate. */
   creditMaxDays: number;
+  /** Read by the daily-summary notification's OS-scheduled trigger. 0..23. */
+  closingHour: number;
 }
 
 export const DEFAULT_B2_SETTINGS: B2Settings = {
@@ -34,6 +38,7 @@ export const DEFAULT_B2_SETTINGS: B2Settings = {
   expiryFarDays: DEFAULT_FAR_EXPIRY_DAYS,
   maxRefundDays: DEFAULT_MAX_REFUND_DAYS,
   creditMaxDays: DEFAULT_CREDIT_MAX_DAYS,
+  closingHour: DEFAULT_CLOSING_HOUR,
 };
 
 function assertB2Settings(settings: B2Settings): void {
@@ -44,6 +49,9 @@ function assertB2Settings(settings: B2Settings): void {
   if (settings.expiryNearDays >= settings.expiryFarDays) {
     throw new Error('Near-expiry days must be less than far-expiry days');
   }
+  if (settings.closingHour > 23) {
+    throw new Error('Closing hour must be between 0 and 23');
+  }
 }
 
 export async function getB2Settings(shopId: string): Promise<B2Settings> {
@@ -53,6 +61,7 @@ export async function getB2Settings(shopId: string): Promise<B2Settings> {
     expiryFarDays: shopB2Settings.expiryFarDays,
     maxRefundDays: shopB2Settings.maxRefundDays,
     creditMaxDays: shopB2Settings.creditMaxDays,
+    closingHour: shopB2Settings.closingHour,
   }).from(shopB2Settings).where(and(
     eq(shopB2Settings.shopId, shopId),
     eq(shopB2Settings.isDeleted, false),

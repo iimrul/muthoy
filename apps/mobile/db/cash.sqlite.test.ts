@@ -10,8 +10,9 @@
 import { readFileSync } from 'node:fs';
 import { ALWAYS_LIVE } from './errors';
 import { resolve } from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { asPaisa, ZERO_PAISA } from '@muthoy/types';
+import { dhakaBusinessDate } from '@muthoy/utils';
 import { sqlite } from './test/expo-sqlite';
 
 const { db } = await import('./client');
@@ -394,5 +395,55 @@ describe('end-of-day close', () => {
       }),
     ).rejects.toThrow(/Owner access only/);
     expect(countRows('cash_drawer', fixture.shopId)).toBe(0);
+  });
+});
+
+describe('business date — Asia/Dhaka everywhere, not device-local (W-1)', () => {
+  // A UTC instant that is already the next calendar day in Asia/Dhaka
+  // (2026-08-21 01:00 +06:00) while still 2026-08-20 in every timezone west
+  // of UTC+5 — which covers virtually every CI runner and developer machine.
+  // Before the fix, db/cash.ts derived the business date from the DEVICE's
+  // local calendar day; only db/customers.ts used dhakaBusinessDate. A device
+  // outside Asia/Dhaka would then post an expense and a credit collection
+  // made minutes apart to two DIFFERENT cash_drawer rows for what is really
+  // one Dhaka business day.
+  const PINNED_INSTANT = new Date('2026-08-20T19:00:00.000Z');
+  const EXPECTED_BUSINESS_DATE = '2026-08-21';
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('posts an expense (cash.ts) and a credit collection (customers.ts) to the same Dhaka business date and the same drawer row', async () => {
+    expect(dhakaBusinessDate(PINNED_INSTANT)).toBe(EXPECTED_BUSINESS_DATE);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(PINNED_INSTANT);
+
+    const fixture = seedShop();
+    seedSale(fixture, '90', 'credit', 8_000, 5_000);
+
+    expect(currentBusinessDate()).toBe(EXPECTED_BUSINESS_DATE);
+
+    await recordExpense({ isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId, staffId: fixture.ownerId,
+      category: 'rent', amount: asPaisa(1_000),
+    });
+    await collectPayment({ isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId, staffId: fixture.ownerId,
+      customerId: fixture.customerId, amount: asPaisa(3_000),
+    });
+
+    // Exactly one drawer row for the shop — both writers agreed on the same
+    // business date, so neither opened a second, divergent row.
+    expect(countRows('cash_drawer', fixture.shopId)).toBe(1);
+    const drawer = sqlite
+      .prepare('SELECT business_date FROM cash_drawer WHERE shop_id = ?')
+      .get(fixture.shopId) as unknown as { business_date: string };
+    expect(drawer.business_date).toBe(EXPECTED_BUSINESS_DATE);
+
+    const summary = await getEndOfDaySummary(fixture.shopId, fixture.ownerId, EXPECTED_BUSINESS_DATE);
+    expect(summary.expenses).toBe(1_000);
+    expect(summary.creditCollected).toBe(3_000);
   });
 });
