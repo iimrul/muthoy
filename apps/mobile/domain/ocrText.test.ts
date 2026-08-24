@@ -5,6 +5,7 @@ import {
   extractMedicineNameCandidate,
   findExactNameMatch,
   normalizeMedicineName,
+  parseScannedInvoiceLines,
   parseScannedMedicineStrip,
 } from './ocrText';
 
@@ -144,5 +145,43 @@ describe('findExactNameMatch', () => {
 
   it('returns null when there are multiple matches, even if one name is exact', () => {
     expect(findExactNameMatch('Napa Extra', [napaExtra, { name: 'Napa Extra Forte' }])).toBeNull();
+  });
+});
+
+describe('parseScannedInvoiceLines', () => {
+  it('splits a multi-item invoice photo into one candidate per blank-line-separated block', () => {
+    const invoiceText = [
+      'Napa Extra',
+      'B. No: NX2456',
+      'EXP: 04/2027',
+      '',
+      'Seclo 20',
+      'B. No: SC998',
+      'EXP: 11/2026',
+    ].join('\n');
+    const lines = parseScannedInvoiceLines(invoiceText);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatchObject({ name: 'Napa Extra', batchNo: 'NX2456' });
+    expect(lines[1]).toMatchObject({ name: 'Seclo 20', batchNo: 'SC998' });
+  });
+
+  it('degrades to a single candidate for a single-strip photo with no blank lines', () => {
+    const lines = parseScannedInvoiceLines('Napa Extra\nB. No: NX2456\nEXP: 04/2027');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ name: 'Napa Extra', batchNo: 'NX2456', expiryDate: '2027-04-30' });
+  });
+
+  it('scores confidence by how many fields were actually extracted, never guessing', () => {
+    const [full] = parseScannedInvoiceLines('Napa Extra\nB. No: NX2456\nEXP: 04/2027');
+    const [nameOnly] = parseScannedInvoiceLines('Napa Extra\n123 456');
+    expect(full!.confidence).toBe(100);
+    expect(nameOnly!.confidence).toBeLessThan(full!.confidence);
+    expect(nameOnly!.confidence).toBeGreaterThan(0);
+  });
+
+  it('drops a block that yields no extractable fields at all', () => {
+    const lines = parseScannedInvoiceLines('Napa Extra\nB. No: NX2456\n\nMFG: 05/2025\n123\n###');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.name).toBe('Napa Extra');
   });
 });

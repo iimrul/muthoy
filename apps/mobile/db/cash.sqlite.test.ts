@@ -32,10 +32,13 @@ const {
 const {
   closeDay,
   currentBusinessDate,
+  deleteExpense,
+  findDuplicateExpense,
   getCashBreakdown,
   getCashSummarySync,
   getEndOfDaySummary,
   listExpenses,
+  listExpensesForMonth,
   recordExpense,
   recordWithdrawal,
   reconcileCashDrawer,
@@ -43,6 +46,7 @@ const {
 } = await import("./cash");
 const { collectPayment } = await import("./customers");
 const { expectedCash } = await import("../domain/cashFormula");
+const { applyRemoteRow } = await import("./sync-helpers");
 
 const BUSINESS_DATE = currentBusinessDate();
 
@@ -352,6 +356,12 @@ beforeAll(() => {
   applyMigration("0015_b3_shop_settings.sql");
   applyMigration("0016_payment_note.sql");
   applyMigration("0017_cash_reconcile.sql");
+  applyMigration("0018_expense_category_taxonomy.sql");
+  applyMigration("0019_supplier_archive.sql");
+  applyMigration("0020_purchase_item_status.sql");
+  applyMigration("0021_purchase_void.sql");
+  applyMigration("0022_supplier_profile_fields.sql");
+  applyMigration("0023_purchase_invoice_metadata.sql");
 });
 
 describe("expense recording and its cash impact", () => {
@@ -365,7 +375,7 @@ describe("expense recording and its cash impact", () => {
       isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId,
       staffId: fixture.ownerId,
-      category: "electricity",
+      category: "utilities",
       amount: asPaisa(12550),
       description: "August bill",
     });
@@ -381,7 +391,7 @@ describe("expense recording and its cash impact", () => {
       created_by: string;
     };
     expect(expense).toEqual({
-      category: "electricity",
+      category: "utilities",
       amount: 12550,
       description: "August bill",
       created_by: fixture.ownerId,
@@ -416,12 +426,28 @@ describe("expense recording and its cash impact", () => {
       "payments",
       "cash_drawer",
     ]);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT table_name, op, operation_group_id, operation_kind,
+                  operation_sequence, operation_expected_count
+             FROM sync_queue
+            WHERE operation_group_id = ?
+            ORDER BY operation_sequence`,
+        )
+        .all(expenseId),
+    ).toEqual([
+      expect.objectContaining({ table_name: "cash_drawer", op: "insert", operation_group_id: expenseId, operation_kind: "expense_create", operation_sequence: 0, operation_expected_count: 4 }),
+      expect.objectContaining({ table_name: "expenses", op: "insert", operation_group_id: expenseId, operation_kind: "expense_create", operation_sequence: 1, operation_expected_count: 4 }),
+      expect.objectContaining({ table_name: "payments", op: "insert", operation_group_id: expenseId, operation_kind: "expense_create", operation_sequence: 2, operation_expected_count: 4 }),
+      expect.objectContaining({ table_name: "cash_drawer", op: "update", operation_group_id: expenseId, operation_kind: "expense_create", operation_sequence: 3, operation_expected_count: 4 }),
+    ]);
     await expect(
       listExpenses(fixture.shopId, fixture.ownerId, BUSINESS_DATE),
     ).resolves.toEqual([
       {
         id: expenseId,
-        category: "electricity",
+        category: "utilities",
         amount: 12550,
         description: "August bill",
         createdAt: expect.any(String),
@@ -449,7 +475,7 @@ describe("expense recording and its cash impact", () => {
       isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId,
       staffId: fixture.ownerId,
-      category: "transport",
+      category: "conveyance",
       amount: asPaisa(7000),
     });
 
@@ -479,6 +505,44 @@ describe("expense recording and its cash impact", () => {
     expect(countRows("cash_drawer", fixture.shopId)).toBe(0);
   });
 
+  it("uses one captured instant for business date and both created_at values at Dhaka midnight", async () => {
+    const fixture = seedShop();
+    const boundaryInstant = new Date("2026-08-31T17:59:59.999Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(boundaryInstant);
+    try {
+      const { expenseId } = await recordExpense({
+        isStillActive: ALWAYS_LIVE,
+        shopId: fixture.shopId,
+        staffId: fixture.ownerId,
+        category: "rent",
+        amount: asPaisa(100),
+      });
+      const row = sqlite
+        .prepare(
+          `SELECT e.created_at expense_created_at, p.created_at payment_created_at,
+                  d.business_date
+             FROM expenses e
+             JOIN payments p ON p.ref_id=e.id AND p.type='expense'
+             JOIN cash_drawer d ON d.shop_id=e.shop_id
+            WHERE e.id=?`,
+        )
+        .get(expenseId) as unknown as {
+          expense_created_at: string;
+          payment_created_at: string;
+          business_date: string;
+        };
+      expect(row).toEqual({
+        expense_created_at: boundaryInstant.toISOString(),
+        payment_created_at: boundaryInstant.toISOString(),
+        business_date: "2026-08-31",
+      });
+      expect(dhakaBusinessDate(new Date(row.expense_created_at))).toBe(row.business_date);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("refuses to record an expense into an already-closed day", async () => {
     const fixture = seedShop();
     await closeDay({
@@ -494,11 +558,301 @@ describe("expense recording and its cash impact", () => {
         isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId,
         staffId: fixture.ownerId,
-        category: "supplies",
+        category: "other",
         amount: asPaisa(500),
       }),
     ).rejects.toThrow(/already closed/);
     expect(countRows("expenses", fixture.shopId)).toBe(0);
+  });
+});
+
+describe("findDuplicateExpense — advisory same-day match (EX-11, B3 Group 3)", () => {
+  it("matches same category + same amount + same Dhaka business day", async () => {
+    const fixture = seedShop();
+    const { expenseId } = await recordExpense({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      staffId: fixture.ownerId,
+      category: "rent",
+      amount: asPaisa(5000),
+    });
+
+    const match = await findDuplicateExpense(
+      fixture.shopId,
+      fixture.ownerId,
+      "rent",
+      asPaisa(5000),
+      BUSINESS_DATE,
+    );
+    expect(match?.id).toBe(expenseId);
+  });
+
+  it("does not match a different category or a different amount", async () => {
+    const fixture = seedShop();
+    await recordExpense({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      staffId: fixture.ownerId,
+      category: "rent",
+      amount: asPaisa(5000),
+    });
+
+    await expect(
+      findDuplicateExpense(fixture.shopId, fixture.ownerId, "utilities", asPaisa(5000), BUSINESS_DATE),
+    ).resolves.toBeNull();
+    await expect(
+      findDuplicateExpense(fixture.shopId, fixture.ownerId, "rent", asPaisa(5001), BUSINESS_DATE),
+    ).resolves.toBeNull();
+  });
+
+  it("is advisory only — a genuine duplicate is never blocked at the write layer", async () => {
+    const fixture = seedShop();
+    await recordExpense({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      staffId: fixture.ownerId,
+      category: "rent",
+      amount: asPaisa(5000),
+    });
+
+    await expect(
+      recordExpense({
+        isStillActive: ALWAYS_LIVE,
+        shopId: fixture.shopId,
+        staffId: fixture.ownerId,
+        category: "rent",
+        amount: asPaisa(5000),
+      }),
+    ).resolves.toBeDefined();
+    expect(countRows("expenses", fixture.shopId)).toBe(2);
+  });
+});
+
+describe("listExpensesForMonth — the Ledger tab's month-range read (B3 Group 3)", () => {
+  it("returns every expense in the given Dhaka month with the logger's name, and none outside it", async () => {
+    const fixture = seedShop();
+    const { expenseId } = await recordExpense({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      staffId: fixture.ownerId,
+      category: "salary",
+      amount: asPaisa(30000),
+    });
+
+    const { year, month } = { year: Number(BUSINESS_DATE.slice(0, 4)), month: Number(BUSINESS_DATE.slice(5, 7)) };
+    const rows = await listExpensesForMonth(fixture.shopId, fixture.ownerId, year, month);
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: expenseId,
+        category: "salary",
+        amount: 30000,
+        loggedByName: expect.stringContaining("Owner"),
+      }),
+    ]);
+
+    const otherMonth = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+    await expect(
+      listExpensesForMonth(fixture.shopId, fixture.ownerId, otherMonth.year, otherMonth.month),
+    ).resolves.toEqual([]);
+  });
+
+  it("rejects an out-of-range month", async () => {
+    const fixture = seedShop();
+    await expect(listExpensesForMonth(fixture.shopId, fixture.ownerId, 2026, 13)).rejects.toThrow(
+      /between 1 and 12/,
+    );
+  });
+});
+
+describe("deleteExpense — atomic soft-delete of both rows (B3 Group 3)", () => {
+  it("soft-deletes the expense AND its paired payment atomically, and recomputes the drawer", async () => {
+    const fixture = seedShop();
+    seedSale(fixture, "70", "cash", 20000, 12000);
+    await setOpeningCash({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      staffId: fixture.ownerId,
+      businessDate: BUSINESS_DATE,
+      openingCash: asPaisa(10000),
+    });
+    const beforeExpense = expectedCash(getCashSummarySync(fixture.shopId, BUSINESS_DATE));
+
+    const { expenseId } = await recordExpense({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      staffId: fixture.ownerId,
+      category: "other",
+      amount: asPaisa(1500),
+    });
+    const payment = sqlite
+      .prepare("SELECT id, is_deleted FROM payments WHERE ref_id = ?")
+      .get(expenseId) as unknown as { id: string; is_deleted: number };
+
+    await deleteExpense({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      staffId: fixture.ownerId,
+      expenseId,
+    });
+
+    const expenseRow = sqlite
+      .prepare("SELECT is_deleted FROM expenses WHERE id = ?")
+      .get(expenseId) as unknown as { is_deleted: number };
+    const paymentRow = sqlite
+      .prepare("SELECT is_deleted FROM payments WHERE id = ?")
+      .get(payment.id) as unknown as { is_deleted: number };
+    expect(expenseRow.is_deleted).toBe(1);
+    expect(paymentRow.is_deleted).toBe(1);
+    const deleteGroups = sqlite
+      .prepare(
+        `SELECT DISTINCT operation_group_id FROM sync_queue
+          WHERE operation_kind='expense_delete'`,
+      )
+      .all() as unknown as { operation_group_id: string }[];
+    expect(deleteGroups).toHaveLength(1);
+    expect(deleteGroups[0]?.operation_group_id).not.toBe(expenseId);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT table_name, op, operation_sequence, operation_expected_count
+             FROM sync_queue WHERE operation_kind='expense_delete'
+             ORDER BY operation_sequence`,
+        )
+        .all(),
+    ).toEqual([
+      expect.objectContaining({ table_name: "expenses", op: "delete", operation_sequence: 0, operation_expected_count: 3 }),
+      expect.objectContaining({ table_name: "payments", op: "delete", operation_sequence: 1, operation_expected_count: 3 }),
+      expect.objectContaining({ table_name: "cash_drawer", op: "update", operation_sequence: 2, operation_expected_count: 3 }),
+    ]);
+
+    // Row COUNTS are unchanged — this is a soft-delete (UPDATE), never a
+    // real DELETE or a partial one-sided mutation.
+    expect(countRows("expenses", fixture.shopId)).toBe(1);
+    // Cash sales are derived from sales.cash_applied, not a payments row —
+    // recordExpense's own payment is the only one this fixture writes.
+    expect(countRows("payments", fixture.shopId)).toBe(1);
+
+    const after = expectedCash(getCashSummarySync(fixture.shopId, BUSINESS_DATE));
+    expect(after).toBe(beforeExpense);
+    expect(drawerRow(fixture.shopId)?.closing_expected).toBe(after);
+  });
+
+  it("refuses a one-sided delete when the paired payment is already missing", async () => {
+    const fixture = seedShop();
+    const { expenseId } = await recordExpense({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      staffId: fixture.ownerId,
+      category: "other",
+      amount: asPaisa(900),
+    });
+    // Simulate a corrupted/partially-synced state directly — never reachable
+    // through the app's own write paths, which is exactly why this must be
+    // refused rather than silently completing a one-sided delete.
+    sqlite.exec(`UPDATE payments SET is_deleted = 1 WHERE ref_id = '${expenseId}'`);
+
+    await expect(
+      deleteExpense({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, staffId: fixture.ownerId, expenseId }),
+    ).rejects.toThrow(/payment record is missing/);
+
+    const expenseRow = sqlite
+      .prepare("SELECT is_deleted FROM expenses WHERE id = ?")
+      .get(expenseId) as unknown as { is_deleted: number };
+    expect(expenseRow.is_deleted).toBe(0);
+  });
+
+  it("is guarded by the EXPENSE'S OWN business date, not today's — refuses once that day is closed", async () => {
+    const fixture = seedShop();
+    const PAST_INSTANT = new Date("2026-08-10T10:00:00.000Z");
+    const pastBusinessDate = dhakaBusinessDate(PAST_INSTANT);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(PAST_INSTANT);
+    const { expenseId } = await recordExpense({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      staffId: fixture.ownerId,
+      category: "other",
+      amount: asPaisa(700),
+    });
+    await closeDay({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      businessDate: pastBusinessDate,
+      countedCash: ZERO_PAISA,
+      closedBy: fixture.ownerId,
+    });
+
+    // Advance to a later, still-OPEN business date — proves the guard reads
+    // the deleted row's own date, not "today".
+    vi.setSystemTime(new Date("2026-08-11T10:00:00.000Z"));
+
+    await expect(
+      deleteExpense({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, staffId: fixture.ownerId, expenseId }),
+    ).rejects.toThrow(/already closed/);
+
+    vi.useRealTimers();
+  });
+
+  it("rejects deleting an expense that does not exist", async () => {
+    const fixture = seedShop();
+    await expect(
+      deleteExpense({
+        isStillActive: ALWAYS_LIVE,
+        shopId: fixture.shopId,
+        staffId: fixture.ownerId,
+        expenseId: "nonexistent-expense",
+      }),
+    ).rejects.toThrow(/not found/);
+  });
+});
+
+describe("expense category sync/domain enforcement", () => {
+  it("canonicalizes a stale-client category before SQLite enforcement", async () => {
+    const fixture = seedShop();
+    const legacyId = "legacy-expense-id";
+    const now = new Date().toISOString();
+    expect(applyRemoteRow("expenses", {
+      id: legacyId,
+      shop_id: fixture.shopId,
+      category: "electricity",
+      amount: 800,
+      created_by: fixture.ownerId,
+      created_at: now,
+      updated_at: now,
+      is_deleted: false,
+    })).toBe("applied");
+
+    const { year, month } = { year: Number(BUSINESS_DATE.slice(0, 4)), month: Number(BUSINESS_DATE.slice(5, 7)) };
+    const rows = await listExpensesForMonth(fixture.shopId, fixture.ownerId, year, month);
+    const legacyRow = rows.find((row) => row.id === legacyId);
+    expect(legacyRow?.category).toBe("utilities");
+  });
+
+  it("rejects unknown categories at domain, pull, and direct SQLite boundaries", async () => {
+    const fixture = seedShop();
+    await expect(recordExpense({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      staffId: fixture.ownerId,
+      category: "fuel" as never,
+      amount: asPaisa(100),
+    })).rejects.toThrow();
+    const now = new Date().toISOString();
+    expect(() => applyRemoteRow("expenses", {
+      id: "unknown-remote-expense",
+      shop_id: fixture.shopId,
+      category: "fuel",
+      amount: 100,
+      created_by: fixture.ownerId,
+      created_at: now,
+      updated_at: now,
+      is_deleted: false,
+    })).toThrow();
+    expect(() => sqlite.exec(
+      `INSERT INTO expenses (id, shop_id, category, amount, created_by, created_at, updated_at)
+       VALUES ('unknown-direct-expense', '${fixture.shopId}', 'fuel', 100, '${fixture.ownerId}', '${now}', '${now}')`,
+    )).toThrow(/invalid expense category/);
   });
 });
 
@@ -548,7 +902,7 @@ describe("end-of-day close", () => {
       isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId,
       staffId: fixture.ownerId,
-      category: "staff_salary",
+      category: "salary",
       amount: asPaisa(7000),
     });
 
@@ -748,6 +1102,48 @@ describe("business date — Asia/Dhaka everywhere, not device-local (W-1)", () =
     );
     expect(summary.expenses).toBe(1_000);
     expect(summary.creditCollected).toBe(3_000);
+  });
+
+  it("B3 Group 3: buckets an expense into the correct Dhaka MONTH, not the device-local one, across a month boundary", async () => {
+    // UTC instant still August 31st everywhere west of UTC+5, but already
+    // 2026-09-01 01:00 in Asia/Dhaka — a stronger proof than a same-month
+    // day-boundary instant: listExpensesForMonth must bucket this into
+    // September, and deleteExpense's own-business-date guard must agree.
+    const MONTH_BOUNDARY_INSTANT = new Date("2026-08-31T19:00:00.000Z");
+    const EXPECTED_MONTH_BUSINESS_DATE = "2026-09-01";
+    expect(dhakaBusinessDate(MONTH_BOUNDARY_INSTANT)).toBe(EXPECTED_MONTH_BUSINESS_DATE);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(MONTH_BOUNDARY_INSTANT);
+    const fixture = seedShop();
+    const { expenseId } = await recordExpense({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      staffId: fixture.ownerId,
+      category: "other",
+      amount: asPaisa(300),
+    });
+
+    const augustRows = await listExpensesForMonth(fixture.shopId, fixture.ownerId, 2026, 8);
+    const septemberRows = await listExpensesForMonth(fixture.shopId, fixture.ownerId, 2026, 9);
+    expect(augustRows).toEqual([]);
+    expect(septemberRows.map((row) => row.id)).toEqual([expenseId]);
+
+    // Close the September 1st business date, then confirm deleteExpense's
+    // guard reads THAT date from the expense — not whatever the device
+    // considers "today" — even though the fake clock never left this instant.
+    await closeDay({
+      isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId,
+      businessDate: EXPECTED_MONTH_BUSINESS_DATE,
+      countedCash: ZERO_PAISA,
+      closedBy: fixture.ownerId,
+    });
+    await expect(
+      deleteExpense({ isStillActive: ALWAYS_LIVE, shopId: fixture.shopId, staffId: fixture.ownerId, expenseId }),
+    ).rejects.toThrow(/already closed/);
+
+    vi.useRealTimers();
   });
 });
 
@@ -1219,7 +1615,7 @@ describe("getCashBreakdown (B3 Group 2)", () => {
       isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId,
       staffId: fixture.ownerId,
-      category: "supplies",
+      category: "other",
       amount: asPaisa(300),
     });
 
@@ -1231,7 +1627,7 @@ describe("getCashBreakdown (B3 Group 2)", () => {
     expect(breakdown.expenses.total).toBe(1500);
     expect(breakdown.expenses.details).toEqual([
       { id: expect.any(String), label: "rent — August", amount: 1200 },
-      { id: expect.any(String), label: "supplies", amount: 300 },
+      { id: expect.any(String), label: "other", amount: 300 },
     ]);
   });
 

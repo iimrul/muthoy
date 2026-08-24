@@ -707,6 +707,19 @@ export const suppliers = sqliteTable(
     address: text("address"),
     email: text("email"),
     contactPerson: text("contact_person"),
+    // B3 Group 5 (migration 0019). Distinct from `base.isDeleted`: an
+    // archived supplier keeps every purchase/invoice/payment reachable, it is
+    // only excluded from active pickers and new-invoice flows. Archive is
+    // refused while the computed payable is > 0 (founder decision D-9,
+    // contract §5.24) — see db/suppliers.ts's archiveSupplier.
+    archivedAt: text("archived_at"),
+    archivedBy: text("archived_by").references(() => users.id, {
+      onDelete: "restrict",
+    }),
+    // B3 Group 4-6 review fixes (migration 0022): prototype parity fields
+    // (Suppliers.tsx/SupplierDetail.tsx) — both optional, display-only.
+    manufacturer: text("manufacturer"),
+    notes: text("notes"),
   },
   (t) => ({
     shopIdx: index("suppliers_shop_idx").on(t.shopId),
@@ -734,6 +747,23 @@ export const purchases = sqliteTable(
       .$type<Paisa>()
       .notNull()
       .default(ZERO_PAISA),
+    // B3 Group 6 (migration 0021, contract §5.13): a purchase may be voided
+    // only when it produced no stock movement and carries no payment —
+    // enforced in db/purchases.ts's voidPurchase, not by a DB trigger, since
+    // the check spans two other tables (inventory_movements, payments).
+    voidedAt: text("voided_at"),
+    voidedBy: text("voided_by").references(() => users.id, {
+      onDelete: "restrict",
+    }),
+    // B3 Group 4-6 review fixes (migration 0023). invoiceDate is the date
+    // printed on the paper invoice — descriptive only. It must NEVER be
+    // passed to assertBusinessDateOpen or used as a ledger/movement
+    // timestamp; every write continues to use the actual dhakaBusinessDate()
+    // at transaction time regardless of this field's value.
+    invoiceDate: text("invoice_date"),
+    source: text("source", { enum: ["manual", "ocr"] })
+      .notNull()
+      .default("manual"),
   },
   (t) => ({
     shopIdx: index("purchases_shop_idx").on(t.shopId),
@@ -764,6 +794,13 @@ export const purchaseItems = sqliteTable(
     qty: integer("qty").notNull(),
     purchasePrice: integer("purchase_price").$type<Paisa>().notNull(),
     salePrice: integer("sale_price").$type<Paisa>().notNull(),
+    // B3 Group 6 (migration 0020, contract §5.12): a 'pending' line produces
+    // no stock movement and is excluded from the header total until Mark
+    // Received applies exactly that line's addStock movement.
+    status: text("status", { enum: ["received", "pending"] })
+      .notNull()
+      .default("received"),
+    receivedAt: text("received_at"),
   },
   (t) => ({
     purchaseIdx: index("purchase_items_purchase_idx").on(t.purchaseId),
@@ -827,7 +864,7 @@ export const expenses = sqliteTable(
     shopId: text("shop_id")
       .notNull()
       .references(() => shops.id, { onDelete: "cascade" }),
-    category: text("category").notNull(), // rent, electricity, transport, staff_salary...
+    category: text("category").notNull(), // enforced by migration 0018: rent/salary/utilities/conveyance/other
     amount: integer("amount").$type<Paisa>().notNull(),
     description: text("description"),
     receiptImage: text("receipt_image"), // Supabase Storage path/URL, nullable

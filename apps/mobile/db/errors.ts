@@ -97,6 +97,38 @@ export class DayClosedError extends Error {
   }
 }
 
+// Thrown by db/suppliers.ts's archiveSupplier when the computed payable
+// (SUM(purchases.total - paid_amount) over non-deleted, non-voided purchases)
+// is > 0 — founder decision D-9, contract §5.24: archiving a supplier the
+// shop still owes would hide a real debt from the payable list and the
+// dashboard KPI. Named, not silently no-op'd, so the screen can show the
+// exact amount blocking the action.
+export class SupplierPayableOutstandingError extends Error {
+  readonly payable: number;
+  constructor(payable: number) {
+    super('Cannot archive a supplier with an outstanding payable balance.');
+    this.name = 'SupplierPayableOutstandingError';
+    this.payable = payable;
+  }
+}
+
+// Thrown by db/purchases.ts's voidPurchase (contract §5.13): a purchase may
+// be voided only when it produced no stock movement and carries no payment.
+// Otherwise the reversal path is a purchase return (Group 7, out of scope
+// here), not a void.
+export class PurchaseNotVoidableError extends Error {
+  readonly reason: 'has_stock_movement' | 'has_payment';
+  constructor(reason: 'has_stock_movement' | 'has_payment') {
+    super(
+      reason === 'has_stock_movement'
+        ? 'This purchase already changed stock and cannot be voided — use a purchase return instead.'
+        : 'This purchase already has a payment recorded and cannot be voided — use a purchase return instead.',
+    );
+    this.name = 'PurchaseNotVoidableError';
+    this.reason = reason;
+  }
+}
+
 // Thrown when the device changed hands between the moment an async write was
 // started and the moment it would have committed (Volume 0 Days 5/11 device
 // handover; state/switchUser.ts). A screen handler closes over the session

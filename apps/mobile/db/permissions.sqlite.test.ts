@@ -156,6 +156,12 @@ beforeAll(() => {
   applyMigration('0015_b3_shop_settings.sql');
   applyMigration('0016_payment_note.sql');
   applyMigration('0017_cash_reconcile.sql');
+  applyMigration('0018_expense_category_taxonomy.sql');
+  applyMigration('0019_supplier_archive.sql');
+  applyMigration('0020_purchase_item_status.sql');
+  applyMigration('0021_purchase_void.sql');
+  applyMigration('0022_supplier_profile_fields.sql');
+  applyMigration('0023_purchase_invoice_metadata.sql');
 });
 
 describe('owner — full access', () => {
@@ -222,7 +228,7 @@ describe('owner — full access', () => {
     });
     await recordExpense({ isStillActive: ALWAYS_LIVE,
       shopId: fixture.shopId, staffId: fixture.ownerId,
-      category: 'transport', amount: asPaisa(7000),
+      category: 'conveyance', amount: asPaisa(7000),
     });
 
     const summary = await getCashSummary(fixture.shopId, fixture.ownerId, BUSINESS_DATE);
@@ -351,7 +357,7 @@ describe('staff — owner-only actions denied by direct navigation', () => {
     await expect(
       recordExpense({ isStillActive: ALWAYS_LIVE,
         shopId: fixture.shopId, staffId: fixture.staffId,
-        category: 'transport', amount: asPaisa(7000),
+        category: 'conveyance', amount: asPaisa(7000),
       }),
     ).rejects.toThrow(/Owner access only/);
 

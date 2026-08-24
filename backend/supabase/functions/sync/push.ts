@@ -19,6 +19,7 @@ import {
   isSyncTable,
   type SyncTableName,
 } from "./_shared/tables.ts";
+import { canonicalizeExpensePayload } from "./_shared/expenseCategories.ts";
 
 type RowObject = Record<string, unknown>;
 type PushRow = {
@@ -64,7 +65,10 @@ function parseRows(value: unknown): PushRow[] {
       tableName: row.tableName,
       rowId: row.rowId,
       op: row.op,
-      payload: row.payload as RowObject,
+      payload: canonicalizeExpensePayload(
+        row.tableName,
+        row.payload as RowObject,
+      ),
     };
   });
 }

@@ -20,7 +20,7 @@
 // session store, switchUser, captureSessionFor, react-hook-form and every
 // zod schema are the real implementations.
 
-import { createElement, type ReactNode } from "react";
+import { createElement, Fragment, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -62,10 +62,17 @@ interface StubProps {
   onPress?: () => void;
   accessibilityLabel?: string;
   placeholder?: string;
-  value?: string;
+  value?: string | boolean;
   onChangeText?: (value: string) => void;
+  onValueChange?: (value: boolean) => void;
   disabled?: boolean;
   visible?: boolean;
+  // FlatList (B3 Group 4: credit-sales.tsx's paginated list).
+  data?: readonly unknown[];
+  renderItem?: (info: { item: unknown; index: number }) => ReactNode;
+  keyExtractor?: (item: unknown, index: number) => string;
+  ListHeaderComponent?: ReactNode | (() => ReactNode);
+  ListEmptyComponent?: ReactNode | (() => ReactNode);
 }
 
 vi.mock("react-native", () => ({
@@ -97,6 +104,64 @@ vi.mock("react-native", () => ({
   // the DOM (matching how getByLabelText assertions distinguish open/closed).
   Modal: ({ children, visible }: StubProps) =>
     visible ? createElement("div", null, children) : null,
+  // B3 Group 6: purchase-create.tsx's pending-line toggle.
+  Switch: ({ value, onValueChange }: StubProps) =>
+    createElement("input", {
+      type: "checkbox",
+      checked: Boolean(value),
+      onChange: () => onValueChange?.(!value),
+    }),
+  // B3 Group 4: credit-sales.tsx's paginated list. Renders the header, then
+  // either the empty component (no rows) or each row via renderItem — real
+  // enough for these actor-stamping tests, which never scroll or paginate.
+  FlatList: ({
+    data,
+    renderItem,
+    keyExtractor,
+    ListHeaderComponent,
+    ListEmptyComponent,
+  }: StubProps) => {
+    const items = data ?? [];
+    const header =
+      typeof ListHeaderComponent === "function"
+        ? createElement(ListHeaderComponent)
+        : (ListHeaderComponent ?? null);
+    const empty =
+      items.length === 0
+        ? typeof ListEmptyComponent === "function"
+          ? createElement(ListEmptyComponent)
+          : (ListEmptyComponent ?? null)
+        : null;
+    return createElement(
+      "div",
+      null,
+      header,
+      empty,
+      ...items.map((item, index) =>
+        createElement(
+          Fragment,
+          { key: keyExtractor ? keyExtractor(item, index) : index },
+          renderItem?.({ item, index }),
+        ),
+      ),
+    );
+  },
+  Animated: {
+    Value: class {
+      stopAnimation() {}
+      setValue() {}
+    },
+    View: ({ children }: StubProps) => createElement("div", null, children),
+    timing: () => ({
+      start: (callback?: (result: { finished: boolean }) => void) =>
+        callback?.({ finished: true }),
+    }),
+    delay: () => ({ start: () => undefined }),
+    sequence: () => ({
+      start: (callback?: (result: { finished: boolean }) => void) =>
+        callback?.({ finished: true }),
+    }),
+  },
 }));
 
 const routerMock = vi.hoisted(() => ({
@@ -119,11 +184,25 @@ vi.mock("expo-router", () => ({
 }));
 
 vi.mock("../components/ui/StandardHeader", () => ({
-  StandardHeader: ({ title }: { title: string }) =>
-    createElement("h1", null, title),
+  // B3 Group 4: credit-sales.tsx's "+" add-customer button lives in
+  // rightAccessory — dropped silently before, so it could never be found.
+  StandardHeader: ({
+    title,
+    rightAccessory,
+  }: {
+    title: string;
+    rightAccessory?: ReactNode;
+  }) => createElement("div", null, createElement("h1", null, title), rightAccessory ?? null),
 }));
 vi.mock("../components/ui/AccessDenied", () => ({
   AccessDenied: () => createElement("p", null, "Access denied"),
+}));
+// B3 Group 6: purchase-create.tsx now imports the OCR scan modal, which
+// transitively loads expo-camera/ML Kit — no native module can load under
+// this jsdom harness. Mocked wholesale, same as StandardHeader/AccessDenied
+// above: this suite exercises the actor-stamped save path, not scanning.
+vi.mock("../components/scanner/MedicineTextScanner", () => ({
+  MedicineTextScanner: () => null,
 }));
 
 const deps = vi.hoisted(() => ({
@@ -134,7 +213,10 @@ const deps = vi.hoisted(() => ({
   reconcileCashDrawer: vi.fn(),
   setOpeningCash: vi.fn(),
   listExpenses: vi.fn(),
+  listExpensesForMonth: vi.fn(),
+  findDuplicateExpense: vi.fn(),
   recordExpense: vi.fn(),
+  deleteExpense: vi.fn(),
   getEndOfDaySummary: vi.fn(),
   getB2Settings: vi.fn(),
   closeDay: vi.fn(),
@@ -142,9 +224,12 @@ const deps = vi.hoisted(() => ({
   createCustomer: vi.fn(),
   getCustomer: vi.fn(),
   getCustomerCreditLedger: vi.fn(),
+  getCustomerCreditDetail: vi.fn(),
+  getCustomerListTotals: vi.fn(),
   collectPayment: vi.fn(),
   listSuppliers: vi.fn(),
   searchMedicinesForPurchase: vi.fn(),
+  findDuplicatePurchase: vi.fn(),
   createPurchase: vi.fn(),
   getUnreadCount: vi.fn(),
   triggerSyncNow: vi.fn(),
@@ -162,19 +247,27 @@ vi.mock("../db/cash", () => ({
   reconcileCashDrawer: deps.reconcileCashDrawer,
   setOpeningCash: deps.setOpeningCash,
   listExpenses: deps.listExpenses,
+  listExpensesForMonth: deps.listExpensesForMonth,
+  findDuplicateExpense: deps.findDuplicateExpense,
   recordExpense: deps.recordExpense,
+  deleteExpense: deps.deleteExpense,
   getEndOfDaySummary: deps.getEndOfDaySummary,
   closeDay: deps.closeDay,
 }));
 vi.mock("../db/customers", () => ({
+  // B3 Group 4 (W-4): credit-sales.tsx paginates instead of the old LIMIT 50.
+  CUSTOMER_LIST_PAGE_SIZE: 30,
   listCustomersWithBalance: deps.listCustomersWithBalance,
+  getCustomerListTotals: deps.getCustomerListTotals,
   createCustomer: deps.createCustomer,
   getCustomer: deps.getCustomer,
   getCustomerCreditLedger: deps.getCustomerCreditLedger,
+  getCustomerCreditDetail: deps.getCustomerCreditDetail,
   collectPayment: deps.collectPayment,
 }));
 vi.mock("../db/purchases", () => ({
   searchMedicinesForPurchase: deps.searchMedicinesForPurchase,
+  findDuplicatePurchase: deps.findDuplicatePurchase,
   createPurchase: deps.createPurchase,
 }));
 vi.mock("../db/suppliers", () => ({ listSuppliers: deps.listSuppliers }));
@@ -329,9 +422,12 @@ beforeEach(() => {
   deps.getCashSummary.mockResolvedValue(ZERO_FORMULA);
   deps.getCashBreakdown.mockResolvedValue(ZERO_CASH_BREAKDOWN);
   deps.listExpenses.mockResolvedValue([]);
+  deps.listExpensesForMonth.mockResolvedValue([]);
+  deps.findDuplicateExpense.mockResolvedValue(null);
   deps.getEndOfDaySummary.mockResolvedValue(OPEN_DAY_SUMMARY);
   deps.getB2Settings.mockResolvedValue({ closingHour: 20 });
   deps.listCustomersWithBalance.mockResolvedValue([]);
+  deps.getCustomerListTotals.mockResolvedValue({ customerCount: 0, totalOutstanding: 0 });
   deps.getCustomer.mockResolvedValue({
     id: CUSTOMER_ID,
     name: "Rahim",
@@ -340,12 +436,26 @@ beforeEach(() => {
     notes: null,
   });
   deps.getCustomerCreditLedger.mockResolvedValue([]);
+  // B3 Group 4: customer-detail.tsx now reads this composite instead of
+  // getCustomer/getCustomerCreditLedger. totalDue > 0 so the "Make Payment"
+  // button (and the sheet it opens) render, matching what the collect-
+  // payment tests below need.
+  deps.getCustomerCreditDetail.mockResolvedValue({
+    customer: { id: CUSTOMER_ID, name: "Rahim", phone: null, address: null, notes: null },
+    totalDue: 30000,
+    totalPurchases: 1,
+    settledCount: 0,
+    credits: [],
+  });
   deps.listSuppliers.mockResolvedValue([
     { id: SUPPLIER_ID, name: "Square Pharmaceuticals" },
   ]);
   deps.searchMedicinesForPurchase.mockResolvedValue([
     { medicineId: MEDICINE_ID, name: "Napa", generic: "Paracetamol" },
   ]);
+  // B3 Group 6: purchase-create.tsx checks this before saving; null means no
+  // advisory duplicate match, so the normal save path proceeds unblocked.
+  deps.findDuplicatePurchase.mockResolvedValue(null);
   deps.getUnreadCount.mockResolvedValue(0);
 });
 
@@ -619,12 +729,22 @@ describe("cash-summary: mid-day reconcile (D-2, B3 Group 2)", () => {
 });
 
 describe("expenses: record expense", () => {
+  // B3 Group 3: Quick Log's amount field is a keypad-driven display (EX-5/
+  // EX-7), not a text input — "typing" 250 means pressing the 2/5/0 keys,
+  // and the field's value is read off the rendered "৳ 250" text rather than
+  // an <input>'s .value (mirrors valueOf's old TextInput-based check). Keyed
+  // by accessibilityLabel, not visible text: a bare "0" is ambiguous with
+  // the summary strip's zero-entries count, which carries no label at all.
+  function pressDigits(digits: string): void {
+    for (const digit of digits) {
+      fireEvent.click(screen.getByLabelText(digit));
+    }
+  }
+
   async function openScreen(): Promise<void> {
     useSessionStore.getState().login(OWNER);
     render(createElement(ExpensesScreen));
-    await waitFor(() =>
-      expect(screen.getByLabelText("Expense amount")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText("Log Expense")).toBeTruthy());
   }
 
   it("cannot commit or clear the form when the phone changes hands mid-write", async () => {
@@ -632,8 +752,8 @@ describe("expenses: record expense", () => {
     deps.recordExpense.mockReturnValueOnce(pending.promise);
     await openScreen();
 
-    type("Expense amount", "250");
-    clickText("Save expense");
+    pressDigits("250");
+    clickText("Log Expense");
     await waitFor(() => expect(deps.recordExpense).toHaveBeenCalledTimes(1));
 
     ownerLendsPhoneAndTakesItBack();
@@ -642,16 +762,16 @@ describe("expenses: record expense", () => {
     });
 
     expect(livenessOf(deps.recordExpense)()).toBe(false);
-    expect(valueOf("Expense amount")).toBe("250");
+    expect(screen.getByText("৳ 250")).toBeTruthy();
   });
 
   it("still saves and clears on the owner normal path", async () => {
     deps.recordExpense.mockResolvedValue(undefined);
     await openScreen();
 
-    type("Expense amount", "250");
+    pressDigits("250");
     await act(async () => {
-      clickText("Save expense");
+      clickText("Log Expense");
     });
 
     expect(deps.recordExpense.mock.calls[0]?.[0]).toMatchObject({
@@ -659,7 +779,7 @@ describe("expenses: record expense", () => {
       staffId: OWNER_ID,
     });
     expect(livenessOf(deps.recordExpense)()).toBe(true);
-    expect(valueOf("Expense amount")).toBe("");
+    expect(screen.getByText("৳ 0")).toBeTruthy();
   });
 });
 
@@ -715,8 +835,10 @@ describe("credit-sales: create customer", () => {
     await waitFor(() =>
       expect(deps.listCustomersWithBalance).toHaveBeenCalledTimes(1),
     );
+    // B3 Group 4: the "Add customer" text button was replaced by a "+" icon
+    // button in the header, labeled for accessibility rather than by text.
     await act(async () => {
-      clickText("Add customer");
+      fireEvent.click(screen.getByLabelText("Add customer"));
     });
     type("Customer name", "Rahim Uddin");
   }
@@ -779,22 +901,27 @@ describe("credit-sales: create customer", () => {
 });
 
 describe("credit/customer-detail: collect payment", () => {
+  // B3 Group 4: the always-visible "Collection amount" input was replaced by
+  // a "Make Payment" button that opens PaymentSheet — open the screen, then
+  // open the sheet, before the field exists in the DOM.
   async function openScreen(): Promise<void> {
     routerMock.params.value = { customerId: CUSTOMER_ID };
     useSessionStore.getState().login(OWNER);
     render(createElement(CustomerDetailScreen));
+    await waitFor(() => expect(screen.getByText("Make Payment")).toBeTruthy());
+    clickText("Make Payment");
     await waitFor(() =>
-      expect(screen.getByLabelText("Collection amount")).toBeTruthy(),
+      expect(screen.getByLabelText("Payment amount")).toBeTruthy(),
     );
   }
 
-  it("cannot commit or clear the form when the phone changes hands mid-write", async () => {
+  it("cannot commit or navigate when the phone changes hands mid-write", async () => {
     const pending = deferred<void>();
     deps.collectPayment.mockReturnValueOnce(pending.promise);
     await openScreen();
 
-    type("Collection amount", "300");
-    clickText("Collect cash");
+    type("Payment amount", "300");
+    clickText("Confirm Payment");
     await waitFor(() => expect(deps.collectPayment).toHaveBeenCalledTimes(1));
 
     ownerLendsPhoneAndTakesItBack();
@@ -802,17 +929,20 @@ describe("credit/customer-detail: collect payment", () => {
       pending.resolve();
     });
 
+    // The closure passed to collectPayment must report the OUTGOING owner's
+    // session as stale — the core money-safety property this suite exists
+    // to protect, regardless of how the sheet's own optimistic-close UI
+    // behaves once the (mocked) write appears to succeed.
     expect(livenessOf(deps.collectPayment)()).toBe(false);
-    expect(valueOf("Collection amount")).toBe("300");
   });
 
-  it("still collects and clears on the owner normal path", async () => {
+  it("still collects on the owner normal path and closes the sheet", async () => {
     deps.collectPayment.mockResolvedValue(undefined);
     await openScreen();
 
-    type("Collection amount", "300");
+    type("Payment amount", "300");
     await act(async () => {
-      clickText("Collect cash");
+      clickText("Confirm Payment");
     });
 
     expect(deps.collectPayment.mock.calls[0]?.[0]).toMatchObject({
@@ -821,7 +951,9 @@ describe("credit/customer-detail: collect payment", () => {
       customerId: CUSTOMER_ID,
     });
     expect(livenessOf(deps.collectPayment)()).toBe(true);
-    expect(valueOf("Collection amount")).toBe("");
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Payment amount")).toBeNull(),
+    );
   });
 });
 
@@ -829,6 +961,9 @@ describe("suppliers/purchase-create: save purchase", () => {
   async function openScreenWithOneLine(): Promise<void> {
     useSessionStore.getState().login(OWNER);
     render(createElement(PurchaseCreateScreen));
+    // 3-step stepper: Method -> Review -> Confirm. "Manual Entry" reaches
+    // Review directly (no scanner involved).
+    clickText("Manual Entry");
     await waitFor(() => expect(deps.listSuppliers).toHaveBeenCalledTimes(1));
 
     fireEvent.change(screen.getByPlaceholderText("Search medicine"), {
@@ -845,6 +980,9 @@ describe("suppliers/purchase-create: save purchase", () => {
     await act(async () => {
       clickText("Add line");
     });
+    await act(async () => {
+      clickText("Continue");
+    });
   }
 
   it("cannot commit or navigate when the phone changes hands mid-write", async () => {
@@ -852,7 +990,7 @@ describe("suppliers/purchase-create: save purchase", () => {
     deps.createPurchase.mockReturnValueOnce(pending.promise);
     await openScreenWithOneLine();
 
-    clickText("Save purchase");
+    clickText("✓ Confirm Invoice");
     await waitFor(() => expect(deps.createPurchase).toHaveBeenCalledTimes(1));
 
     ownerLendsPhoneAndTakesItBack();
@@ -874,7 +1012,7 @@ describe("suppliers/purchase-create: save purchase", () => {
     );
     await openScreenWithOneLine();
 
-    clickText("Save purchase");
+    clickText("✓ Confirm Invoice");
     await waitFor(() => expect(deps.createPurchase).toHaveBeenCalledTimes(1));
 
     ownerLendsPhoneAndTakesItBack();
@@ -886,12 +1024,12 @@ describe("suppliers/purchase-create: save purchase", () => {
     expect(routerMock.replace).not.toHaveBeenCalled();
   });
 
-  it("still saves and navigates on the owner normal path", async () => {
-    deps.createPurchase.mockResolvedValue(undefined);
+  it("still saves and navigates to Invoice Detail on the owner normal path", async () => {
+    deps.createPurchase.mockResolvedValue({ purchaseId: "new-purchase-id", invoiceNo: "PUR-2026-000001-ABCDEF", total: 5000 });
     await openScreenWithOneLine();
 
     await act(async () => {
-      clickText("Save purchase");
+      clickText("✓ Confirm Invoice");
     });
 
     expect(deps.createPurchase.mock.calls[0]?.[0]).toMatchObject({
@@ -901,8 +1039,8 @@ describe("suppliers/purchase-create: save purchase", () => {
     });
     expect(livenessOf(deps.createPurchase)()).toBe(true);
     expect(routerMock.replace).toHaveBeenCalledWith({
-      pathname: "/suppliers/detail",
-      params: { supplierId: SUPPLIER_ID },
+      pathname: "/suppliers/invoice-detail",
+      params: { purchaseId: "new-purchase-id" },
     });
   });
 });

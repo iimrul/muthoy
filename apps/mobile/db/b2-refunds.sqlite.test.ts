@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { asPaisa } from '@muthoy/types';
+import { ZERO_PAISA, asPaisa } from '@muthoy/types';
 import { sqlite } from './test/expo-sqlite';
 import { ALWAYS_LIVE } from './errors';
 
@@ -16,6 +16,12 @@ const schema = await import('./schema');
 const { createSaleTransaction } = await import('./sales');
 const { createFullSaleRefund, getRefundEligibility } = await import('./refunds');
 const { refundChildId } = await import('../domain/deterministicId');
+const {
+  collectPayment,
+  getCustomerCreditDetail,
+  getCustomerListTotals,
+  listCustomersWithBalance,
+} = await import('./customers');
 
 function applyMigration(name: string): void {
   sqlite.exec(readFileSync(resolve('apps/mobile/db/migrations', name), 'utf8'));
@@ -28,7 +34,9 @@ beforeAll(() => {
     '0006_inventory_movement_ledger.sql', '0007_staff_device_login.sql', '0008_native_pin_lookup.sql',
     '0009_strong_gargoyle.sql', '0010_known_ares.sql', '0011_black_zarda.sql', '0012_small_meltdown.sql',
     '0013_owner_dashboard_credit_period.sql', '0014_owner_dashboard_credit_period_guard.sql',
-    '0015_b3_shop_settings.sql', '0016_payment_note.sql', '0017_cash_reconcile.sql',
+    '0015_b3_shop_settings.sql', '0016_payment_note.sql', '0017_cash_reconcile.sql', '0018_expense_category_taxonomy.sql',
+    '0019_supplier_archive.sql', '0020_purchase_item_status.sql', '0021_purchase_void.sql',
+    '0022_supplier_profile_fields.sql', '0023_purchase_invoice_metadata.sql',
   ]) applyMigration(name);
   const now = new Date().toISOString();
   db.insert(schema.shops).values({ id: 'shop', ownerId: 'owner', name: 'B2', phone: '01700000000', createdAt: now, updatedAt: now }).run();
@@ -92,5 +100,59 @@ describe('B2 full-sale refund', () => {
     const item = db.select({ id: schema.saleItems.id }).from(schema.saleItems).where(eq(schema.saleItems.saleId, sale.saleId)).get();
     expect(db.select({ id: schema.inventoryMovements.id }).from(schema.inventoryMovements)
       .where(eq(schema.inventoryMovements.id, refundChildId(first.refundId, `movement:${item?.id}`))).get()).toBeTruthy();
+  });
+});
+
+// W-1 fix proof: createFullSaleRefund zeroes credits.balance directly without
+// touching credits.amount or inserting an offsetting payments row. Before the
+// canonicalization fix, a ledger-sum read (SUM(credits.amount) -
+// SUM(customer_payment)) would overstate this customer's balance by the
+// refunded outstanding amount after a partial-collection-then-refund
+// sequence, while balance-column reads (SUM(credits.balance)) stayed
+// correct. Every balance read in db/customers.ts now derives from
+// balance-column, so all three must agree here.
+describe('credit balance canonicalization — refund consistency (W-1)', () => {
+  it('keeps list/list-totals/detail balance reads consistent after a credit-sale refund with a prior partial collection', async () => {
+    // Dedicated medicine/batch: the shared 'batch' fixture is left expired by
+    // the test above (it archives/expires it to test refund's un-archive
+    // path), so it has zero sellable stock afterward.
+    const now = new Date().toISOString();
+    db.insert(schema.medicines).values({ id: 'medicine-credit-w1', shopId: 'shop', name: 'Paracetamol', createdAt: now, updatedAt: now }).run();
+    db.insert(schema.batches).values({ id: 'batch-credit-w1', shopId: 'shop', medicineId: 'medicine-credit-w1', batchNo: 'B2',
+      expiryDate: null, stock: 0, purchasePrice: asPaisa(500), salePrice: asPaisa(1000), createdAt: now, updatedAt: now }).run();
+    db.insert(schema.inventoryMovements).values({ id: 'opening-credit-w1', shopId: 'shop', batchId: 'batch-credit-w1', changeQty: 5,
+      reason: 'purchase', createdBy: 'owner', createdAt: now, updatedAt: now }).run();
+
+    const sale = await createSaleTransaction({
+      shopId: 'shop', staffId: 'owner', isStillActive: ALWAYS_LIVE,
+      payment: { type: 'credit' },
+      newCustomer: { name: 'Credit Customer', phone: '01700000900' },
+      lines: [{ medicineId: 'medicine-credit-w1', quantity: 2 }],
+    });
+    const credit = db.select().from(schema.credits).where(eq(schema.credits.saleId, sale.saleId)).get();
+    expect(credit).toBeTruthy();
+    const customerId = credit!.customerId;
+    expect(credit!.amount).toBe(asPaisa(2000));
+
+    await collectPayment({
+      shopId: 'shop', staffId: 'owner', isStillActive: ALWAYS_LIVE,
+      customerId, amount: asPaisa(800), method: 'cash',
+    });
+
+    const eligibility = await getRefundEligibility('shop', 'owner', sale.saleId);
+    expect(eligibility.eligible).toBe(true);
+    await createFullSaleRefund({
+      shopId: 'shop', actorUserId: 'owner', saleId: sale.saleId, reason: 'Customer request',
+      claim: { claimId: 'claim-credit', claimToken: 'token-credit', operationId: eligibility.operationId, deviceId: 'device-b' },
+      currentDeviceId: 'device-b', isStillActive: ALWAYS_LIVE,
+    });
+
+    const [listRow] = await listCustomersWithBalance('shop', 'owner', 'Credit Customer');
+    const totals = await getCustomerListTotals('shop', 'owner', 'Credit Customer');
+    const detail = await getCustomerCreditDetail('shop', 'owner', customerId);
+
+    expect(listRow?.balance).toBe(ZERO_PAISA);
+    expect(totals.totalOutstanding).toBe(ZERO_PAISA);
+    expect(detail.totalDue).toBe(ZERO_PAISA);
   });
 });

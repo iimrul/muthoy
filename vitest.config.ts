@@ -32,6 +32,10 @@ export default defineConfig({
         process.cwd(),
         "apps/mobile/db/test/react-native-mmkv.ts",
       ),
+      "@expo/vector-icons/Feather": resolve(
+        process.cwd(),
+        "apps/mobile/db/test/vector-icons.ts",
+      ),
     },
   },
   test: {
@@ -42,10 +46,17 @@ export default defineConfig({
       "apps/mobile/navigation/**/*.test.ts",
       "apps/mobile/components/scanner/*.test.tsx",
       "apps/mobile/components/ui/PinPad.test.tsx",
+      "apps/mobile/components/expenses/*.test.ts",
+      "apps/mobile/components/expenses/*.test.tsx",
+      "apps/mobile/components/suppliers/*.test.tsx",
       // dev/ also contains production-disabled auth timing code. Remove only
       // the OTP-bypass files listed in dev/README.md before production.
       "apps/mobile/dev/*.test.ts",
       "apps/mobile/db/cash.sqlite.test.ts",
+      // Migration 0018's data backfill against a populated pre-migration
+      // fixture — the taxonomy remap, not the CHECK-constraint rebuild the
+      // plan doc originally assumed (there is none on this column).
+      "apps/mobile/db/expense-category-migration.sqlite.test.ts",
       "apps/mobile/db/closed-day-guard.sqlite.test.ts",
       "apps/mobile/db/errors.test.ts",
       "apps/mobile/db/inventory-expiry.sqlite.test.ts",
@@ -60,6 +71,22 @@ export default defineConfig({
       // Per-staff permission overrides, the phone credential's uniqueness, and
       // the revocation counter — through the real db/ actions on real SQLite.
       "apps/mobile/db/staff-permissions.sqlite.test.ts",
+      // B3 Group 4: overdue derivation at the credit_max_days boundary,
+      // unpaid/partial/settled status split, W-4's search+pagination
+      // replacing the old LIMIT 50, zero-balance retention, and non-cash
+      // collection method plumbing — all through the real db/customers.ts
+      // functions on real SQLite.
+      "apps/mobile/db/credit-completeness.sqlite.test.ts",
+      // B3 Group 5: archived suppliers excluded from the active list, D-9's
+      // archive-refused-while-payable>0 guard, supplier edit, and
+      // recordSupplierPayment's capping/COD/fully-paid refusal + atomic
+      // paid_amount increment + drawer recompute + closed-day guard.
+      "apps/mobile/db/supplier-completeness.sqlite.test.ts",
+      // B3 Group 6: pending purchase lines (no movement/total until
+      // received), Mark Received's exact-one-movement + recompute, void's
+      // zero-movement/zero-payment guard, and advisory duplicate-invoice
+      // detection.
+      "apps/mobile/db/purchase-completeness.sqlite.test.ts",
       // The purchase invoice number through the real createPurchase path:
       // two devices at the same local sequence must not mint the same string.
       "apps/mobile/db/purchase-invoice.sqlite.test.ts",
@@ -116,6 +143,14 @@ export default defineConfig({
       "backend/supabase/pgtest/security.pgtest.ts",
       "backend/supabase/pgtest/b2.pgtest.ts",
       "backend/supabase/pgtest/b3-group2.pgtest.ts",
+      "backend/supabase/pgtest/b3-group3.pgtest.ts",
+      "backend/supabase/pgtest/b3-groups456-sync.pgtest.ts",
+      // CREDIT CONVERGENCE PROOF (review-fix): the credit_collection
+      // dispatcher branch has shipped since B2 with zero coverage through
+      // sync_stage_operation_chunk. Proves sync/pull canonical balance,
+      // multi-device convergence, and retry/idempotency without touching
+      // the (already-correct) dispatcher itself.
+      "backend/supabase/pgtest/credit-convergence.pgtest.ts",
       "backend/supabase/functions/sync/grants.test.ts",
       // Same text-reading technique again, for the separate-device login: that
       // the lockout precedes bcrypt, that every credential failure is
@@ -127,6 +162,8 @@ export default defineConfig({
       // stock is unwritable except through the movement trigger, that trigger
       // adds rather than assigns, and an oversell is marked rather than refused.
       "backend/supabase/functions/sync/inventory-ledger.test.ts",
+      "backend/supabase/functions/sync/expenses.test.ts",
+      "backend/supabase/functions/sync/purchases.test.ts",
       // apps/admin's pure logic + service-role exposure guards. Framework-free:
       // nothing here imports Next or opens a Supabase connection.
       "apps/admin/lib/**/*.test.ts",

@@ -1,187 +1,321 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { fromTaka } from '@muthoy/types';
+import { ZERO_PAISA, type Paisa } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
+import { PaymentSheet } from '../../components/credit/PaymentSheet';
 import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import {
   collectPayment,
-  getCustomer,
-  getCustomerCreditLedger,
-  type CreditLedgerRow,
-  type Customer,
+  getCustomerCreditDetail,
+  type CreditRecord,
+  type CreditRecordStatus,
+  type CustomerCreditDetail,
+  type CustomerPaymentMethod,
 } from '../../db/customers';
-import { remainingBalance } from '../../domain/credit';
 import { captureSessionFor } from '../../state/sessionGuard';
+import { useI18n } from '../../state/localeStore';
+import type { CatalogKey } from '../../i18n/catalog';
+import { paymentMethodLabel, userFacingError } from '../../i18n/display';
 import { usePermission } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
+// screens/CustomerCreditDetail.tsx parity (plan §1.2): Purchase History /
+// Settled History tabs, an All/Unpaid/Partial filter on the purchases view,
+// per-record status pill + sync indicator + item preview + Paid/Due block,
+// the two count tiles, allocation visibility, and both empty states.
+
+type ViewMode = 'purchases' | 'settled';
+type StatusFilter = 'all' | 'unpaid' | 'partial';
+
+function formatRecordDate(
+  iso: string,
+  t: (key: CatalogKey) => string,
+  formatDateTime: (value: string | Date) => string,
+  formatTime: (value: string | Date) => string,
+): string {
+  const date = new Date(iso);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(date, today)) return `${t('today')} · ${formatTime(date)}`;
+  if (sameDay(date, yesterday)) return `${t('yesterday')} · ${formatTime(date)}`;
+  return formatDateTime(date);
+}
+
+function statusBadgeClasses(
+  status: CreditRecordStatus,
+  t: (key: CatalogKey) => string,
+): { bg: string; text: string; label: string } {
+  if (status === 'settled') return { bg: 'bg-brand-softGreen', text: 'text-brand-green', label: t('settledLabel') };
+  if (status === 'partial') return { bg: 'bg-amber-100', text: 'text-amber-700', label: t('partialLabel') };
+  return { bg: 'bg-error/10', text: 'text-error', label: t('unpaidLabel') };
+}
+
+function RecordCard({ record }: { record: CreditRecord }) {
+  const { t, formatNumber, formatDateTime, formatTime } = useI18n();
+  const badge = statusBadgeClasses(record.status, t);
+  const isSettled = record.status === 'settled';
+  return (
+    <View
+      className={`gap-2 rounded-2xl p-4 ${
+        isSettled ? 'border-2 border-brand-green bg-brand-softGreen' : 'bg-white'
+      }`}
+    >
+      {isSettled ? (
+        <View className="flex-row items-center gap-1">
+          <Text className="font-sans-bold text-xs text-brand-green">✓ {t('settlementCompleteLabel')}</Text>
+        </View>
+      ) : null}
+      <View className="flex-row items-center justify-between">
+        <View className="flex-row flex-wrap items-center gap-2">
+          <Text className="font-mono text-xs text-midGray">
+            {record.invoiceNo ?? `#${record.id.slice(0, 8).toUpperCase()}`}
+          </Text>
+          <View className={`rounded-full px-2 py-0.5 ${badge.bg}`}>
+            <Text className={`font-sans-semibold text-xs ${badge.text}`}>{badge.label}</Text>
+          </View>
+          {record.overdue ? (
+            <View className="rounded-full bg-error/10 px-2 py-0.5">
+              <Text className="font-sans-semibold text-xs text-error">{t('overdueLabel')}</Text>
+            </View>
+          ) : null}
+          {record.synced ? (
+            <Text className="font-sans text-xs text-brand-green">✓</Text>
+          ) : (
+            <View className="h-2 w-2 rounded-full bg-midGray/50" />
+          )}
+        </View>
+        <Text className="font-sans text-xs text-midGray">{formatRecordDate(record.createdAt, t, formatDateTime, formatTime)}</Text>
+      </View>
+
+      {record.items.length > 0 ? (
+        <Text className="font-sans text-sm text-richBlack">
+          {record.items.map((item) => `${item.name} ×${formatNumber(item.qty)}`).join(', ')}
+          {record.itemsMoreCount > 0 ? ` +${formatNumber(record.itemsMoreCount)} ${t('andMore')}` : ''}
+        </Text>
+      ) : null}
+
+      <View className="flex-row items-center justify-between border-t border-midGray/20 pt-2">
+        <Text className="font-sans-medium text-sm text-richBlack">{t('amount')}</Text>
+        <Text className="font-mono text-base text-richBlack">{formatMoney(record.amount)}</Text>
+      </View>
+
+      {record.status !== 'unpaid' ? (
+        <View className="flex-row items-center justify-between">
+          <Text className="font-sans text-xs text-brand-green">{t('paidColonLabel')} {formatMoney(record.paidAmount)}</Text>
+          {record.balance > ZERO_PAISA ? (
+            <Text className="font-sans text-xs text-amber-700">{t('dueColonLabel')} {formatMoney(record.balance)}</Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {record.allocations.length > 0 ? (
+        <View className="gap-1 rounded-xl bg-white/70 p-2">
+          <Text className="font-sans-semibold text-xs text-richBlack">{t('paymentHistoryLabel2')}</Text>
+          {record.allocations.map((allocation) => (
+            <View key={allocation.paymentId} className="flex-row justify-between">
+              <Text className="font-sans text-xs text-midGray">
+                {formatDateTime(allocation.createdAt)} · {paymentMethodLabel(allocation.method, t)}
+                {allocation.refId ? ` · ${t('refLabel')}: ${allocation.refId}` : ''}
+              </Text>
+              <Text className="font-mono text-xs text-brand-green">+{formatMoney(allocation.amount)}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 export default function CustomerDetailScreen() {
   const { customerId } = useLocalSearchParams<{ customerId: string }>();
+  const { t, formatNumber } = useI18n();
   // Volume 0 Day 11: same owner-only surface as credit-sales.tsx — collecting
   // a payment mutates both the credit ledger and (for cash) the drawer.
   const { session, isAllowed } = usePermission('credit_view');
   const { isAllowed: canManage } = usePermission('credit_manage');
-  const [customer, setCustomer] = useState<Customer | null>(null);
-  const [ledgerRows, setLedgerRows] = useState<CreditLedgerRow[]>([]);
-  const [amountText, setAmountText] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [detail, setDetail] = useState<CustomerCreditDetail | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('purchases');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [isPaying, setIsPaying] = useState(false);
+  const [isCollecting, setIsCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
-    // A denied role reads nothing: this customer's balance and ledger are
-    // exactly what this screen is protecting.
     if (!session || !isAllowed || !customerId) {
       return;
     }
-    // This customer's balance and ledger are owner-only. A read that lands
-    // after the handover must not paint them for the incoming user.
     const guard = captureSessionFor(session);
     try {
-      const [customerRow, history] = await Promise.all([
-        getCustomer(session.shopId, session.userId, customerId),
-        getCustomerCreditLedger(session.shopId, session.userId, customerId),
-      ]);
+      const result = await getCustomerCreditDetail(session.shopId, session.userId, customerId);
       if (!guard || guard.isStale()) {
         return;
       }
-      setCustomer(customerRow);
-      setLedgerRows(history);
+      setDetail(result);
       setError(null);
     } catch (caught) {
       if (!guard || guard.isStale()) {
         return;
       }
-      setError(caught instanceof Error ? caught.message : 'Customer details failed to load.');
+      setError(userFacingError(caught, 'customerDetailLoadFailedLabel', t));
     }
-  }, [customerId, isAllowed, session]);
+  }, [customerId, isAllowed, session, t]);
 
   useEffect(() => {
-    // SQLite load-on-mount; TanStack Query is reserved for sync.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
   }, [reload]);
 
-  const balance = useMemo(() => remainingBalance(ledgerRows), [ledgerRows]);
-
-  const handleCollect = useCallback(async () => {
+  const handleCollect = useCallback(async (amount: Paisa, method: CustomerPaymentMethod) => {
     if (!session || !isAllowed || !canManage || !customerId) {
       return;
     }
-    // Pinned at action start. A collection moves both the credit ledger and
-    // the cash drawer; db/customers.ts re-checks this same guard inside the
-    // transaction.
     const guard = captureSessionFor(session);
     if (!guard) {
-      return;
+      throw new Error(t('sessionChangedRetryLabel'));
     }
-    const taka = Number(amountText.trim());
-    if (!amountText.trim() || !Number.isFinite(taka) || taka <= 0) {
-      setError('Enter a valid collection amount.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
+    setIsCollecting(true);
     try {
       await collectPayment({
         shopId: session.shopId,
         staffId: session.userId,
         isStillActive: guard.isStillActive,
         customerId,
-        amount: fromTaka(taka),
+        amount,
+        method,
       });
       void triggerSyncNow(session.shopId);
-      // Clearing the field and repainting the ledger belong to the collector.
-      if (guard.isStale()) {
-        return;
+      if (!guard.isStale()) {
+        await reload();
       }
-      setAmountText('');
-      await reload();
-    } catch (caught) {
-      if (guard.isStale()) {
-        return;
-      }
-      setError(caught instanceof Error ? caught.message : 'Payment could not be collected.');
     } finally {
-      setIsSubmitting(false);
+      setIsCollecting(false);
     }
-  }, [amountText, canManage, customerId, isAllowed, reload, session]);
+  }, [canManage, customerId, isAllowed, reload, session, t]);
+
+  const purchaseRecords = useMemo(() => {
+    if (!detail) return [];
+    return detail.credits
+      .filter((record) => record.status !== 'settled')
+      .filter((record) => statusFilter === 'all' || record.status === statusFilter);
+  }, [detail, statusFilter]);
+
+  const settledRecords = useMemo(
+    () => (detail ? detail.credits.filter((record) => record.status === 'settled') : []),
+    [detail],
+  );
 
   if (!session) {
-    return <AccessDenied message="Active session required." />;
+    return <AccessDenied message={t('activeSessionRequiredLabel')} />;
   }
-
-  // Volume 0 Day 11 checklist: "A Staff-role login cannot access owner-only
-  // screens." Arriving here by direct navigation renders this instead, and
-  // db/customers.ts rejects collectPayment independently.
   if (!isAllowed) {
     return <AccessDenied />;
   }
-
   if (!customerId) {
     return (
       <View className="flex-1 items-center justify-center bg-brand-softGreen p-6">
-        <Text className="font-sans text-base text-error">Customer is missing.</Text>
+        <Text className="font-sans text-base text-error">{t('customerMissingLabel')}</Text>
       </View>
     );
   }
 
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title={customer?.name ?? 'Customer'} onBackPress={() => router.back()} />
+      <StandardHeader title={detail?.customer.name ?? t('customerLabel')} onBackPress={() => router.back()} />
       <ScrollView contentContainerClassName="gap-4 p-4" keyboardShouldPersistTaps="handled">
         {error ? <Text className="font-sans text-sm text-error">{error}</Text> : null}
 
-        {customer ? (
-          <View className="gap-2 rounded-lg bg-white p-4">
-            <Text className="font-sans-bold text-lg text-richBlack">{customer.name}</Text>
-            {customer.phone ? <Text className="font-sans text-sm text-richBlack">{customer.phone}</Text> : null}
-            {customer.address ? <Text className="font-sans text-sm text-midGray">{customer.address}</Text> : null}
-            {customer.notes ? <Text className="font-sans text-sm text-midGray">{customer.notes}</Text> : null}
-            <View className="mt-2 flex-row items-center justify-between border-t border-midGray pt-3">
-              <Text className="font-sans-medium text-sm text-richBlack">Outstanding balance</Text>
-              <Text className="font-mono text-lg text-error">{formatMoney(balance)}</Text>
+        {detail ? (
+          <>
+            <View className="gap-2 rounded-2xl bg-white p-4">
+              <Text className="font-sans-bold text-lg text-richBlack">{detail.customer.name}</Text>
+              {detail.customer.phone ? <Text className="font-sans text-sm text-richBlack">{detail.customer.phone}</Text> : null}
+              <Text className="font-sans text-xs text-midGray">{t('idPrefixLabel')}: {detail.customer.id.slice(0, 8).toUpperCase()}</Text>
+              <View className="mt-2 flex-row items-center justify-between border-t border-midGray/20 pt-3">
+                <Text className="font-sans-medium text-sm text-richBlack">{t('totalDueLabel')}</Text>
+                <Text className="font-mono text-lg text-error">{formatMoney(detail.totalDue)}</Text>
+              </View>
             </View>
-          </View>
+
+            <View className="flex-row gap-3">
+              <View className="flex-1 items-center gap-1 rounded-2xl bg-white p-4">
+                <Text className="font-mono text-xl text-richBlack">{formatNumber(detail.totalPurchases)}</Text>
+                <Text className="font-sans text-xs text-midGray">{t('totalPurchasesLabel')}</Text>
+              </View>
+              <View className="flex-1 items-center gap-1 rounded-2xl bg-white p-4">
+                <Text className="font-mono text-xl text-brand-green">{formatNumber(detail.settledCount)}</Text>
+                <Text className="font-sans text-xs text-midGray">{t('settledLabel')}</Text>
+              </View>
+            </View>
+
+            {canManage && detail.totalDue > ZERO_PAISA ? (
+              <Pressable onPress={() => setIsPaying(true)} className="items-center rounded-2xl bg-brand-green py-3.5">
+                <Text className="font-sans-semibold text-white">{t('makePaymentLabel')}</Text>
+              </Pressable>
+            ) : null}
+
+            <View className="flex-row rounded-2xl bg-white p-1">
+              {(['purchases', 'settled'] as const).map((mode) => (
+                <Pressable
+                  key={mode}
+                  onPress={() => setViewMode(mode)}
+                  className={`flex-1 items-center rounded-xl py-2.5 ${viewMode === mode ? 'bg-brand-green' : ''}`}
+                >
+                  <Text className={`font-sans-semibold text-sm ${viewMode === mode ? 'text-white' : 'text-richBlack'}`}>
+                    {mode === 'purchases' ? t('purchaseHistoryLabel') : t('settledHistoryLabel')}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {viewMode === 'purchases' ? (
+              <View className="flex-row gap-2">
+                {(['all', 'unpaid', 'partial'] as const).map((filter) => (
+                  <Pressable
+                    key={filter}
+                    onPress={() => setStatusFilter(filter)}
+                    className={`rounded-full border px-3 py-1.5 ${statusFilter === filter ? 'border-brand-green bg-brand-green' : 'border-midGray/40'}`}
+                  >
+                    <Text className={`font-sans-medium text-xs capitalize ${statusFilter === filter ? 'text-white' : 'text-richBlack'}`}>
+                      {filter === 'all' ? t('allStatusLabel') : filter === 'unpaid' ? t('unpaidLabel') : t('partialLabel')}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+
+            {viewMode === 'purchases' ? (
+              purchaseRecords.length === 0 ? (
+                <View className="items-center gap-1 py-10">
+                  <Text className="font-sans-semibold text-base text-richBlack">{t('noPurchaseHistory')}</Text>
+                </View>
+              ) : (
+                purchaseRecords.map((record) => <RecordCard key={record.id} record={record} />)
+              )
+            ) : settledRecords.length === 0 ? (
+              <View className="items-center gap-1 py-10">
+                <Text className="font-sans-semibold text-base text-richBlack">{t('noSettledHistory')}</Text>
+              </View>
+            ) : (
+              settledRecords.map((record) => <RecordCard key={record.id} record={record} />)
+            )}
+          </>
         ) : null}
-
-        {canManage ? <View className="gap-3 rounded-lg bg-white p-4">
-          <Text className="font-sans-bold text-base text-richBlack">Collect payment</Text>
-          <Text className="font-sans-medium text-sm text-richBlack">Amount (৳)</Text>
-          <TextInput
-            value={amountText}
-            onChangeText={setAmountText}
-            keyboardType="decimal-pad"
-            accessibilityLabel="Collection amount"
-            placeholder="0.00"
-            className="rounded-lg border border-midGray px-4 py-3 font-mono text-base text-richBlack"
-          />
-          <Pressable
-            onPress={handleCollect}
-            disabled={isSubmitting}
-            className="items-center rounded-lg bg-brand-green py-3 disabled:opacity-50"
-          >
-            <Text className="font-sans-semibold text-white">{isSubmitting ? 'Collecting…' : 'Collect cash'}</Text>
-          </Pressable>
-        </View> : null}
-
-        <Text className="font-sans-bold text-base text-richBlack">Credit ledger</Text>
-        {ledgerRows.length === 0 ? (
-          <Text className="py-6 text-center font-sans text-midGray">No credit activity yet.</Text>
-        ) : ledgerRows.map((row) => (
-          <View key={row.id} className="gap-2 rounded-lg bg-white p-4">
-            <View className="flex-row items-center justify-between">
-              <Text className="font-sans-medium text-sm text-richBlack">
-                {row.type === 'credit_sale' ? 'Credit sale' : 'Collection'}
-              </Text>
-              <Text className="font-mono text-base text-richBlack">{formatMoney(row.amount)}</Text>
-            </View>
-            <Text className="font-sans text-xs text-midGray">{new Date(row.createdAt).toLocaleDateString()}</Text>
-          </View>
-        ))}
       </ScrollView>
+
+      <PaymentSheet
+        visible={isPaying}
+        customerName={detail?.customer.name ?? ''}
+        customerPhone={detail?.customer.phone ?? null}
+        outstanding={detail?.totalDue ?? ZERO_PAISA}
+        isSubmitting={isCollecting}
+        onClose={() => setIsPaying(false)}
+        onSubmit={handleCollect}
+      />
     </View>
   );
 }

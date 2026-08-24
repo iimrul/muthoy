@@ -8,6 +8,8 @@ export const supplierFieldsSchema = z.object({
   address: optionalText,
   email: z.union([z.email('Enter a valid email address'), z.literal('')]).transform((value) => value || undefined).optional(),
   contactPerson: optionalText,
+  manufacturer: optionalText,
+  notes: optionalText,
 });
 
 function isRealIsoDate(value: string): boolean {

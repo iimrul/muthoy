@@ -50,7 +50,7 @@ const { createShopAndOwner, setOwnerPin } = await import('./auth');
 const { createStaff, deactivateStaff, resetStaffPin } = await import('./staff');
 const { addBatchToMedicine, createMedicineWithBatch } = await import('./inventory');
 const { createSaleTransaction } = await import('./sales');
-const { closeDay, currentBusinessDate, recordExpense, setOpeningCash } = await import('./cash');
+const { closeDay, currentBusinessDate, deleteExpense, recordExpense, setOpeningCash } = await import('./cash');
 const { collectPayment, createCustomer } = await import('./customers');
 const { createPurchase } = await import('./purchases');
 const { createSupplier } = await import('./suppliers');
@@ -81,6 +81,9 @@ interface Fixture {
   /** Staff rows created solely so a destructive case has its own target. */
   resetTargetId: string;
   deactivateTargetId: string;
+  /** An expense created solely so the deleteExpense case has its own target
+   *  — deleting is destructive (single-use), unlike recordExpense's case. */
+  deletableExpenseId: string;
 }
 
 let fixture: Fixture;
@@ -155,6 +158,20 @@ const CASES: readonly MutationCase[] = [
         isStillActive,
         category: 'rent',
         amount: asPaisa(1500),
+      }),
+  },
+  {
+    // A soft-delete-only mutation (UPDATE, no INSERT into expenses/payments/
+    // cash_drawer) — sync_queue is the only table whose ROW COUNT actually
+    // grows on a successful commit, so that is the sole growth signal here.
+    name: 'cash — deleteExpense',
+    tables: ['sync_queue'],
+    run: (isStillActive) =>
+      deleteExpense({
+        shopId: fixture.shopId,
+        staffId: fixture.ownerId,
+        isStillActive,
+        expenseId: fixture.deletableExpenseId,
       }),
   },
   {
@@ -280,6 +297,12 @@ beforeAll(async () => {
   applyMigration('0015_b3_shop_settings.sql');
   applyMigration('0016_payment_note.sql');
   applyMigration('0017_cash_reconcile.sql');
+  applyMigration('0018_expense_category_taxonomy.sql');
+  applyMigration('0019_supplier_archive.sql');
+  applyMigration('0020_purchase_item_status.sql');
+  applyMigration('0021_purchase_void.sql');
+  applyMigration('0022_supplier_profile_fields.sql');
+  applyMigration('0023_purchase_invoice_metadata.sql');
 
   const registration = await createShopAndOwner({
     shopName: 'Muthoy Audit Pharmacy',
@@ -352,6 +375,14 @@ beforeAll(async () => {
 
   const batchId = seedBatchId();
 
+  const deletableExpense = await recordExpense({
+    shopId: registration.shopId,
+    staffId: registration.userId,
+    isStillActive: ALWAYS_LIVE,
+    category: 'rent',
+    amount: asPaisa(1234),
+  });
+
   fixture = {
     shopId: registration.shopId,
     ownerId: registration.userId,
@@ -362,6 +393,7 @@ beforeAll(async () => {
     notificationId: notification!.id,
     resetTargetId: resetTarget.id,
     deactivateTargetId: deactivateTarget.id,
+    deletableExpenseId: deletableExpense.expenseId,
   };
 });
 
@@ -457,7 +489,7 @@ describe('every actor-attributed mutation refuses a stale session', () => {
     // markAsRead, changeOwnPin and closeDay above = the 15 interactive
     // mutations the audit found. A new one added to db/ without a case here
     // fails this count.
-    expect(CASES).toHaveLength(12);
+    expect(CASES).toHaveLength(13);
   });
 });
 

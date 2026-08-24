@@ -19,6 +19,12 @@ import m0014 from './0014_owner_dashboard_credit_period_guard.sql';
 import m0015 from './0015_b3_shop_settings.sql';
 import m0016 from './0016_payment_note.sql';
 import m0017 from './0017_cash_reconcile.sql';
+import m0018 from './0018_expense_category_taxonomy.sql';
+import m0019 from './0019_supplier_archive.sql';
+import m0020 from './0020_purchase_item_status.sql';
+import m0021 from './0021_purchase_void.sql';
+import m0022 from './0022_supplier_profile_fields.sql';
+import m0023 from './0023_purchase_invoice_metadata.sql';
 
 export default {
   journal,
@@ -41,5 +47,11 @@ export default {
     m0015,
     m0016,
     m0017,
+    m0018,
+    m0019,
+    m0020,
+    m0021,
+    m0022,
+    m0023,
   },
 };

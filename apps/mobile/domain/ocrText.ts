@@ -105,3 +105,43 @@ export function parseScannedMedicineStrip(rawText: string): ScannedMedicineField
     expiryDate: expiryCandidate ? normalizeScannedExpiryDate(expiryCandidate) : null,
   };
 }
+
+export interface ScannedInvoiceLineCandidate extends ScannedMedicineFields {
+  /** The OCR text block this candidate was derived from — shown for verification, never hidden. */
+  rawText: string;
+  /**
+   * 0-100, deterministic: how many of {name, batchNo, expiryDate} were
+   * actually extracted (never an ML confidence — this module never guesses,
+   * see the file header). Qty/price are NOT extracted here — no reliable
+   * label-anchored heuristic exists for them yet, so they stay manual entry
+   * exactly as parseScannedMedicineStrip already leaves them.
+   */
+  confidence: number;
+}
+
+function scoreLineCandidate(fields: ScannedMedicineFields): number {
+  const extractedCount = [fields.name, fields.batchNo, fields.expiryDate].filter(Boolean).length;
+  return Math.round((extractedCount / 3) * 100);
+}
+
+/**
+ * Splits a full invoice photo's recognized text into per-line-item blocks
+ * and runs the same three label-anchored extractors on each. ML Kit
+ * generally preserves blank-line paragraph breaks between visually separated
+ * print blocks on an invoice; a photo with no blank lines (e.g. a single
+ * strip) degrades to exactly one block, matching parseScannedMedicineStrip's
+ * existing single-candidate behavior.
+ */
+export function parseScannedInvoiceLines(rawText: string): ScannedInvoiceLineCandidate[] {
+  const blocks = rawText
+    .split(/\n\s*\n+/)
+    .map((block) => block.trim())
+    .filter((block) => block.length > 0);
+  const effectiveBlocks = blocks.length > 0 ? blocks : [rawText.trim()];
+  return effectiveBlocks
+    .map((block) => {
+      const fields = parseScannedMedicineStrip(block);
+      return { ...fields, rawText: block, confidence: scoreLineCandidate(fields) };
+    })
+    .filter((candidate) => candidate.name !== null || candidate.batchNo !== null || candidate.expiryDate !== null);
+}

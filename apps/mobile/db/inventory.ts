@@ -288,6 +288,54 @@ export async function createMedicineWithBatch(
   return { medicineId, batchId };
 }
 
+export interface CreateMedicineOnlyInput {
+  shopId: string;
+  actorUserId: string;
+  isStillActive: () => boolean;
+  name: string;
+  generic?: string;
+  manufacturer?: string;
+}
+
+// Medicine-only creation — deliberately NOT createMedicineWithBatch, which
+// always creates a first batch carrying real stock (an addStock movement).
+// This is for the purchase-create OCR match-picker's "Add as New Medicine":
+// the batch and its stock are created by the purchase's own line-item write
+// (db/purchases.ts's createPurchase/markPurchaseLineReceived), so creating a
+// batch here too would double-count the same physical receipt.
+export async function createMedicineOnly(
+  input: CreateMedicineOnlyInput,
+): Promise<{ medicineId: string }> {
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("inventoryEdit"));
+  const medicineId = generateId();
+  await db.transaction(async (tx) => {
+    assertSessionLive(input.isStillActive);
+    const now = new Date().toISOString();
+    const medicineValues = {
+      id: medicineId,
+      shopId: input.shopId,
+      name: input.name,
+      generic: input.generic ?? null,
+      manufacturer: input.manufacturer ?? null,
+      unitOfMeasure: "piece",
+      requiresPrescription: false,
+      threshold: 10,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await tx.insert(medicines).values(medicineValues);
+    recordChange(tx, {
+      shopId: input.shopId,
+      table: "medicines",
+      rowId: medicineId,
+      op: "insert",
+      payload: medicineValues,
+    });
+    assertSessionLive(input.isStillActive);
+  });
+  return { medicineId };
+}
+
 export interface AddBatchInput {
   shopId: string;
   /** Logged-in user performing the write — checked against `inventory_write`. */

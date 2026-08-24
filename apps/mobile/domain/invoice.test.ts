@@ -4,6 +4,7 @@ import {
   buildPurchaseInvoiceNo,
   buildSaleInvoiceNo,
   invoiceSuffix,
+  isValidInvoiceDate,
 } from './invoice';
 
 // The defect under test: the running number is counted from the LOCAL sales
@@ -17,6 +18,17 @@ import {
 function uuid(tail: string): string {
   return `9f8e7d6c-5b4a-4392-8171-abcdef${tail.padStart(6, '0')}`;
 }
+
+describe('editable invoice date', () => {
+  it('accepts only real YYYY-MM-DD calendar dates', () => {
+    expect(isValidInvoiceDate('2026-08-24')).toBe(true);
+    expect(isValidInvoiceDate('2024-02-29')).toBe(true);
+    expect(isValidInvoiceDate('2026-02-29')).toBe(false);
+    expect(isValidInvoiceDate('2026-13-01')).toBe(false);
+    expect(isValidInvoiceDate('24/08/2026')).toBe(false);
+    expect(isValidInvoiceDate('')).toBe(false);
+  });
+});
 
 describe('format', () => {
   it('is INV-{year}-{6-digit sequence}-{12-char suffix}', () => {

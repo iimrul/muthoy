@@ -1,4 +1,5 @@
 import { and, asc, count, eq, max } from "drizzle-orm";
+import { canonicalizeExpenseCategory } from "@muthoy/validation";
 import { db } from "./client";
 import {
   auditLogs,
@@ -170,8 +171,20 @@ export interface SyncOperationGroup {
     | "draft_complete"
     | "credit_collection"
     | "withdrawal"
+    | "expense_create"
+    | "expense_delete"
     | "draft_hold"
-    | "draft_cancel";
+    | "draft_cancel"
+    // B3 Group 5/6 review fix: supplier_payment/purchase_receive_line/
+    // purchase_void/purchase_create now ALSO have a matching
+    // `sync_apply_operation` Postgres branch and pushGroup.ts KINDS entry
+    // (local migration file only — not executed against the remote project
+    // in this batch; see docs/plans/phase-b3-exact-prototype-parity.md §7.2
+    // and the B3 Groups 4-6 review-fix plan §4).
+    | "supplier_payment"
+    | "purchase_receive_line"
+    | "purchase_void"
+    | "purchase_create";
   sequence: number;
   expectedCount: number;
 }
@@ -204,6 +217,14 @@ export function toCamelCaseRow(
   return Object.fromEntries(
     Object.entries(row).map(([key, value]) => [snakeToCamel(key), value]),
   );
+}
+
+function canonicalizeRemoteRow(
+  tableName: SyncTableName,
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  if (tableName !== "expenses" || !("category" in row)) return row;
+  return { ...row, category: canonicalizeExpenseCategory(row.category) };
 }
 
 export function nextSeq(tx: DbTransaction): number {
@@ -942,7 +963,11 @@ export function applyRemoteRow(
   snakeCaseRow: Record<string, unknown>,
 ): RemoteRowResult {
   return db.transaction((tx) =>
-    applyToTable(tx, tableName, toCamelCaseRow(snakeCaseRow)),
+    applyToTable(
+      tx,
+      tableName,
+      canonicalizeRemoteRow(tableName, toCamelCaseRow(snakeCaseRow)),
+    ),
   );
 }
 
@@ -982,7 +1007,10 @@ export function applyRemoteRows(
       const result = applyToTable(
         tx,
         change.tableName,
-        toCamelCaseRow(change.row),
+        canonicalizeRemoteRow(
+          change.tableName,
+          toCamelCaseRow(change.row),
+        ),
       );
       if (result === "deferred" && !options.moreToCome) {
         // Thrown from INSIDE the transaction, deliberately: every row applied

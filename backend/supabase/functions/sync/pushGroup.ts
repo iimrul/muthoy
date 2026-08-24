@@ -7,6 +7,7 @@ import {
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
 import { classifySyncSqlError } from "./_shared/syncErrors.ts";
 import { isSyncTable } from "./_shared/tables.ts";
+import { canonicalizeExpensePayload } from "./_shared/expenseCategories.ts";
 
 type OperationRow = {
   queueId: string;
@@ -23,8 +24,18 @@ const KINDS = new Set([
   "draft_complete",
   "credit_collection",
   "withdrawal",
+  "expense_create",
+  "expense_delete",
   "draft_hold",
   "draft_cancel",
+  // B3 Groups 4-6 review fix: purely additive — old clients that never stamp
+  // an operation kind on purchases/purchase_items keep pushing them ungrouped
+  // via push.ts, unaffected by this addition. See the migration file's
+  // "NOT PUSHED" header and the review-fix plan §4's old-client rollout note.
+  "supplier_payment",
+  "purchase_receive_line",
+  "purchase_void",
+  "purchase_create",
 ]);
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -52,7 +63,10 @@ function parseRows(value: unknown): OperationRow[] {
     ) {
       throw new HttpError(400, "Invalid grouped push row");
     }
-    return row as OperationRow;
+    return {
+      ...row,
+      payload: canonicalizeExpensePayload(row.tableName, row.payload as Record<string, unknown>),
+    } as OperationRow;
   });
 }
 

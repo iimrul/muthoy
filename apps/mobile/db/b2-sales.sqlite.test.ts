@@ -45,6 +45,12 @@ beforeAll(() => {
     "0015_b3_shop_settings.sql",
     "0016_payment_note.sql",
     "0017_cash_reconcile.sql",
+    "0018_expense_category_taxonomy.sql",
+    "0019_supplier_archive.sql",
+    "0020_purchase_item_status.sql",
+    "0021_purchase_void.sql",
+    "0022_supplier_profile_fields.sql",
+    "0023_purchase_invoice_metadata.sql",
   ])
     applyMigration(name);
   const timestamp = now();

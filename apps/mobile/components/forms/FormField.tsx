@@ -1,5 +1,7 @@
 import { Controller, type Control, type FieldPath, type FieldValues } from 'react-hook-form';
 import { Text, TextInput, View, type KeyboardTypeOptions } from 'react-native';
+import { localizeValidationMessage } from '../../i18n/display';
+import { useI18n } from '../../state/localeStore';
 
 // FormField — label + Controller-wired TextInput + inline error, extracted
 // from RegistrationForm.tsx's repeated block. Add Medicine has 11+ fields;
@@ -28,6 +30,7 @@ export function FormField<TFieldValues extends FieldValues>({
   numeric = false,
   money = false,
 }: FormFieldProps<TFieldValues>) {
+  const { t } = useI18n();
   return (
     <View className="gap-2">
       <Text className="font-sans-medium text-sm text-richBlack">{label}</Text>
@@ -46,7 +49,7 @@ export function FormField<TFieldValues extends FieldValues>({
               accessibilityLabel={label}
               className={`rounded-lg border border-midGray bg-white px-4 py-3 text-base text-richBlack ${money ? 'font-mono' : 'font-sans'}`}
             />
-            {error ? <Text className="font-sans text-sm text-error">{error.message}</Text> : null}
+            {error ? <Text className="font-sans text-sm text-error">{localizeValidationMessage(error.message, t)}</Text> : null}
           </>
         )}
       />

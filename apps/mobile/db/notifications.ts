@@ -135,6 +135,12 @@ export async function dismissNotification(
   upsertReceipt(shopId, actorUserId, notificationId, { readAt: now, dismissedAt: now });
 }
 
+/**
+ * Returns `created: false` when this call updated an existing same-day row
+ * instead of inserting a new one — callers that also fire an OS banner (e.g.
+ * native/notifications.ts's runOverdueCreditCheck) use this to avoid
+ * re-delivering the banner for a dedup that already happened today.
+ */
 export async function createNotification(
   shopId: string,
   type: NotificationType,
@@ -142,7 +148,7 @@ export async function createNotification(
   title: string,
   body: string,
   refId?: string,
-): Promise<void> {
+): Promise<{ created: boolean }> {
   const today = dhakaBusinessDate(new Date());
   if (refId) {
     const existing = sqliteConnection.getFirstSync<{ id: string }>(
@@ -155,13 +161,14 @@ export async function createNotification(
     );
     if (existing) {
       await db.update(notifications).set({ title, body, severity, updatedAt: new Date().toISOString() }).where(eq(notifications.id, existing.id));
-      return;
+      return { created: false };
     }
   }
   await db.insert(notifications).values({
     id: generateId(), shopId, type, severity, title, body,
     refId: refId ?? null, isDirty: false,
   });
+  return { created: true };
 }
 
 export async function createDailySummaryNotification(shopId: string, actorUserId: string, title: string, body: string, businessDate: string): Promise<void> {

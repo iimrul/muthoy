@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { LanguageToggle } from './LanguageToggle';
 import { useI18n } from '../../state/localeStore';
@@ -18,9 +19,11 @@ export interface StandardHeaderProps {
   unreadCount?: number;
   onSyncPress?: () => void;
   syncing?: boolean;
+  /** Optional screen-specific status/action placed before LanguageToggle. */
+  rightAccessory?: ReactNode;
 }
 
-export function StandardHeader({ title, onBackPress, onBellPress, unreadCount = 0, onSyncPress, syncing = false }: StandardHeaderProps) {
+export function StandardHeader({ title, onBackPress, onBellPress, unreadCount = 0, onSyncPress, syncing = false, rightAccessory }: StandardHeaderProps) {
   const { t } = useI18n();
   return (
     <View className="flex-row items-center justify-center bg-brand-softGreen px-4 py-4">
@@ -36,35 +39,38 @@ export function StandardHeader({ title, onBackPress, onBellPress, unreadCount = 
         </Pressable>
       ) : null}
       <Text className="font-sans-semibold text-base text-richBlack">{title}</Text>
-      {onBellPress ? (
-        <Pressable
-          onPress={onBellPress}
-          accessibilityRole="button"
-          accessibilityLabel={`Open notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
-          hitSlop={8}
-          className="absolute right-24 h-10 w-10 items-center justify-center active:opacity-70"
-        >
-          <Text className="font-sans-semibold text-xl text-richBlack">🔔</Text>
-          {unreadCount > 0 ? (
-            <View className="absolute right-0 top-0 min-w-5 items-center rounded-full bg-error px-1">
-              <Text className="font-mono text-xs text-white">{unreadCount > 10 ? '10+' : unreadCount}</Text>
-            </View>
-          ) : null}
-        </Pressable>
-      ) : null}
-      {onSyncPress ? (
-        <Pressable
-          disabled={syncing}
-          onPress={onSyncPress}
-          accessibilityRole="button"
-          accessibilityLabel={t('sync')}
-          hitSlop={8}
-          className="absolute right-24 h-10 w-10 items-center justify-center active:opacity-70"
-        >
-          <Text className="font-sans-semibold text-lg text-brand-green">{syncing ? '…' : '↻'}</Text>
-        </Pressable>
-      ) : null}
-      <View className="absolute right-3"><LanguageToggle /></View>
+      <View className="absolute right-3 flex-row items-center gap-1">
+        {onBellPress ? (
+          <Pressable
+            onPress={onBellPress}
+            accessibilityRole="button"
+            accessibilityLabel={`Open notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
+            hitSlop={8}
+            className="h-10 w-10 items-center justify-center active:opacity-70"
+          >
+            <Text className="font-sans-semibold text-xl text-richBlack">🔔</Text>
+            {unreadCount > 0 ? (
+              <View className="absolute right-0 top-0 min-w-5 items-center rounded-full bg-error px-1">
+                <Text className="font-mono text-xs text-white">{unreadCount > 10 ? '10+' : unreadCount}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        ) : null}
+        {onSyncPress ? (
+          <Pressable
+            disabled={syncing}
+            onPress={onSyncPress}
+            accessibilityRole="button"
+            accessibilityLabel={t('sync')}
+            hitSlop={8}
+            className="h-10 w-10 items-center justify-center active:opacity-70"
+          >
+            <Text className="font-sans-semibold text-lg text-brand-green">{syncing ? '…' : '↻'}</Text>
+          </Pressable>
+        ) : null}
+        {rightAccessory}
+        <LanguageToggle />
+      </View>
     </View>
   );
 }

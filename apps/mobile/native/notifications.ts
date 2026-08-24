@@ -18,8 +18,10 @@ import {
   isLowStockCrossing,
   isStockRecovered,
 } from "../domain/notificationRules";
-import { getActiveSessionRole } from "../db/auth";
+import { getActiveSessionContext, getActiveSessionRole } from "../db/auth";
+import { resolvePermission } from "../domain/permissions";
 import { getCashSummary } from "../db/cash";
+import { shopHasOverdueCredit } from "../db/customers";
 import { listBatchesForMedicine, listMedicines } from "../db/inventory";
 import {
   createDailySummaryNotification,
@@ -221,6 +223,50 @@ async function runDailySummaryCheck(shopId: string, now: Date): Promise<void> {
   // materializes the deduped in-app row, avoiding a second delivery.
 }
 
+// B3 Group 4 (CP-5): pushes ONE `overdue_credit` notification per Dhaka
+// business date whenever any customer holds a credit older than the shop's
+// `credit_max_days`. Dedup is `createNotification`'s own (type + refId +
+// same day) mechanism, with `businessDate` as the refId — the same pattern
+// `runDailySummaryCheck` already uses below. Gated on the `credit` toggle
+// (preferences.all && preferences.credit), matching the prototype's
+// settings.creditAlerts gate (CP-5) and this module's low-stock/expiry
+// pattern above. Not owner-scoped at creation: db/notifications.ts's
+// REQUIRED_PERMISSION map (`overdue_credit: 'credit_view'`) is what actually
+// controls who can read it back.
+async function runOverdueCreditCheck(shopId: string, now: Date): Promise<void> {
+  const preferences = readNotificationPreferences(shopId);
+  if (!preferences.all || !preferences.credit) return;
+  const { creditMaxDays } = await getB2Settings(shopId);
+  const businessDate = dhakaBusinessDate(now);
+  if (!shopHasOverdueCredit(shopId, businessDate, creditMaxDays)) return;
+  const title = encodeLocalizedText(
+    "Overdue credit",
+    "মেয়াদোত্তীর্ণ বাকি",
+  );
+  const body = encodeLocalizedText(
+    "One or more customers have an overdue credit balance.",
+    "এক বা একাধিক গ্রাহকের বাকি মেয়াদোত্তীর্ণ হয়েছে।",
+  );
+  const { created } = await createNotification(
+    shopId,
+    "overdue_credit",
+    "warning",
+    title,
+    body,
+    businessDate,
+  );
+  // Generation stays shop-wide (above), but the OS banner is per-session: it
+  // must not surface to a user whose role/permissions can't see credit data,
+  // and must not re-fire on every check once today's row already exists.
+  if (!created) return;
+  const session = readPersistedSessionSync();
+  if (!session || session.shopId !== shopId) return;
+  const context = await getActiveSessionContext(session.userId, shopId);
+  if (!context) return;
+  if (!resolvePermission(context.role, "credit_view", context.permissions)) return;
+  await presentLocalNotification(title, body, "warning");
+}
+
 let activeCheck: Promise<void> | null = null;
 
 export function runNotificationChecks(shopId: string): Promise<void> {
@@ -247,6 +293,11 @@ export function runNotificationChecks(shopId: string): Promise<void> {
       await runDailySummaryCheck(shopId, now);
     } catch (error) {
       console.warn("Daily-summary notification check failed", error);
+    }
+    try {
+      await runOverdueCreditCheck(shopId, now);
+    } catch (error) {
+      console.warn("Overdue-credit notification check failed", error);
     }
   })().finally(() => {
     activeCheck = null;

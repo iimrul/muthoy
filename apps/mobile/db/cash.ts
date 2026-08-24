@@ -6,7 +6,10 @@
 // them to expectedCash() — it never re-derives or approximates the formula.
 
 import { and, eq } from "drizzle-orm";
-import type { ExpenseCategory } from "@muthoy/validation";
+import {
+  expenseCategorySchema,
+  type ExpenseCategory,
+} from "@muthoy/validation";
 import {
   ZERO_PAISA,
   addPaisa,
@@ -214,7 +217,6 @@ export interface RecordExpenseInput {
   category: ExpenseCategory;
   amount: Paisa;
   description?: string;
-  receiptPhotoUri?: string;
 }
 
 // Volume 0 Day 10: writes BOTH an `expenses` row and a `payments` row with
@@ -238,30 +240,50 @@ export async function recordExpense(
   if (!Number.isInteger(input.amount) || input.amount <= ZERO_PAISA) {
     throw new Error("Expense amount must be a positive whole number of paisa");
   }
+  const category = expenseCategorySchema.parse(input.category);
 
   const now = new Date();
   const businessDate = dhakaBusinessDate(now);
+  const timestamp = now.toISOString();
   const expenseId = generateId();
 
   db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
     requireActiveUser(tx, input.shopId, input.staffId);
+    const existingDrawer = tx
+      .select({ id: cashDrawer.id, isDeleted: cashDrawer.isDeleted })
+      .from(cashDrawer)
+      .where(
+        and(
+          eq(cashDrawer.shopId, input.shopId),
+          eq(cashDrawer.businessDate, businessDate),
+        ),
+      )
+      .get() as DrawerLookupRow | undefined;
+    const expectedCount = existingDrawer ? 3 : 4;
+    let sequence = 0;
+    const operation = (): SyncOperationGroup => ({
+      id: expenseId,
+      kind: "expense_create",
+      sequence: sequence++,
+      expectedCount,
+    });
     const drawerId = ensureOpenDrawer(
       tx,
       input.shopId,
       businessDate,
       input.staffId,
       now,
+      operation,
     );
 
-    const timestamp = new Date().toISOString();
     const expenseValues = {
       id: expenseId,
       shopId: input.shopId,
-      category: input.category,
+      category,
       amount: input.amount,
       description: input.description ?? null,
-      receiptImage: input.receiptPhotoUri ?? null,
+      receiptImage: null,
       createdBy: input.staffId,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -273,6 +295,7 @@ export async function recordExpense(
       rowId: expenseId,
       op: "insert",
       payload: expenseValues,
+      operation: operation(),
     });
 
     const paymentId = generateId();
@@ -295,9 +318,20 @@ export async function recordExpense(
       rowId: paymentId,
       op: "insert",
       payload: paymentValues,
+      operation: operation(),
     });
 
-    refreshClosingExpected(tx, input.shopId, businessDate, drawerId);
+    refreshClosingExpected(
+      tx,
+      input.shopId,
+      businessDate,
+      drawerId,
+      {},
+      operation,
+    );
+    if (sequence !== expectedCount) {
+      throw new Error("Expense creation operation count mismatch");
+    }
   });
 
   return { expenseId };
@@ -331,6 +365,255 @@ export async function listExpenses(
     { $shopId: shopId, $businessDate: businessDate },
   );
   return rows.map((row) => ({ ...row, amount: asPaisa(row.amount) }));
+}
+
+export interface MonthExpenseRow extends ExpenseRow {
+  loggedByName: string;
+}
+
+interface RawMonthExpenseRow extends Omit<MonthExpenseRow, "amount"> {
+  amount: number;
+}
+
+// B3 Group 3 — the Ledger tab's month-navigated read. `month` is 1-12
+// (calendar convention, not JS's 0-11) so the SQL boundary strings below stay
+// directly readable. Dhaka-anchored via DHAKA_SQL_OFFSET, never `'localtime'`
+// — a shop's expense must fall in the same Dhaka month regardless of the
+// device's configured timezone (W-1's business-date discipline extended to
+// month buckets, not just days).
+export async function listExpensesForMonth(
+  shopId: string,
+  actorUserId: string,
+  year: number,
+  month: number,
+): Promise<MonthExpenseRow[]> {
+  await requireOwner(shopId, actorUserId);
+
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    throw new Error("Month must be an integer between 1 and 12");
+  }
+
+  const monthStart = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+  const nextMonth = month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 };
+  const monthEnd = `${String(nextMonth.year).padStart(4, "0")}-${String(nextMonth.month).padStart(2, "0")}-01`;
+
+  const rows = sqliteConnection.getAllSync<RawMonthExpenseRow>(
+    `SELECT e.id AS id, e.category AS category, e.amount AS amount, e.description AS description,
+            e.created_at AS createdAt, u.name AS loggedByName
+       FROM expenses e
+       JOIN users u ON u.id = e.created_by
+      WHERE e.shop_id = $shopId AND e.is_deleted = 0
+        AND date(e.created_at, '${DHAKA_SQL_OFFSET}') >= $monthStart
+        AND date(e.created_at, '${DHAKA_SQL_OFFSET}') < $monthEnd
+      ORDER BY e.created_at DESC, e.id DESC`,
+    { $shopId: shopId, $monthStart: monthStart, $monthEnd: monthEnd },
+  );
+  return rows.map((row) => ({ ...row, amount: asPaisa(row.amount) }));
+}
+
+export interface DuplicateExpenseMatch {
+  id: string;
+  category: string;
+  amount: Paisa;
+  description: string | null;
+  createdAt: string;
+}
+
+interface RawDuplicateExpenseRow extends Omit<DuplicateExpenseMatch, "amount"> {
+  amount: number;
+}
+
+// B3 Group 3 (EX-11) — an ADVISORY pre-flight read, never a hard block:
+// mirrors contract §5.14's "advisory, not blocking" duplicate-invoice
+// philosophy. The Quick Log screen shows this as a confirm modal; "Log
+// Anyway" just calls recordExpense normally afterward. Same-day match is
+// Dhaka-anchored, never device-local `Date`/`toDateString()` like the
+// prototype (W-1) — two devices in different timezones must agree on
+// whether "today" already has this expense.
+export async function findDuplicateExpense(
+  shopId: string,
+  actorUserId: string,
+  category: ExpenseCategory,
+  amount: Paisa,
+  businessDate: string,
+): Promise<DuplicateExpenseMatch | null> {
+  await requireOwner(shopId, actorUserId);
+
+  const row = sqliteConnection.getFirstSync<RawDuplicateExpenseRow>(
+    `SELECT id, category, amount, description, created_at AS createdAt
+       FROM expenses
+      WHERE shop_id = $shopId AND is_deleted = 0
+        AND category = $category AND amount = $amount
+        AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1`,
+    {
+      $shopId: shopId,
+      $category: category,
+      $amount: amount,
+      $businessDate: businessDate,
+    },
+  );
+  return row ? { ...row, amount: asPaisa(row.amount) } : null;
+}
+
+export interface DeleteExpenseInput {
+  shopId: string;
+  staffId: string;
+  /** Device-handover guard — see db/errors.ts assertSessionLive. */
+  isStillActive: () => boolean;
+  expenseId: string;
+}
+
+// B3 Group 3 — soft-deletes the expense row AND its paired `payments` row
+// (type='expense', ref_id=expenseId) atomically, then recomputes the drawer.
+// "Never delete one side": if the payment row is already missing, this
+// refuses rather than silently leaving a one-sided deletion.
+//
+// Guarded on the EXPENSE'S OWN business date, not "today" — unlike
+// recordWithdrawal, an owner deleting an old Ledger entry from a still-open
+// earlier day is a real path. A deletion targeting an already-closed day is
+// refused exactly like any other write to that date (contract §5.5/§5.8).
+//
+// Mirrors recordWithdrawal's SyncOperationGroup shape: an existing drawer
+// produces expense+payment+drawer (3 rows); the (practically unreachable,
+// since recordExpense always ensures one) missing-drawer case adds a 4th.
+export async function deleteExpense(input: DeleteExpenseInput): Promise<void> {
+  await requireOwner(input.shopId, input.staffId);
+
+  db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
+    requireActiveUser(tx, input.shopId, input.staffId);
+
+    const expense = tx
+      .select({ id: expenses.id, createdAt: expenses.createdAt })
+      .from(expenses)
+      .where(
+        and(
+          eq(expenses.id, input.expenseId),
+          eq(expenses.shopId, input.shopId),
+          eq(expenses.isDeleted, false),
+        ),
+      )
+      .get() as { id: string; createdAt: string } | undefined;
+    if (!expense) {
+      throw new Error("Expense not found");
+    }
+
+    const payment = tx
+      .select({ id: payments.id })
+      .from(payments)
+      .where(
+        and(
+          eq(payments.shopId, input.shopId),
+          eq(payments.refId, expense.id),
+          eq(payments.type, "expense"),
+          eq(payments.isDeleted, false),
+        ),
+      )
+      .get() as { id: string } | undefined;
+    if (!payment) {
+      throw new Error(
+        "This expense's payment record is missing — refusing a one-sided delete",
+      );
+    }
+
+    const businessDate = dhakaBusinessDate(new Date(expense.createdAt));
+    assertBusinessDateOpen(tx, input.shopId, businessDate);
+
+    const existingDrawer = tx
+      .select({ id: cashDrawer.id, isDeleted: cashDrawer.isDeleted })
+      .from(cashDrawer)
+      .where(
+        and(
+          eq(cashDrawer.shopId, input.shopId),
+          eq(cashDrawer.businessDate, businessDate),
+        ),
+      )
+      .get() as DrawerLookupRow | undefined;
+    if (existingDrawer?.isDeleted) {
+      throw new Error(
+        "This day's cash drawer row is deleted and cannot be reused",
+      );
+    }
+
+    const expectedCount = existingDrawer ? 3 : 4;
+    // Creation owns expense.id as its grouped-operation id. Deletion must use
+    // a fresh id or PostgreSQL staging would treat it as a conflicting retry
+    // of the already-applied create operation. This id is generated once and
+    // persisted on every outbox row, so delete retries remain idempotent.
+    const operationId = generateId();
+    let sequence = 0;
+    const operation = (): SyncOperationGroup => ({
+      id: operationId,
+      kind: "expense_delete",
+      sequence: sequence++,
+      expectedCount,
+    });
+
+    const now = new Date();
+    const deleteValues = stampUpdatedAt({
+      isDeleted: true,
+      deletedAt: now.toISOString(),
+      deletedBy: input.staffId,
+      isDirty: true,
+    });
+
+    const expenseUpdate = tx
+      .update(expenses)
+      .set(deleteValues)
+      .where(and(eq(expenses.id, expense.id), eq(expenses.shopId, input.shopId)))
+      .run();
+    if (expenseUpdate.changes !== 1) {
+      throw new Error("Expense could not be deleted");
+    }
+    recordChange(tx, {
+      shopId: input.shopId,
+      table: "expenses",
+      rowId: expense.id,
+      op: "delete",
+      payload: deleteValues,
+      operation: operation(),
+    });
+
+    const paymentUpdate = tx
+      .update(payments)
+      .set(deleteValues)
+      .where(and(eq(payments.id, payment.id), eq(payments.shopId, input.shopId)))
+      .run();
+    if (paymentUpdate.changes !== 1) {
+      throw new Error("Expense payment could not be deleted");
+    }
+    recordChange(tx, {
+      shopId: input.shopId,
+      table: "payments",
+      rowId: payment.id,
+      op: "delete",
+      payload: deleteValues,
+      operation: operation(),
+    });
+
+    const drawerId = ensureOpenDrawer(
+      tx,
+      input.shopId,
+      businessDate,
+      input.staffId,
+      now,
+      operation,
+    );
+    refreshClosingExpected(
+      tx,
+      input.shopId,
+      businessDate,
+      drawerId,
+      {},
+      operation,
+    );
+
+    if (sequence !== expectedCount) {
+      throw new Error("Expense deletion operation count mismatch");
+    }
+  });
 }
 
 export interface SetOpeningCashInput {

@@ -30,6 +30,17 @@ export const INVOICE_SEQUENCE_WIDTH = 6;
  */
 export const INVOICE_SUFFIX_LENGTH = 12;
 
+/** A real calendar date in the editable paper-invoice YYYY-MM-DD field. */
+export function isValidInvoiceDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 /**
  * The last twelve hex characters of the row's UUID, uppercased.
  *

@@ -46,6 +46,14 @@ export function useI18n() {
       new Intl.NumberFormat(locale === "bn" ? "bn-BD" : "en-IN").format(value),
     [locale],
   );
+  const formatDate = useCallback(
+    (value: string | Date): string =>
+      new Intl.DateTimeFormat(locale === "bn" ? "bn-BD" : "en-BD", {
+        day: "numeric",
+        month: "short",
+      }).format(new Date(value)),
+    [locale],
+  );
   const formatDateTime = useCallback(
     (value: string | Date): string =>
       new Intl.DateTimeFormat(locale === "bn" ? "bn-BD" : "en-BD", {
@@ -62,11 +70,22 @@ export function useI18n() {
       }).format(new Date(value)),
     [locale],
   );
+  const formatPercent = useCallback(
+    (value: number, signDisplay: 'auto' | 'always' = 'auto'): string =>
+      new Intl.NumberFormat(locale === "bn" ? "bn-BD" : "en-BD", {
+        style: 'percent',
+        maximumFractionDigits: 0,
+        signDisplay,
+      }).format(value),
+    [locale],
+  );
   return {
     locale,
     t,
     formatNumber,
+    formatDate,
     formatDateTime,
     formatTime,
+    formatPercent,
   };
 }

@@ -102,7 +102,10 @@ export const OWNER_QUICK_LINKS: readonly OwnerQuickLink[] = [
   { key: 'expense', labelKey: 'expense', href: '/expenses' },
   { key: 'history', labelKey: 'salesHistory', href: '/reports/sales-history' },
   { key: 'expiry', labelKey: 'expiry', href: '/inventory/expiry' },
-  { key: 'invoices', labelKey: 'supplierInvoices', href: '/suppliers/purchase-create' },
+  // W-3: repointed from the bare create form to the real invoices list now
+  // that Group 6 ships it — atomic with the MORE_ROUTES entry below so
+  // neither registry is left pointing at a stub while the other has moved.
+  { key: 'invoices', labelKey: 'supplierInvoices', href: '/suppliers/invoices' },
   { key: 'suppliers', labelKey: 'suppliers', href: '/suppliers/list' },
   { key: 'report', labelKey: 'report', href: '/reports/report' },
   { key: 'staff', labelKey: 'staffManagement', href: '/staff/management' },
@@ -120,7 +123,7 @@ export const MORE_ROUTES: readonly MoreRoute[] = [
   { key: 'eod', labelKey: 'endOfDay', href: '/end-of-day', permission: 'cash_drawer' },
   { key: 'report', labelKey: 'report', href: '/reports/report', permission: 'reports' },
   { key: 'expense', labelKey: 'expense', href: '/expenses', ownerOnly: true },
-  { key: 'invoices', labelKey: 'supplierInvoices', href: '/suppliers/purchase-create', ownerOnly: true },
+  { key: 'invoices', labelKey: 'supplierInvoices', href: '/suppliers/invoices', ownerOnly: true },
   { key: 'suppliers', labelKey: 'suppliers', href: '/suppliers/list', ownerOnly: true },
   { key: 'staff', labelKey: 'staff', href: '/staff/management', permission: 'staff_manage' },
   { key: 'staff-sales', labelKey: 'staffSales', href: '/staff/sales-view', ownerOnly: true },

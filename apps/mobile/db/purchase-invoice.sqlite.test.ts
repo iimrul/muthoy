@@ -96,6 +96,12 @@ beforeAll(() => {
   applyMigration('0015_b3_shop_settings.sql');
   applyMigration('0016_payment_note.sql');
   applyMigration('0017_cash_reconcile.sql');
+  applyMigration('0018_expense_category_taxonomy.sql');
+  applyMigration('0019_supplier_archive.sql');
+  applyMigration('0020_purchase_item_status.sql');
+  applyMigration('0021_purchase_void.sql');
+  applyMigration('0022_supplier_profile_fields.sql');
+  applyMigration('0023_purchase_invoice_metadata.sql');
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: OWNER_ID, name: 'Invoice Shop', phone: '01700000901', createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: 'owner', isSystem: true, createdAt: NOW, updatedAt: NOW }).run();

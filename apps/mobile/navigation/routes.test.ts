@@ -44,7 +44,7 @@ describe('B1 routes', () => {
       ['expense', '/expenses'],
       ['salesHistory', '/reports/sales-history'],
       ['expiry', '/inventory/expiry'],
-      ['supplierInvoices', '/suppliers/purchase-create'],
+      ['supplierInvoices', '/suppliers/invoices'],
       ['suppliers', '/suppliers/list'],
       ['report', '/reports/report'],
       ['staffManagement', '/staff/management'],

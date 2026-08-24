@@ -2,19 +2,42 @@ import { z } from 'zod';
 
 const optionalText = z.string().trim().transform((value) => (value === '' ? undefined : value)).optional();
 
-// Volume 4's expense categories. `other` keeps a free-text description as the
-// escape hatch rather than allowing an arbitrary category string, so the
-// End-of-Day breakdown stays groupable.
+// B3 Group 3 (founder decision D-4, locked 2026-08-22): the prototype's
+// 5-category taxonomy replaces production's original 6-category set —
+// migration 0018 backfills every existing row. `other` keeps a free-text
+// description as the escape hatch rather than allowing an arbitrary category
+// string, so the End-of-Day breakdown stays groupable.
 export const EXPENSE_CATEGORIES = [
   'rent',
-  'electricity',
-  'transport',
-  'staff_salary',
-  'supplies',
+  'salary',
+  'utilities',
+  'conveyance',
   'other',
 ] as const;
 
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+export const expenseCategorySchema = z.enum(EXPENSE_CATEGORIES);
+
+export const LEGACY_EXPENSE_CATEGORY_MAP = {
+  electricity: 'utilities',
+  transport: 'conveyance',
+  staff_salary: 'salary',
+  supplies: 'other',
+} as const satisfies Record<string, ExpenseCategory>;
+
+/**
+ * Compatibility boundary for rows produced before B3 Group 3. Legacy values
+ * are accepted only long enough to become canonical; every other value is
+ * rejected. New writes use expenseCategorySchema directly.
+ */
+export function canonicalizeExpenseCategory(value: unknown): ExpenseCategory {
+  const mapped =
+    typeof value === 'string' && value in LEGACY_EXPENSE_CATEGORY_MAP
+      ? LEGACY_EXPENSE_CATEGORY_MAP[value as keyof typeof LEGACY_EXPENSE_CATEGORY_MAP]
+      : value;
+  return expenseCategorySchema.parse(mapped);
+}
 
 // Taka at the form boundary; db/cash.ts converts once via fromTaka(). Rounding
 // is allowed only in that conversion (packages/types/src/money.ts).
@@ -23,11 +46,12 @@ export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
 const takaAmount = z.number({ error: 'Enter a valid amount' }).finite('Enter a valid amount');
 
 export const expenseFormSchema = z.object({
-  category: z.enum(EXPENSE_CATEGORIES),
+  category: expenseCategorySchema,
   amountTaka: takaAmount.positive('Amount must be greater than zero'),
   description: optionalText,
-  // Local file URI for now — Supabase Storage upload is sync territory.
-  receiptImage: optionalText,
+  // No receipt-photo capture in B3 Beta (founder decision D-5, locked
+  // 2026-08-22): no image picker is installed, and the `expenses.receipt_image`
+  // DB column stays unused rather than half-wiring a money attachment.
 });
 
 export type ExpenseFormInput = z.input<typeof expenseFormSchema>;

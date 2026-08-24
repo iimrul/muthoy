@@ -26,7 +26,10 @@ let h: Harness;
 beforeEach(async () => {
   h = await createHarness();
   await seedShops(h);
-}, 30_000);
+// Full runs initialize several independent PGlite databases concurrently.
+// Group 2 is healthy in isolation but can exceed 30s while those workers
+// contend for CPU; match the established PG-suite setup budget.
+}, 60_000);
 
 afterEach(async () => h.close());
 

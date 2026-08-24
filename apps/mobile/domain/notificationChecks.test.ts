@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { asPaisa } from "@muthoy/types";
 import { formatMoney } from "@muthoy/utils";
+import { sqlite } from "../db/test/expo-sqlite";
+import type {
+  NotificationSeverity,
+  NotificationType,
+} from "../db/notifications";
 import { localizeStoredText } from "../i18n/localizedText";
 import { expectedCash } from "./cashFormula";
 
@@ -15,6 +20,7 @@ const mocks = vi.hoisted(() => ({
     role: "owner" | "staff";
   } | null,
   activeRole: "owner" as "owner" | "staff" | null,
+  activePermissions: {} as Partial<Record<"credit_view", boolean>>,
   medicines: [] as {
     medicineId: string;
     name: string;
@@ -34,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   >(),
   rows: [] as {
     id: string;
+    shopId: string;
     type: string;
     severity: string;
     title: string;
@@ -86,6 +93,15 @@ vi.mock("../state/sessionStore", () => ({
 }));
 vi.mock("../db/auth", () => ({
   getActiveSessionRole: vi.fn(async () => mocks.activeRole),
+  getActiveSessionContext: vi.fn(async () =>
+    mocks.activeRole
+      ? {
+          role: mocks.activeRole,
+          permissions: mocks.activePermissions,
+          permissionVersion: 0,
+        }
+      : null,
+  ),
 }));
 vi.mock("../db/cash", () => ({
   getCashSummary: vi.fn(async () => mocks.cashInput),
@@ -97,68 +113,97 @@ vi.mock("../db/inventory", () => ({
       mocks.batches.get(medicineId) ?? [],
   ),
 }));
-vi.mock("../db/notifications", () => ({
-  createNotification: vi.fn(
-    async (
-      _shopId: string,
-      type: string,
-      severity: string,
-      title: string,
-      body: string,
-      refId?: string,
-    ) => {
-      mocks.rows.push({
-        id: `notification-${mocks.rows.length + 1}`,
-        type,
-        severity,
-        title,
-        body,
-        refId: refId ?? null,
-        resolvedAt: null,
-      });
-    },
-  ),
-  createDailySummaryNotification: vi.fn(
-    async (
-      _shopId: string,
-      _userId: string,
-      title: string,
-      body: string,
-      businessDate: string,
-    ) => {
-      mocks.rows.push({
-        id: `notification-${mocks.rows.length + 1}`,
-        type: "daily_summary",
-        severity: "info",
-        title,
-        body,
-        refId: businessDate,
-        resolvedAt: null,
-      });
-    },
-  ),
-  findUnresolvedLowStockAlert: vi.fn(
-    async (_shopId: string, medicineId: string) =>
-      mocks.rows.find(
-        (row) =>
-          row.type === "low_stock" &&
-          row.refId === medicineId &&
-          row.resolvedAt === null,
-      ) ?? null,
-  ),
-  resolveLowStockAlert: vi.fn(async (id: string) => {
-    const row = mocks.rows.find((candidate) => candidate.id === id);
-    if (row) row.resolvedAt = new Date().toISOString();
-  }),
-  hasExpiryAlert: vi.fn(async (_shopId: string, batchId: string) =>
-    mocks.rows.some((row) => row.type === "expiry" && row.refId === batchId),
-  ),
-  hasDailySummaryToday: vi.fn(async (_shopId: string, date: string) =>
-    mocks.rows.some(
-      (row) => row.type === "daily_summary" && row.refId === date,
+vi.mock("../db/notifications", async () => {
+  const actual = await vi.importActual<typeof import("../db/notifications")>(
+    "../db/notifications",
+  );
+  return {
+    createNotification: vi.fn(
+      async (
+        shopId: string,
+        type: NotificationType,
+        severity: NotificationSeverity,
+        title: string,
+        body: string,
+        refId?: string,
+      ) => {
+        if (type === "overdue_credit") {
+          return actual.createNotification(
+            shopId,
+            type,
+            severity,
+            title,
+            body,
+            refId,
+          );
+        }
+        const existing = mocks.rows.find(
+          (row) =>
+            row.shopId === shopId &&
+            row.type === type &&
+            row.refId === (refId ?? null) &&
+            row.resolvedAt === null,
+        );
+        if (existing) {
+          Object.assign(existing, { severity, title, body });
+          return { created: false };
+        }
+        mocks.rows.push({
+          id: `notification-${mocks.rows.length + 1}`,
+          shopId,
+          type,
+          severity,
+          title,
+          body,
+          refId: refId ?? null,
+          resolvedAt: null,
+        });
+        return { created: true };
+      },
     ),
-  ),
-}));
+    createDailySummaryNotification: vi.fn(
+      async (
+        shopId: string,
+        _userId: string,
+        title: string,
+        body: string,
+        businessDate: string,
+      ) => {
+        mocks.rows.push({
+          id: `notification-${mocks.rows.length + 1}`,
+          shopId,
+          type: "daily_summary",
+          severity: "info",
+          title,
+          body,
+          refId: businessDate,
+          resolvedAt: null,
+        });
+      },
+    ),
+    findUnresolvedLowStockAlert: vi.fn(
+      async (_shopId: string, medicineId: string) =>
+        mocks.rows.find(
+          (row) =>
+            row.type === "low_stock" &&
+            row.refId === medicineId &&
+            row.resolvedAt === null,
+        ) ?? null,
+    ),
+    resolveLowStockAlert: vi.fn(async (id: string) => {
+      const row = mocks.rows.find((candidate) => candidate.id === id);
+      if (row) row.resolvedAt = new Date().toISOString();
+    }),
+    hasExpiryAlert: vi.fn(async (_shopId: string, batchId: string) =>
+      mocks.rows.some((row) => row.type === "expiry" && row.refId === batchId),
+    ),
+    hasDailySummaryToday: vi.fn(async (_shopId: string, date: string) =>
+      mocks.rows.some(
+        (row) => row.type === "daily_summary" && row.refId === date,
+      ),
+    ),
+  };
+});
 vi.mock("../db/settings", () => ({
   getB2Settings: vi.fn(async () => ({
     lowStockDefault: 10,
@@ -186,6 +231,7 @@ describe("runNotificationChecks", () => {
     vi.setSystemTime(new Date("2026-08-12T14:30:00Z"));
     mocks.session = { shopId: "shop-1", userId: "owner-1", role: "owner" };
     mocks.activeRole = "owner";
+    mocks.activePermissions = {};
     mocks.medicines = [];
     mocks.batches.clear();
     mocks.rows.length = 0;
@@ -196,7 +242,51 @@ describe("runNotificationChecks", () => {
     mocks.getPermissions.mockClear();
     mocks.requestPermissions.mockClear();
     mocks.registerTask.mockClear();
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS credits (
+        id TEXT PRIMARY KEY NOT NULL,
+        shop_id TEXT NOT NULL,
+        balance INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        is_deleted INTEGER NOT NULL DEFAULT 0
+      );
+      DELETE FROM credits;
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (current_timestamp),
+        updated_at TEXT NOT NULL DEFAULT (current_timestamp),
+        is_dirty INTEGER NOT NULL DEFAULT 1,
+        is_deleted INTEGER NOT NULL DEFAULT 0,
+        deleted_at TEXT,
+        deleted_by TEXT,
+        shop_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        severity TEXT NOT NULL DEFAULT 'info',
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        is_read INTEGER NOT NULL DEFAULT 0,
+        ref_id TEXT,
+        resolved_at TEXT
+      );
+      DELETE FROM notifications;
+    `);
   });
+
+  function insertOverdueCredit(): void {
+    sqlite.prepare(
+      `INSERT INTO credits (id, shop_id, balance, created_at, is_deleted)
+       VALUES (?, ?, ?, ?, 0)`,
+    ).run("credit-overdue", "shop-1", 10_000, "2026-08-01T04:00:00.000Z");
+  }
+
+  function overdueCreditRows(): { refId: string | null }[] {
+    return sqlite
+      .prepare(
+        `SELECT ref_id AS refId FROM notifications
+         WHERE shop_id = ? AND type = 'overdue_credit' AND is_deleted = 0`,
+      )
+      .all("shop-1") as unknown as { refId: string | null }[];
+  }
 
   it("creates the Android channel before checking notification permission", async () => {
     await requestNotificationPermissionsAsync();
@@ -300,6 +390,62 @@ describe("runNotificationChecks", () => {
         }),
       )}`,
     );
+  });
+
+  it("does not deliver an overdue-credit banner without credit_view", async () => {
+    insertOverdueCredit();
+    mocks.session = { shopId: "shop-1", userId: "staff-1", role: "staff" };
+    mocks.activeRole = "staff";
+    mocks.activePermissions = { credit_view: false };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await runNotificationChecks("shop-1");
+      expect(overdueCreditRows()).toEqual([{ refId: "2026-08-12" }]);
+      expect(mocks.scheduled).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalledWith(
+        "Overdue-credit notification check failed",
+        expect.anything(),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("delivers and same-day deduplicates overdue credit with credit_view", async () => {
+    insertOverdueCredit();
+    mocks.session = { shopId: "shop-1", userId: "staff-1", role: "staff" };
+    mocks.activeRole = "staff";
+    mocks.activePermissions = { credit_view: true };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await runNotificationChecks("shop-1");
+      // SQLite's CURRENT_TIMESTAMP uses the host clock, while Vitest's fake
+      // clock drives the Dhaka business date. Align the stored fixture row so
+      // the second run directly executes production's same-day dedupe query.
+      sqlite
+        .prepare(
+          `UPDATE notifications SET created_at = ?
+           WHERE shop_id = ? AND type = 'overdue_credit'`,
+        )
+        .run("2026-08-12T14:30:00.000Z", "shop-1");
+      await runNotificationChecks("shop-1");
+
+      expect(overdueCreditRows()).toEqual([{ refId: "2026-08-12" }]);
+      expect(mocks.scheduled).toHaveBeenCalledOnce();
+      expect(mocks.scheduled).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: expect.objectContaining({
+            data: { route: "/notifications" },
+          }),
+        }),
+      );
+      expect(warn).not.toHaveBeenCalledWith(
+        "Overdue-credit notification check failed",
+        expect.anything(),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("skips all checks when the persisted session does not match the shop", async () => {

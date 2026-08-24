@@ -1,47 +1,79 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { addPaisa, fromTaka } from '@muthoy/types';
-import { formatMoney } from '@muthoy/utils';
-import { EXPENSE_CATEGORIES, expenseFormSchema, type ExpenseCategory } from '@muthoy/validation';
+import Feather from '@expo/vector-icons/Feather';
+import { addPaisa, ZERO_PAISA, type Paisa } from '@muthoy/types';
+import { dhakaBusinessDate } from '@muthoy/utils';
+import type { ExpenseCategory } from '@muthoy/validation';
 import { AccessDenied } from '../components/ui/AccessDenied';
 import { StandardHeader } from '../components/ui/StandardHeader';
-import { currentBusinessDate, listExpenses, recordExpense, type ExpenseRow } from '../db/cash';
+import { AnalyticsTab, type CategoryTotal } from '../components/expenses/AnalyticsTab';
+import { ExpenseSummaryStrip } from '../components/expenses/ExpenseSummaryStrip';
+import { LedgerTab } from '../components/expenses/LedgerTab';
+import { QuickLogTab } from '../components/expenses/QuickLogTab';
+import {
+  currentBusinessDate,
+  deleteExpense,
+  findDuplicateExpense,
+  listExpensesForMonth,
+  recordExpense,
+  type MonthExpenseRow,
+} from '../db/cash';
 import { captureSessionFor } from '../state/sessionGuard';
+import { useI18n } from '../state/localeStore';
 import { useOwnerAccess } from '../state/usePermission';
 import { triggerSyncNow } from '../sync';
 
-// Expense Tracking — Volume 0 Day 10. Not nested under a named subfolder in
-// Volume 2's illustrative route tree, so placed at the app/ top level
-// (kebab-case per DEVELOPMENT_RULES.md route-naming rule).
+// Expense Tracking — B3 Group 3 (exact prototype parity, see
+// docs/plans/phase-b3-exact-prototype-parity.md §1.4 EX-1..EX-25).
 //
-// The optional receipt photo is deliberately NOT captured here: no image
-// picker is installed, and adding a native module needs a fresh EAS build.
-// db/cash.ts already accepts `receiptPhotoUri`, so the field is a UI-only
-// follow-up, not a schema change.
+// Owner-only, full stop (founder decision D-3) — the prototype's staff access
+// and ৳500 cap are NOT ported. No receipt-photo capture (D-5). Categories are
+// exactly Rent/Salary/Utilities/Conveyance/Other (D-4, migration 0018).
+//
+// canViewTotals collapses: the prototype gates the summary strip/Analytics on
+// `isOwner || hasPermission("reports")`, but this screen is already
+// owner-gated end to end, so those two panels render unconditionally here —
+// a locked simplification, not a behavior change.
 
-const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
-  rent: 'Rent',
-  electricity: 'Electricity',
-  transport: 'Transport',
-  staff_salary: 'Staff salary',
-  supplies: 'Supplies',
-  other: 'Other',
-};
+type ExpenseView = 'quick' | 'ledger' | 'analytics';
+
+interface MonthKey {
+  year: number;
+  month: number; // 1-12
+}
+
+function parseYearMonth(businessDate: string): MonthKey {
+  return { year: Number(businessDate.slice(0, 4)), month: Number(businessDate.slice(5, 7)) };
+}
+
+function previousMonthOf({ year, month }: MonthKey): MonthKey {
+  return month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+}
 
 export default function ExpenseTrackingScreen() {
-  // Volume 0 Day 11: cash is owner-only — Staff is sales + inventory-view.
   const { session, isAllowed } = useOwnerAccess();
-  const [category, setCategory] = useState<ExpenseCategory>('rent');
-  const [amountText, setAmountText] = useState('');
-  const [description, setDescription] = useState('');
-  const [todaysExpenses, setTodaysExpenses] = useState<ExpenseRow[]>([]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { t, locale } = useI18n();
+  const [view, setView] = useState<ExpenseView>('quick');
+  // Lifted out of QuickLogTab: this screen is owner-only, so a device
+  // handover that briefly logs in Staff renders AccessDenied instead of the
+  // tab tree, unmounting QuickLogTab. Screen-level hooks survive that (this
+  // component itself never unmounts), which is what keeps a half-typed
+  // amount from vanishing mid-handover — see QuickLogTab.tsx's header
+  // comment and tests/switch-user-writes.test.tsx.
+  const [quickCategory, setQuickCategory] = useState<ExpenseCategory | null>(null);
+  const [quickAmountText, setQuickAmountText] = useState('');
+  const [quickDescription, setQuickDescription] = useState('');
+  const [ledgerMonth, setLedgerMonth] = useState<MonthKey>(() => parseYearMonth(currentBusinessDate()));
+  const [currentMonthExpenses, setCurrentMonthExpenses] = useState<MonthExpenseRow[]>([]);
+  const [lastMonthExpenses, setLastMonthExpenses] = useState<MonthExpenseRow[]>([]);
+  const [ledgerExpenses, setLedgerExpenses] = useState<MonthExpenseRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const businessDate = currentBusinessDate();
+  const nowKey = parseYearMonth(currentBusinessDate());
+  const isLedgerCurrentMonth = ledgerMonth.year === nowKey.year && ledgerMonth.month === nowKey.month;
 
-  const reload = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     if (!session || !isAllowed) {
       return;
     }
@@ -49,172 +81,231 @@ export default function ExpenseTrackingScreen() {
     // after the handover must not paint them for whoever holds the phone now.
     const guard = captureSessionFor(session);
     try {
-      const rows = await listExpenses(session.shopId, session.userId, businessDate);
+      const businessDate = currentBusinessDate();
+      const current = parseYearMonth(businessDate);
+      const last = previousMonthOf(current);
+      const ledgerIsCurrent = ledgerMonth.year === current.year && ledgerMonth.month === current.month;
+
+      const [currentRows, lastRows, ledgerRows] = await Promise.all([
+        listExpensesForMonth(session.shopId, session.userId, current.year, current.month),
+        listExpensesForMonth(session.shopId, session.userId, last.year, last.month),
+        ledgerIsCurrent
+          ? Promise.resolve<MonthExpenseRow[] | null>(null)
+          : listExpensesForMonth(session.shopId, session.userId, ledgerMonth.year, ledgerMonth.month),
+      ]);
       if (!guard || guard.isStale()) {
         return;
       }
-      setTodaysExpenses(rows);
+      setCurrentMonthExpenses(currentRows);
+      setLastMonthExpenses(lastRows);
+      setLedgerExpenses(ledgerRows ?? currentRows);
       setError(null);
-    } catch (caught) {
+    } catch {
       if (!guard || guard.isStale()) {
         return;
       }
-      setError(caught instanceof Error ? caught.message : "Today's expenses failed to load.");
+      setError(t('expenseLoadFailed'));
     }
-  }, [businessDate, isAllowed, session]);
+  }, [session, isAllowed, ledgerMonth, t]);
 
   useEffect(() => {
-    // SQLite load-on-mount; TanStack Query is reserved for sync.
+    // SQLite load-on-mount/month-change; TanStack Query is reserved for sync.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void reload();
-  }, [reload]);
+    void loadAll();
+  }, [loadAll]);
 
-  const total = useMemo(
-    () => addPaisa(...todaysExpenses.map((expense) => expense.amount)),
-    [todaysExpenses],
+  const todayStr = currentBusinessDate();
+  const todayTotal = useMemo(
+    () =>
+      addPaisa(
+        ...currentMonthExpenses
+          .filter((row) => dhakaBusinessDate(new Date(row.createdAt)) === todayStr)
+          .map((row) => row.amount),
+      ),
+    [currentMonthExpenses, todayStr],
+  );
+  const thisMonthTotal = useMemo(() => addPaisa(...currentMonthExpenses.map((row) => row.amount)), [currentMonthExpenses]);
+  const lastMonthTotal = useMemo(() => addPaisa(...lastMonthExpenses.map((row) => row.amount)), [lastMonthExpenses]);
+
+  const topCategories: CategoryTotal[] = useMemo(() => {
+    const totals = new Map<string, Paisa>();
+    for (const row of currentMonthExpenses) {
+      totals.set(row.category, addPaisa(totals.get(row.category) ?? ZERO_PAISA, row.amount));
+    }
+    return Array.from(totals.entries())
+      .map(([category, total]) => ({ category, total }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+  }, [currentMonthExpenses]);
+
+  const monthLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat(locale === 'bn' ? 'bn-BD' : 'en-BD', { month: 'long', year: 'numeric' }).format(
+        // Day 15 keeps the formatted month/year stable regardless of the
+        // device's configured timezone — no boundary can roll it into an
+        // adjacent month.
+        new Date(Date.UTC(ledgerMonth.year, ledgerMonth.month - 1, 15)),
+      ),
+    [ledgerMonth, locale],
   );
 
-  const handleSave = useCallback(async () => {
-    if (!session || !isAllowed) {
-      return;
-    }
-    // Pinned at action start. Survives a device handover; db/cash.ts re-checks
-    // this same guard inside the transaction.
-    const guard = captureSessionFor(session);
-    if (!guard) {
-      return;
-    }
-    const parsed = expenseFormSchema.safeParse({
-      category,
-      amountTaka: Number(amountText.trim()),
-      description,
+  const stepMonth = (direction: -1 | 1) => {
+    setLedgerMonth((previous) => {
+      const nextMonth = previous.month + direction;
+      if (nextMonth < 1) return { year: previous.year - 1, month: 12 };
+      if (nextMonth > 12) return { year: previous.year + 1, month: 1 };
+      return { year: previous.year, month: nextMonth };
     });
-    if (!amountText.trim() || !parsed.success) {
-      setError(parsed.success ? 'Enter a valid amount' : parsed.error.issues[0]?.message ?? 'Check the expense details.');
-      return;
-    }
+  };
 
-    setIsSubmitting(true);
-    setError(null);
-    try {
+  const handleCheckDuplicate = useCallback(
+    (category: ExpenseCategory, amount: Paisa) => {
+      if (!session) {
+        return Promise.resolve(null);
+      }
+      return findDuplicateExpense(session.shopId, session.userId, category, amount, currentBusinessDate());
+    },
+    [session],
+  );
+
+  const handleSaveExpense = useCallback(
+    async (input: { category: ExpenseCategory; amount: Paisa; description?: string }): Promise<boolean> => {
+      if (!session) {
+        throw new Error('Active session required.');
+      }
+      // Pinned at action start. Survives a device handover; db/cash.ts
+      // re-checks this same guard inside the transaction.
+      const guard = captureSessionFor(session);
+      if (!guard) {
+        throw new Error('Active session required.');
+      }
       await recordExpense({
         shopId: session.shopId,
         staffId: session.userId,
         isStillActive: guard.isStillActive,
-        category: parsed.data.category,
-        // fromTaka is the one place taka becomes paisa (packages/types).
-        amount: fromTaka(parsed.data.amountTaka),
-        description: parsed.data.description,
+        category: input.category,
+        amount: input.amount,
+        description: input.description,
       });
       void triggerSyncNow(session.shopId);
-      // The form reset and the reload below are the outgoing user's screen.
+      // The device changed hands while this write was in flight — the
+      // OUTGOING user's screen must not reset the form or show "saved" as
+      // if their own write had gone through under their own name.
       if (guard.isStale()) {
-        return;
+        return false;
       }
-      setAmountText('');
-      setDescription('');
-      await reload();
-    } catch (caught) {
-      if (guard.isStale()) {
-        return;
+      await loadAll();
+      return true;
+    },
+    [session, loadAll],
+  );
+
+  const handleDeleteExpense = useCallback(
+    async (expenseId: string) => {
+      if (!session) {
+        throw new Error('Active session required.');
       }
-      setError(caught instanceof Error ? caught.message : 'Expense could not be saved.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [amountText, category, description, isAllowed, reload, session]);
+      const guard = captureSessionFor(session);
+      if (!guard) {
+        throw new Error('Active session required.');
+      }
+      await deleteExpense({
+        shopId: session.shopId,
+        staffId: session.userId,
+        isStillActive: guard.isStillActive,
+        expenseId,
+      });
+      void triggerSyncNow(session.shopId);
+      if (!guard.isStale()) {
+        await loadAll();
+      }
+    },
+    [session, loadAll],
+  );
 
   if (!session) {
     return <AccessDenied message="Active session required." />;
   }
 
-  // Volume 0 Day 11 checklist: "A Staff-role login cannot access owner-only
-  // screens." db/cash.ts's recordExpense rejects the write independently.
+  // "A Staff-role login cannot access owner-only screens" — db/cash.ts's
+  // recordExpense/deleteExpense/listExpensesForMonth all reject independently.
   if (!isAllowed) {
     return <AccessDenied />;
   }
 
+  const tabs: { key: ExpenseView; labelKey: 'quickLogTab' | 'ledgerTab' | 'analyticsTab' }[] = [
+    { key: 'quick', labelKey: 'quickLogTab' },
+    { key: 'ledger', labelKey: 'ledgerTab' },
+    { key: 'analytics', labelKey: 'analyticsTab' },
+  ];
+
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title="Expenses" onBackPress={() => router.back()} />
-      <ScrollView contentContainerClassName="gap-4 p-4" keyboardShouldPersistTaps="handled">
-        {error ? <Text className="font-sans text-sm text-error">{error}</Text> : null}
-
-        <View className="gap-3 rounded-lg bg-white p-4">
-          <Text className="font-sans-bold text-base text-richBlack">Record an expense</Text>
-
-          <Text className="font-sans-medium text-sm text-richBlack">Category</Text>
-          <View className="flex-row flex-wrap gap-2">
-            {EXPENSE_CATEGORIES.map((option) => (
-              <Pressable
-                key={option}
-                onPress={() => setCategory(option)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: category === option }}
-                accessibilityLabel={CATEGORY_LABELS[option]}
-                className={`rounded-full border px-4 py-2 ${
-                  category === option ? 'border-brand-green bg-brand-green' : 'border-midGray bg-white'
-                }`}
-              >
-                <Text
-                  className={`font-sans-medium text-sm ${category === option ? 'text-white' : 'text-richBlack'}`}
-                >
-                  {CATEGORY_LABELS[option]}
-                </Text>
-              </Pressable>
-            ))}
+      <StandardHeader
+        title={t('expensesLabel')}
+        onBackPress={() => router.back()}
+        rightAccessory={(
+          <View className="flex-row items-center gap-1 rounded-full bg-white/60 px-2 py-1">
+            <Feather name="save" size={12} color="#065F46" />
+            <Text className="font-sans text-xs text-[#065F46]">{t('localSave')}</Text>
           </View>
+        )}
+      />
 
-          <Text className="font-sans-medium text-sm text-richBlack">Amount (৳)</Text>
-          <TextInput
-            value={amountText}
-            onChangeText={setAmountText}
-            keyboardType="decimal-pad"
-            accessibilityLabel="Expense amount"
-            placeholder="0.00"
-            className="rounded-lg border border-midGray px-4 py-3 font-mono text-base text-richBlack"
-          />
+      <ExpenseSummaryStrip thisMonthTotal={thisMonthTotal} todayTotal={todayTotal} entryCount={currentMonthExpenses.length} />
 
-          <Text className="font-sans-medium text-sm text-richBlack">Description (optional)</Text>
-          <TextInput
-            value={description}
-            onChangeText={setDescription}
-            accessibilityLabel="Expense description"
-            placeholder="What was this for?"
-            className="rounded-lg border border-midGray px-4 py-3 font-sans text-base text-richBlack"
-          />
-
-          <Pressable
-            onPress={handleSave}
-            disabled={isSubmitting}
+      <View className="flex-row border-b border-brand-green/10 bg-white">
+        {tabs.map(({ key, labelKey }) => (
+          <Text
+            key={key}
+            onPress={() => setView(key)}
             accessibilityRole="button"
-            className="items-center rounded-lg bg-brand-green py-3 disabled:opacity-50"
+            className={`flex-1 py-3 text-center text-sm font-semibold ${
+              view === key ? 'border-b-2 border-brand-green text-brand-green' : 'text-midGray'
+            }`}
           >
-            <Text className="font-sans-semibold text-white">{isSubmitting ? 'Saving…' : 'Save expense'}</Text>
-          </Pressable>
-        </View>
-
-        <View className="flex-row items-center justify-between rounded-lg bg-white p-4">
-          <Text className="font-sans-medium text-sm text-richBlack">Spent today</Text>
-          <Text className="font-mono text-lg text-error">{formatMoney(total)}</Text>
-        </View>
-
-        <Text className="font-sans-bold text-base text-richBlack">Today&apos;s expenses</Text>
-        {todaysExpenses.length === 0 ? (
-          <Text className="py-6 text-center font-sans text-midGray">No expenses recorded today.</Text>
-        ) : todaysExpenses.map((expense) => (
-          <View key={expense.id} className="gap-1 rounded-lg bg-white p-4">
-            <View className="flex-row items-center justify-between">
-              <Text className="font-sans-medium text-sm text-richBlack">
-                {CATEGORY_LABELS[expense.category as ExpenseCategory] ?? expense.category}
-              </Text>
-              <Text className="font-mono text-base text-richBlack">{formatMoney(expense.amount)}</Text>
-            </View>
-            {expense.description ? (
-              <Text className="font-sans text-xs text-midGray">{expense.description}</Text>
-            ) : null}
-          </View>
+            {t(labelKey)}
+          </Text>
         ))}
+      </View>
+
+      {error ? (
+        <Text accessibilityRole="alert" className="px-4 pt-2 font-sans text-sm text-error">
+          {error}
+        </Text>
+      ) : null}
+
+      <ScrollView keyboardShouldPersistTaps="handled">
+        {view === 'quick' ? (
+          <QuickLogTab
+            category={quickCategory}
+            onCategoryChange={setQuickCategory}
+            amountText={quickAmountText}
+            onAmountTextChange={setQuickAmountText}
+            description={quickDescription}
+            onDescriptionChange={setQuickDescription}
+            onCheckDuplicate={handleCheckDuplicate}
+            onSave={handleSaveExpense}
+          />
+        ) : null}
+        {view === 'ledger' ? (
+          <LedgerTab
+            monthLabel={monthLabel}
+            isCurrentMonth={isLedgerCurrentMonth}
+            onPrevMonth={() => stepMonth(-1)}
+            onNextMonth={() => stepMonth(1)}
+            expenses={ledgerExpenses}
+            onDelete={handleDeleteExpense}
+          />
+        ) : null}
+        {view === 'analytics' ? (
+          <AnalyticsTab
+            thisMonthTotal={thisMonthTotal}
+            thisMonthCount={currentMonthExpenses.length}
+            lastMonthTotal={lastMonthTotal}
+            topCategories={topCategories}
+          />
+        ) : null}
       </ScrollView>
     </View>
   );
