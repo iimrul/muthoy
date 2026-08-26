@@ -218,7 +218,9 @@ describe("purchase_create", () => {
       row("95000000-0000-4000-8200-000000000025", "payments", "insert",
         paymentsRow(paymentId, purchaseId, { amount: 20000 })),
       row("95000000-0000-4000-8200-000000000026", "cash_drawer", "insert",
-        drawerRow(drawerId, { closing_expected: 20000 })),
+        drawerRow(drawerId)),
+      row("95000000-0000-4000-8200-000000000027", "cash_drawer", "update",
+        drawerRow(drawerId, { closing_expected: 20000, updated_at: UPDATED_AT })),
     ];
     expect((await stage(purchaseId, "purchase_create", rows)).result.status).toBe("applied");
     expect(await h!.one(
@@ -344,7 +346,9 @@ describe("purchase_receive_line — COD atomic settlement (review §3/§4)", () 
           sale_price: 30000, status: "received", received_at: CREATED_AT, updated_at: UPDATED_AT,
         })),
       row("95000000-0000-4000-8200-000000000072", "batches", "insert",
-        batchesRow(batchId, { batch_no: "B-PEND-1", purchase_price: 20000, sale_price: 30000 })),
+        batchesRow(batchId, {
+          batch_no: "B-PEND-1", expiry_date: "2028-06-01", purchase_price: 20000, sale_price: 30000,
+        })),
       row("95000000-0000-4000-8200-000000000073", "inventory_movements", "insert",
         movementRow(movementId, batchId, purchaseId, { change_qty: 3 })),
       row("95000000-0000-4000-8200-000000000074", "purchases", "update",
@@ -355,7 +359,9 @@ describe("purchase_receive_line — COD atomic settlement (review §3/§4)", () 
       row("95000000-0000-4000-8200-000000000075", "payments", "insert",
         paymentsRow(codPaymentId, purchaseId, { amount: 60000 })),
       row("95000000-0000-4000-8200-000000000076", "cash_drawer", "insert",
-        drawerRow(drawerId, { closing_expected: 60000 })),
+        drawerRow(drawerId)),
+      row("95000000-0000-4000-8200-000000000077", "cash_drawer", "update",
+        drawerRow(drawerId, { closing_expected: 60000, updated_at: UPDATED_AT })),
     ];
     expect((await stage(purchaseId, "purchase_receive_line", rows)).result.status).toBe("applied");
     const after = await h!.one<{ total: number; paid_amount: number }>(
@@ -400,7 +406,9 @@ describe("purchase_receive_line — COD atomic settlement (review §3/§4)", () 
           sale_price: 22000, status: "received", received_at: CREATED_AT,
         })),
       row("95000000-0000-4000-8200-000000000082", "batches", "insert",
-        batchesRow(batchId, { batch_no: "B-PEND-2", purchase_price: 15000, sale_price: 22000 })),
+        batchesRow(batchId, {
+          batch_no: "B-PEND-2", expiry_date: "2028-06-01", purchase_price: 15000, sale_price: 22000,
+        })),
       row("95000000-0000-4000-8200-000000000083", "inventory_movements", "insert",
         movementRow(movementId, batchId, purchaseId, { change_qty: 4 })),
       row("95000000-0000-4000-8200-000000000084", "purchases", "update",

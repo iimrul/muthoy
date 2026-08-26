@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import Feather from '@expo/vector-icons/Feather';
 import { LanguageToggle } from './LanguageToggle';
 import { useI18n } from '../../state/localeStore';
 
@@ -8,8 +9,10 @@ import { useI18n } from '../../state/localeStore';
 // applied to every screen except MorningDashboard and Registration."
 // Presentation only (DEVELOPMENT_RULES.md).
 //
-// Language toggle intentionally NOT built here yet — there is no i18n layer
-// anywhere in the app to toggle between (flagged, not guessed).
+// Icons use @expo/vector-icons' Feather set (already an app dependency) —
+// the closest stroke-icon match to the prototype's lucide-react icons
+// without adding a new native dependency, replacing the bell/chevron/sync
+// glyph characters this shipped with.
 
 export interface StandardHeaderProps {
   title: string;
@@ -35,7 +38,7 @@ export function StandardHeader({ title, onBackPress, onBellPress, unreadCount = 
           hitSlop={8}
           className="absolute left-4 h-10 w-10 items-center justify-center active:opacity-70"
         >
-          <Text className="font-sans-semibold text-xl text-richBlack">‹</Text>
+          <Feather name="chevron-left" size={24} color="#111827" />
         </Pressable>
       ) : null}
       <Text className="font-sans-semibold text-base text-richBlack">{title}</Text>
@@ -48,7 +51,7 @@ export function StandardHeader({ title, onBackPress, onBellPress, unreadCount = 
             hitSlop={8}
             className="h-10 w-10 items-center justify-center active:opacity-70"
           >
-            <Text className="font-sans-semibold text-xl text-richBlack">🔔</Text>
+            <Feather name="bell" size={20} color="#111827" />
             {unreadCount > 0 ? (
               <View className="absolute right-0 top-0 min-w-5 items-center rounded-full bg-error px-1">
                 <Text className="font-mono text-xs text-white">{unreadCount > 10 ? '10+' : unreadCount}</Text>
@@ -65,7 +68,7 @@ export function StandardHeader({ title, onBackPress, onBellPress, unreadCount = 
             hitSlop={8}
             className="h-10 w-10 items-center justify-center active:opacity-70"
           >
-            <Text className="font-sans-semibold text-lg text-brand-green">{syncing ? '…' : '↻'}</Text>
+            <Feather name="refresh-cw" size={18} color="#059669" />
           </Pressable>
         ) : null}
         {rightAccessory}

@@ -20,7 +20,11 @@ import {
   batchPromotions,
   batches,
   medicines,
+  roles,
   shopB2Settings,
+  shops,
+  userPermissions,
+  users,
 } from "./schema";
 import { generateId } from "../native/id";
 import {
@@ -30,13 +34,22 @@ import {
   type Batch,
 } from "../domain/fefo";
 import type { ExpiryStatus } from "../domain/notificationRules";
+import {
+  fromStoragePermissionKey,
+  resolvePermission,
+  toRole,
+  type PermissionOverrides,
+} from "../domain/permissions";
+import type { PurchasePaymentType } from "../domain/purchases";
 import { requirePermission } from "./auth";
 import { permissionForDataGate } from "./dataAccessGates";
 import {
   assertSessionLive,
   DuplicateBatchError,
   isUniqueConstraintViolation,
+  NotAuthorizedError,
 } from "./errors";
+import { writePurchaseEffects } from "./purchases";
 import { addStock, adjustStock } from "./stockLedger";
 import { recordChange, stampUpdatedAt } from "./sync-helpers";
 import {
@@ -51,6 +64,7 @@ export interface MedicineListRow {
   medicineId: string;
   name: string;
   generic: string | null;
+  manufacturer: string | null;
   threshold: number;
   totalStock: number;
   sellableStock: number;
@@ -73,6 +87,7 @@ export async function listMedicines(
       id: medicines.id,
       name: medicines.name,
       generic: medicines.generic,
+      manufacturer: medicines.manufacturer,
       threshold: medicines.threshold,
       override: medicines.lowStockThresholdOverride,
     })
@@ -149,6 +164,7 @@ export async function listMedicines(
       medicineId: medicine.id,
       name: medicine.name,
       generic: medicine.generic,
+      manufacturer: medicine.manufacturer,
       threshold: effectiveLowStockThreshold(
         medicine.override,
         settings?.lowStockDefault,
@@ -286,6 +302,180 @@ export async function createMedicineWithBatch(
   });
 
   return { medicineId, batchId };
+}
+
+export interface CreateMedicineWithPurchaseInput {
+  shopId: string;
+  actorUserId: string;
+  isStillActive: () => boolean;
+  name: string;
+  generic?: string;
+  manufacturer?: string;
+  strength?: string;
+  category?: string;
+  unitOfMeasure: string;
+  requiresPrescription: boolean;
+  threshold?: number;
+  barcode?: string;
+  supplierId: string;
+  paymentType: PurchasePaymentType;
+  firstBatch: {
+    batchNo: string;
+    expiryDate?: string;
+    quantity: number;
+    purchasePrice: Paisa;
+    salePrice: Paisa;
+  };
+}
+
+// Founder decision (Sales+Inventory prototype-parity recovery): Add
+// Medicine's Search/Manual flow gained a required Supplier + Payment Method
+// step, so the medicine, its first batch, the purchase invoice, and (for
+// COD) the supplier-payment/cash-drawer ledger effect must commit or roll
+// back TOGETHER — not medicine-create-then-separate-purchase-call. This
+// reuses db/purchases.ts's writePurchaseEffects (the exact mechanics
+// createPurchase itself runs) inside ONE transaction with the medicine
+// insert, instead of duplicating invoice numbering / COD Supplier-Credit
+// resolution / stock-movement logic here.
+//
+// Gated on inventory_add, NOT requireOwner and NOT inventory_edit: this is
+// deliberately the one non-owner-eligible path into purchase/payment/ledger
+// effects, scoped to a staff member the Owner has explicitly granted
+// inventory_add — never blanket purchase-creation access (that stays
+// owner-only via createPurchase/app/suppliers/purchase-create.tsx).
+export async function createMedicineWithPurchase(
+  input: CreateMedicineWithPurchaseInput,
+): Promise<{
+  medicineId: string;
+  batchId: string;
+  purchaseId: string;
+  invoiceNo: string;
+}> {
+  await requirePermission(
+    input.shopId,
+    input.actorUserId,
+    permissionForDataGate("inventoryAdd"),
+  );
+
+  const medicineId = generateId();
+
+  return db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
+
+    // Recheck inside the write transaction — same rationale as
+    // createPurchase's owner recheck (db/purchases.ts): a stale caller whose
+    // inventory_add grant was revoked between the public guard above and
+    // this write must not slip through. Synchronous, not a re-call of the
+    // async requirePermission above: this transaction, like createPurchase's,
+    // never awaits mid-write, so the check re-reads the same two tables
+    // requirePermission itself reads (role, then permission overrides) and
+    // feeds them through the identical pure resolvePermission function —
+    // one source of truth for the grant decision, just read synchronously.
+    const roleRow = tx
+      .select({ role: roles.name })
+      .from(users)
+      .innerJoin(
+        shops,
+        and(eq(shops.id, users.shopId), eq(shops.isDeleted, false)),
+      )
+      .innerJoin(
+        roles,
+        and(eq(roles.id, users.roleId), eq(roles.shopId, users.shopId)),
+      )
+      .where(
+        and(
+          eq(users.id, input.actorUserId),
+          eq(users.shopId, input.shopId),
+          eq(users.isActive, true),
+          eq(users.isDeleted, false),
+        ),
+      )
+      .get();
+    const role = toRole(roleRow?.role ?? null);
+    if (!role) {
+      throw new NotAuthorizedError();
+    }
+    const overrideRows = tx
+      .select({ key: userPermissions.key, allowed: userPermissions.allowed })
+      .from(userPermissions)
+      .where(
+        and(
+          eq(userPermissions.userId, input.actorUserId),
+          eq(userPermissions.shopId, input.shopId),
+          eq(userPermissions.isDeleted, false),
+        ),
+      )
+      .all();
+    const overrides: PermissionOverrides = {};
+    for (const row of overrideRows) {
+      const permission = fromStoragePermissionKey(row.key);
+      if (permission) {
+        overrides[permission] = row.allowed;
+      }
+    }
+    if (!resolvePermission(role, "inventory_add", overrides)) {
+      throw new NotAuthorizedError();
+    }
+
+    const now = new Date().toISOString();
+    const medicineValues = {
+      id: medicineId,
+      shopId: input.shopId,
+      name: input.name,
+      generic: input.generic ?? null,
+      manufacturer: input.manufacturer ?? null,
+      strength: input.strength ?? null,
+      category: input.category ?? null,
+      unitOfMeasure: input.unitOfMeasure,
+      requiresPrescription: input.requiresPrescription,
+      threshold: input.threshold ?? 10,
+      lowStockThresholdOverride: input.threshold ?? null,
+      barcode: input.barcode ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    tx.insert(medicines).values(medicineValues).run();
+
+    const { purchaseId, invoiceNo } = writePurchaseEffects(tx, {
+      shopId: input.shopId,
+      supplierId: input.supplierId,
+      staffId: input.actorUserId,
+      paymentType: input.paymentType,
+      source: "manual",
+      inventoryAddMedicine: { id: medicineId, payload: medicineValues },
+      lineItems: [
+        {
+          medicineId,
+          batchNo: input.firstBatch.batchNo,
+          expiryDate: input.firstBatch.expiryDate ?? null,
+          quantity: input.firstBatch.quantity,
+          purchasePrice: input.firstBatch.purchasePrice,
+          salePrice: input.firstBatch.salePrice,
+        },
+      ],
+    });
+
+    // The batch writePurchaseEffects just created for this brand-new
+    // medicineId — medicineId is freshly generated above, so there is no
+    // prior batch row it could have matched instead (same non-collision
+    // argument createMedicineWithBatch's own comment makes).
+    const batchRow = tx
+      .select({ id: batches.id })
+      .from(batches)
+      .where(
+        and(
+          eq(batches.shopId, input.shopId),
+          eq(batches.medicineId, medicineId),
+          eq(batches.batchNo, input.firstBatch.batchNo),
+        ),
+      )
+      .get();
+    if (!batchRow) {
+      throw new Error("Batch was not created for the new medicine");
+    }
+
+    return { medicineId, batchId: batchRow.id, purchaseId, invoiceNo };
+  });
 }
 
 export interface CreateMedicineOnlyInput {

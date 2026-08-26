@@ -175,6 +175,7 @@ export interface SyncOperationGroup {
     | "expense_delete"
     | "draft_hold"
     | "draft_cancel"
+    | "draft_cancel_create"
     // B3 Group 5/6 review fix: supplier_payment/purchase_receive_line/
     // purchase_void/purchase_create now ALSO have a matching
     // `sync_apply_operation` Postgres branch and pushGroup.ts KINDS entry
@@ -184,7 +185,13 @@ export interface SyncOperationGroup {
     | "supplier_payment"
     | "purchase_receive_line"
     | "purchase_void"
-    | "purchase_create";
+    | "purchase_create"
+    | "inventory_add_purchase"
+    // B3 Group 7: purchase_returns insert + inventory_movements negative
+    // row + audit_logs row, atomically. Purely additive — see the Postgres
+    // dispatcher migration for the matching `sync_apply_operation` branch
+    // (local file only, same rollout caveat as the Groups 4-6 kinds above).
+    | "purchase_return";
   sequence: number;
   expectedCount: number;
 }

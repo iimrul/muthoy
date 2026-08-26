@@ -13,7 +13,7 @@
 // each section still passes through its own permission-gated read, so a later
 // Manager reuse cannot quietly widen access.
 
-import { asPaisa, ZERO_PAISA, type Paisa } from "@muthoy/types";
+import { addPaisa, asPaisa, ZERO_PAISA, type Paisa } from "@muthoy/types";
 import { DHAKA_SQL_OFFSET } from "@muthoy/utils";
 import {
   ALERT_PREVIEW_ROWS,
@@ -37,6 +37,7 @@ import {
 import { sqliteConnection } from "./client";
 import { getB2Settings, getShopName } from "./settings";
 import { getStaffPerformance, type StaffPerformanceRow } from "./staffDashboard";
+import { getSupplierPositionSync } from "./suppliers";
 
 /** Yesterday's summary sheet lists its three best sellers, like the prototype. */
 const TOP_ITEM_ROWS = 3;
@@ -232,34 +233,53 @@ export async function getCreditSummary(
 export interface SupplierPayableSummary {
   payable: Paisa;
   supplierCount: number;
+  /**
+   * Shop-wide sum of every individual supplier's own standalone Supplier
+   * Credit (domain/supplierPosition.ts) — money the supplier owes the shop
+   * back, e.g. an unconsumed purchase-return credit. Deliberately NEVER
+   * netted against a different supplier's payable: a credit from Supplier A
+   * cannot offset a debt to Supplier B. Group 7 does not add a new dashboard
+   * tile for this — it is exposed here so the existing "Supplier Payable"
+   * KPI can optionally show it as a small secondary line without changing
+   * the card's layout (see app/(tabs)/dashboard.tsx).
+   */
+  supplierCreditTotal: Paisa;
 }
 
-/** Aggregate only — `listSuppliers` would load every supplier row for two numbers. */
+/**
+ * Aggregate only — `listSuppliers` would load every supplier row for three
+ * numbers. Routes through the same canonical `computeSupplierPosition`
+ * (domain/supplierPosition.ts, B3 Group 7) every other supplier screen uses,
+ * one supplier at a time — this ALSO fixes a pre-existing divergence: the
+ * prior hand-rolled SQL here summed `total - paid_amount` without excluding
+ * voided purchases (`listSuppliers`/`getSupplierDetail` always did), so a
+ * voided credit purchase could inflate this KPI above what the list/detail
+ * screens showed for the same shop. `getSupplierPositionSync` reads only
+ * non-voided purchases, so that divergence cannot recur.
+ */
 export async function getSupplierPayableSummary(
   shopId: string,
   actorUserId: string,
 ): Promise<SupplierPayableSummary> {
   await requireOwner(shopId, actorUserId);
-  const row = sqliteConnection.getFirstSync<{
-    payable: number;
-    supplierCount: number;
-  }>(
-    `SELECT COALESCE(SUM(payable), 0) AS payable, COUNT(*) AS supplierCount
-       FROM (SELECT s.id,
-                    SUM(CASE WHEN p.is_deleted = 0
-                             THEN p.total - p.paid_amount ELSE 0 END) AS payable
-               FROM suppliers AS s
-               LEFT JOIN purchases AS p
-                 ON p.shop_id = s.shop_id AND p.supplier_id = s.id
-              WHERE s.shop_id = $shopId AND s.is_deleted = 0
-              GROUP BY s.id
-             HAVING payable > 0)`,
+  const supplierRows = sqliteConnection.getAllSync<{ id: string }>(
+    `SELECT id FROM suppliers WHERE shop_id = $shopId AND is_deleted = 0`,
     { $shopId: shopId },
   );
-  return {
-    payable: asPaisa(row?.payable ?? 0),
-    supplierCount: row?.supplierCount ?? 0,
-  };
+  let payable = ZERO_PAISA;
+  let supplierCount = 0;
+  let supplierCreditTotal = ZERO_PAISA;
+  for (const supplier of supplierRows) {
+    const position = getSupplierPositionSync(shopId, supplier.id);
+    if (position.outstandingPayable > ZERO_PAISA) {
+      payable = addPaisa(payable, position.outstandingPayable);
+      supplierCount += 1;
+    }
+    if (position.supplierCredit > ZERO_PAISA) {
+      supplierCreditTotal = addPaisa(supplierCreditTotal, position.supplierCredit);
+    }
+  }
+  return { payable, supplierCount, supplierCreditTotal };
 }
 
 // ── Expiry and low stock ────────────────────────────────────────────────

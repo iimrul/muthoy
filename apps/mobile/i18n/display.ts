@@ -23,6 +23,32 @@ export function purchaseTermsLabel(terms: string, t: Translate): string {
   return terms === 'cod' ? t('codLabel') : t('onCreditLabel');
 }
 
+// B3 Group 7: maps a purchase-return reason to its translated preset label.
+// A reason that isn't one of the seven preset slugs is the free-text note
+// entered under "Other" — rendered literally, never translated, exactly like
+// a customer-entered name or note elsewhere in the app.
+const RETURN_REASON_SLUGS: Record<string, CatalogKey> = {
+  expired: 'reasonExpiredLabel',
+  near_expiry: 'reasonNearExpiryLabel',
+  slow_moving: 'reasonSlowMovingLabel',
+  damaged: 'reasonDamagedLabel',
+  wrong_item: 'reasonWrongItemLabel',
+  supplier_recall: 'reasonSupplierRecallLabel',
+  other: 'reasonOtherLabel',
+};
+export function returnReasonLabel(reason: string, t: Translate): string {
+  const key = RETURN_REASON_SLUGS[reason];
+  return key ? t(key) : reason;
+}
+export function purchaseLineReturnStatusLabel(
+  status: 'received' | 'partially_returned' | 'fully_returned',
+  t: Translate,
+): string {
+  if (status === 'partially_returned') return t('partiallyReturnedLabel');
+  if (status === 'fully_returned') return t('fullyReturnedLabel');
+  return t('receivedStatusLabel');
+}
+
 export function localizeValidationMessage(message: string | undefined, t: Translate): string | undefined {
   if (!message) return undefined;
   const labels: Record<string, CatalogKey> = {
@@ -60,6 +86,9 @@ export function userFacingError(error: unknown, fallback: CatalogKey, t: Transla
     SupplierPayableOutstandingError: 'supplierOutstandingArchiveErrorLabel',
     DuplicateBatchError: 'duplicateBatchErrorLabel',
     BatchExpiryMismatchError: 'batchExpiryMismatchErrorLabel',
+    PurchaseLineNotReceivedError: 'lineNotReceivedForReturnLabel',
+    PurchaseReturnExceedsAvailableError: 'quantityExceedsAvailableLabel',
+    PurchaseReturnReasonRequiredError: 'reasonRequiredLabel',
   };
   const named = byName[error.name];
   if (named) return t(named);
@@ -82,6 +111,8 @@ export function userFacingError(error: unknown, fallback: CatalogKey, t: Transla
     'Cannot create a purchase without line items': 'addLineItemFirstLabel',
     'This line has already been received': 'lineAlreadyReceivedErrorLabel',
     'Purchase line does not belong to this purchase': 'purchaseLineMissingErrorLabel',
+    'Batch must have zero stock, no oversell, and no active promotion': 'medicineArchiveRequirementsLabel',
+    'Medicine not found': 'medicineMissingLabel',
   };
   return t(byMessage[error.message] ?? fallback);
 }

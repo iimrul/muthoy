@@ -7,6 +7,7 @@ import { ALWAYS_LIVE } from "./errors";
 
 vi.mock("../native/prescriptionAttachment", () => ({
   preparePrescriptionAttachment: vi.fn(),
+  prepareDraftPrescriptionAttachment: vi.fn().mockRejectedValue(new Error("copy failed")),
   removePreparedPrescriptionAttachment: vi.fn(),
 }));
 
@@ -14,7 +15,8 @@ const { db } = await import("./client");
 const schema = await import("./schema");
 const { createSaleTransaction, SaleQuoteChangedError } =
   await import("./sales");
-const { holdSaleDraft } = await import("./saleDrafts");
+const { createCancelledSaleDraft, getSaleDraft, holdSaleDraft } =
+  await import("./saleDrafts");
 const { collectPayment } = await import("./customers");
 
 function applyMigration(name: string): void {
@@ -277,6 +279,70 @@ describe("B2 sale transaction", () => {
     ).toBe(stockBefore);
   });
 
+  it("rejects reconfirmation when the server quote changed again", async () => {
+    let firstQuote: InstanceType<typeof SaleQuoteChangedError> | undefined;
+    try {
+      await createSaleTransaction({
+        shopId: "shop",
+        staffId: "owner",
+        isStillActive: ALWAYS_LIVE,
+        payment: { type: "cash", tendered: asPaisa(5000) },
+        quotedTotal: asPaisa(1),
+        lines: [{ medicineId: "medicine", quantity: 1 }],
+      });
+    } catch (caught) {
+      expect(caught).toBeInstanceOf(SaleQuoteChangedError);
+      firstQuote = caught as InstanceType<typeof SaleQuoteChangedError>;
+    }
+    expect(firstQuote).toBeDefined();
+    const batchId = firstQuote!.refreshedAllocation[0]!.batchId;
+    sqlite
+      .prepare("UPDATE batches SET sale_price = sale_price + 100 WHERE id = ?")
+      .run(batchId);
+
+    await expect(
+      createSaleTransaction({
+        shopId: "shop",
+        staffId: "owner",
+        isStillActive: ALWAYS_LIVE,
+        payment: { type: "cash", tendered: asPaisa(5000) },
+        quotedTotal: asPaisa(1),
+        confirmedQuote: {
+          total: firstQuote!.refreshedTotal,
+          allocation: firstQuote!.refreshedAllocation,
+        },
+        lines: [{ medicineId: "medicine", quantity: 1 }],
+      }),
+    ).rejects.toBeInstanceOf(SaleQuoteChangedError);
+    sqlite
+      .prepare("UPDATE batches SET sale_price = sale_price - 100 WHERE id = ?")
+      .run(batchId);
+  });
+
+  it("restores prescription requirements from a held cart", async () => {
+    sqlite
+      .prepare("UPDATE medicines SET requires_prescription = 1 WHERE id = 'medicine'")
+      .run();
+    const held = await holdSaleDraft({
+      shopId: "shop",
+      actorUserId: "owner",
+      originDeviceId: "device-a",
+      isStillActive: ALWAYS_LIVE,
+      items: [{ medicineId: "medicine", quantity: 1 }],
+    });
+
+    const restored = await getSaleDraft("shop", "owner", held.draftId);
+    expect(restored.items).toEqual([
+      expect.objectContaining({
+        medicineId: "medicine",
+        requiresPrescription: true,
+      }),
+    ]);
+    sqlite
+      .prepare("UPDATE medicines SET requires_prescription = 0 WHERE id = 'medicine'")
+      .run();
+  });
+
   it("completes a held draft in the same grouped sale operation", async () => {
     const held = await holdSaleDraft({
       shopId: "shop",
@@ -322,6 +388,48 @@ describe("B2 sale transaction", () => {
         (row) => row.tableName === "sale_drafts" && row.rowId === held.draftId,
       ),
     ).toBe(true);
+  });
+
+  it("persists current cancellation as one complete grouped operation", async () => {
+    const cancelled = await createCancelledSaleDraft({
+      shopId: "shop",
+      actorUserId: "owner",
+      originDeviceId: "device-a",
+      isStillActive: ALWAYS_LIVE,
+      items: [{ medicineId: "medicine", quantity: 2 }],
+    });
+    const draft = db.select().from(schema.saleDrafts).where(
+      (await import("drizzle-orm")).eq(schema.saleDrafts.id, cancelled.draftId),
+    ).get();
+    expect(draft?.status).toBe("cancelled");
+    const group = db.select().from(schema.syncQueue).where(
+      (await import("drizzle-orm")).eq(schema.syncQueue.operationGroupId, cancelled.draftId),
+    ).all();
+    expect(group).toHaveLength(2);
+    expect(group.map((row) => row.operationKind)).toEqual([
+      "draft_cancel_create",
+      "draft_cancel_create",
+    ]);
+    expect(group.map((row) => row.operationSequence)).toEqual([0, 1]);
+    expect(group.every((row) => row.operationExpectedCount === 2)).toBe(true);
+  });
+
+  it("keeps the cart hold unpersisted when a selected image cannot become durable", async () => {
+    const before = Number(
+      (sqlite.prepare("SELECT count(*) AS value FROM sale_drafts").get() as { value: number }).value,
+    );
+    await expect(holdSaleDraft({
+      shopId: "shop",
+      actorUserId: "owner",
+      originDeviceId: "device-a",
+      isStillActive: ALWAYS_LIVE,
+      items: [{ medicineId: "medicine", quantity: 1 }],
+      prescriptionImageUri: "file:///temporary/rx.jpg",
+    })).rejects.toThrow("copy failed");
+    const after = Number(
+      (sqlite.prepare("SELECT count(*) AS value FROM sale_drafts").get() as { value: number }).value,
+    );
+    expect(after).toBe(before);
   });
 
   it("groups a customer collection, FIFO allocation, and credit balance atomically", async () => {

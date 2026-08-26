@@ -61,13 +61,22 @@ export interface MedicineSearchResult {
   medicineId: string;
   name: string;
   generic: string | null;
+  manufacturer: string | null;
+  requiresPrescription: boolean;
   activeBatch: Batch;
+  /** domain/fefo.ts's Batch omits batchNo (FEFO logic never needs it) — carried here for the Sale Entry card's batch+expiry line only. */
+  activeBatchNo: string | null;
+  /** 0 when the active batch has no active promotion. */
+  promotionBps: number;
+  originalUnitPrice: Paisa;
 }
 
 interface FtsMedicineRow {
   medicineId: string;
   name: string;
   generic: string | null;
+  manufacturer: string | null;
+  requiresPrescription: boolean;
 }
 
 function toFtsPrefixQuery(query: string): string {
@@ -89,7 +98,8 @@ export async function searchMedicinesForSale(
   }
 
   const medicineRows = sqliteConnection.getAllSync<FtsMedicineRow>(
-    `SELECT m.id AS medicineId, m.name, m.generic
+    `SELECT m.id AS medicineId, m.name, m.generic, m.manufacturer,
+            m.requires_prescription AS requiresPrescription
        FROM medicines_fts
        JOIN medicines AS m ON m.rowid = medicines_fts.rowid
       WHERE medicines_fts MATCH $matchQuery
@@ -121,6 +131,7 @@ export async function searchMedicinesForSale(
     .select({
       id: batches.id,
       medicineId: batches.medicineId,
+      batchNo: batches.batchNo,
       expiryDate: batches.expiryDate,
       quantityAvailable: batches.stock,
       salePrice: batches.salePrice,
@@ -176,6 +187,7 @@ export async function searchMedicinesForSale(
       businessDateDifference(batch.expiryDate, businessDate) <= farDays;
     return {
       ...batch,
+      originalUnitPrice: batch.salePrice,
       salePrice: effectiveUnitPrice(
         batch.salePrice,
         eligiblePromotion ? (batch.promotionBps ?? 0) : 0,
@@ -195,11 +207,24 @@ export async function searchMedicinesForSale(
           (row.expiryDate === null || row.expiryDate >= businessDate),
       )
       .reduce((sum, row) => sum + row.quantityAvailable, 0);
+    // activeSellableBatch's declared return type is the pure domain Batch
+    // (no batchNo/promotionBps — domain/fefo.ts never needs them), but the
+    // object it returns is one of these exact pricedRows entries, so this
+    // re-finds it by id rather than widening the shared FEFO helper's type
+    // for a display-only concern.
+    const selectedExtra = selected
+      ? pricedRows.find((row) => row.id === selected.id)
+      : undefined;
     return selected
       ? [
           {
             ...medicine,
+            requiresPrescription: Boolean(medicine.requiresPrescription),
             activeBatch: { ...selected, quantityAvailable: sellableStock },
+            activeBatchNo: selectedExtra?.batchNo ?? null,
+            promotionBps: selectedExtra?.promotionBps ?? 0,
+            originalUnitPrice:
+              selectedExtra?.originalUnitPrice ?? selected.salePrice,
           },
         ]
       : [];
@@ -324,7 +349,10 @@ export interface SaleTransactionInput {
   discount?: CheckoutDiscount;
   quotedTotal?: Paisa;
   quotedAllocation?: SaleQuoteAllocation[];
-  confirmQuoteChange?: boolean;
+  confirmedQuote?: {
+    total: Paisa;
+    allocation: SaleQuoteAllocation[];
+  };
   prescription?: {
     prescriptionNo?: string;
     patientName?: string;
@@ -606,7 +634,11 @@ export async function createSaleTransaction(
         (input.quotedAllocation !== undefined &&
           quoteIdentity(input.quotedAllocation) !==
             quoteIdentity(refreshedAllocation));
-      if (quoteChanged && !input.confirmQuoteChange)
+      const confirmedQuoteMatches =
+        input.confirmedQuote?.total === total &&
+        quoteIdentity(input.confirmedQuote.allocation) ===
+          quoteIdentity(refreshedAllocation);
+      if (quoteChanged && !confirmedQuoteMatches)
         throw new SaleQuoteChangedError(total, refreshedAllocation);
 
       const payment = resolveSalePayment(total, paymentRequest(input, total));

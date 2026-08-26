@@ -44,18 +44,21 @@ interface StubProps {
   value?: string;
   onChangeText?: (value: string) => void;
   disabled?: boolean;
+  placeholder?: string;
 }
 
 vi.mock('react-native', () => ({
+  Alert: { alert: vi.fn() },
   View: ({ children }: StubProps) => createElement('div', null, children),
   Text: ({ children }: StubProps) => createElement('span', null, children),
   ScrollView: ({ children }: StubProps) => createElement('div', null, children),
   Pressable: ({ children, onPress, accessibilityLabel, disabled }: StubProps) =>
     createElement('button', { onClick: onPress, 'aria-label': accessibilityLabel, disabled }, children),
-  TextInput: ({ value, onChangeText, accessibilityLabel }: StubProps) =>
+  TextInput: ({ value, onChangeText, accessibilityLabel, placeholder }: StubProps) =>
     createElement('input', {
       value: value ?? '',
-      'aria-label': accessibilityLabel,
+      'aria-label': accessibilityLabel ?? placeholder,
+      placeholder,
       onChange: (event: { target: { value: string } }) => onChangeText?.(event.target.value),
     }),
 }));
@@ -74,6 +77,10 @@ const deps = vi.hoisted(() => ({
   listCustomers: vi.fn(),
   listBatchesForMedicine: vi.fn(),
   createSaleTransaction: vi.fn(),
+  getActiveBatchForMedicine: vi.fn(),
+  holdSaleDraft: vi.fn(),
+  cancelSaleDraft: vi.fn(),
+  createCancelledSaleDraft: vi.fn(),
   runNotificationChecks: vi.fn(),
   triggerSyncNow: vi.fn(),
   stopSyncEngine: vi.fn(),
@@ -83,9 +90,22 @@ vi.mock('../../db/customers', () => ({ listCustomers: deps.listCustomers }));
 vi.mock('../../db/inventory', () => ({ listBatchesForMedicine: deps.listBatchesForMedicine }));
 vi.mock('../../db/sales', () => ({
   createSaleTransaction: deps.createSaleTransaction,
+  getActiveBatchForMedicine: deps.getActiveBatchForMedicine,
   SaleQuoteChangedError: class SaleQuoteChangedError extends Error {
-    constructor(readonly refreshedTotal: number) { super('Quote changed'); }
+    constructor(
+      readonly refreshedTotal: number,
+      readonly refreshedAllocation: {
+        batchId: string;
+        quantity: number;
+        unitPrice: number;
+      }[] = [],
+    ) { super('Quote changed'); }
   },
+}));
+vi.mock('../../db/saleDrafts', () => ({
+  holdSaleDraft: deps.holdSaleDraft,
+  cancelSaleDraft: deps.cancelSaleDraft,
+  createCancelledSaleDraft: deps.createCancelledSaleDraft,
 }));
 vi.mock('../../native/notifications', () => ({ runNotificationChecks: deps.runNotificationChecks }));
 // state/switchUser.ts imports stopSyncEngine from this same module, so the
@@ -103,11 +123,13 @@ vi.mock('../../domain/fefo', async (importOriginal) => ({
 }));
 
 const { StaleSessionError } = await import('../../db/errors');
+const { useLocaleStore } = await import('../../state/localeStore');
 const { useSessionStore } = await import('../../state/sessionStore');
 type Session = import('../../state/sessionStore').Session;
 const { useCartStore } = await import('../../state/cartStore');
 const { switchUser } = await import('../../state/switchUser');
 const { asPaisa } = await import('@muthoy/types');
+const { SaleQuoteChangedError } = await import('../../db/sales');
 const CheckoutScreen = (await import('../../app/sale/checkout')).default;
 
 const OWNER: Session = { shopId: SHOP_ID, userId: '3f1c8a90-0000-4000-8000-000000000002', role: 'owner' };
@@ -125,7 +147,7 @@ function fillCart(): void {
 
 /** Enters enough cash and presses Confirm sale. */
 async function confirmCashSale(): Promise<void> {
-  fireEvent.change(screen.getByLabelText('Amount tendered'), { target: { value: '100' } });
+  fireEvent.change(screen.getByLabelText('Amount tendered (৳)'), { target: { value: '100' } });
   await act(async () => {
     fireEvent.click(screen.getByLabelText('Confirm sale'));
   });
@@ -138,6 +160,11 @@ function staffIdOfLastSale(): string {
 beforeEach(() => {
   vi.clearAllMocks();
   mmkv.stores.forEach((store) => store.clear());
+  // Checkout's copy is locale-driven (state/localeStore.ts defaults to
+  // "bn"); this suite is about session-handover attribution, not i18n, so
+  // it pins English to keep querying the same stable label strings it
+  // always has rather than asserting on Bangla translations.
+  useLocaleStore.getState().setLocale('en');
   useSessionStore.setState({ session: null });
   useCartStore.setState({ items: [] });
   deps.listCustomers.mockResolvedValue([]);
@@ -149,6 +176,16 @@ beforeEach(() => {
     total: asPaisa(1000),
     change: asPaisa(9000),
   });
+  deps.getActiveBatchForMedicine.mockResolvedValue({
+    id: BATCH_ID,
+    medicineId: MEDICINE_ID,
+    quantityAvailable: 10,
+    salePrice: asPaisa(1000),
+    expiryDate: null,
+  });
+  deps.holdSaleDraft.mockResolvedValue({ draftId: 'draft-current' });
+  deps.cancelSaleDraft.mockResolvedValue(undefined);
+  deps.createCancelledSaleDraft.mockResolvedValue({ draftId: 'draft-current' });
 });
 
 afterEach(() => {
@@ -207,7 +244,7 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
     fillCart();
     render(createElement(CheckoutScreen));
 
-    fireEvent.change(screen.getByLabelText('Amount tendered'), { target: { value: '100' } });
+    fireEvent.change(screen.getByLabelText('Amount tendered (৳)'), { target: { value: '100' } });
     fireEvent.click(screen.getByLabelText('Confirm sale'));
     await waitFor(() => expect(deps.createSaleTransaction).toHaveBeenCalled());
 
@@ -239,7 +276,7 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
     fillCart();
     render(createElement(CheckoutScreen));
 
-    fireEvent.change(screen.getByLabelText('Amount tendered'), { target: { value: '100' } });
+    fireEvent.change(screen.getByLabelText('Amount tendered (৳)'), { target: { value: '100' } });
     fireEvent.click(screen.getByLabelText('Confirm sale'));
     await waitFor(() => expect(deps.createSaleTransaction).toHaveBeenCalled());
 
@@ -322,5 +359,99 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
 
     // An empty cart is refused outright: nothing of the owner's survives.
     expect(deps.createSaleTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('checkout remediation', () => {
+  it('requires stale-quote reconfirmation again after any cart edit', async () => {
+    deps.createSaleTransaction
+      .mockRejectedValueOnce(new SaleQuoteChangedError(asPaisa(1_100), []))
+      .mockResolvedValueOnce({
+        saleId: 'sale-2',
+        invoiceNo: 'INV-2',
+        total: asPaisa(2_000),
+        change: asPaisa(8_000),
+      });
+    useSessionStore.getState().login(OWNER);
+    fillCart();
+    render(createElement(CheckoutScreen));
+    await waitFor(() => expect(deps.getActiveBatchForMedicine).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText('Amount tendered (৳)'), { target: { value: '100' } });
+    fireEvent.click(screen.getByLabelText('Confirm sale'));
+    await screen.findByLabelText('Confirm refreshed total');
+
+    fireEvent.click(screen.getByLabelText('Increase Napa quantity'));
+    await screen.findByLabelText('Confirm sale');
+    fireEvent.click(screen.getByLabelText('Confirm sale'));
+    await waitFor(() => expect(deps.createSaleTransaction).toHaveBeenCalledTimes(2));
+    expect(deps.createSaleTransaction.mock.calls[1]?.[0]?.confirmedQuote).toBeUndefined();
+  });
+
+  it('binds reconfirmation to the exact refreshed quote', async () => {
+    const allocation = [{
+      batchId: 'batch-1',
+      quantity: 1,
+      unitPrice: asPaisa(1_100),
+    }];
+    deps.createSaleTransaction
+      .mockRejectedValueOnce(new SaleQuoteChangedError(asPaisa(1_100), allocation))
+      .mockResolvedValueOnce({
+        saleId: 'sale-2',
+        invoiceNo: 'INV-2',
+        total: asPaisa(1_100),
+        change: asPaisa(8_900),
+      });
+    useSessionStore.getState().login(OWNER);
+    fillCart();
+    render(createElement(CheckoutScreen));
+    await waitFor(() => expect(deps.getActiveBatchForMedicine).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText('Amount tendered (৳)'), { target: { value: '100' } });
+    fireEvent.click(screen.getByLabelText('Confirm sale'));
+    fireEvent.click(await screen.findByLabelText('Confirm refreshed total'));
+
+    await waitFor(() => expect(deps.createSaleTransaction).toHaveBeenCalledTimes(2));
+    expect(deps.createSaleTransaction.mock.calls[1]?.[0]?.confirmedQuote).toEqual({
+      total: asPaisa(1_100),
+      allocation,
+    });
+  });
+
+  it('holds the complete checkout snapshot', async () => {
+    useSessionStore.getState().login(OWNER);
+    fillCart();
+    render(createElement(CheckoutScreen));
+
+    fireEvent.click(screen.getByText('Credit'));
+    fireEvent.click(screen.getByText('New customer'));
+    fireEvent.change(screen.getByLabelText('Customer name'), { target: { value: 'Rahim' } });
+    fireEvent.change(screen.getByLabelText('Phone (optional)'), { target: { value: '01700000000' } });
+    fireEvent.change(screen.getByLabelText('Prescription number'), { target: { value: 'RX-10' } });
+    fireEvent.change(screen.getByLabelText('Patient name'), { target: { value: 'Karim' } });
+    fireEvent.change(screen.getByLabelText('Prescriber name'), { target: { value: 'Dr A' } });
+    fireEvent.click(screen.getByLabelText('Hold'));
+
+    await waitFor(() => expect(deps.holdSaleDraft).toHaveBeenCalled());
+    expect(deps.holdSaleDraft.mock.calls[0]?.[0]?.checkoutSnapshot).toMatchObject({
+      paymentType: 'credit',
+      newCustomer: true,
+      customerName: 'Rahim',
+      customerPhone: '01700000000',
+      prescriptionNo: 'RX-10',
+      patientName: 'Karim',
+      prescriberName: 'Dr A',
+      imageUri: null,
+    });
+  });
+
+  it('durably creates and cancels a current draft before clearing the cart', async () => {
+    useSessionStore.getState().login(OWNER);
+    fillCart();
+    render(createElement(CheckoutScreen));
+
+    fireEvent.click(screen.getByLabelText('Cancel'));
+    await waitFor(() => expect(deps.createCancelledSaleDraft).toHaveBeenCalled());
+    expect(useCartStore.getState().items).toEqual([]);
   });
 });

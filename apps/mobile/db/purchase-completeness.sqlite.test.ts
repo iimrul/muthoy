@@ -181,6 +181,138 @@ describe('COD pending-line settlement (review §3/§4 fix)', () => {
   });
 });
 
+describe('COD Supplier Credit application (B3 Group 7)', () => {
+  it('creating a COD purchase consumes available Supplier Credit before any cash', async () => {
+    const supplier = await createSupplier(SHOP_ID, OWNER_ID, { name: 'Credit COD Supplier 1' }, ALWAYS_LIVE);
+    // Seed ৳2,000 of unconsumed Supplier Credit: a fully-paid COD purchase
+    // with a return whose credit has no other open invoice to offset.
+    const priorPurchase = await createPurchase({
+      isStillActive: ALWAYS_LIVE, shopId: SHOP_ID, supplierId: supplier.id, staffId: OWNER_ID,
+      paymentType: 'cod',
+      lineItems: [{ medicineId: MEDICINE_ID, batchNo: 'CREDIT-SEED-1', expiryDate: '2028-01-01', quantity: 1, purchasePrice: asPaisa(100000), salePrice: asPaisa(150000) }],
+    });
+    const priorLineId = (await getPurchaseDetail(SHOP_ID, OWNER_ID, priorPurchase.purchaseId)).lines[0]!.id;
+    sqlite.exec(
+      `INSERT INTO purchase_returns (id, shop_id, purchase_id, purchase_item_id, qty, credit_amount, created_by, created_at, updated_at)
+       VALUES ('70000000-0000-4000-9000-000000000010', '${SHOP_ID}', '${priorPurchase.purchaseId}', '${priorLineId}', 1, 200000, '${OWNER_ID}', '${NOW}', '${NOW}')`,
+    );
+
+    // New COD purchase totalling ৳5,000 — must collect only ৳3,000 cash.
+    const purchase = await createPurchase({
+      isStillActive: ALWAYS_LIVE, shopId: SHOP_ID, supplierId: supplier.id, staffId: OWNER_ID,
+      paymentType: 'cod',
+      lineItems: [{ medicineId: MEDICINE_ID, batchNo: 'CREDIT-COD-1', expiryDate: '2028-01-01', quantity: 1, purchasePrice: asPaisa(500000), salePrice: asPaisa(700000) }],
+    });
+    expect(purchase.total).toBe(500000);
+
+    const detail = await getPurchaseDetail(SHOP_ID, OWNER_ID, purchase.purchaseId);
+    expect(detail.paidAmount).toBe(300000); // ৳3,000 cash only — the founder's exact worked example
+
+    const supplierDetail = await getSupplierDetail(SHOP_ID, OWNER_ID, supplier.id);
+    expect(supplierDetail.payable).toBe(asPaisa(0));
+    expect(supplierDetail.supplierCredit).toBe(asPaisa(0));
+
+    const paymentRows = sqlite.prepare(
+      `SELECT amount FROM payments WHERE shop_id = ? AND ref_id = ? AND type = 'supplier_payment'`,
+    ).all(SHOP_ID, purchase.purchaseId) as { amount: number }[];
+    expect(paymentRows.reduce((sum, row) => sum + row.amount, 0)).toBe(300000);
+  });
+
+  it('a COD purchase fully covered by Supplier Credit writes zero cash and no payment row', async () => {
+    const supplier = await createSupplier(SHOP_ID, OWNER_ID, { name: 'Credit COD Supplier 2' }, ALWAYS_LIVE);
+    const priorPurchase = await createPurchase({
+      isStillActive: ALWAYS_LIVE, shopId: SHOP_ID, supplierId: supplier.id, staffId: OWNER_ID,
+      paymentType: 'cod',
+      lineItems: [{ medicineId: MEDICINE_ID, batchNo: 'FULLCREDIT-SEED-1', expiryDate: '2028-01-01', quantity: 1, purchasePrice: asPaisa(100000), salePrice: asPaisa(150000) }],
+    });
+    const priorLineId = (await getPurchaseDetail(SHOP_ID, OWNER_ID, priorPurchase.purchaseId)).lines[0]!.id;
+    sqlite.exec(
+      `INSERT INTO purchase_returns (id, shop_id, purchase_id, purchase_item_id, qty, credit_amount, created_by, created_at, updated_at)
+       VALUES ('70000000-0000-4000-9000-000000000011', '${SHOP_ID}', '${priorPurchase.purchaseId}', '${priorLineId}', 1, 100000, '${OWNER_ID}', '${NOW}', '${NOW}')`,
+    );
+
+    const drawerBefore = sqlite.prepare(
+      'SELECT closing_expected FROM cash_drawer WHERE shop_id = ? AND business_date = ?',
+    ).get(SHOP_ID, TODAY) as { closing_expected: number };
+    sqlite.prepare(
+      'UPDATE cash_drawer SET is_deleted = 1 WHERE shop_id = ? AND business_date = ?',
+    ).run(SHOP_ID, TODAY);
+
+    let purchase: Awaited<ReturnType<typeof createPurchase>>;
+    try {
+      purchase = await createPurchase({
+        isStillActive: ALWAYS_LIVE, shopId: SHOP_ID, supplierId: supplier.id, staffId: OWNER_ID,
+        paymentType: 'cod',
+        lineItems: [{ medicineId: MEDICINE_ID, batchNo: 'FULLCREDIT-COD-1', expiryDate: '2028-01-01', quantity: 1, purchasePrice: asPaisa(100000), salePrice: asPaisa(150000) }],
+      });
+      const drawerAfter = sqlite.prepare(
+        'SELECT closing_expected FROM cash_drawer WHERE shop_id = ? AND business_date = ?',
+      ).get(SHOP_ID, TODAY) as { closing_expected: number };
+      expect(drawerAfter.closing_expected).toBe(drawerBefore.closing_expected);
+    } finally {
+      sqlite.prepare(
+        'UPDATE cash_drawer SET is_deleted = 0 WHERE shop_id = ? AND business_date = ?',
+      ).run(SHOP_ID, TODAY);
+    }
+
+    const detail = await getPurchaseDetail(SHOP_ID, OWNER_ID, purchase.purchaseId);
+    expect(detail.paidAmount).toBe(0);
+
+    const paymentRows = sqlite.prepare(
+      `SELECT amount FROM payments WHERE shop_id = ? AND ref_id = ? AND type = 'supplier_payment'`,
+    ).all(SHOP_ID, purchase.purchaseId) as { amount: number }[];
+    expect(paymentRows.length).toBe(0);
+  });
+
+  it('receiving a pending COD line consumes available Supplier Credit before any cash', async () => {
+    const supplier = await createSupplier(SHOP_ID, OWNER_ID, { name: 'Credit COD Receive Supplier' }, ALWAYS_LIVE);
+    const priorPurchase = await createPurchase({
+      isStillActive: ALWAYS_LIVE, shopId: SHOP_ID, supplierId: supplier.id, staffId: OWNER_ID,
+      paymentType: 'cod',
+      lineItems: [{ medicineId: MEDICINE_ID, batchNo: 'RECV-CREDIT-SEED-1', expiryDate: '2028-01-01', quantity: 1, purchasePrice: asPaisa(100000), salePrice: asPaisa(150000) }],
+    });
+    const priorLineId = (await getPurchaseDetail(SHOP_ID, OWNER_ID, priorPurchase.purchaseId)).lines[0]!.id;
+    sqlite.exec(
+      `INSERT INTO purchase_returns (id, shop_id, purchase_id, purchase_item_id, qty, credit_amount, created_by, created_at, updated_at)
+       VALUES ('70000000-0000-4000-9000-000000000012', '${SHOP_ID}', '${priorPurchase.purchaseId}', '${priorLineId}', 1, 50000, '${OWNER_ID}', '${NOW}', '${NOW}')`,
+    );
+
+    const purchase = await createPurchase({
+      isStillActive: ALWAYS_LIVE, shopId: SHOP_ID, supplierId: supplier.id, staffId: OWNER_ID,
+      paymentType: 'cod',
+      lineItems: [{ medicineId: MEDICINE_ID, batchNo: 'RECV-CREDIT-PEND-1', expiryDate: '2028-06-01', quantity: 2, purchasePrice: asPaisa(20000), salePrice: asPaisa(30000), pending: true }],
+    });
+    expect(purchase.total).toBe(0); // pending line contributes nothing yet
+
+    const pendingLine = (await getPurchaseDetail(SHOP_ID, OWNER_ID, purchase.purchaseId)).lines[0]!;
+    sqlite.prepare(
+      'UPDATE cash_drawer SET is_deleted = 1 WHERE shop_id = ? AND business_date = ?',
+    ).run(SHOP_ID, TODAY);
+    let result: Awaited<ReturnType<typeof markPurchaseLineReceived>>;
+    try {
+      result = await markPurchaseLineReceived({
+        shopId: SHOP_ID, actorUserId: OWNER_ID, isStillActive: ALWAYS_LIVE,
+        purchaseId: purchase.purchaseId, purchaseItemId: pendingLine.id,
+      });
+    } finally {
+      sqlite.prepare(
+        'UPDATE cash_drawer SET is_deleted = 0 WHERE shop_id = ? AND business_date = ?',
+      ).run(SHOP_ID, TODAY);
+    }
+
+    // Line value 2 * ৳200 = ৳400 = 40000 paisa; ৳500 available credit covers
+    // it entirely — zero cash for this line.
+    expect(result.total).toBe(40000);
+    const detailAfter = await getPurchaseDetail(SHOP_ID, OWNER_ID, purchase.purchaseId);
+    expect(detailAfter.paidAmount).toBe(0);
+
+    const paymentRows = sqlite.prepare(
+      `SELECT amount FROM payments WHERE shop_id = ? AND ref_id = ? AND type = 'supplier_payment'`,
+    ).all(SHOP_ID, purchase.purchaseId) as { amount: number }[];
+    expect(paymentRows.length).toBe(0);
+  });
+});
+
 describe('void (contract §5.13)', () => {
   it('voids a purchase with zero movements and zero payments', async () => {
     const supplier = await createSupplier(SHOP_ID, OWNER_ID, { name: 'Void Supplier 1' }, ALWAYS_LIVE);

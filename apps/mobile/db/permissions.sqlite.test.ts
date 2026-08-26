@@ -41,7 +41,7 @@ function nextStaffPin(): string {
 
 const { db } = await import('./client');
 const schema = await import('./schema');
-const { batches, inventoryMovements, customers, medicines, roles, shops, suppliers, users } = schema;
+const { batches, inventoryMovements, customers, medicines, roles, shops, suppliers, userPermissions, users } = schema;
 const {
   closeDay,
   currentBusinessDate,
@@ -51,11 +51,11 @@ const {
   recordExpense,
   setOpeningCash,
 } = await import('./cash');
-const { createMedicineWithBatch, listMedicines } = await import('./inventory');
+const { createMedicineWithBatch, createMedicineWithPurchase, listMedicines } = await import('./inventory');
 const { createSaleTransaction } = await import('./sales');
 const { createStaff, deactivateStaff, listStaff, resetStaffPin } = await import('./staff');
 const { changeOwnPin, getShopName, getShopProfile, updateShopProfile } = await import('./settings');
-const { createSupplier, getSupplierDetail, listSuppliers } = await import('./suppliers');
+const { createSupplier, getSupplierDetail, listSupplierPickerOptions, listSuppliers } = await import('./suppliers');
 const { createPurchase, listPurchasesForSupplier } = await import('./purchases');
 const { collectPayment, createCustomer, getCustomerCreditLedger } = await import('./customers');
 const { requirePermission, verifyPin } = await import('./auth');
@@ -119,6 +119,24 @@ function seedShop(): Fixture {
   db.insert(suppliers).values({ id: fixture.supplierId, shopId: fixture.shopId, name: `Supplier ${shop}`, createdAt: now, updatedAt: now }).run();
   db.insert(customers).values({ id: fixture.customerId, shopId: fixture.shopId, name: `Customer ${shop}`, createdAt: now, updatedAt: now }).run();
   return fixture;
+}
+
+// Owner-granted, per-staff-member override — the mechanism the founder's
+// inventory_add decision relies on: default OFF for every non-owner role,
+// switched on for one specific user via a user_permissions row, exactly as
+// components/staff/PermissionMatrix.tsx writes when an Owner toggles a
+// permission for a staff member.
+function grantPermission(shopId: string, userId: string, key: string): void {
+  const now = new Date().toISOString();
+  db.insert(userPermissions).values({
+    id: `${shopId}-${userId}-${key}`,
+    shopId,
+    userId,
+    key,
+    allowed: true,
+    createdAt: now,
+    updatedAt: now,
+  }).run();
 }
 
 function countRows(table: string, shopId: string): number {
@@ -216,6 +234,28 @@ describe('owner — full access', () => {
     });
 
     expect(result.medicineId).toEqual(expect.any(String));
+  });
+
+  // Founder decision (Sales+Inventory prototype-parity recovery): Add
+  // Medicine's Supplier + Payment Method step must be atomic with the
+  // medicine/batch it prices, reusing db/purchases.ts's writePurchaseEffects
+  // rather than a second, separate createPurchase call.
+  it('may add a medicine together with its first supplier purchase, atomically', async () => {
+    const fixture = seedShop();
+
+    const result = await createMedicineWithPurchase({ isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId, actorUserId: fixture.ownerId,
+      name: 'Sergel', unitOfMeasure: 'piece', requiresPrescription: false,
+      supplierId: fixture.supplierId, paymentType: 'credit',
+      firstBatch: { batchNo: 'AMP1', expiryDate: '2028-01-01', quantity: 15, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+    });
+
+    expect(result.medicineId).toEqual(expect.any(String));
+    expect(result.batchId).toEqual(expect.any(String));
+    expect(result.invoiceNo).toEqual(expect.any(String));
+    expect(countRows('purchases', fixture.shopId)).toBe(1);
+    const batch = sqlite.prepare('SELECT stock FROM batches WHERE id = ?').get(result.batchId) as unknown as { stock: number };
+    expect(batch.stock).toBe(15);
   });
 
   // Gating the reads must not change a single figure for the owner —
@@ -433,11 +473,137 @@ describe('staff — owner-only actions denied by direct navigation', () => {
     expect(sneaky.value).toBe(0);
   });
 
+  it('cannot add a medicine with a supplier purchase without an explicit inventory_add grant', async () => {
+    const fixture = seedShop();
+
+    await expect(
+      createMedicineWithPurchase({ isStillActive: ALWAYS_LIVE,
+        shopId: fixture.shopId, actorUserId: fixture.staffId,
+        name: 'Sneaky Purchase', unitOfMeasure: 'piece', requiresPrescription: false,
+        supplierId: fixture.supplierId, paymentType: 'cod',
+        firstBatch: { batchNo: 'SNP1', expiryDate: '2028-01-01', quantity: 5, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+      }),
+    ).rejects.toThrow(/Owner access only/);
+
+    const sneaky = sqlite
+      .prepare("SELECT COUNT(*) AS value FROM medicines WHERE shop_id = ? AND name = 'Sneaky Purchase'")
+      .get(fixture.shopId) as unknown as { value: number };
+    expect(sneaky.value).toBe(0);
+    expect(countRows('purchases', fixture.shopId)).toBe(0);
+  });
+
+  it('cannot add a medicine with a supplier purchase as a Manager either — inventory_add is not a Manager default', async () => {
+    const fixture = seedShop();
+
+    await expect(
+      createMedicineWithPurchase({ isStillActive: ALWAYS_LIVE,
+        shopId: fixture.shopId, actorUserId: fixture.managerId,
+        name: 'Manager Purchase', unitOfMeasure: 'piece', requiresPrescription: false,
+        supplierId: fixture.supplierId, paymentType: 'cod',
+        firstBatch: { batchNo: 'MGP1', expiryDate: '2028-01-01', quantity: 5, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+      }),
+    ).rejects.toThrow(/Owner access only/);
+
+    expect(countRows('purchases', fixture.shopId)).toBe(0);
+  });
+
+  it('leaves no medicine row behind when the atomic purchase step fails (rollback, not partial write)', async () => {
+    const fixture = seedShop();
+    grantPermission(fixture.shopId, fixture.staffId, 'inventory_add');
+
+    // A supplierId that does not belong to this shop makes
+    // writePurchaseEffects throw AFTER the medicine insert already ran in
+    // the same transaction — proving the whole write rolls back together,
+    // not just the purchase half.
+    await expect(
+      createMedicineWithPurchase({ isStillActive: ALWAYS_LIVE,
+        shopId: fixture.shopId, actorUserId: fixture.staffId,
+        name: 'Orphan Candidate', unitOfMeasure: 'piece', requiresPrescription: false,
+        supplierId: 'does-not-exist', paymentType: 'cod',
+        firstBatch: { batchNo: 'ORPH1', expiryDate: '2028-01-01', quantity: 5, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+      }),
+    ).rejects.toThrow(/Supplier does not belong to this shop/);
+
+    const orphan = sqlite
+      .prepare("SELECT COUNT(*) AS value FROM medicines WHERE shop_id = ? AND name = 'Orphan Candidate'")
+      .get(fixture.shopId) as unknown as { value: number };
+    expect(orphan.value).toBe(0);
+    expect(countRows('purchases', fixture.shopId)).toBe(0);
+  });
+
+  it('allows a staff member to add a medicine with a supplier purchase once the Owner grants inventory_add', async () => {
+    const fixture = seedShop();
+    grantPermission(fixture.shopId, fixture.staffId, 'inventory_add');
+
+    const result = await createMedicineWithPurchase({ isStillActive: ALWAYS_LIVE,
+      shopId: fixture.shopId, actorUserId: fixture.staffId,
+      name: 'Granted Purchase', unitOfMeasure: 'piece', requiresPrescription: true,
+      supplierId: fixture.supplierId, paymentType: 'credit',
+      firstBatch: { batchNo: 'GRP1', expiryDate: '2028-01-01', quantity: 8, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+    });
+
+    expect(result.medicineId).toEqual(expect.any(String));
+    expect(countRows('purchases', fixture.shopId)).toBe(1);
+    const persisted = sqlite
+      .prepare('SELECT requires_prescription FROM medicines WHERE id = ?')
+      .get(result.medicineId) as unknown as { requires_prescription: number };
+    expect(persisted.requires_prescription).toBe(1);
+
+    const groupedOutbox = sqlite.prepare(
+      `SELECT table_name AS tableName, operation_kind AS operationKind,
+              operation_group_id AS operationGroupId,
+              operation_sequence AS operationSequence,
+              operation_expected_count AS operationExpectedCount
+         FROM sync_queue
+        WHERE shop_id = ? AND operation_group_id = ?
+        ORDER BY operation_sequence`,
+    ).all(fixture.shopId, result.purchaseId) as unknown as {
+      tableName: string;
+      operationKind: string;
+      operationGroupId: string;
+      operationSequence: number;
+      operationExpectedCount: number;
+    }[];
+    expect(groupedOutbox.map((row) => row.tableName)).toEqual([
+      'medicines', 'purchases', 'batches', 'purchase_items', 'inventory_movements',
+    ]);
+    expect(groupedOutbox.map((row) => row.operationSequence)).toEqual([0, 1, 2, 3, 4]);
+    expect(new Set(groupedOutbox.map((row) => row.operationKind))).toEqual(
+      new Set(['inventory_add_purchase']),
+    );
+    expect(new Set(groupedOutbox.map((row) => row.operationExpectedCount))).toEqual(new Set([5]));
+    expect(new Set(groupedOutbox.map((row) => row.operationGroupId))).toEqual(
+      new Set([result.purchaseId]),
+    );
+
+    // The narrow picker exposes identity only. It does not inherit any of
+    // listSuppliers' payable/purchase/contact metadata or Owner authority.
+    const pickerRows = await listSupplierPickerOptions(
+      fixture.shopId,
+      fixture.staffId,
+    );
+    expect(pickerRows).toEqual([
+      expect.objectContaining({ id: fixture.supplierId }),
+    ]);
+    expect(Object.keys(pickerRows[0]!).sort()).toEqual(['id', 'name']);
+    // The grant does not widen into general purchase-creation access —
+    // createPurchase itself stays owner-only regardless of inventory_add.
+    await expect(
+      createPurchase({ isStillActive: ALWAYS_LIVE,
+        shopId: fixture.shopId, supplierId: fixture.supplierId, staffId: fixture.staffId, paymentType: 'cod',
+        lineItems: [{ medicineId: fixture.medicineId, batchNo: 'GRP2', expiryDate: '2028-01-01', quantity: 1, purchasePrice: asPaisa(400), salePrice: asPaisa(700) }],
+      }),
+    ).rejects.toThrow(/Owner access only/);
+  });
+
   it('cannot manage suppliers or purchases', async () => {
     const fixture = seedShop();
     const suppliersBefore = countRows('suppliers', fixture.shopId);
 
     await expect(listSuppliers(fixture.shopId, fixture.staffId)).rejects.toThrow(/Owner access only/);
+    await expect(
+      listSupplierPickerOptions(fixture.shopId, fixture.staffId),
+    ).rejects.toThrow(/Owner access only/);
     await expect(getSupplierDetail(fixture.shopId, fixture.staffId, fixture.supplierId)).rejects.toThrow(/Owner access only/);
     await expect(createSupplier(fixture.shopId, fixture.staffId, { name: 'Backdoor' }, ALWAYS_LIVE)).rejects.toThrow(/Owner access only/);
     await expect(listPurchasesForSupplier(fixture.shopId, fixture.staffId, fixture.supplierId)).rejects.toThrow(/Owner access only/);

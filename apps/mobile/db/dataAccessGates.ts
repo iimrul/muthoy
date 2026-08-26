@@ -16,6 +16,7 @@ export const DATA_ACCESS_GATES = {
   staffHome: { kind: "staffHome" },
   saleEntry: permissionGate("sale_entry"),
   inventoryEdit: permissionGate("inventory_edit"),
+  inventoryAdd: permissionGate("inventory_add"),
   expiryManage: permissionGate("expiry_manage"),
   inventoryView: permissionGate("inventory_view"),
   creditView: permissionGate("credit_view"),

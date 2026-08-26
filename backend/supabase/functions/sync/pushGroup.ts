@@ -28,6 +28,7 @@ const KINDS = new Set([
   "expense_delete",
   "draft_hold",
   "draft_cancel",
+  "draft_cancel_create",
   // B3 Groups 4-6 review fix: purely additive — old clients that never stamp
   // an operation kind on purchases/purchase_items keep pushing them ungrouped
   // via push.ts, unaffected by this addition. See the migration file's
@@ -36,6 +37,17 @@ const KINDS = new Set([
   "purchase_receive_line",
   "purchase_void",
   "purchase_create",
+  // Explicit inventory_add only. Server validation requires one new
+  // medicine and its exact one-line purchase graph; purchase_create remains
+  // Owner-only and is not widened by this additive kind.
+  "inventory_add_purchase",
+  // B3 Group 7: purchase_returns insert + a negative inventory_movements
+  // row + an audit_logs row, atomically. Purely additive, same rollout
+  // note as the Groups 4-6 kinds above — no existing client ever writes
+  // purchase_returns today (confirmed: zero business-logic writers existed
+  // anywhere in the app before this group), so there is no old-client
+  // compatibility path to preserve for this one.
+  "purchase_return",
 ]);
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

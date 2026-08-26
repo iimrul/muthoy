@@ -14,6 +14,7 @@ const LABELS: Readonly<Record<Permission, CatalogKey>> = {
   sale_history: "viewSalesHistory",
   inventory_view: "viewStock",
   inventory_edit: "updateStock",
+  inventory_add: "addMedicineAndPurchase",
   expiry_manage: "manageExpiry",
   credit_view: "viewCredit",
   credit_manage: "manageCredit",

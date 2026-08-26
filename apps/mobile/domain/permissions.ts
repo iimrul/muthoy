@@ -10,6 +10,7 @@ export type Permission =
   | "sale_history"
   | "inventory_view"
   | "inventory_edit"
+  | "inventory_add"
   | "expiry_manage"
   | "credit_view"
   | "credit_manage"
@@ -39,6 +40,7 @@ export const PERMISSION_KEYS = [
   "sale_history",
   "inventory_view",
   "inventory_edit",
+  "inventory_add",
   "expiry_manage",
   "credit_view",
   "credit_manage",
@@ -56,7 +58,7 @@ export const PERMISSION_GROUPS = [
   {
     key: "inventory",
     label: "Inventory",
-    permissions: ["inventory_view", "inventory_edit", "expiry_manage"],
+    permissions: ["inventory_view", "inventory_edit", "inventory_add", "expiry_manage"],
   },
   {
     key: "credit_cash",
@@ -78,8 +80,13 @@ export const CASHIER_DEFAULT_PERMISSIONS = [
   "sale_entry",
   "inventory_view",
 ] as const satisfies readonly Permission[];
+// inventory_add is deliberately excluded from the Manager default: unlike
+// every other operational permission, it must start OFF for every non-owner
+// role and be switched on per staff member by the Owner (founder decision —
+// it lets the holder trigger supplier/payment/COD-ledger effects via Add
+// Medicine, not just edit stock).
 export const MANAGER_DEFAULT_PERMISSIONS = PERMISSION_KEYS.filter(
-  (key) => key !== "staff_manage",
+  (key) => key !== "staff_manage" && key !== "inventory_add",
 );
 
 function preset(enabled: readonly Permission[]): PermissionOverrides {
@@ -105,6 +112,7 @@ const STORAGE_KEY_BY_PERMISSION: Readonly<Record<Permission, string>> = {
   sale_history: "sale_history",
   inventory_view: "inventory_view",
   inventory_edit: "inventory_write",
+  inventory_add: "inventory_add",
   expiry_manage: "expiry_manage",
   credit_view: "credit_view",
   credit_manage: "credit_management",

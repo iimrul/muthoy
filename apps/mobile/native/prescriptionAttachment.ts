@@ -25,6 +25,25 @@ export async function preparePrescriptionAttachment(
   };
 }
 
+export async function prepareDraftPrescriptionAttachment(
+  temporaryUri: string,
+  shopId: string,
+  draftId: string,
+  attachmentId: string,
+): Promise<PreparedPrescriptionAttachment> {
+  const directory = new Directory(Paths.document, 'prescription-drafts', shopId, draftId);
+  directory.create({ intermediates: true, idempotent: true });
+  const source = new File(temporaryUri);
+  const extension = source.extension || '.jpg';
+  const destination = new File(directory, `${attachmentId}${extension}`);
+  await source.copy(destination, { overwrite: true });
+  return {
+    localUri: destination.uri,
+    storagePath: `${shopId}/drafts/${draftId}/${attachmentId}`,
+    mimeType: extension.toLocaleLowerCase() === '.png' ? 'image/png' : 'image/jpeg',
+  };
+}
+
 export async function removePreparedPrescriptionAttachment(localUri: string): Promise<void> {
   try {
     const file = new File(localUri);

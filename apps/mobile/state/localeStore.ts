@@ -7,6 +7,7 @@ import {
 } from "zustand/middleware";
 import { createMMKV } from "react-native-mmkv";
 import { catalog, type CatalogKey } from "../i18n/catalog";
+import { toTaka, type Paisa } from "@muthoy/types";
 
 export type Locale = "bn" | "en";
 
@@ -79,6 +80,16 @@ export function useI18n() {
       }).format(value),
     [locale],
   );
+  const formatMoney = useCallback(
+    (value: Paisa): string => {
+      const formatted = new Intl.NumberFormat(
+        locale === "bn" ? "bn-BD" : "en-IN",
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 },
+      ).format(toTaka(value));
+      return `৳${formatted}`;
+    },
+    [locale],
+  );
   return {
     locale,
     t,
@@ -87,5 +98,6 @@ export function useI18n() {
     formatDateTime,
     formatTime,
     formatPercent,
+    formatMoney,
   };
 }

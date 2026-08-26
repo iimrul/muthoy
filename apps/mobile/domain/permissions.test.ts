@@ -7,23 +7,30 @@ import {
 } from './permissions';
 
 describe('Phase B1 permission contract', () => {
-  it('contains the exact twelve prototype keys', () => {
-    expect(PERMISSION_KEYS).toEqual(['sale_entry','sale_discount','sale_return','sale_history','inventory_view','inventory_edit','expiry_manage','credit_view','credit_manage','cash_drawer','reports','staff_manage']);
+  it('contains the exact thirteen product keys', () => {
+    expect(PERMISSION_KEYS).toEqual(['sale_entry','sale_discount','sale_return','sale_history','inventory_view','inventory_edit','inventory_add','expiry_manage','credit_view','credit_manage','cash_drawer','reports','staff_manage']);
   });
   it('uses exact Cashier, Manager and Custom presets', () => {
     expect(PERMISSION_KEYS.filter((key) => PERMISSION_PRESETS.cashier[key])).toEqual(CASHIER_DEFAULT_PERMISSIONS);
     expect(PERMISSION_KEYS.filter((key) => PERMISSION_PRESETS.manager[key])).toEqual(MANAGER_DEFAULT_PERMISSIONS);
-    expect(MANAGER_DEFAULT_PERMISSIONS).toEqual(PERMISSION_KEYS.filter((key) => key !== 'staff_manage'));
+    expect(MANAGER_DEFAULT_PERMISSIONS).toEqual(PERMISSION_KEYS.filter((key) => key !== 'staff_manage' && key !== 'inventory_add'));
     expect(PERMISSION_KEYS.some((key) => PERMISSION_PRESETS.custom[key])).toBe(false);
   });
   it('keeps mapped production storage keys stable', () => {
-    const pairs: [Permission, string][] = [['sale_entry','sales'],['inventory_edit','inventory_write'],['credit_manage','credit_management'],['cash_drawer','cash_management'],['staff_manage','staff_management']];
+    const pairs: [Permission, string][] = [['sale_entry','sales'],['inventory_edit','inventory_write'],['inventory_add','inventory_add'],['credit_manage','credit_management'],['cash_drawer','cash_management'],['staff_manage','staff_management']];
     for (const [product, storage] of pairs) { expect(permissionStorageKey(product)).toBe(storage); expect(fromStoragePermissionKey(storage)).toBe(product); }
   });
-  it('gives Owner everything, Manager all operational defaults except staff management, and Cashier two defaults', () => {
+  it('gives Owner everything, Manager all operational defaults except staff management and inventory_add, and Cashier two defaults', () => {
     for (const key of PERMISSION_KEYS) expect(hasPermission('owner', key)).toBe(true);
-    for (const key of PERMISSION_KEYS) expect(hasPermission('manager', key)).toBe(key !== 'staff_manage');
+    for (const key of PERMISSION_KEYS) expect(hasPermission('manager', key)).toBe(key !== 'staff_manage' && key !== 'inventory_add');
     for (const key of PERMISSION_KEYS) expect(hasPermission('staff', key)).toBe(key === 'sale_entry' || key === 'inventory_view');
+  });
+  it('keeps inventory_add OFF by default for Manager and Staff until explicitly granted', () => {
+    expect(hasPermission('manager', 'inventory_add')).toBe(false);
+    expect(hasPermission('staff', 'inventory_add')).toBe(false);
+    expect(resolvePermission('manager', 'inventory_add', undefined)).toBe(false);
+    expect(resolvePermission('staff', 'inventory_add', { inventory_add: true })).toBe(true);
+    expect(resolvePermission('owner', 'inventory_add', { inventory_add: false })).toBe(true);
   });
   it('applies individual overrides and never lets settings_manage escape Owner-only', () => {
     expect(resolvePermission('manager', 'staff_manage', { staff_manage: true })).toBe(true);

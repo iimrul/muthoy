@@ -311,6 +311,15 @@ export async function push(caller: Caller, body: Record<string, unknown>) {
         "credit_payment_allocations",
         "sale_drafts",
         "sale_draft_items",
+        // B3 Group 7: purchase_returns must always land atomically with its
+        // paired negative inventory_movements + audit_logs rows via the
+        // `purchase_return` grouped operation. Defense-in-depth: the paired
+        // movement is already forced through the grouped path above
+        // (reason: 'return' is in movementNeedsGroup's list) — this closes
+        // the same gap for the purchase_returns row itself, so a stray
+        // ungrouped push of just that row is rejected rather than silently
+        // accepted non-atomically.
+        "purchase_returns",
       ].includes(String(row.tableName)) ||
       customerPaymentNeedsGroup ||
       movementNeedsGroup

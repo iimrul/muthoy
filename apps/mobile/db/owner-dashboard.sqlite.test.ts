@@ -37,6 +37,14 @@ const MIGRATIONS = [
   "0013_owner_dashboard_credit_period.sql",
   "0014_owner_dashboard_credit_period_guard.sql",
   "0015_b3_shop_settings.sql",
+  "0016_payment_note.sql",
+  "0017_cash_reconcile.sql",
+  "0018_expense_category_taxonomy.sql",
+  "0019_supplier_archive.sql",
+  "0020_purchase_item_status.sql",
+  "0021_purchase_void.sql",
+  "0022_supplier_profile_fields.sql",
+  "0023_purchase_invoice_metadata.sql",
 ];
 
 const SHOP = "shop-owner-dashboard";
@@ -675,13 +683,53 @@ describe("supplier payables", () => {
     await expect(getSupplierPayableSummary(SHOP, OWNER)).resolves.toEqual({
       payable: 23_000,
       supplierCount: 2,
+      supplierCreditTotal: 0,
     });
   });
 
   it("never leaks the neighbouring shop's payables", async () => {
     await expect(
       getSupplierPayableSummary(OTHER_SHOP, OTHER_OWNER),
-    ).resolves.toEqual({ payable: 50_000, supplierCount: 1 });
+    ).resolves.toEqual({ payable: 50_000, supplierCount: 1, supplierCreditTotal: 0 });
+  });
+
+  it("excludes a voided purchase's own total, matching listSuppliers/getSupplierDetail (pre-existing divergence fix)", async () => {
+    // Voidable purchases always carry zero paid_amount (voidPurchase's own
+    // invariant), so `total - paid_amount` on a voided row would still read
+    // as its full total under the OLD hand-rolled SQL, which never filtered
+    // voided_at — inflating this KPI above what every other supplier screen
+    // showed for the same shop.
+    sqlite.exec(`
+      INSERT INTO purchases (id, shop_id, supplier_id, invoice_no, total, paid_amount,
+                             payment_terms, voided_at, voided_by, created_at, updated_at) VALUES
+        ('pur-voided-1', '${SHOP}', 'sup-2', 'P-VOID-1', 99000, 0, 'credit', '${at(DAY_BEFORE)}', '${OWNER}', ${stamp(DAY_BEFORE)});
+    `);
+    await expect(getSupplierPayableSummary(SHOP, OWNER)).resolves.toEqual({
+      payable: 23_000,
+      supplierCount: 2,
+      supplierCreditTotal: 0,
+    });
+  });
+
+  it("surfaces an unconsumed purchase-return credit as supplierCreditTotal, never netted against payable", async () => {
+    // sup-3's only purchase (pur-3) is COD, already fully paid (6000/6000).
+    // A return against it generates credit with nothing left on that
+    // invoice to offset, and no other open invoice for sup-3 to FIFO into —
+    // it must surface as standalone credit, not silently vanish.
+    sqlite.exec(`
+      INSERT INTO medicines (id, shop_id, name, unit_of_measure, threshold, created_at, updated_at)
+      VALUES ('med-credit-test', '${SHOP}', 'Credit Test Med', 'piece', 10, ${stamp(DAY_BEFORE)});
+      INSERT INTO purchase_items (id, shop_id, purchase_id, medicine_id, batch_no, qty,
+                                   purchase_price, sale_price, status, created_at, updated_at)
+      VALUES ('pi-credit-1', '${SHOP}', 'pur-3', 'med-credit-test', 'B-CREDIT-1', 1, 6000, 9000, 'received', ${stamp(DAY_BEFORE)});
+      INSERT INTO purchase_returns (id, shop_id, purchase_id, purchase_item_id, qty, credit_amount, created_by, created_at, updated_at)
+      VALUES ('pret-1', '${SHOP}', 'pur-3', 'pi-credit-1', 1, 1500, '${OWNER}', ${stamp(DAY_BEFORE)});
+    `);
+    await expect(getSupplierPayableSummary(SHOP, OWNER)).resolves.toEqual({
+      payable: 23_000,
+      supplierCount: 2,
+      supplierCreditTotal: 1_500,
+    });
   });
 });
 

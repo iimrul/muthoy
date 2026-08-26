@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ZERO_PAISA, subtractPaisa } from '@muthoy/types';
+import { ZERO_PAISA } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
 import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
+import { PurchaseReturnSheet } from '../../components/suppliers/PurchaseReturnSheet';
 import {
   getPurchaseDetail,
   markPurchaseLineReceived,
   voidPurchase,
   type PurchaseDetail,
+  type PurchaseDetailLine,
 } from '../../db/purchases';
+import { createPurchaseReturn } from '../../db/purchaseReturns';
 import { captureSessionFor } from '../../state/sessionGuard';
-import { purchaseSourceLabel, purchaseTermsLabel, userFacingError } from '../../i18n/display';
+import { purchaseLineReturnStatusLabel, purchaseSourceLabel, purchaseTermsLabel, userFacingError } from '../../i18n/display';
 import { useI18n } from '../../state/localeStore';
 import { useOwnerAccess } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
+
+const TOAST_DURATION_MS = 1800;
 
 // screens/SupplierInvoiceDetail.tsx parity (plan §1.13): voided badge,
 // header card (supplier/date/total/items/source), per-line status pill +
@@ -32,6 +37,9 @@ export default function InvoiceDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [receivingLineId, setReceivingLineId] = useState<string | null>(null);
   const [isVoiding, setIsVoiding] = useState(false);
+  const [returnTarget, setReturnTarget] = useState<PurchaseDetailLine | null>(null);
+  const [isReturning, setIsReturning] = useState(false);
+  const [isToastVisible, setIsToastVisible] = useState(false);
 
   const reload = useCallback(async () => {
     if (!session || !isAllowed || !purchaseId) return;
@@ -63,6 +71,27 @@ export default function InvoiceDetailScreen() {
       setReceivingLineId(null);
     }
   }, [isAllowed, purchaseId, reload, session, t]);
+
+  const handleReturnSubmit = useCallback(async (qty: number, reason: string) => {
+    if (!session || !isAllowed || !purchaseId || !returnTarget) return;
+    const guard = captureSessionFor(session);
+    if (!guard) throw new Error(t('sessionChangedRetryLabel'));
+    setIsReturning(true);
+    try {
+      await createPurchaseReturn({
+        shopId: session.shopId, actorUserId: session.userId, isStillActive: guard.isStillActive,
+        purchaseId, purchaseItemId: returnTarget.id, qty, reason,
+      });
+      void triggerSyncNow(session.shopId);
+      if (!guard.isStale()) {
+        await reload();
+        setIsToastVisible(true);
+        setTimeout(() => setIsToastVisible(false), TOAST_DURATION_MS);
+      }
+    } finally {
+      setIsReturning(false);
+    }
+  }, [isAllowed, purchaseId, reload, returnTarget, session, t]);
 
   const handleVoid = useCallback(() => {
     if (!session || !isAllowed || !purchaseId) return;
@@ -153,10 +182,10 @@ export default function InvoiceDetailScreen() {
                 <Text className="font-sans-medium text-sm text-richBlack">{t('paidLabel')}</Text>
                 <Text className="font-mono text-sm text-brand-green">{formatMoney(detail.paidAmount)}</Text>
               </View>
-              {!detail.voidedAt && subtractPaisa(detail.total, detail.paidAmount) > ZERO_PAISA ? (
+              {!detail.voidedAt && detail.effectivePayable > ZERO_PAISA ? (
                 <View className="flex-row items-center justify-between">
                   <Text className="font-sans-medium text-sm text-richBlack">{t('remainingLabel')}</Text>
-                  <Text className="font-mono text-sm text-amber-700">{formatMoney(subtractPaisa(detail.total, detail.paidAmount))}</Text>
+                  <Text className="font-mono text-sm text-amber-700">{formatMoney(detail.effectivePayable)}</Text>
                 </View>
               ) : null}
               {!detail.voidedAt ? (
@@ -166,37 +195,67 @@ export default function InvoiceDetailScreen() {
               ) : null}
             </View>
 
-            {detail.lines.map((line, index) => (
-              <View key={line.id} className="gap-2 rounded-2xl bg-white p-4">
-                <View className="flex-row items-center justify-between">
-                  <Text className="font-mono text-xs text-midGray">#{formatNumber(index + 1)}</Text>
-                  <View className={`rounded-full px-2 py-0.5 ${line.status === 'pending' ? 'bg-amber-100' : 'bg-brand-softGreen'}`}>
-                    <Text className={`font-sans-semibold text-xs ${line.status === 'pending' ? 'text-amber-700' : 'text-brand-green'}`}>
-                      {line.status === 'pending' ? `⏱ ${t('pendingStatusLabel')}` : `✓ ${t('receivedStatusLabel')}`}
+            {detail.lines.map((line, index) => {
+              // B3 Group 7: 3-state status pill for a received line — reuses
+              // the existing amber/soft-green pair (pending/received) plus
+              // the error/10 pair already meaning "voided" elsewhere on this
+              // screen, so no new color is invented for "fully returned".
+              const pillClass = line.status === 'pending'
+                ? 'bg-amber-100'
+                : line.returnStatus === 'fully_returned'
+                  ? 'bg-error/10'
+                  : line.returnStatus === 'partially_returned'
+                    ? 'bg-amber-100'
+                    : 'bg-brand-softGreen';
+              const pillTextClass = line.status === 'pending'
+                ? 'text-amber-700'
+                : line.returnStatus === 'fully_returned'
+                  ? 'text-error'
+                  : line.returnStatus === 'partially_returned'
+                    ? 'text-amber-700'
+                    : 'text-brand-green';
+              const pillGlyph = line.status === 'pending' ? '⏱' : line.returnStatus === 'received' ? '✓' : '↩';
+              const canReturn = line.status === 'received' && line.returnStatus !== 'fully_returned';
+              return (
+                <View key={line.id} className="gap-2 rounded-2xl bg-white p-4">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="font-mono text-xs text-midGray">#{formatNumber(index + 1)}</Text>
+                    <View className={`rounded-full px-2 py-0.5 ${pillClass}`}>
+                      <Text className={`font-sans-semibold text-xs ${pillTextClass}`}>
+                        {pillGlyph} {line.status === 'pending' ? t('pendingStatusLabel') : purchaseLineReturnStatusLabel(line.returnStatus, t)}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text className="font-sans-semibold text-richBlack">{line.medicineName}</Text>
+                  <View className="flex-row flex-wrap gap-x-6 gap-y-1">
+                    <Text className="font-sans text-xs text-midGray">{t('qtyPrefixLabel')} {formatNumber(line.qty)}</Text>
+                    <Text className="font-mono text-xs text-midGray">{formatMoney(line.purchasePrice)}</Text>
+                    <Text className="font-sans text-xs text-midGray">
+                      {line.expiryDate ? formatDate(`${line.expiryDate}T12:00:00`) : '—'}
                     </Text>
                   </View>
+                  <Text className="font-sans text-xs text-midGray">{t('batchPrefixLabel')}: {line.batchNo}</Text>
+                  {line.status === 'pending' ? (
+                    <Pressable
+                      onPress={() => void handleMarkReceived(line.id)}
+                      disabled={receivingLineId === line.id}
+                      className="mt-1 flex-row items-center justify-center gap-2 rounded-xl bg-brand-green py-2.5"
+                    >
+                      {receivingLineId === line.id ? <ActivityIndicator color="#FFFFFF" size="small" /> : null}
+                      <Text className="font-sans-semibold text-white">{receivingLineId === line.id ? t('processingLabel') : t('markReceivedLabel')}</Text>
+                    </Pressable>
+                  ) : null}
+                  {canReturn ? (
+                    <Pressable
+                      onPress={() => setReturnTarget(line)}
+                      className="mt-1 items-center rounded-full border border-midGray/40 px-3 py-1.5 self-start"
+                    >
+                      <Text className="font-sans-semibold text-xs text-richBlack">{t('returnLabel')}</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
-                <Text className="font-sans-semibold text-richBlack">{line.medicineName}</Text>
-                <View className="flex-row flex-wrap gap-x-6 gap-y-1">
-                  <Text className="font-sans text-xs text-midGray">{t('qtyPrefixLabel')} {formatNumber(line.qty)}</Text>
-                  <Text className="font-mono text-xs text-midGray">{formatMoney(line.purchasePrice)}</Text>
-                  <Text className="font-sans text-xs text-midGray">
-                    {line.expiryDate ? formatDate(`${line.expiryDate}T12:00:00`) : '—'}
-                  </Text>
-                </View>
-                <Text className="font-sans text-xs text-midGray">{t('batchPrefixLabel')}: {line.batchNo}</Text>
-                {line.status === 'pending' ? (
-                  <Pressable
-                    onPress={() => void handleMarkReceived(line.id)}
-                    disabled={receivingLineId === line.id}
-                    className="mt-1 flex-row items-center justify-center gap-2 rounded-xl bg-brand-green py-2.5"
-                  >
-                    {receivingLineId === line.id ? <ActivityIndicator color="#FFFFFF" size="small" /> : null}
-                    <Text className="font-sans-semibold text-white">{receivingLineId === line.id ? t('processingLabel') : t('markReceivedLabel')}</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            ))}
+              );
+            })}
           </>
         ) : (
           <View className="items-center gap-1 py-12">
@@ -204,6 +263,27 @@ export default function InvoiceDetailScreen() {
           </View>
         )}
       </ScrollView>
+
+      {session && purchaseId && returnTarget ? (
+        <PurchaseReturnSheet
+          visible={returnTarget !== null}
+          shopId={session.shopId}
+          actorUserId={session.userId}
+          purchaseId={purchaseId}
+          purchaseItemId={returnTarget.id}
+          isSubmitting={isReturning}
+          onClose={() => setReturnTarget(null)}
+          onSubmit={handleReturnSubmit}
+        />
+      ) : null}
+
+      {isToastVisible ? (
+        <View className="absolute bottom-8 left-0 right-0 items-center">
+          <View className="flex-row items-center gap-2 rounded-full bg-richBlack px-4 py-2">
+            <Text className="font-sans-semibold text-sm text-white">✓ {t('returnRecordedLabel')}</Text>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }

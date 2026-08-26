@@ -90,6 +90,11 @@ export default defineConfig({
       // The purchase invoice number through the real createPurchase path:
       // two devices at the same local sequence must not mint the same string.
       "apps/mobile/db/purchase-invoice.sqlite.test.ts",
+      // B3 Group 7: purchase returns — negative-ledger-only stock restore,
+      // exact batch resolution, the received-minus-returned/current-stock
+      // dual cap, required reason, closed-day guard, audit row, and the
+      // downstream Supplier Credit effect on the canonical position.
+      "apps/mobile/db/purchase-returns.sqlite.test.ts",
       "apps/mobile/db/sync-helpers.order.test.ts",
       "apps/mobile/db/sync-helpers.sqlite.test.ts",
       "apps/mobile/db/user-switch.sqlite.test.ts",
@@ -121,6 +126,8 @@ export default defineConfig({
       "apps/mobile/state/switchUser.test.tsx",
       "apps/mobile/state/businessDayStore.test.ts",
       "apps/mobile/tests/sale/checkout.test.tsx",
+      "apps/mobile/tests/sale/cartStore.test.ts",
+      "apps/mobile/tests/inventory/*.test.tsx",
       // The six sibling actor-stamping write screens, driven across a real
       // OWNER → STAFF → OWNER handover with only db/ and sync/ mocked.
       "apps/mobile/tests/switch-user-writes.test.tsx",
@@ -145,6 +152,10 @@ export default defineConfig({
       "backend/supabase/pgtest/b3-group2.pgtest.ts",
       "backend/supabase/pgtest/b3-group3.pgtest.ts",
       "backend/supabase/pgtest/b3-groups456-sync.pgtest.ts",
+      // B3 Group 7: purchase_return grouped-sync dispatcher — server-side
+      // re-derivation of max returnable, credit_amount, and row shape.
+      "backend/supabase/pgtest/b3-group7-purchase-return-sync.pgtest.ts",
+      "backend/supabase/pgtest/inventory-add-purchase-sync.pgtest.ts",
       // CREDIT CONVERGENCE PROOF (review-fix): the credit_collection
       // dispatcher branch has shipped since B2 with zero coverage through
       // sync_stage_operation_chunk. Proves sync/pull canonical balance,

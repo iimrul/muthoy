@@ -20,7 +20,7 @@ export const RULES: readonly {
   { prefixes: ['/dashboard'], dataGate: 'owner', rule: DATA_ACCESS_GATES.owner },
   { prefixes: ['/staff-home'], dataGate: 'staffHome', rule: DATA_ACCESS_GATES.staffHome },
   { prefixes: ['/sale', '/scan'], dataGate: 'saleEntry', rule: DATA_ACCESS_GATES.saleEntry },
-  { prefixes: ['/inventory/add-medicine'], dataGate: 'inventoryEdit', rule: DATA_ACCESS_GATES.inventoryEdit },
+  { prefixes: ['/inventory/add-medicine'], dataGate: 'inventoryAdd', rule: DATA_ACCESS_GATES.inventoryAdd },
   { prefixes: ['/inventory/expiry'], dataGate: 'expiryManage', rule: DATA_ACCESS_GATES.expiryManage },
   { prefixes: ['/inventory'], dataGate: 'inventoryView', rule: DATA_ACCESS_GATES.inventoryView },
   { prefixes: ['/credit'], dataGate: 'creditView', rule: DATA_ACCESS_GATES.creditView },

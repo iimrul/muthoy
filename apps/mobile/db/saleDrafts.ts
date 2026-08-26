@@ -10,6 +10,7 @@ import {
   type SyncOperationGroup,
 } from "./sync-helpers";
 import { generateId } from "../native/id";
+import type { CheckoutSnapshot } from "../domain/checkoutSnapshot";
 
 export interface HoldSaleDraftInput {
   shopId: string;
@@ -17,7 +18,8 @@ export interface HoldSaleDraftInput {
   originDeviceId: string;
   isStillActive: () => boolean;
   items: { medicineId: string; quantity: number }[];
-  checkoutSnapshot?: Record<string, unknown>;
+  checkoutSnapshot?: CheckoutSnapshot;
+  prescriptionImageUri?: string;
   prescription?: {
     prescriptionNo?: string;
     patientName?: string;
@@ -53,7 +55,20 @@ export async function holdSaleDraft(
     );
   }
   const draftId = generateId();
-  db.transaction((tx) => {
+  let durableImageUri: string | null = null;
+  if (input.prescriptionImageUri) {
+    const attachment = await import("../native/prescriptionAttachment");
+    durableImageUri = (
+      await attachment.prepareDraftPrescriptionAttachment(
+        input.prescriptionImageUri,
+        input.shopId,
+        draftId,
+        generateId(),
+      )
+    ).localUri;
+  }
+  try {
+    db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
     const actor = tx
       .select({ id: users.id })
@@ -94,7 +109,10 @@ export async function holdSaleDraft(
       originDeviceId: input.originDeviceId,
       actorId: input.actorUserId,
       checkoutSnapshot: input.checkoutSnapshot
-        ? JSON.stringify(input.checkoutSnapshot)
+        ? JSON.stringify({
+            ...input.checkoutSnapshot,
+            imageUri: durableImageUri ?? input.checkoutSnapshot.imageUri,
+          })
         : null,
       prescriptionNo: input.prescription?.prescriptionNo?.trim() || null,
       patientName: input.prescription?.patientName?.trim() || null,
@@ -132,7 +150,14 @@ export async function holdSaleDraft(
         operation: operation(),
       });
     }
-  });
+    });
+  } catch (caught) {
+    if (durableImageUri) {
+      const attachment = await import("../native/prescriptionAttachment");
+      await attachment.removePreparedPrescriptionAttachment(durableImageUri);
+    }
+    throw caught;
+  }
   return { draftId };
 }
 
@@ -180,13 +205,137 @@ export async function listSaleDrafts(
   }));
 }
 
+export async function createCancelledSaleDraft(
+  input: HoldSaleDraftInput,
+): Promise<{ draftId: string }> {
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("saleEntry"));
+  if (!input.originDeviceId.trim()) throw new Error("Origin device is required");
+  if (input.items.length === 0) throw new Error("Cannot cancel an empty cart");
+  const merged = new Map<string, number>();
+  for (const item of input.items) {
+    if (!Number.isInteger(item.quantity) || item.quantity <= 0)
+      throw new Error("Cancelled quantities must be positive integers");
+    merged.set(item.medicineId, (merged.get(item.medicineId) ?? 0) + item.quantity);
+  }
+  const draftId = generateId();
+  let durableImageUri: string | null = null;
+  if (input.prescriptionImageUri) {
+    const attachment = await import("../native/prescriptionAttachment");
+    durableImageUri = (
+      await attachment.prepareDraftPrescriptionAttachment(
+        input.prescriptionImageUri,
+        input.shopId,
+        draftId,
+        generateId(),
+      )
+    ).localUri;
+  }
+  try {
+    db.transaction((tx) => {
+      assertSessionLive(input.isStillActive);
+      const actor = tx
+        .select({ id: users.id })
+        .from(users)
+        .where(and(
+          eq(users.id, input.actorUserId),
+          eq(users.shopId, input.shopId),
+          eq(users.isActive, true),
+          eq(users.isDeleted, false),
+        ))
+        .get();
+      if (!actor) throw new Error("Active user does not belong to this shop");
+      const allowed = new Set(
+        tx.select({ id: medicines.id })
+          .from(medicines)
+          .where(and(eq(medicines.shopId, input.shopId), eq(medicines.isDeleted, false)))
+          .all()
+          .map((row) => row.id),
+      );
+      if ([...merged.keys()].some((id) => !allowed.has(id)))
+        throw new Error("Cancelled cart contains an unavailable medicine");
+
+      const now = new Date().toISOString();
+      let sequence = 0;
+      const expectedCount = 1 + merged.size;
+      const operation = (): SyncOperationGroup => ({
+        id: draftId,
+        kind: "draft_cancel_create",
+        sequence: sequence++,
+        expectedCount,
+      });
+      const values = {
+        id: draftId,
+        shopId: input.shopId,
+        status: "cancelled" as const,
+        originDeviceId: input.originDeviceId,
+        actorId: input.actorUserId,
+        checkoutSnapshot: input.checkoutSnapshot
+          ? JSON.stringify({
+              ...input.checkoutSnapshot,
+              imageUri: durableImageUri ?? input.checkoutSnapshot.imageUri,
+            })
+          : null,
+        prescriptionNo: input.prescription?.prescriptionNo?.trim() || null,
+        patientName: input.prescription?.patientName?.trim() || null,
+        prescriberName: input.prescription?.prescriberName?.trim() || null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      tx.insert(saleDrafts).values(values).run();
+      recordChange(tx, {
+        shopId: input.shopId,
+        table: "sale_drafts",
+        rowId: draftId,
+        op: "insert",
+        payload: values,
+        operation: operation(),
+      });
+      for (const [medicineId, qty] of merged) {
+        const id = generateId();
+        const itemValues = {
+          id,
+          shopId: input.shopId,
+          draftId,
+          medicineId,
+          qty,
+          createdAt: now,
+          updatedAt: now,
+        };
+        tx.insert(saleDraftItems).values(itemValues).run();
+        recordChange(tx, {
+          shopId: input.shopId,
+          table: "sale_draft_items",
+          rowId: id,
+          op: "insert",
+          payload: itemValues,
+          operation: operation(),
+        });
+      }
+    });
+  } catch (caught) {
+    if (durableImageUri) {
+      const attachment = await import("../native/prescriptionAttachment");
+      await attachment.removePreparedPrescriptionAttachment(durableImageUri);
+    }
+    throw caught;
+  }
+  return { draftId };
+}
+
 export async function getSaleDraft(
   shopId: string,
   actorUserId: string,
   draftId: string,
 ): Promise<{
   draft: typeof saleDrafts.$inferSelect;
-  items: { medicineId: string; medicineName: string; quantity: number }[];
+  items: {
+    medicineId: string;
+    medicineName: string;
+    generic: string | null;
+    manufacturer: string | null;
+    requiresPrescription: boolean;
+    quantity: number;
+  }[];
 }> {
   await requirePermission(shopId, actorUserId, permissionForDataGate("saleEntry"));
   const draft = db
@@ -205,6 +354,9 @@ export async function getSaleDraft(
     .select({
       medicineId: saleDraftItems.medicineId,
       medicineName: medicines.name,
+      generic: medicines.generic,
+      manufacturer: medicines.manufacturer,
+      requiresPrescription: medicines.requiresPrescription,
       quantity: saleDraftItems.qty,
     })
     .from(saleDraftItems)

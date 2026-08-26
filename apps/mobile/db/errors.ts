@@ -97,25 +97,29 @@ export class DayClosedError extends Error {
   }
 }
 
-// Thrown by db/suppliers.ts's archiveSupplier when the computed payable
-// (SUM(purchases.total - paid_amount) over non-deleted, non-voided purchases)
-// is > 0 — founder decision D-9, contract §5.24: archiving a supplier the
-// shop still owes would hide a real debt from the payable list and the
-// dashboard KPI. Named, not silently no-op'd, so the screen can show the
-// exact amount blocking the action.
+// Thrown by db/suppliers.ts's archiveSupplier when EITHER side of the
+// canonical supplier position (domain/supplierPosition.ts) is open — founder
+// decision D-9, contract §5.24, extended by the B3 Group 7 founder decision:
+// archiving while outstandingPayable > 0 would hide a real debt the shop
+// owes; archiving while supplierCredit > 0 would just as surely hide a real
+// debt the SUPPLIER owes the shop (e.g. an unconsumed purchase-return
+// credit). Named, not silently no-op'd, so the screen can show the exact
+// amount(s) blocking the action.
 export class SupplierPayableOutstandingError extends Error {
-  readonly payable: number;
-  constructor(payable: number) {
-    super('Cannot archive a supplier with an outstanding payable balance.');
+  readonly outstandingPayable: number;
+  readonly supplierCredit: number;
+  constructor(outstandingPayable: number, supplierCredit: number) {
+    super('Cannot archive a supplier with an outstanding payable balance or supplier credit owed to the shop.');
     this.name = 'SupplierPayableOutstandingError';
-    this.payable = payable;
+    this.outstandingPayable = outstandingPayable;
+    this.supplierCredit = supplierCredit;
   }
 }
 
 // Thrown by db/purchases.ts's voidPurchase (contract §5.13): a purchase may
 // be voided only when it produced no stock movement and carries no payment.
-// Otherwise the reversal path is a purchase return (Group 7, out of scope
-// here), not a void.
+// Otherwise the reversal path is a purchase return (db/purchaseReturns.ts,
+// B3 Group 7), not a void.
 export class PurchaseNotVoidableError extends Error {
   readonly reason: 'has_stock_movement' | 'has_payment';
   constructor(reason: 'has_stock_movement' | 'has_payment') {
@@ -126,6 +130,39 @@ export class PurchaseNotVoidableError extends Error {
     );
     this.name = 'PurchaseNotVoidableError';
     this.reason = reason;
+  }
+}
+
+// Thrown by db/purchaseReturns.ts's createPurchaseReturn (B3 Group 7,
+// contract: "cannot return more than received-minus-already-returned") when
+// a purchase line is not (or no longer) 'received' — a pending line was
+// never stocked, so there is nothing to return.
+export class PurchaseLineNotReceivedError extends Error {
+  constructor() {
+    super('This line has not been received yet and cannot be returned.');
+    this.name = 'PurchaseLineNotReceivedError';
+  }
+}
+
+// Thrown when a requested return quantity exceeds the smaller of (a)
+// received-minus-already-returned and (b) the batch's current actual stock
+// (locked founder decision 5 — never allow a return to create negative
+// stock). Named with the true ceiling so the screen can show it.
+export class PurchaseReturnExceedsAvailableError extends Error {
+  readonly maxReturnable: number;
+  constructor(maxReturnable: number) {
+    super('Return quantity exceeds what can be returned for this line.');
+    this.name = 'PurchaseReturnExceedsAvailableError';
+    this.maxReturnable = maxReturnable;
+  }
+}
+
+// Locked founder decision 4: every return requires a reason (a preset slug,
+// or free text when "Other" is chosen) — never silently defaulted.
+export class PurchaseReturnReasonRequiredError extends Error {
+  constructor() {
+    super('A reason is required to record a purchase return.');
+    this.name = 'PurchaseReturnReasonRequiredError';
   }
 }
 

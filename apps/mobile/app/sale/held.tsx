@@ -10,6 +10,7 @@ import {
   listSaleDrafts,
   type SaleDraftRow,
 } from "../../db/saleDrafts";
+import { parseCheckoutSnapshot } from "../../domain/checkoutSnapshot";
 import { getDeviceId } from "../../native/deviceId";
 import { useCartStore } from "../../state/cartStore";
 import { captureSessionFor } from "../../state/sessionGuard";
@@ -21,6 +22,7 @@ export default function HeldSalesScreen() {
   const clear = useCartStore((state) => state.clear);
   const addItem = useCartStore((state) => state.addItem);
   const setResumedDraft = useCartStore((state) => state.setResumedDraft);
+  const setCheckoutSnapshot = useCartStore((state) => state.setCheckoutSnapshot);
   const [rows, setRows] = useState<SaleDraftRow[]>([]);
   const reload = useCallback(async () => {
     if (session)
@@ -55,6 +57,9 @@ export default function HeldSalesScreen() {
           addItem({
             medicineId: item.medicineId,
             medicineName: item.medicineName,
+            generic: item.generic,
+            manufacturer: item.manufacturer,
+            requiresPrescription: item.requiresPrescription,
             batchId: batch.id,
             quantity: item.quantity,
             unitPrice: batch.salePrice,
@@ -62,6 +67,7 @@ export default function HeldSalesScreen() {
             availableQuantity: batch.quantityAvailable,
           }),
       );
+      setCheckoutSnapshot(parseCheckoutSnapshot(held.draft.checkoutSnapshot));
       setResumedDraft(draftId, getDeviceId());
       router.replace("/sale/cart");
     } catch (caught) {

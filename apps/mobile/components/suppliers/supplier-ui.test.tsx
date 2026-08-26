@@ -11,12 +11,14 @@ const SUPPLIER_ID = '8c2f1a30-0000-4000-8000-000000000003';
 interface StubProps {
   children?: ReactNode;
   onPress?: () => void;
+  accessibilityRole?: string;
   accessibilityLabel?: string;
   disabled?: boolean;
   visible?: boolean;
   value?: string;
   placeholder?: string;
   onChangeText?: (value: string) => void;
+  className?: string;
 }
 
 const deps = vi.hoisted(() => ({
@@ -31,6 +33,9 @@ const deps = vi.hoisted(() => ({
   getSupplierDetail: vi.fn(),
   listPurchasesForSupplier: vi.fn(),
   listSupplierPaymentsForPurchase: vi.fn(),
+  listPurchaseReturnsForPurchase: vi.fn(),
+  getPurchaseReturnLineContext: vi.fn(),
+  previewPurchaseReturn: vi.fn(),
   archiveSupplier: vi.fn(),
   recordSupplierPayment: vi.fn(),
   updateSupplier: vi.fn(),
@@ -39,14 +44,25 @@ const deps = vi.hoisted(() => ({
   formatNumber: (value: number) => String(value),
   formatDate: (value: string) => value.slice(0, 10),
   formatPercent: (value: number) => `${value >= 0 ? '+' : ''}${Math.round(value * 100)}%`,
+  numberPrefix: '',
 }));
 
 vi.mock('react-native', () => ({
-  View: ({ children }: StubProps) => createElement('div', null, children),
-  Text: ({ children }: StubProps) => createElement('span', null, children),
+  View: ({ children, className }: StubProps) => createElement('div', { className }, children),
+  Text: ({ children, className }: StubProps) => createElement('span', { className }, children),
   ScrollView: ({ children }: StubProps) => createElement('div', null, children),
-  Pressable: ({ children, onPress, accessibilityLabel, disabled }: StubProps) =>
-    createElement('button', { onClick: onPress, 'aria-label': accessibilityLabel, disabled }, children),
+  Pressable: ({ children, onPress, accessibilityRole, accessibilityLabel, disabled, className }: StubProps) =>
+    accessibilityRole === 'button'
+      ? createElement('button', {
+          onClick: (event: { stopPropagation: () => void }) => {
+            event.stopPropagation();
+            onPress?.();
+          },
+          'aria-label': accessibilityLabel,
+          disabled,
+          className,
+        }, children)
+      : createElement('div', { onClick: onPress, className }, children),
   TextInput: ({ value, onChangeText, accessibilityLabel, placeholder }: StubProps) =>
     createElement('input', {
       value: value ?? '',
@@ -83,6 +99,11 @@ vi.mock('../../db/suppliers', () => ({
   updateSupplier: deps.updateSupplier,
 }));
 vi.mock('../../db/purchases', () => ({ listPurchasesForSupplier: deps.listPurchasesForSupplier }));
+vi.mock('../../db/purchaseReturns', () => ({
+  listPurchaseReturnsForPurchase: deps.listPurchaseReturnsForPurchase,
+  getPurchaseReturnLineContext: deps.getPurchaseReturnLineContext,
+  previewPurchaseReturn: deps.previewPurchaseReturn,
+}));
 vi.mock('../../state/usePermission', () => ({
   useOwnerAccess: () => ({
     session: deps.session,
@@ -99,7 +120,7 @@ vi.mock('../../state/sessionGuard', () => ({
 vi.mock('../../state/localeStore', () => ({
   useI18n: () => ({
     t: deps.t,
-    formatNumber: deps.formatNumber,
+    formatNumber: (value: number) => `${deps.numberPrefix}${deps.formatNumber(value)}`,
     formatDate: deps.formatDate,
     formatPercent: deps.formatPercent,
   }),
@@ -108,6 +129,7 @@ vi.mock('../../sync', () => ({ triggerSyncNow: deps.triggerSyncNow }));
 
 const { default: SupplierListScreen } = await import('../../app/suppliers/list');
 const { default: SupplierDetailScreen } = await import('../../app/suppliers/detail');
+const { PurchaseReturnSheet } = await import('./PurchaseReturnSheet');
 
 const baseSupplier = {
   id: SUPPLIER_ID,
@@ -128,10 +150,12 @@ describe('supplier screen parity', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     deps.focusCallback = undefined;
+    deps.numberPrefix = '';
     deps.listSuppliers.mockResolvedValue([]);
     deps.getSupplierDetail.mockResolvedValue({
       supplier: baseSupplier,
       payable: 0,
+      supplierCredit: 0,
       totalPurchase: 30000,
       invoiceCount: 2,
       lastPurchaseDate: '2026-08-20T00:00:00.000Z',
@@ -140,11 +164,11 @@ describe('supplier screen parity', () => {
     });
     deps.listPurchasesForSupplier.mockResolvedValue([
       {
-        id: 'paid-purchase', invoiceNo: 'INV-1', total: 20000, paidAmount: 10000,
+        id: 'paid-purchase', invoiceNo: 'INV-1', total: 20000, paidAmount: 10000, effectivePayable: 0,
         paymentType: 'credit', createdAt: '2026-08-20T00:00:00.000Z', voidedAt: null, itemCount: 1,
       },
       {
-        id: 'unpaid-purchase', invoiceNo: 'INV-2', total: 10000, paidAmount: 0,
+        id: 'unpaid-purchase', invoiceNo: 'INV-2', total: 10000, paidAmount: 0, effectivePayable: 5000,
         paymentType: 'credit', createdAt: '2026-08-19T00:00:00.000Z', voidedAt: null, itemCount: 1,
       },
     ]);
@@ -153,6 +177,22 @@ describe('supplier screen parity', () => {
         ? [{ id: 'payment-1', amount: 10000, method: 'cash', note: null, createdAt: '2026-08-21T00:00:00.000Z' }]
         : [],
     );
+    deps.listPurchaseReturnsForPurchase.mockImplementation(async (_shopId: string, _ownerId: string, purchaseId: string) =>
+      purchaseId === 'paid-purchase'
+        ? [{
+            id: 'return-1', medicineName: 'Very Long Medicine Name For Narrow Screens', qty: 1,
+            creditAmount: 5000, reason: 'supplier_recall', createdAt: '2026-08-22T00:00:00.000Z',
+          }]
+        : [],
+    );
+    deps.getPurchaseReturnLineContext.mockResolvedValue({
+      purchaseItemId: 'item-1', purchaseId: 'purchase-1', supplierId: SUPPLIER_ID, medicineId: 'medicine-1',
+      medicineName: 'Medicine', batchNo: 'B-1', purchaseQty: 12, alreadyReturnedQty: 2,
+      currentBatchStock: 7, maxReturnable: 5, purchasePrice: 10000,
+    });
+    deps.previewPurchaseReturn.mockResolvedValue({
+      creditAmount: 30000, currentPayable: 50000, resultingPayable: 20000, resultingSupplierCredit: 0,
+    });
   });
 
   afterEach(cleanup);
@@ -171,13 +211,55 @@ describe('supplier screen parity', () => {
 
   it('shows the prototype chevron only for invoices with payment history', async () => {
     render(createElement(SupplierDetailScreen));
+    await act(async () => { deps.focusCallback?.(); });
 
     await waitFor(() => expect(deps.listSupplierPaymentsForPurchase).toHaveBeenCalledTimes(2));
-    const expandButtons = await screen.findAllByRole('button', { name: 'Expand payment history' });
+    const expandButtons = await screen.findAllByRole('button', { name: 'expandHistoryAccessibilityLabel' });
     expect(expandButtons).toHaveLength(1);
+    expect(screen.getByText('partialLabel')).toBeTruthy();
 
     fireEvent.click(expandButtons[0]!);
     expect(await screen.findByText('+৳100.00')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Collapse payment history' })).toBeTruthy();
+    expect(screen.getByText(/Very Long Medicine Name/).className).toContain('flex-1');
+    expect(screen.getByText('৳50.00').className).toContain('shrink-0');
+    expect(screen.getByRole('button', { name: 'collapseHistoryAccessibilityLabel' })).toBeTruthy();
+  });
+
+  it('reloads supplier position whenever the detail route regains focus', async () => {
+    render(createElement(SupplierDetailScreen));
+
+    expect(deps.focusCallback).toBeTypeOf('function');
+    await act(async () => { deps.focusCallback?.(); });
+    await waitFor(() => expect(deps.getSupplierDetail).toHaveBeenCalledTimes(1));
+
+    await act(async () => { deps.focusCallback?.(); });
+    await waitFor(() => expect(deps.getSupplierDetail).toHaveBeenCalledTimes(2));
+  });
+
+  it('localizes return controls and formats return quantities through the active locale', async () => {
+    deps.numberPrefix = 'BN-';
+    render(createElement(PurchaseReturnSheet, {
+      visible: true,
+      shopId: SHOP_ID,
+      actorUserId: OWNER_ID,
+      purchaseId: 'purchase-1',
+      purchaseItemId: 'item-1',
+      isSubmitting: false,
+      onClose: vi.fn(),
+      onSubmit: vi.fn(),
+    }));
+
+    expect(await screen.findByText('BN-12')).toBeTruthy();
+    expect(screen.getByText('BN-2')).toBeTruthy();
+    expect(screen.getByText('BN-7')).toBeTruthy();
+    expect(screen.getByText('BN-5')).toBeTruthy();
+    expect(screen.getByText('maxReturnableLabel: BN-5')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'close' })).toBeTruthy();
+
+    const qtyInput = screen.getByRole('textbox', { name: 'returnQtyLabel' });
+    fireEvent.change(qtyInput, { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: 'reasonOtherLabel' }));
+    expect(screen.getByRole('textbox', { name: 'otherReasonNoteLabel' })).toBeTruthy();
+    expect(await screen.findByText(/BN-3 stockWillDecreaseWarning/)).toBeTruthy();
   });
 });

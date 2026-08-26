@@ -1,38 +1,27 @@
-import { useEffect, useState } from "react";
-import {
-  Alert,
-  FlatList,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { useEffect } from "react";
+import { FlatList, Pressable, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
-import { formatMoney } from "@muthoy/utils";
+import Feather from "@expo/vector-icons/Feather";
+import { daysUntilExpiry } from "@muthoy/utils";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { StandardHeader } from "../../components/ui/StandardHeader";
-import { cancelSaleDraft, holdSaleDraft } from "../../db/saleDrafts";
 import { getActiveBatchForMedicine } from "../../db/sales";
 import { applyDiscount } from "../../domain/discounts";
-import { getDeviceId } from "../../native/deviceId";
+import type { CatalogKey } from "../../i18n/catalog";
 import { useCartStore, type CartLine } from "../../state/cartStore";
-import { captureSessionFor } from "../../state/sessionGuard";
+import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
-import { triggerSyncNow } from "../../sync";
+
+const NEAR_EXPIRY_DAYS = 60;
 
 export default function CartScreen() {
+  const { t, formatNumber, formatMoney } = useI18n();
   const session = useSessionStore((state) => state.session);
   const items = useCartStore((state) => state.items);
   const updateQuantity = useCartStore((state) => state.updateQuantity);
   const removeItem = useCartStore((state) => state.removeItem);
   const updateQuote = useCartStore((state) => state.updateQuote);
   const total = useCartStore((state) => state.total());
-  const clear = useCartStore((state) => state.clear);
-  const resumedDraftId = useCartStore((state) => state.resumedDraftId);
-  const resumedDraftDeviceId = useCartStore(
-    (state) => state.resumedDraftDeviceId,
-  );
-  const [holding, setHolding] = useState(false);
   const medicineIds = items
     .map((item) => item.medicineId)
     .sort()
@@ -62,81 +51,33 @@ export default function CartScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [medicineIds, session?.shopId, updateQuote]);
 
-  const hold = async () => {
-    if (!session || !items.length) return;
-    const guard = captureSessionFor(session);
-    if (!guard) return;
-    setHolding(true);
-    try {
-      await holdSaleDraft({
-        shopId: session.shopId,
-        actorUserId: session.userId,
-        originDeviceId: getDeviceId(),
-        isStillActive: guard.isStillActive,
-        items: items.map((item) => ({
-          medicineId: item.medicineId,
-          quantity: item.quantity,
-        })),
-      });
-      if (guard.isStale()) return;
-      clear();
-      void triggerSyncNow(session.shopId);
-      router.replace("/sale");
-    } catch (caught) {
-      if (!guard.isStale())
-        Alert.alert(
-          "Could not hold sale",
-          caught instanceof Error ? caught.message : "Try again.",
-        );
-    } finally {
-      setHolding(false);
-    }
-  };
-  const cancelCurrent = async () => {
-    if (!session) return;
-    const guard = captureSessionFor(session);
-    if (!guard) return;
-    try {
-      if (resumedDraftId && resumedDraftDeviceId) {
-        await cancelSaleDraft(
-          session.shopId,
-          session.userId,
-          resumedDraftId,
-          resumedDraftDeviceId,
-          guard.isStillActive,
-        );
-        triggerSyncNow(session.shopId);
-      }
-      if (guard.isStale()) return;
-      clear();
-      router.replace("/sale");
-    } catch (caught) {
-      if (!guard.isStale())
-        Alert.alert(
-          "Could not cancel sale",
-          caught instanceof Error ? caught.message : "Try again.",
-        );
-    }
-  };
-
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title="Cart" onBackPress={() => router.back()} />
+      <StandardHeader title={t("cartTitle")} onBackPress={() => router.back()} />
+      {items.length > 0 ? (
+        <Text className="px-4 pt-2 font-sans text-sm text-brand-green/70">
+          {formatNumber(items.length)} {items.length === 1 ? t("itemCountLabel") : t("itemsCountLabel")}
+        </Text>
+      ) : null}
       <FlatList
         data={items}
         keyExtractor={(item) => item.medicineId}
         contentContainerClassName="flex-grow gap-3 p-4"
         ListEmptyComponent={
           <EmptyState
-            title="Cart is empty"
-            message="Search for medicines to start a sale."
-            actionLabel="Find medicines"
+            icon="shopping-bag"
+            title={t("cartEmptyTitle")}
+            message={t("cartEmptyMessage")}
+            actionLabel={t("findMedicinesLabel")}
             onAction={() => router.replace("/sale")}
           />
         }
         renderItem={({ item }) => (
           <CartRow
             item={item}
+            t={t}
+            formatNumber={formatNumber}
+            formatMoney={formatMoney}
             onQuantityChange={(quantity) =>
               updateQuantity(item.medicineId, quantity)
             }
@@ -145,56 +86,41 @@ export default function CartScreen() {
         )}
       />
       {items.length > 0 ? (
-        <View className="gap-4 border-t border-midGray bg-white p-4">
-          <View className="flex-row items-center justify-between">
-            <Text className="font-sans-bold text-lg text-richBlack">Total</Text>
-            <Text className="font-mono text-xl text-brand-green">
+        <View className="gap-3 border-t border-midGray bg-white p-4">
+          <View className="flex-row items-center justify-between rounded-2xl border-2 border-brand-green/20 bg-brand-softGreen px-4 py-3">
+            <Text className="font-sans-bold text-lg text-richBlack">
+              {t("totalLabel")}
+            </Text>
+            <Text className="font-mono text-3xl text-brand-green">
               {formatMoney(total)}
             </Text>
           </View>
-          <View className="flex-row gap-3">
-            {!resumedDraftId ? (
-              <Pressable
-                onPress={hold}
-                disabled={holding}
-                className="flex-1 items-center rounded-lg border border-brand-green py-3"
-              >
-                <Text className="text-brand-green">
-                  {holding ? "Holding…" : "Hold"}
-                </Text>
-              </Pressable>
-            ) : null}
-            <Pressable
-              onPress={() => router.push("/sale/checkout")}
-              accessibilityRole="button"
-              accessibilityLabel="Checkout"
-              className="flex-1 items-center rounded-lg bg-brand-green py-3 active:opacity-80"
-            >
-              <Text className="font-sans-semibold text-base text-white">
-                Checkout
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={() => router.push("/sale/checkout")}
+            accessibilityRole="button"
+            accessibilityLabel={t("checkoutTitle")}
+            className="items-center rounded-full bg-brand-green py-4 active:opacity-80"
+          >
+            <Text className="font-sans-semibold text-base text-white">
+              {t("proceedToCheckoutLabel")} →
+            </Text>
+          </Pressable>
           <Pressable
             onPress={() => router.push("/sale/held")}
             className="items-center py-2"
           >
-            <Text className="text-sm text-midGray">View held sales</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => void cancelCurrent()}
-            className="items-center py-2"
-          >
-            <Text className="text-sm text-error">Cancel current sale</Text>
+            <Text className="text-sm text-midGray">
+              {t("viewHeldSalesLabel")}
+            </Text>
           </Pressable>
           <Pressable
             onPress={() => router.replace("/sale")}
             accessibilityRole="button"
-            accessibilityLabel="Continue sale"
+            accessibilityLabel={t("addMoreItemsLabel")}
             className="items-center py-2 active:opacity-70"
           >
             <Text className="font-sans-semibold text-sm text-brand-green">
-              + Add more items
+              {t("addMoreItemsLabel")}
             </Text>
           </Pressable>
         </View>
@@ -205,10 +131,16 @@ export default function CartScreen() {
 
 function CartRow({
   item,
+  t,
+  formatNumber,
+  formatMoney,
   onQuantityChange,
   onRemove,
 }: {
   item: CartLine;
+  t: (key: CatalogKey) => string;
+  formatNumber: (value: number) => string;
+  formatMoney: (value: import("@muthoy/types").Paisa) => string;
   onQuantityChange: (quantity: number) => void;
   onRemove: () => void;
 }) {
@@ -218,6 +150,8 @@ function CartRow({
     item.discount,
   ).lineTotal;
   const maximum = item.availableQuantity ?? Number.MAX_SAFE_INTEGER;
+  const days = daysUntilExpiry(item.expiryDate ?? null, new Date());
+  const nearExpiry = days !== null && days < NEAR_EXPIRY_DAYS;
   return (
     <View className="gap-3 rounded-lg bg-white p-4">
       <View className="flex-row items-start justify-between">
@@ -226,8 +160,13 @@ function CartRow({
             {item.medicineName}
           </Text>
           <Text className="font-mono text-xs text-midGray">
-            {formatMoney(item.unitPrice)} each
+            {formatMoney(item.unitPrice)} {t("eachLabel")}
           </Text>
+          {item.generic || item.manufacturer ? (
+            <Text className="font-sans text-xs text-midGray">
+              {[item.generic, item.manufacturer].filter(Boolean).join(" · ")}
+            </Text>
+          ) : null}
         </View>
         <View className="items-end gap-2">
           <Text className="font-mono text-base text-brand-green">
@@ -237,17 +176,19 @@ function CartRow({
             onPress={onRemove}
             accessibilityRole="button"
             accessibilityLabel={`Remove ${item.medicineName}`}
+            hitSlop={8}
           >
-            <Text className="font-sans-semibold text-xs text-error">
-              Remove
-            </Text>
+            <Feather name="trash-2" size={16} color="#DC2626" />
           </Pressable>
         </View>
       </View>
       {item.batchNo || item.expiryDate ? (
-        <Text className="font-sans text-xs text-midGray">
-          {item.batchNo ? `Batch ${item.batchNo}` : "Batch"}
-          {item.expiryDate ? ` · Exp ${item.expiryDate}` : ""}
+        <Text
+          className={`font-sans text-xs ${nearExpiry ? "font-sans-semibold text-error" : "text-midGray"}`}
+        >
+          {item.batchNo ? `${t("batchNumberLabel")} #${item.batchNo}` : t("batchNumberLabel")}
+          {item.expiryDate ? ` · ${t("expiryShortLabel")}: ${item.expiryDate}` : ""}
+          {days !== null ? ` (${formatNumber(days)}${t("dayShortLabel")})` : ""}
         </Text>
       ) : null}
       <View className="flex-row gap-2">
@@ -263,45 +204,63 @@ function CartRow({
             <Text
               className={`font-mono text-xs ${item.quantity === quantity ? "text-white" : "text-richBlack"}`}
             >
-              {quantity}
+              {formatNumber(quantity)}
             </Text>
           </Pressable>
         ))}
       </View>
-      <View className="flex-row items-center justify-end gap-4">
-        <Pressable
-          onPress={() => onQuantityChange(item.quantity - 1)}
-          accessibilityRole="button"
-          accessibilityLabel={`Decrease ${item.medicineName} quantity`}
-          className="h-10 w-10 items-center justify-center rounded-lg border border-midGray active:opacity-70"
-        >
-          <Text className="font-sans-bold text-xl text-richBlack">−</Text>
-        </Pressable>
-        <TextInput
-          value={String(item.quantity)}
-          onChangeText={(value) => {
-            const parsed = Number.parseInt(value, 10);
-            if (Number.isInteger(parsed) && parsed > 0)
-              onQuantityChange(parsed);
-          }}
-          onBlur={() => {
-            if (item.quantity < 1) onQuantityChange(1);
-          }}
-          selectTextOnFocus
-          keyboardType="number-pad"
-          accessibilityLabel={`${item.medicineName} quantity`}
-          className="h-10 w-16 rounded-lg border border-brand-green text-center font-mono text-base text-richBlack"
-        />
-        <Pressable
-          onPress={() => onQuantityChange(item.quantity + 1)}
-          disabled={item.quantity >= maximum}
-          accessibilityRole="button"
-          accessibilityLabel={`Increase ${item.medicineName} quantity`}
-          className="h-10 w-10 items-center justify-center rounded-lg bg-brand-green active:opacity-70 disabled:opacity-30"
-        >
-          <Text className="font-sans-bold text-xl text-white">+</Text>
-        </Pressable>
+      <View className="flex-row items-center justify-between">
+        <View className="flex-row items-center gap-4">
+          <Pressable
+            onPress={() => onQuantityChange(Math.max(1, item.quantity - 1))}
+            accessibilityRole="button"
+            accessibilityLabel={`Decrease ${item.medicineName} quantity`}
+            className="h-10 w-10 items-center justify-center rounded-lg border border-midGray active:opacity-70"
+          >
+            <Feather name="minus" size={16} color="#111827" />
+          </Pressable>
+          <TextInput
+            value={String(item.quantity)}
+            onChangeText={(value) => {
+              const parsed = Number.parseInt(value, 10);
+              if (Number.isInteger(parsed) && parsed > 0)
+                onQuantityChange(parsed);
+            }}
+            onBlur={() => {
+              if (item.quantity < 1) onQuantityChange(1);
+            }}
+            selectTextOnFocus
+            keyboardType="number-pad"
+            accessibilityLabel={`${item.medicineName} quantity`}
+            className="h-10 w-16 rounded-lg border border-brand-green text-center font-mono text-base text-richBlack"
+          />
+          <Pressable
+            onPress={() => onQuantityChange(item.quantity + 1)}
+            disabled={item.quantity >= maximum}
+            accessibilityRole="button"
+            accessibilityLabel={`Increase ${item.medicineName} quantity`}
+            className="h-10 w-10 items-center justify-center rounded-lg bg-brand-green active:opacity-70 disabled:opacity-30"
+          >
+            <Feather name="plus" size={16} color="#FFFFFF" />
+          </Pressable>
+        </View>
+        <View className="items-end">
+          <Text className="font-sans text-xs text-midGray">
+            {t("subtotalLabel")}
+          </Text>
+          <Text className="font-mono text-xl text-brand-green">
+            {formatMoney(lineTotal)}
+          </Text>
+        </View>
       </View>
+      {item.quantity > maximum ? (
+        <View className="flex-row items-start gap-2 rounded-lg bg-errorBg p-2">
+          <Feather name="alert-triangle" size={13} color="#DC2626" />
+          <Text className="flex-1 font-sans text-xs text-error">
+            {t("insufficientStockAvailableLabel")} {formatNumber(maximum)}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }

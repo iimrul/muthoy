@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
@@ -8,13 +8,14 @@ import {
   type SupplierFieldsInput,
   type SupplierFieldsOutput,
 } from '@muthoy/validation';
-import { ZERO_PAISA, subtractPaisa, type Paisa } from '@muthoy/types';
+import { ZERO_PAISA, type Paisa } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
 import { FormField } from '../../components/forms/FormField';
 import { SupplierPaymentSheet } from '../../components/suppliers/SupplierPaymentSheet';
 import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { listPurchasesForSupplier, type PurchaseListRow } from '../../db/purchases';
+import { listPurchaseReturnsForPurchase, type PurchaseReturnHistoryRow } from '../../db/purchaseReturns';
 import {
   archiveSupplier,
   getSupplierDetail,
@@ -25,7 +26,7 @@ import {
   type SupplierPaymentRow,
 } from '../../db/suppliers';
 import type { CustomerPaymentMethod } from '../../db/customers';
-import { countLabel, userFacingError } from '../../i18n/display';
+import { countLabel, returnReasonLabel, userFacingError } from '../../i18n/display';
 import { captureSessionFor } from '../../state/sessionGuard';
 import { useI18n } from '../../state/localeStore';
 import type { CatalogKey } from '../../i18n/catalog';
@@ -39,11 +40,13 @@ import { triggerSyncNow } from '../../sync';
 // bottom-sheet modal (matching the prototype's EditModal) instead of an
 // inline expanding form.
 
+// B3 Group 7: status is derived from `effectivePayable` (domain/
+// supplierPosition.ts), never raw total-paidAmount — a COD invoice settled
+// partly by Supplier Credit must read as Paid, not Partial.
 function statusPill(row: PurchaseListRow, t: (key: CatalogKey) => string): { label: string; bg: string; text: string } {
   if (row.voidedAt) return { label: t('statusVoidedLabel'), bg: 'bg-error/10', text: 'text-error' };
-  const remaining = subtractPaisa(row.total, row.paidAmount);
-  if (remaining <= ZERO_PAISA) return { label: t('paidLabel'), bg: 'bg-brand-softGreen', text: 'text-brand-green' };
-  if (row.paidAmount > ZERO_PAISA) return { label: t('partialLabel'), bg: 'bg-amber-100', text: 'text-amber-700' };
+  if (row.effectivePayable <= ZERO_PAISA) return { label: t('paidLabel'), bg: 'bg-brand-softGreen', text: 'text-brand-green' };
+  if (row.effectivePayable < row.total) return { label: t('partialLabel'), bg: 'bg-amber-100', text: 'text-amber-700' };
   return { label: t('pendingStatusLabel'), bg: 'bg-midGray/10', text: 'text-midGray' };
 }
 
@@ -58,6 +61,7 @@ export default function SupplierDetailScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [expandedPurchaseId, setExpandedPurchaseId] = useState<string | null>(null);
   const [paymentHistory, setPaymentHistory] = useState<Record<string, SupplierPaymentRow[]>>({});
+  const [returnHistory, setReturnHistory] = useState<Record<string, PurchaseReturnHistoryRow[]>>({});
   const [paymentTarget, setPaymentTarget] = useState<PurchaseListRow | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const { control, handleSubmit, reset } = useForm<SupplierFieldsInput, unknown, SupplierFieldsOutput>({
@@ -80,9 +84,19 @@ export default function SupplierDetailScreen() {
           await listSupplierPaymentsForPurchase(session.shopId, session.userId, purchase.id),
         ] as const),
       ));
+      // B3 Group 7: prefetched alongside payments, same shape, so the
+      // expand chevron's visibility is correct on first render rather than
+      // only appearing after a purchase has already been expanded once.
+      const returnsByPurchase = Object.fromEntries(await Promise.all(
+        history.map(async (purchase) => [
+          purchase.id,
+          await listPurchaseReturnsForPurchase(session.shopId, session.userId, purchase.id),
+        ] as const),
+      ));
       setDetail(supplierDetail);
       setPurchaseRows(history);
       setPaymentHistory(paymentsByPurchase);
+      setReturnHistory(returnsByPurchase);
       reset({
         name: supplierDetail.supplier.name,
         phone: supplierDetail.supplier.phone ?? '',
@@ -98,10 +112,9 @@ export default function SupplierDetailScreen() {
     }
   }, [isAllowed, reset, session, supplierId, t]);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  useFocusEffect(useCallback(() => {
     void reload();
-  }, [reload]);
+  }, [reload]));
 
   const handleToggleExpand = useCallback(async (purchase: PurchaseListRow) => {
     if (!session || !isAllowed) return;
@@ -110,16 +123,31 @@ export default function SupplierDetailScreen() {
       return;
     }
     setExpandedPurchaseId(purchase.id);
-    if (!paymentHistory[purchase.id]) {
-      try {
-        const rows = await listSupplierPaymentsForPurchase(session.shopId, session.userId, purchase.id);
-        setPaymentHistory((current) => ({ ...current, [purchase.id]: rows }));
-      } catch (caught) {
-        setExpandedPurchaseId(null);
-        setError(userFacingError(caught, 'supplierDetailLoadFailedLabel', t));
+    try {
+      // B3 Group 7: one expand toggle reveals both Payments and Returns
+      // subsections (not a second chevron) — fetched together, lazily, on
+      // first expand, exactly like the payment-history fetch already did.
+      const fetches: Promise<void>[] = [];
+      if (!paymentHistory[purchase.id]) {
+        fetches.push(
+          listSupplierPaymentsForPurchase(session.shopId, session.userId, purchase.id).then((rows) => {
+            setPaymentHistory((current) => ({ ...current, [purchase.id]: rows }));
+          }),
+        );
       }
+      if (!returnHistory[purchase.id]) {
+        fetches.push(
+          listPurchaseReturnsForPurchase(session.shopId, session.userId, purchase.id).then((rows) => {
+            setReturnHistory((current) => ({ ...current, [purchase.id]: rows }));
+          }),
+        );
+      }
+      await Promise.all(fetches);
+    } catch (caught) {
+      setExpandedPurchaseId(null);
+      setError(userFacingError(caught, 'supplierDetailLoadFailedLabel', t));
     }
-  }, [expandedPurchaseId, isAllowed, paymentHistory, session, t]);
+  }, [expandedPurchaseId, isAllowed, paymentHistory, returnHistory, session, t]);
 
   const closeEditSheet = useCallback(() => {
     setIsEditing(false);
@@ -212,7 +240,7 @@ export default function SupplierDetailScreen() {
         title={detail?.supplier.name ?? t('supplierLabel')}
         onBackPress={() => router.back()}
         rightAccessory={
-          <Pressable onPress={() => setIsEditing(true)} accessibilityRole="button" accessibilityLabel="Edit supplier" hitSlop={8} className="h-10 w-10 items-center justify-center">
+          <Pressable onPress={() => setIsEditing(true)} accessibilityRole="button" accessibilityLabel={t('editSupplierLabel')} hitSlop={8} className="h-10 w-10 items-center justify-center">
             <Text className="font-sans-bold text-lg text-brand-green">✎</Text>
           </Pressable>
         }
@@ -264,6 +292,12 @@ export default function SupplierDetailScreen() {
                   ) : null}
                 </Text>
               </View>
+              {detail.supplierCredit > ZERO_PAISA ? (
+                <View className="min-w-[45%] flex-1 gap-1 rounded-2xl bg-info/10 p-4">
+                  <Text className="font-sans text-xs text-info">{t('supplierCreditLabel')}</Text>
+                  <Text className="font-mono text-lg text-info">{formatMoney(detail.supplierCredit)}</Text>
+                </View>
+              ) : null}
             </View>
 
             <View className="flex-row gap-3">
@@ -285,9 +319,10 @@ export default function SupplierDetailScreen() {
               <Text className="py-6 text-center font-sans text-midGray">{t('noPurchasesYet')}</Text>
             ) : purchaseRows.map((purchase) => {
               const pill = statusPill(purchase, t);
-              const remaining = subtractPaisa(purchase.total, purchase.paidAmount);
+              const remaining = purchase.effectivePayable;
               const isExpanded = expandedPurchaseId === purchase.id;
               const hasPaymentHistory = (paymentHistory[purchase.id]?.length ?? 0) > 0;
+              const hasReturnHistory = (returnHistory[purchase.id]?.length ?? 0) > 0;
               return (
                 <View key={purchase.id} className="gap-2 rounded-2xl bg-white p-4">
                   <View className="flex-row items-center justify-between">
@@ -295,11 +330,11 @@ export default function SupplierDetailScreen() {
                       <Pressable onPress={() => router.push({ pathname: '/suppliers/invoice-detail', params: { purchaseId: purchase.id } })}>
                         <Text className="font-mono text-sm text-brand-green underline">{formatDate(purchase.createdAt)}</Text>
                       </Pressable>
-                      {hasPaymentHistory ? (
+                      {hasPaymentHistory || hasReturnHistory ? (
                         <Pressable
                           onPress={() => void handleToggleExpand(purchase)}
                           accessibilityRole="button"
-                          accessibilityLabel={isExpanded ? 'Collapse payment history' : 'Expand payment history'}
+                          accessibilityLabel={isExpanded ? t('collapseHistoryAccessibilityLabel') : t('expandHistoryAccessibilityLabel')}
                           hitSlop={8}
                           className="h-6 w-6 items-center justify-center"
                         >
@@ -327,14 +362,26 @@ export default function SupplierDetailScreen() {
                   ) : null}
                   {isExpanded && hasPaymentHistory ? (
                     <View className="gap-1 border-t border-midGray/20 pt-2">
-                      {(paymentHistory[purchase.id]?.length ?? 0) === 0 ? (
-                        <Text className="font-sans text-xs text-midGray">{t('noPaymentsYet')}</Text>
-                      ) : paymentHistory[purchase.id]!.map((payment) => (
+                      <Text className="font-sans-semibold text-xs text-midGray">{t('showPaymentHistoryLabel')}</Text>
+                      {paymentHistory[purchase.id]!.map((payment) => (
                         <View key={payment.id} className="flex-row justify-between">
                           <Text className="font-sans text-xs text-midGray">
                             {formatDate(payment.createdAt)}{payment.note ? ` — ${payment.note}` : ''}
                           </Text>
                           <Text className="font-mono text-xs text-brand-green">+{formatMoney(payment.amount)}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                  {isExpanded && hasReturnHistory ? (
+                    <View className="gap-1 border-t border-midGray/20 pt-2">
+                      <Text className="font-sans-semibold text-xs text-midGray">{t('returnHistoryLabel')}</Text>
+                      {returnHistory[purchase.id]!.map((ret) => (
+                        <View key={ret.id} className="flex-row items-start justify-between">
+                          <Text className="flex-1 pr-2 font-sans text-xs text-midGray">
+                            {formatDate(ret.createdAt)} · {ret.medicineName} × {formatNumber(ret.qty)} — {returnReasonLabel(ret.reason, t)}
+                          </Text>
+                          <Text className="shrink-0 font-mono text-xs text-amber-700">{formatMoney(ret.creditAmount)}</Text>
                         </View>
                       ))}
                     </View>
@@ -352,7 +399,7 @@ export default function SupplierDetailScreen() {
             <ScrollView showsVerticalScrollIndicator={false} contentContainerClassName="gap-4">
               <View className="flex-row items-center justify-between">
                 <Text className="font-sans-bold text-lg text-richBlack">{t('editSupplierLabel')}</Text>
-                <Pressable onPress={closeEditSheet} accessibilityRole="button" accessibilityLabel="Close" hitSlop={8}>
+                <Pressable onPress={closeEditSheet} accessibilityRole="button" accessibilityLabel={t('close')} hitSlop={8}>
                   <Text className="font-sans-semibold text-xl text-midGray">✕</Text>
                 </Pressable>
               </View>
@@ -374,7 +421,7 @@ export default function SupplierDetailScreen() {
       <SupplierPaymentSheet
         visible={paymentTarget !== null}
         invoiceNo={paymentTarget?.invoiceNo ?? ''}
-        remaining={paymentTarget ? subtractPaisa(paymentTarget.total, paymentTarget.paidAmount) : ZERO_PAISA}
+        remaining={paymentTarget?.effectivePayable ?? ZERO_PAISA}
         isSubmitting={isPaying}
         onClose={() => setPaymentTarget(null)}
         onSubmit={handleRecordPayment}
