@@ -175,6 +175,8 @@ beforeAll(async () => {
   applyMigration('0021_purchase_void.sql');
   applyMigration('0022_supplier_profile_fields.sql');
   applyMigration('0023_purchase_invoice_metadata.sql');
+  applyMigration('0024_b3_report_indexes.sql');
+  applyMigration('0025_b3_sale_tax_snapshot.sql');
 
   // Day 4: the owner registers, sets a PIN, and the device gets linked.
   const registration = await createShopAndOwner({

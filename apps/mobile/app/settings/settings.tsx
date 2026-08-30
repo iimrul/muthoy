@@ -25,6 +25,9 @@ import {
   getShopProfile,
   updateB2Settings,
   type B2Settings,
+  getTaxSettings,
+  updateTaxSettings,
+  type TaxSettings,
   updateShopProfile,
   type ShopProfile,
 } from "../../db/settings";
@@ -113,23 +116,27 @@ function formatClosingHour(hour: number): string {
 
 export default function SettingsScreen() {
   const session = useSessionStore((state) => state.session);
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [b2Settings, setB2Settings] = useState<B2Settings | null>(null);
   const [b2SettingsOpen, setB2SettingsOpen] = useState(false);
+  const [taxSettings, setTaxSettings] = useState<TaxSettings | null>(null);
+  const [taxSettingsOpen, setTaxSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     if (!session || session.role !== "owner") return;
     try {
-      const [nextProfile, nextB2Settings] = await Promise.all([
+      const [nextProfile, nextB2Settings, nextTaxSettings] = await Promise.all([
         getShopProfile(session.shopId, session.userId),
         getB2Settings(session.shopId),
+        getTaxSettings(session.shopId),
       ]);
       setProfile(nextProfile);
       setB2Settings(nextB2Settings);
+      setTaxSettings(nextTaxSettings);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Settings failed");
@@ -204,7 +211,11 @@ export default function SettingsScreen() {
             value={b2Settings ? formatClosingHour(b2Settings.closingHour) : "…"}
             onPress={() => setB2SettingsOpen(true)}
           />
-          <Row label={t("taxVat")} value="B3" disabled />
+          <Row
+            label={t("taxVat")}
+            value={taxSettings ? taxSettings.rateBp === 0 ? locale === "bn" ? "নিষ্ক্রিয়" : "Disabled" : `${taxSettings.rateBp / 100}% ${taxSettings.label}` : "…"}
+            onPress={() => setTaxSettingsOpen(true)}
+          />
         </View>
         <View className="rounded-xl bg-white px-4">
           <Row label={t("changePin")} onPress={() => setPinOpen(true)} />
@@ -259,7 +270,77 @@ export default function SettingsScreen() {
           }}
         />
       ) : null}
+      {taxSettings && taxSettingsOpen ? (
+        <TaxSettingsModal
+          visible
+          settings={taxSettings}
+          session={session}
+          onClose={() => setTaxSettingsOpen(false)}
+          onSaved={() => { setTaxSettingsOpen(false); void load(); }}
+        />
+      ) : null}
     </View>
+  );
+}
+
+function TaxSettingsModal({ visible, settings, session, onClose, onSaved }: {
+  visible: boolean; settings: TaxSettings; session: Session; onClose: () => void; onSaved: () => void;
+}) {
+  const { locale } = useI18n();
+  const [draft, setDraft] = useState(settings);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const bn = locale === 'bn';
+  const save = async () => {
+    const guard = captureSessionFor(session);
+    if (!guard) return;
+    setSaving(true); setError(null);
+    try {
+      await updateTaxSettings(session.shopId, session.userId, draft, guard.isStillActive);
+      void triggerSyncNow(session.shopId);
+      guard.ifLive(onSaved);
+    } catch (cause) {
+      guard.ifLive(() => setError(cause instanceof Error ? cause.message : (bn ? 'সংরক্ষণ করা যায়নি' : 'Save failed')));
+    } finally { guard.ifLive(() => setSaving(false)); }
+  };
+  const adjust = (delta: number) => setDraft((value) => ({ ...value, rateBp: Math.max(0, Math.min(10_000, value.rateBp + delta)) }));
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View className="flex-1 justify-end bg-black/50">
+        <View className="gap-5 rounded-t-3xl bg-white p-5 pb-8">
+          <Text className="font-sans-bold text-lg text-richBlack">{bn ? 'ট্যাক্স / ভ্যাট' : 'Tax / VAT'}</Text>
+          <Text className="font-sans text-xs text-midGray">
+            {bn ? 'MRP-এর মধ্যেই ট্যাক্স অন্তর্ভুক্ত। বিক্রয়ের মোট বাড়বে না।' : 'Tax is extracted from the MRP. The sale total will not increase.'}
+          </Text>
+          <View className="flex-row items-center justify-center gap-5 rounded-2xl bg-brand-softGreen p-4">
+            <Pressable onPress={() => adjust(-50)} className="h-11 w-11 items-center justify-center rounded-full bg-white">
+              <Text className="font-sans-bold text-xl text-brand-green">−</Text>
+            </Pressable>
+            <Text className="min-w-24 text-center font-mono text-3xl text-richBlack">{draft.rateBp / 100}%</Text>
+            <Pressable onPress={() => adjust(50)} className="h-11 w-11 items-center justify-center rounded-full bg-white">
+              <Text className="font-sans-bold text-xl text-brand-green">+</Text>
+            </Pressable>
+          </View>
+          <View className="flex-row gap-2">
+            {['VAT', 'GST'].map((label) => (
+              <Pressable key={label} onPress={() => setDraft({ ...draft, label })}
+                className={`flex-1 items-center rounded-xl border p-3 ${draft.label === label ? 'border-brand-green bg-brand-softGreen' : 'border-midGray'}`}>
+                <Text className="font-sans-semibold text-richBlack">{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {error ? <Text className="font-sans text-sm text-error">{error}</Text> : null}
+          <View className="flex-row gap-2">
+            <Pressable onPress={onClose} className="flex-1 items-center rounded-xl bg-brand-softGreen p-3">
+              <Text className="font-sans-semibold text-richBlack">{bn ? 'বাতিল' : 'Cancel'}</Text>
+            </Pressable>
+            <Pressable disabled={saving} onPress={() => void save()} className="flex-1 items-center rounded-xl bg-brand-green p-3 disabled:opacity-50">
+              <Text className="font-sans-semibold text-white">{saving ? '…' : (bn ? 'সংরক্ষণ' : 'Save')}</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 

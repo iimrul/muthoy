@@ -99,6 +99,8 @@ beforeAll(() => {
   applyMigration('0021_purchase_void.sql');
   applyMigration('0022_supplier_profile_fields.sql');
   applyMigration('0023_purchase_invoice_metadata.sql');
+  applyMigration('0024_b3_report_indexes.sql');
+  applyMigration('0025_b3_sale_tax_snapshot.sql');
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: OWNER_ID, name: 'Invariant Shop', phone: '01700000902', createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: 'owner', isSystem: true, createdAt: NOW, updatedAt: NOW }).run();

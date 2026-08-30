@@ -45,27 +45,26 @@ export function SearchMedicineTab({
   };
 
   return (
-    <View className="gap-4">
-      <View className="flex-row gap-2">
-        <View className="relative flex-1">
-          <View className="absolute inset-y-0 left-3 z-10 justify-center">
-            <Feather name="search" size={18} color="#6B7280" />
-          </View>
-          <TextInput
-            value={query}
-            onChangeText={handleChangeText}
-            placeholder={t("searchMedicineLabel")}
-            accessibilityLabel={t("searchMedicineLabel")}
-            className="h-12 rounded-xl border border-midGray bg-white pl-10 pr-3 font-sans text-base text-richBlack"
-          />
+    <View className="gap-3">
+      <View className="relative">
+        <View className="absolute inset-y-0 left-3 z-10 justify-center">
+          <Feather name="search" size={20} color="#9CA3AF" />
         </View>
+        <TextInput
+          value={query}
+          onChangeText={handleChangeText}
+          placeholder={t("searchMedicinePlaceholder")}
+          placeholderTextColor="#6B7280"
+          accessibilityLabel={t("searchMedicineLabel")}
+          className="h-12 rounded-xl border border-[#D1D5DB] bg-white pl-10 pr-14 font-sans text-base text-richBlack"
+        />
         <Pressable
           onPress={onScan}
           accessibilityRole="button"
           accessibilityLabel={t("scanStripToPrefillLabel")}
-          className="h-12 w-12 items-center justify-center rounded-xl bg-brand-green active:opacity-80"
+          className="absolute right-2 top-1.5 h-9 w-9 items-center justify-center rounded-lg bg-brand-green active:opacity-80"
         >
-          <Feather name="camera" size={20} color="#FFFFFF" />
+          <Feather name="maximize" size={16} color="#FFFFFF" />
         </Pressable>
       </View>
       {results.length > 0 ? (
@@ -76,7 +75,7 @@ export function SearchMedicineTab({
               onPress={() => onSelect(result)}
               accessibilityRole="button"
               accessibilityLabel={result.name}
-              className="rounded-lg bg-white p-3 active:opacity-80"
+              className="rounded-xl bg-[#F9FAFB] p-3 active:opacity-80"
             >
               <Text className="font-sans-medium text-base text-richBlack">
                 {result.name}
@@ -93,7 +92,7 @@ export function SearchMedicineTab({
         </View>
       ) : null}
       {hasSearched && results.length === 0 ? (
-        <View className="gap-3 rounded-lg bg-white p-4">
+        <View className="gap-3 rounded-xl bg-white p-4">
           <Text className="font-sans-medium text-sm text-richBlack">
             {t("medicineDatabaseNotConnected")}
           </Text>
@@ -104,7 +103,7 @@ export function SearchMedicineTab({
             onPress={onSwitchToManual}
             accessibilityRole="button"
             accessibilityLabel={t("manualEntryTitle")}
-            className="items-center rounded-lg border border-brand-green py-2.5 active:opacity-80"
+            className="items-center rounded-xl border border-brand-green py-2.5 active:opacity-80"
           >
             <Text className="font-sans-semibold text-sm text-brand-green">
               {t("manualEntryTitle")}

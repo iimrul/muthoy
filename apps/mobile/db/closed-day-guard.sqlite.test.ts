@@ -127,6 +127,8 @@ beforeAll(() => {
   applyMigration('0021_purchase_void.sql');
   applyMigration('0022_supplier_profile_fields.sql');
   applyMigration('0023_purchase_invoice_metadata.sql');
+  applyMigration('0024_b3_report_indexes.sql');
+  applyMigration('0025_b3_sale_tax_snapshot.sql');
 });
 
 describe('closed-day mutation guard', () => {

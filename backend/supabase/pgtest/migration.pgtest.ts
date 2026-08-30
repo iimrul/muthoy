@@ -162,6 +162,9 @@ function everyTablePayload(): Array<{
         paid: 1500,
         change: 0,
         payment_type: "cash",
+        tax_amount: 136,
+        tax_rate_bp: 1000,
+        tax_label: "VAT",
         customer_id: IDS.customer,
         staff_id: OWNER_A,
       },
@@ -503,6 +506,44 @@ describe("every synced table still applies through the wrapper", () => {
     const covered = new Set(payloads.map((p) => p.table));
     covered.add("shops");
     expect(covered.size).toBe(22);
+  });
+
+  it("preserves old-client tax omissions and rejects all snapshot replacement", async () => {
+    expect(await h.one<{ tax_amount: string; tax_rate_bp: number; tax_label: string }>(
+      "select tax_amount::text,tax_rate_bp,tax_label from sales where id=$1::uuid",
+      [IDS.sale],
+    )).toEqual({ tax_amount: "136", tax_rate_bp: 1000, tax_label: "VAT" });
+
+    const sale = payloads.find((payload) => payload.table === "sales")!.row;
+    const {
+      tax_amount: _taxAmount,
+      tax_rate_bp: _taxRate,
+      tax_label: _taxLabel,
+      ...oldClientSale
+    } = sale;
+    const preserved = await applyRow(h, {
+      table: "sales",
+      op: "update",
+      row: { ...oldClientSale, updated_at: "2026-08-19T12:00:00.000Z" },
+      shopId: SHOP_A,
+      callerUserId: OWNER_A,
+    });
+    expect(preserved).toMatchObject({ ok: true, error: null });
+    expect(await h.one<{ tax_amount: string; tax_rate_bp: number; tax_label: string }>(
+      "select tax_amount::text,tax_rate_bp,tax_label from sales where id=$1::uuid",
+      [IDS.sale],
+    )).toEqual({ tax_amount: "136", tax_rate_bp: 1000, tax_label: "VAT" });
+
+    const rejected = await applyRow(h, {
+      table: "sales",
+      op: "update",
+      row: { ...sale, tax_amount: 71, tax_rate_bp: 500, tax_label: "GST", updated_at: "2026-08-19T13:00:00.000Z" },
+      shopId: SHOP_A,
+      callerUserId: OWNER_A,
+    });
+    expect(rejected.error).toMatch(/sale tax snapshot is immutable/);
+    expect(rejected.code).toBe("MU024");
+    expect((await h.one<{ tax_amount: string }>("select tax_amount::text from sales where id=$1::uuid", [IDS.sale])).tax_amount).toBe("136");
   });
 
   it("rejects a caller who is not a live user of the shop", async () => {

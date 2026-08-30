@@ -53,6 +53,8 @@ beforeAll(() => {
     "0021_purchase_void.sql",
     "0022_supplier_profile_fields.sql",
     "0023_purchase_invoice_metadata.sql",
+    "0024_b3_report_indexes.sql",
+    "0025_b3_sale_tax_snapshot.sql",
   ])
     applyMigration(name);
   const timestamp = now();
@@ -176,6 +178,9 @@ beforeAll(() => {
 
 describe("B2 sale transaction", () => {
   it("allocates sellable FEFO, prices each batch, discounts exactly, and splits cash plus credit", async () => {
+    const timestamp = now();
+    sqlite.prepare(`INSERT INTO shop_b2_settings (id,shop_id,tax_rate_bp,tax_label,created_at,updated_at)
+      VALUES ('tax-settings','shop',1000,'VAT',?,?)`).run(timestamp, timestamp);
     const result = await createSaleTransaction({
       shopId: "shop",
       staffId: "owner",
@@ -191,6 +196,7 @@ describe("B2 sale transaction", () => {
       discountAmount: 580,
       total: 5220,
       change: 0,
+      taxAmount: 475,
     });
     const sale = db
       .select()
@@ -203,6 +209,9 @@ describe("B2 sale transaction", () => {
       creditAmount: 3220,
       subtotal: 5800,
       total: 5220,
+      taxAmount: 475,
+      taxRateBp: 1000,
+      taxLabel: "VAT",
     });
     const items = db
       .select()

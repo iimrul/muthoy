@@ -447,6 +447,11 @@ export const sales = sqliteTable(
       .$type<Paisa>()
       .notNull()
       .default(ZERO_PAISA),
+    // Group 9: immutable MRP-inclusive tax snapshot. The total above remains
+    // exactly what the customer pays; taxAmount is extracted from it.
+    taxAmount: integer("tax_amount").$type<Paisa>().notNull().default(ZERO_PAISA),
+    taxRateBp: integer("tax_rate_bp").notNull().default(0),
+    taxLabel: text("tax_label").notNull().default("VAT"),
     customerId: text("customer_id").references(() => customers.id, {
       onDelete: "set null",
     }), // nullable — walk-in sale
@@ -462,6 +467,7 @@ export const sales = sqliteTable(
   (t) => ({
     shopIdx: index("sales_shop_idx").on(t.shopId),
     shopCreatedIdx: index("sales_shop_created_idx").on(t.shopId, t.createdAt),
+    shopBusinessDateIdx: index("sales_shop_business_date_idx").on(t.shopId, t.businessDate),
     staffIdx: index("sales_staff_idx").on(t.staffId),
     shopInvoiceUnique: uniqueIndex("sales_shop_invoice_unique").on(
       t.shopId,
@@ -631,6 +637,7 @@ export const saleRefunds = sqliteTable(
       t.shopId,
       t.saleId,
     ),
+    shopBusinessDateIdx: index("sale_refunds_shop_business_date_idx").on(t.shopId, t.businessDate),
   }),
 );
 
@@ -852,6 +859,7 @@ export const credits = sqliteTable(
   },
   (t) => ({
     shopIdx: index("credits_shop_idx").on(t.shopId),
+    shopCreatedIdx: index("credits_shop_created_idx").on(t.shopId, t.createdAt),
     customerIdx: index("credits_customer_idx").on(t.customerId),
   }),
 );

@@ -42,6 +42,7 @@ minimumReleaseAgeExclude:
   - '@expo/metro-config@57.0.9'
   - expo-modules-jsi@57.0.5
   - expo-camera@57.0.4
+  - expo-sharing@57.0.16
 
 # Deliberately not a wildcard on "apps/*": apps/prototype-web ships its own
 # independent pnpm-workspace.yaml/package.json (Vite + React 18 + Tailwind v4)

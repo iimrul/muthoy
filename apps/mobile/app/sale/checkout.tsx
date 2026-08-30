@@ -45,6 +45,8 @@ import { captureSessionFor } from "../../state/sessionGuard";
 import { useSessionStore } from "../../state/sessionStore";
 import { usePermission } from "../../state/usePermission";
 import { triggerSyncNow } from "../../sync";
+import { getTaxSettings, type TaxSettings } from "../../db/settings";
+import { extractInclusiveTax } from "../../domain/tax";
 
 type PaymentType = "cash" | "credit" | "split";
 type DiscountType = "none" | "amount" | "percentage";
@@ -127,6 +129,7 @@ export default function CheckoutScreen() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [holding, setHolding] = useState(false);
+  const [taxSettings, setTaxSettings] = useState<TaxSettings>({ rateBp: 0, label: "VAT" });
   const customerRequest = useRef(0);
   const medicineIds = items.map((item) => item.medicineId).sort().join("|");
   const quoteConfirmed =
@@ -188,6 +191,14 @@ export default function CheckoutScreen() {
     const timer = setTimeout(() => void loadCustomers(), 0);
     return () => clearTimeout(timer);
   }, [heldSnapshot, loadCustomers, session]);
+  useEffect(() => {
+    if (!session) return;
+    let current = true;
+    void getTaxSettings(session.shopId).then((settings) => {
+      if (current) setTaxSettings(settings);
+    }).catch(() => undefined);
+    return () => { current = false; };
+  }, [session]);
   if (!session) return null;
 
   let discount: CheckoutDiscount | undefined;
@@ -216,6 +227,7 @@ export default function CheckoutScreen() {
   const total = quoteConfirmed && refreshedTotal !== null
     ? refreshedTotal
     : asPaisa(subtotal - discountAmount);
+  const displayedTax = extractInclusiveTax(total, taxSettings.rateBp);
   // UI-level pre-check only, using the same availableQuantity Cart's own
   // live quote-refresh effect already keeps current — createSaleTransaction
   // (db/sales.ts) remains the sole authoritative stock/FEFO validation at
@@ -491,6 +503,14 @@ export default function CheckoutScreen() {
               <View className="flex-row justify-between">
                 <Text className="font-sans text-sm text-error">{t("discountLabel")}</Text>
                 <Text className="font-mono text-sm text-error">-{formatMoney(discountAmount)}</Text>
+              </View>
+            ) : null}
+            {displayedTax > 0 ? (
+              <View className="flex-row justify-between">
+                <Text className="font-sans text-sm text-midGray">
+                  {taxSettings.label} ({taxSettings.rateBp / 100}% {t("taxVat")})
+                </Text>
+                <Text className="font-mono text-sm text-midGray">{formatMoney(displayedTax)}</Text>
               </View>
             ) : null}
             <View className="flex-row justify-between border-t border-midGray/20 pt-2">

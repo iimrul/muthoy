@@ -42,6 +42,8 @@ export default defineConfig({
     server: { deps: { inline: ["expo-sqlite", "expo-crypto"] } },
     include: [
       "apps/mobile/domain/**/*.test.ts",
+      "apps/mobile/native/*.test.ts",
+      "apps/mobile/services/*.test.ts",
       "apps/mobile/i18n/**/*.test.ts",
       "apps/mobile/navigation/**/*.test.ts",
       "apps/mobile/components/scanner/*.test.tsx",
@@ -68,6 +70,7 @@ export default defineConfig({
       // day boundary, the all-payment-types staff fix, truthful "+N more"
       // alert totals, shop isolation, and a fresh shop's empty state.
       "apps/mobile/db/owner-dashboard.sqlite.test.ts",
+      "apps/mobile/db/reports.sqlite.test.ts",
       // Per-staff permission overrides, the phone credential's uniqueness, and
       // the revocation counter — through the real db/ actions on real SQLite.
       "apps/mobile/db/staff-permissions.sqlite.test.ts",
@@ -132,6 +135,8 @@ export default defineConfig({
       // OWNER → STAFF → OWNER handover with only db/ and sync/ mocked.
       "apps/mobile/tests/switch-user-writes.test.tsx",
       "apps/mobile/tests/dashboard-rollover.test.tsx",
+      "apps/mobile/tests/navigation-shell.test.tsx",
+      "apps/mobile/tests/reports-final-fixes.test.tsx",
       "apps/mobile/tests/app-layout.test.tsx",
       "apps/mobile/tests/authenticated-routing.test.tsx",
       "apps/mobile/tests/auth-pin-latency.test.tsx",

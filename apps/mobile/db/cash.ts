@@ -22,6 +22,7 @@ import { expectedCash, type CashFormulaInput } from "../domain/cashFormula";
 import { generateId } from "../native/id";
 import { requireOwner, requirePermission } from "./auth";
 import { permissionForDataGate } from "./dataAccessGates";
+import { getEndOfDayReportSnapshot } from "./reports";
 import { db, sqliteConnection } from "./client";
 import { assertSessionLive, DayClosedError } from "./errors";
 import { cashDrawer, expenses, payments, users } from "./schema";
@@ -1194,8 +1195,6 @@ export interface EndOfDaySummary {
 }
 
 interface EndOfDayAggregateRow {
-  totalSales: number;
-  cogs: number;
   newCreditGiven: number;
   creditCollected: number;
 }
@@ -1223,16 +1222,13 @@ export async function getEndOfDaySummary(
     actorUserId,
     permissionForDataGate("cashDrawer"),
   );
+  const report = await getEndOfDayReportSnapshot(shopId, actorUserId, {
+    startDate: businessDate,
+    endDate: businessDate,
+  });
 
   const aggregates = sqliteConnection.getFirstSync<EndOfDayAggregateRow>(
     `SELECT
-      COALESCE((SELECT SUM(total) FROM sales
-        WHERE shop_id = $shopId AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS totalSales,
-      COALESCE((SELECT SUM(si.cogs) FROM sale_items AS si
-                  JOIN sales AS s ON s.id = si.sale_id
-        WHERE si.shop_id = $shopId AND si.is_deleted = 0 AND s.is_deleted = 0
-          AND date(s.created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS cogs,
       COALESCE((SELECT SUM(amount) FROM credits
         WHERE shop_id = $shopId AND is_deleted = 0
           AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS newCreditGiven,
@@ -1261,8 +1257,8 @@ export async function getEndOfDaySummary(
 
   const cashFormula = getCashSummarySync(shopId, businessDate);
   const expected = expectedCash(cashFormula);
-  const totalSales = asPaisa(aggregates.totalSales);
-  const cogs = asPaisa(aggregates.cogs);
+  const totalSales = report.totals.netSales;
+  const cogs = report.totals.cogs;
   const rawCounted = drawer?.closingCounted;
   const countedCash =
     rawCounted === null || rawCounted === undefined
@@ -1275,11 +1271,11 @@ export async function getEndOfDaySummary(
     cashFormula,
     expectedCash: expected,
     totalSales,
-    cashSales: cashFormula.cashSales,
-    creditSales: subtractPaisa(totalSales, cashFormula.cashSales),
+    cashSales: report.totals.cashSales,
+    creditSales: report.totals.creditSales,
     cogs,
-    grossProfit: subtractPaisa(totalSales, cogs),
-    expenses: cashFormula.expenses,
+    grossProfit: report.totals.grossProfit,
+    expenses: report.totals.expenses,
     newCreditGiven: asPaisa(aggregates.newCreditGiven),
     creditCollected: asPaisa(aggregates.creditCollected),
     countedCash,

@@ -45,6 +45,8 @@ const MIGRATIONS = [
   "0021_purchase_void.sql",
   "0022_supplier_profile_fields.sql",
   "0023_purchase_invoice_metadata.sql",
+  "0024_b3_report_indexes.sql",
+  "0025_b3_sale_tax_snapshot.sql",
 ];
 
 const SHOP = "shop-owner-dashboard";

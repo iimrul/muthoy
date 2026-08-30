@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import {
   addMedicineSchema,
   isoDateSchema,
+  supplierFieldsSchema,
   type AddMedicineInput,
   type AddMedicineOutput,
 } from "@muthoy/validation";
@@ -18,7 +19,10 @@ import {
   createMedicineWithPurchase,
   listManufacturerSuggestions,
 } from "../../db/inventory";
-import { listSupplierPickerOptions } from "../../db/suppliers";
+import {
+  createSupplier,
+  listSupplierPickerOptions,
+} from "../../db/suppliers";
 import { parseScannedMedicineStrip } from "../../domain/ocrText";
 import type { MedicineSearchResult } from "../../domain/medicineSearchProvider";
 import { captureSessionFor } from "../../state/sessionGuard";
@@ -89,7 +93,7 @@ export function ManualEntryForm({
       name: "",
       unitOfMeasure: "piece",
       requiresPrescription: false,
-      firstBatch: { batchNo: "", quantity: 0, purchasePrice: 0, salePrice: 0 },
+      firstBatch: { batchNo: "", expiryDate: "" },
     },
   });
 
@@ -140,6 +144,14 @@ export function ManualEntryForm({
   const onSubmit = useCallback(
     async (input: AddMedicineOutput) => {
       setErrorMessage(null);
+      if (
+        !input.generic?.trim() ||
+        !input.manufacturer?.trim() ||
+        !input.firstBatch.expiryDate
+      ) {
+        setErrorMessage(t("fillRequiredFieldsLabel"));
+        return;
+      }
       if (!supplierId) {
         setErrorMessage(t("selectSupplierLabel"));
         return;
@@ -195,19 +207,58 @@ export function ManualEntryForm({
     [onSaved, paymentType, session, supplierId, t],
   );
 
+  const handleCreateSupplier = useCallback(
+    async (input: {
+      name: string;
+      phone: string;
+      manufacturer?: string;
+      notes?: string;
+    }) => {
+      const fields = supplierFieldsSchema.parse({
+        ...input,
+        address: "",
+        email: "",
+        contactPerson: "",
+      });
+      const guard = captureSessionFor(session);
+      if (!guard) throw new Error("Session unavailable");
+      const created = await createSupplier(
+        session.shopId,
+        session.userId,
+        fields,
+        guard.isStillActive,
+      );
+      if (!guard.isStillActive()) throw new Error("Session changed");
+      setSuppliers((current) => [
+        ...current.filter((supplier) => supplier.id !== created.id),
+        { id: created.id, name: created.name },
+      ]);
+      setSupplierId(created.id);
+      void triggerSyncNow(session.shopId);
+    },
+    [session],
+  );
+
   return (
-    <View className="gap-5">
-      <Pressable
-        onPress={() => setIsScannerVisible(true)}
-        accessibilityRole="button"
-        accessibilityLabel={t("scanStripToPrefillLabel")}
-        className="flex-row items-center justify-center gap-2 rounded-lg border border-brand-green bg-white py-3 active:opacity-80"
-      >
-        <Feather name="camera" size={18} color="#059669" />
-        <Text className="font-sans-semibold text-sm text-brand-green">
-          {t("scanStripToPrefillLabel")}
-        </Text>
-      </Pressable>
+    <View className="gap-4">
+      <View className="flex-row items-center justify-between rounded-lg border border-info bg-[#EFF6FF] p-4">
+        <View className="flex-1 pr-3">
+          <Text className="mb-1 font-sans-semibold text-sm text-info">
+            {t("quickAddLabel")}
+          </Text>
+          <Text className="font-sans text-xs text-info">
+            {t("quickAddHint")}
+          </Text>
+        </View>
+        <Pressable
+          onPress={() => setIsScannerVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel={t("scanStripToPrefillLabel")}
+          className="h-12 w-12 items-center justify-center rounded-full bg-info active:opacity-80"
+        >
+          <Feather name="camera" size={24} color="#FFFFFF" />
+        </Pressable>
+      </View>
       {scanNotice ? (
         <Text className="font-sans text-sm text-midGray">{scanNotice}</Text>
       ) : null}
@@ -217,16 +268,18 @@ export function ManualEntryForm({
         name="name"
         label={`${t("medicineNameLabel")} *`}
         placeholder={t("medicineNamePlaceholder")}
+        prototypeStyle
       />
       <FormField
         control={control}
         name="generic"
-        label={t("genericNameLabel")}
+        label={`${t("genericNameLabel")} *`}
         placeholder={t("genericNamePlaceholder")}
+        prototypeStyle
       />
       <View className="gap-2">
-        <Text className="font-sans-medium text-sm text-richBlack">
-          {t("manufacturerLabel")}
+        <Text className="font-sans-semibold text-sm text-richBlack">
+          {t("manufacturerLabel")} *
         </Text>
         <Controller
           control={control}
@@ -251,8 +304,9 @@ export function ManualEntryForm({
                   );
                 }}
                 placeholder={t("manufacturerPlaceholder")}
+                placeholderTextColor="#6B7280"
                 accessibilityLabel={t("manufacturerLabel")}
-                className="rounded-lg border border-midGray bg-white px-4 py-3"
+                className="h-12 rounded-xl border border-[#D1D5DB] bg-white px-4 font-sans text-base text-richBlack"
               />
               {manufacturerSuggestions.length ? (
                 <View className="flex-row flex-wrap gap-2">
@@ -286,14 +340,17 @@ export function ManualEntryForm({
             control={control}
             name="firstBatch.batchNo"
             label={`${t("batchNumberLabel")} *`}
+            placeholder="B2401"
+            prototypeStyle
           />
         </View>
         <View className="flex-1">
           <FormField
             control={control}
             name="firstBatch.expiryDate"
-            label={t("expiryDateLabel")}
+            label={`${t("expiryDateLabel")} *`}
             placeholder="YYYY-MM-DD"
+            prototypeStyle
           />
         </View>
       </View>
@@ -303,8 +360,10 @@ export function ManualEntryForm({
             control={control}
             name="firstBatch.purchasePrice"
             label={`${t("purchasePriceLabel")} *`}
+            placeholder="0.00"
             numeric
             money
+            prototypeStyle
           />
         </View>
         <View className="flex-1">
@@ -312,8 +371,10 @@ export function ManualEntryForm({
             control={control}
             name="firstBatch.salePrice"
             label={`${t("salePriceLabel")} *`}
+            placeholder="0.00"
             numeric
             money
+            prototypeStyle
           />
         </View>
       </View>
@@ -323,7 +384,9 @@ export function ManualEntryForm({
             control={control}
             name="firstBatch.quantity"
             label={`${t("quantityLabel")} *`}
+            placeholder="0"
             numeric
+            prototypeStyle
           />
         </View>
         <View className="flex-1">
@@ -331,7 +394,9 @@ export function ManualEntryForm({
             control={control}
             name="threshold"
             label={t("minimumStockLabel")}
+            placeholder="10"
             numeric
+            prototypeStyle
           />
         </View>
       </View>
@@ -340,36 +405,41 @@ export function ManualEntryForm({
         suppliers={suppliers}
         selectedId={supplierId}
         onSelect={setSupplierId}
+        onCreateSupplier={
+          session.role === "owner" ? handleCreateSupplier : undefined
+        }
       />
 
       <View className="gap-2">
-        <Text className="font-sans-bold text-base text-richBlack">
-          {t("paymentMethodLabel")}
+        <Text className="font-sans-bold text-xs text-[#374151]">
+          {t("addMedicinePaymentMethodLabel")}
         </Text>
         <View className="flex-row gap-3">
           {(["cod", "credit"] as const).map((type) => (
             <Pressable
               key={type}
               onPress={() => setPaymentType(type)}
-              className={`flex-1 items-center rounded-lg border py-3 ${
+              className={`h-11 flex-1 items-center justify-center rounded-xl border-2 ${
                 paymentType === type
-                  ? "border-brand-green bg-brand-green"
-                  : "border-midGray bg-white"
+                  ? "border-brand-green bg-brand-softGreen"
+                  : "border-[#E5E7EB] bg-white"
               }`}
             >
               <Text
                 className={`font-sans-semibold ${
-                  paymentType === type ? "text-white" : "text-richBlack"
+                  paymentType === type ? "text-[#047857]" : "text-midGray"
                 }`}
               >
-                {type === "cod" ? t("codLabel") : t("onCreditLabel")}
+                {type === "cod"
+                  ? t("addMedicineCodLabel")
+                  : t("addMedicineCreditLabel")}
               </Text>
             </Pressable>
           ))}
         </View>
       </View>
 
-      <View className="flex-row items-center justify-between rounded-xl bg-white px-4 py-3">
+      <View className="flex-row items-center justify-between rounded-xl border border-[#E5E7EB] bg-white px-4 py-3">
         <View className="flex-1 pr-3">
           <Text className="font-sans-semibold text-sm text-richBlack">
             {t("requiresPrescriptionLabel")}
@@ -392,19 +462,19 @@ export function ManualEntryForm({
         />
       </View>
 
-      <Text className="font-sans text-xs text-midGray">
+      <Text className="text-center font-sans text-xs text-midGray">
         {t("requiredFieldsNoteLabel")}
       </Text>
       {errorMessage ? (
         <Text className="font-sans text-sm text-error">{errorMessage}</Text>
       ) : null}
 
-      <View className="flex-row gap-3">
+      <View className="flex-row gap-3 pt-4">
         <Pressable
           onPress={() => router.back()}
           accessibilityRole="button"
           accessibilityLabel={t("cancelLabel")}
-          className="flex-1 items-center rounded-lg border border-brand-green py-3.5 active:opacity-80"
+          className="h-12 flex-1 items-center justify-center rounded-lg border border-brand-green bg-white active:opacity-80"
         >
           <Text className="font-sans-semibold text-base text-brand-green">
             {t("cancelLabel")}
@@ -415,7 +485,7 @@ export function ManualEntryForm({
           disabled={isSubmitting}
           accessibilityRole="button"
           accessibilityLabel={t("saveMedicineLabel")}
-          className="flex-1 items-center rounded-lg bg-brand-green py-3.5 active:opacity-80 disabled:opacity-50"
+          className="h-12 flex-1 items-center justify-center rounded-lg bg-brand-green active:opacity-80 disabled:opacity-50"
         >
           <Text className="font-sans-semibold text-base text-white">
             {isSubmitting ? t("savingMedicineLabel") : t("saveMedicineLabel")}

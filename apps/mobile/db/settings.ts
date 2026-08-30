@@ -16,10 +16,13 @@ import {
   DEFAULT_NEAR_EXPIRY_DAYS,
 } from '../domain/inventoryRules';
 import { DEFAULT_CREDIT_MAX_DAYS } from '../domain/dashboard';
+import { MAX_TAX_RATE_BP, normalizeTaxLabel } from '../domain/tax';
 
 export const DEFAULT_MAX_REFUND_DAYS = 7;
 /** W-5/D-11: the hour the shop closes. Mirrors migration 0015's DB default. */
 export const DEFAULT_CLOSING_HOUR = 20;
+export interface TaxSettings { rateBp: number; label: string; }
+export const DEFAULT_TAX_SETTINGS: TaxSettings = { rateBp: 0, label: 'VAT' };
 
 export interface B2Settings {
   lowStockDefault: number;
@@ -93,6 +96,41 @@ export async function updateB2Settings(
       tx.insert(shopB2Settings).values(values).run();
       recordChange(tx, { shopId, table: 'shop_b2_settings', rowId: id, op: 'insert', payload: values });
     }
+  });
+}
+
+export async function getTaxSettings(shopId: string): Promise<TaxSettings> {
+  const row = db.select({ rateBp: shopB2Settings.taxRateBp, label: shopB2Settings.taxLabel })
+    .from(shopB2Settings).where(and(eq(shopB2Settings.shopId, shopId), eq(shopB2Settings.isDeleted, false))).get();
+  return row ?? DEFAULT_TAX_SETTINGS;
+}
+
+export async function updateTaxSettings(
+  shopId: string,
+  actorUserId: string,
+  settings: TaxSettings,
+  isStillActive: () => boolean,
+): Promise<void> {
+  await requireOwner(shopId, actorUserId);
+  if (!Number.isInteger(settings.rateBp) || settings.rateBp < 0 || settings.rateBp > MAX_TAX_RATE_BP) {
+    throw new Error('Tax rate must be between 0% and 100%');
+  }
+  const normalized = { taxRateBp: settings.rateBp, taxLabel: normalizeTaxLabel(settings.label) };
+  db.transaction((tx) => {
+    assertSessionLive(isStillActive);
+    const existing = tx.select({ id: shopB2Settings.id }).from(shopB2Settings)
+      .where(and(eq(shopB2Settings.shopId, shopId), eq(shopB2Settings.isDeleted, false))).get();
+    if (existing) {
+      const values = stampUpdatedAt({ ...normalized, isDirty: true });
+      tx.update(shopB2Settings).set(values).where(eq(shopB2Settings.id, existing.id)).run();
+      recordChange(tx, { shopId, table: 'shop_b2_settings', rowId: existing.id, op: 'update', payload: values });
+      return;
+    }
+    const id = generateId();
+    const now = new Date().toISOString();
+    const values = { id, shopId, ...DEFAULT_B2_SETTINGS, ...normalized, createdAt: now, updatedAt: now };
+    tx.insert(shopB2Settings).values(values).run();
+    recordChange(tx, { shopId, table: 'shop_b2_settings', rowId: id, op: 'insert', payload: values });
   });
 }
 

@@ -218,6 +218,7 @@ const deps = vi.hoisted(() => ({
   recordExpense: vi.fn(),
   deleteExpense: vi.fn(),
   getEndOfDaySummary: vi.fn(),
+  getEndOfDayReportSnapshot: vi.fn(),
   getB2Settings: vi.fn(),
   closeDay: vi.fn(),
   listCustomersWithBalance: vi.fn(),
@@ -264,6 +265,9 @@ vi.mock("../db/customers", () => ({
   getCustomerCreditLedger: deps.getCustomerCreditLedger,
   getCustomerCreditDetail: deps.getCustomerCreditDetail,
   collectPayment: deps.collectPayment,
+}));
+vi.mock("../db/reports", () => ({
+  getEndOfDayReportSnapshot: deps.getEndOfDayReportSnapshot,
 }));
 vi.mock("../db/purchases", () => ({
   searchMedicinesForPurchase: deps.searchMedicinesForPurchase,
@@ -425,6 +429,16 @@ beforeEach(() => {
   deps.listExpensesForMonth.mockResolvedValue([]);
   deps.findDuplicateExpense.mockResolvedValue(null);
   deps.getEndOfDaySummary.mockResolvedValue(OPEN_DAY_SUMMARY);
+  deps.getEndOfDayReportSnapshot.mockResolvedValue({
+    range: { startDate: BUSINESS_DATE, endDate: BUSINESS_DATE },
+    previousNetSales: asPaisa(0), changeBp: null, trend: [], topMedicines: [], expensesByCategory: [],
+    totals: {
+      grossSales: asPaisa(0), discounts: asPaisa(0), refunds: asPaisa(0), netSales: asPaisa(0),
+      taxCollected: asPaisa(0), netRevenue: asPaisa(0), cogs: asPaisa(0), grossProfit: asPaisa(0),
+      expenses: asPaisa(0), netProfit: asPaisa(0), cashSales: asPaisa(0), creditSales: asPaisa(0),
+      transactions: 0, refundsCount: 0, averageSale: asPaisa(0), isCogsPartial: false, missingCogsMedicines: [],
+    },
+  });
   deps.getB2Settings.mockResolvedValue({ closingHour: 20 });
   deps.listCustomersWithBalance.mockResolvedValue([]);
   deps.getCustomerListTotals.mockResolvedValue({ customerCount: 0, totalOutstanding: 0 });
@@ -966,7 +980,7 @@ describe("suppliers/purchase-create: save purchase", () => {
     clickText("Manual Entry");
     await waitFor(() => expect(deps.listSuppliers).toHaveBeenCalledTimes(1));
 
-    fireEvent.change(screen.getByPlaceholderText("Search medicine"), {
+    fireEvent.change(screen.getByPlaceholderText(/search medicine/i), {
       target: { value: "Napa" },
     });
     await waitFor(() => expect(screen.getByText("Napa")).toBeTruthy());

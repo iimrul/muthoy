@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { parseTakaTextToPaisa } from "@muthoy/utils";
+import Feather from "@expo/vector-icons/Feather";
 import { StandardHeader } from "../../components/ui/StandardHeader";
 import { AccessDenied } from "../../components/ui/AccessDenied";
 import {
@@ -19,6 +20,7 @@ import {
 } from "../../db/inventory";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { usePermission } from "../../state/usePermission";
+import { useI18n } from "../../state/localeStore";
 import { triggerSyncNow } from "../../sync";
 
 type AdjustmentKind = "adjustment" | "expiry_disposal" | "reconciliation";
@@ -29,11 +31,17 @@ export default function EditBatchScreen() {
     batchId: string;
   }>();
   const { session, isAllowed } = usePermission("inventory_edit");
+  const { isAllowed: canManageExpiry } = usePermission("expiry_manage");
+  const { t, formatNumber } = useI18n();
   const [batchNo, setBatchNo] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
   const [purchasePrice, setPurchasePrice] = useState("");
   const [salePrice, setSalePrice] = useState("");
+  const [currentStock, setCurrentStock] = useState(0);
   const [changeQty, setChangeQty] = useState("");
+  const [direction, setDirection] = useState<"increase" | "decrease">(
+    "increase",
+  );
   const [reason, setReason] = useState("");
   const [kind, setKind] = useState<AdjustmentKind>("adjustment");
   const [busy, setBusy] = useState(false);
@@ -46,6 +54,7 @@ export default function EditBatchScreen() {
       setExpiryDate(row.expiryDate ?? "");
       setPurchasePrice(String(row.purchasePrice / 100));
       setSalePrice(String(row.salePrice / 100));
+      setCurrentStock(row.quantityAvailable);
     });
   }, [batchId, medicineId, session]);
   if (!session || !isAllowed || !medicineId || !batchId)
@@ -63,109 +72,235 @@ export default function EditBatchScreen() {
     } catch (caught) {
       if (!guard.isStale())
         Alert.alert(
-          "Could not update batch",
-          caught instanceof Error ? caught.message : "Try again.",
+          t("updateBatchFailedLabel"),
+          caught instanceof Error ? caught.message : t("tryAgainLabel"),
         );
     } finally {
       setBusy(false);
     }
   };
   return (
-    <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title="Edit batch" onBackPress={() => router.back()} />
-      <ScrollView contentContainerClassName="gap-4 p-4">
-        <Field label="Batch number" value={batchNo} onChange={setBatchNo} />
-        <Field
-          label="Expiry (blank = unknown)"
-          value={expiryDate}
-          onChange={setExpiryDate}
-        />
-        <Field
-          label="Purchase price (৳)"
-          value={purchasePrice}
-          onChange={setPurchasePrice}
-          numeric
-        />
-        <Field
-          label="Sale price (৳)"
-          value={salePrice}
-          onChange={setSalePrice}
-          numeric
-        />
-        <Pressable
-          disabled={busy}
-          onPress={() =>
-            void run((isStillActive) =>
-              updateBatch({
-                shopId: session.shopId,
-                actorUserId: session.userId,
-                batchId,
-                isStillActive,
-                values: {
-                  batchNo: batchNo.trim(),
-                  expiryDate: expiryDate.trim() || null,
-                  purchasePrice: parseTakaTextToPaisa(purchasePrice),
-                  salePrice: parseTakaTextToPaisa(salePrice),
-                },
-              }),
-            )
-          }
-          className="items-center rounded-lg bg-brand-green py-4 disabled:opacity-40"
-        >
-          <Text className="text-white">Save metadata</Text>
-        </Pressable>
-        <View className="gap-3 rounded-lg bg-white p-4">
-          <Text className="font-sans-semibold">Ledger adjustment</Text>
+    <View className="flex-1 bg-[#F9F9FC]">
+      <StandardHeader
+        title={t("editBatchTitle")}
+        onBackPress={() => router.back()}
+      />
+      <ScrollView contentContainerClassName="gap-4 p-4 pb-32">
+        <View className="gap-4 rounded-2xl bg-white p-4 shadow-sm">
+          <View className="flex-row items-center gap-2">
+            <View className="h-9 w-9 items-center justify-center rounded-lg bg-brand-softGreen">
+              <Feather name="package" size={17} color="#059669" />
+            </View>
+            <Text className="font-sans-bold text-base text-richBlack">
+              {t("batchMetadataLabel")}
+            </Text>
+          </View>
+          <Field
+            label={t("batchNoColumnLabel")}
+            value={batchNo}
+            onChange={setBatchNo}
+          />
+          <Field
+            label={t("expiryDateLabel")}
+            value={expiryDate}
+            onChange={setExpiryDate}
+            placeholder="YYYY-MM-DD"
+          />
+          <View className="flex-row gap-3">
+            <View className="flex-1">
+              <Field
+                label={t("purchasePriceLabel")}
+                value={purchasePrice}
+                onChange={setPurchasePrice}
+                numeric
+              />
+            </View>
+            <View className="flex-1">
+              <Field
+                label={t("salePriceLabel")}
+                value={salePrice}
+                onChange={setSalePrice}
+                numeric
+              />
+            </View>
+          </View>
+          <Pressable
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel={t("saveMetadataLabel")}
+            onPress={() =>
+              void run((isStillActive) =>
+                updateBatch({
+                  shopId: session.shopId,
+                  actorUserId: session.userId,
+                  batchId,
+                  isStillActive,
+                  values: {
+                    batchNo: batchNo.trim(),
+                    expiryDate: expiryDate.trim() || null,
+                    purchasePrice: parseTakaTextToPaisa(purchasePrice),
+                    salePrice: parseTakaTextToPaisa(salePrice),
+                  },
+                }),
+              )
+            }
+            className="h-12 items-center justify-center rounded-xl bg-brand-green disabled:opacity-40"
+          >
+            <Text className="font-sans-bold text-white">
+              {t("saveMetadataLabel")}
+            </Text>
+          </Pressable>
+        </View>
+
+        <View className="gap-4 rounded-2xl bg-white p-4 shadow-sm">
+          <View className="flex-row items-center gap-2">
+            <View className="h-9 w-9 items-center justify-center rounded-lg bg-[#CFE6F2]">
+              <Feather name="activity" size={17} color="#526772" />
+            </View>
+            <Text className="font-sans-bold text-base text-richBlack">
+              {t("stockAdjustmentLabel")}
+            </Text>
+          </View>
           <View className="flex-row gap-2">
-            {(["adjustment", "expiry_disposal", "reconciliation"] as const).map(
+            <View className="flex-1 items-center rounded-xl bg-[#F3F4F6] p-3">
+              <Text className="font-sans text-[10px] uppercase text-midGray">
+                {t("currentStockLabel")}
+              </Text>
+              <Text className="font-sans-extrabold text-2xl text-richBlack">
+                {formatNumber(currentStock)}
+              </Text>
+            </View>
+            <View className="flex-1 items-center rounded-xl bg-brand-softGreen p-3">
+              <Text className="font-sans text-[10px] uppercase text-midGray">
+                {t("resultingStockLabel")}
+              </Text>
+              <Text className="font-sans-extrabold text-2xl text-brand-green">
+                {formatNumber(
+                  currentStock +
+                    (direction === "decrease" ? -1 : 1) *
+                      (Number(changeQty) || 0),
+                )}
+              </Text>
+            </View>
+          </View>
+          <View className="flex-row gap-2">
+            {(["increase", "decrease"] as const).map((value) => (
+              <Pressable
+                key={value}
+                onPress={() => setDirection(value)}
+                accessibilityRole="button"
+                accessibilityLabel={t(
+                  value === "increase"
+                    ? "increaseStockLabel"
+                    : "decreaseStockLabel",
+                )}
+                className={`h-11 flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border ${direction === value ? "border-brand-green bg-brand-softGreen" : "border-[#D1D5DB] bg-white"}`}
+              >
+                <Feather
+                  name={value === "increase" ? "plus" : "minus"}
+                  size={16}
+                  color={direction === value ? "#059669" : "#6B7280"}
+                />
+                <Text
+                  className={`font-sans-bold text-xs ${direction === value ? "text-brand-green" : "text-midGray"}`}
+                >
+                  {t(
+                    value === "increase"
+                      ? "increaseStockLabel"
+                      : "decreaseStockLabel",
+                  )}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <View className="flex-row gap-2">
+            {(
+              [
+                "adjustment",
+                ...(canManageExpiry ? (["expiry_disposal"] as const) : []),
+                "reconciliation",
+              ] as const
+            ).map(
               (value) => (
                 <Pressable
                   key={value}
-                  onPress={() => setKind(value)}
-                  className={`flex-1 rounded border p-2 ${kind === value ? "border-brand-green" : "border-midGray"}`}
+                  onPress={() => {
+                    setKind(value);
+                    if (value === "expiry_disposal") setDirection("decrease");
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(
+                    value === "adjustment"
+                      ? "adjustmentLabel"
+                      : value === "expiry_disposal"
+                        ? "expiryDisposalLabel"
+                        : "reconciliationLabel",
+                  )}
+                  className={`flex-1 items-center rounded-lg border p-2 ${kind === value ? "border-brand-green bg-brand-softGreen" : "border-[#D1D5DB]"}`}
                 >
-                  <Text className="text-xs">{value}</Text>
+                  <Text
+                    className={`text-center font-sans-semibold text-[10px] ${kind === value ? "text-brand-green" : "text-midGray"}`}
+                  >
+                    {t(
+                      value === "adjustment"
+                        ? "adjustmentLabel"
+                        : value === "expiry_disposal"
+                          ? "expiryDisposalLabel"
+                          : "reconciliationLabel",
+                    )}
+                  </Text>
                 </Pressable>
               ),
             )}
           </View>
           <Field
-            label="Signed quantity"
+            label={t("quantityChangeLabel")}
             value={changeQty}
             onChange={setChangeQty}
             numeric
           />
-          <Field label="Required reason" value={reason} onChange={setReason} />
+          <Field
+            label={t("requiredReasonLabel")}
+            value={reason}
+            onChange={setReason}
+          />
           <Pressable
             disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel={t("postAdjustmentLabel")}
             onPress={() =>
               void run((isStillActive) =>
                 adjustBatchStock({
                   shopId: session.shopId,
                   actorUserId: session.userId,
                   batchId,
-                  changeQty: Number(changeQty),
+                  changeQty:
+                    (direction === "decrease" ? -1 : 1) * Number(changeQty),
                   reason,
                   kind,
                   isStillActive,
                 }),
               )
             }
-            className="items-center rounded-lg border border-brand-green py-3 disabled:opacity-40"
+            className="h-12 items-center justify-center rounded-xl border border-brand-green bg-brand-softGreen disabled:opacity-40"
           >
-            <Text className="text-brand-green">Post adjustment</Text>
+            <Text className="font-sans-bold text-brand-green">
+              {t("postAdjustmentLabel")}
+            </Text>
           </Pressable>
         </View>
         <Pressable
           disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel={t("archiveBatchLabel")}
           onPress={() =>
             Alert.alert(
-              "Archive batch?",
-              "Requires zero stock, no oversell, and no active promotion.",
+              t("archiveBatchTitle"),
+              t("medicineArchiveRequirementsLabel"),
               [
-                { text: "Cancel" },
+                { text: t("cancelLabel") },
                 {
-                  text: "Archive",
+                  text: t("archiveLabel"),
                   style: "destructive",
                   onPress: () =>
                     void run((isStillActive) =>
@@ -180,9 +315,11 @@ export default function EditBatchScreen() {
               ],
             )
           }
-          className="items-center rounded-lg border border-error py-4"
+          className="h-12 items-center justify-center rounded-xl border border-error bg-white"
         >
-          <Text className="text-error">Archive batch</Text>
+          <Text className="font-sans-bold text-error">
+            {t("archiveBatchLabel")}
+          </Text>
         </Pressable>
       </ScrollView>
     </View>
@@ -194,20 +331,25 @@ function Field({
   value,
   onChange,
   numeric = false,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   numeric?: boolean;
+  placeholder?: string;
 }) {
   return (
-    <View className="gap-2">
-      <Text>{label}</Text>
+    <View className="gap-1.5">
+      <Text className="font-sans-semibold text-sm text-richBlack">{label}</Text>
       <TextInput
         value={value}
         onChangeText={onChange}
+        accessibilityLabel={label}
         keyboardType={numeric ? "decimal-pad" : "default"}
-        className="rounded-lg border border-midGray bg-white p-3"
+        placeholder={placeholder}
+        placeholderTextColor="#6B7280"
+        className="h-12 rounded-xl border border-[#D1D5DB] bg-white px-3 font-sans text-sm text-richBlack"
       />
     </View>
   );

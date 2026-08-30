@@ -54,6 +54,7 @@ import { deductStock } from "./stockLedger";
 import { recordChange, stampUpdatedAt } from "./sync-helpers";
 import { markSaleDraftCompleted } from "./saleDrafts";
 import { uuidV5 } from "../domain/deterministicId";
+import { extractInclusiveTax, normalizeTaxLabel } from "../domain/tax";
 
 const SEARCH_LIMIT = 50;
 
@@ -377,6 +378,7 @@ export interface SaleTransactionResult {
   discountAmount: Paisa;
   total: Paisa;
   change: Paisa;
+  taxAmount: Paisa;
   quoteChanged: boolean;
 }
 
@@ -550,9 +552,13 @@ export async function createSaleTransaction(
           promotion.discountBps,
         ]),
       );
-      const farDays =
+      const shopSettings =
         tx
-          .select({ value: shopB2Settings.expiryFarDays })
+          .select({
+            farDays: shopB2Settings.expiryFarDays,
+            taxRateBp: shopB2Settings.taxRateBp,
+            taxLabel: shopB2Settings.taxLabel,
+          })
           .from(shopB2Settings)
           .where(
             and(
@@ -560,7 +566,10 @@ export async function createSaleTransaction(
               eq(shopB2Settings.isDeleted, false),
             ),
           )
-          .get()?.value ?? 60;
+          .get();
+      const farDays = shopSettings?.farDays ?? 60;
+      const taxRateBp = shopSettings?.taxRateBp ?? 0;
+      const taxLabel = normalizeTaxLabel(shopSettings?.taxLabel ?? "VAT");
 
       const itemDrafts = requested.flatMap((line) => {
         const candidates: Batch[] = rawBatches.map((batch) => ({
@@ -624,6 +633,7 @@ export async function createSaleTransaction(
       );
       const allocationById = new Map(allocated.map((item) => [item.id, item]));
       const total = asPaisa(subtotal - discountAmount);
+      const taxAmount = extractInclusiveTax(total, taxRateBp);
       const refreshedAllocation = itemDrafts.map((item) => ({
         batchId: item.batchId,
         quantity: item.qty,
@@ -855,6 +865,9 @@ export async function createSaleTransaction(
         paymentType: payment.type,
         cashApplied: payment.cashApplied,
         creditAmount: payment.creditAmount,
+        taxAmount,
+        taxRateBp,
+        taxLabel,
         customerId: resolvedCustomerId,
         staffId: input.staffId,
         sellerNameSnapshot: staff.name,
@@ -1065,6 +1078,7 @@ export async function createSaleTransaction(
         discountAmount,
         total,
         change: payment.change,
+        taxAmount,
         quoteChanged,
       };
     });

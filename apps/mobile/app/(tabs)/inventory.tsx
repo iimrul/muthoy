@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, FlatList, Pressable, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  FlatList,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { router } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { daysUntilExpiry } from "@muthoy/utils";
@@ -18,7 +26,7 @@ import { userFacingError } from "../../i18n/display";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useSessionStore } from "../../state/sessionStore";
 import { useOwnerAccess, usePermission } from "../../state/usePermission";
-import { useUnreadCount } from "../../state/useUnreadCount";
+import { triggerSyncNow } from "../../sync";
 
 const FILTERS = [
   { value: "all", labelKey: "allLabel" },
@@ -43,7 +51,7 @@ export default function InventoryScreen() {
   const { isAllowed: canEditInventory } = usePermission("inventory_edit");
   const { isAllowed: canManageExpiry } = usePermission("expiry_manage");
   const { isAllowed: isOwner } = useOwnerAccess();
-  const unreadCount = useUnreadCount(session?.shopId, session?.userId);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [medicines, setMedicines] = useState<MedicineListRow[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "low" | "out" | "expiring">(
@@ -101,6 +109,18 @@ export default function InventoryScreen() {
     }
   };
 
+  const handleSync = async () => {
+    setIsSyncing(true);
+    try {
+      await triggerSyncNow(session.shopId);
+      await reloadMedicines();
+    } catch (caught) {
+      console.warn("Inventory sync failed", caught);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleDelete = (medicine: MedicineListRow) => {
     Alert.alert(
       t("deleteLabel") + "?",
@@ -139,13 +159,13 @@ export default function InventoryScreen() {
   };
 
   return (
-    <View className="flex-1 bg-brand-softGreen">
+    <View className="flex-1 bg-[#F9F9FC]">
       <StandardHeader
         title={t("inventoryManagementTitle")}
-        onBellPress={() => router.push("/notifications")}
-        unreadCount={unreadCount}
+        onSyncPress={() => void handleSync()}
+        syncing={isSyncing}
       />
-      <View className="gap-3 px-4 pt-4">
+      <View className="gap-2 px-3 py-2">
         <View className="relative">
           <View className="absolute inset-y-0 left-3 z-10 items-center justify-center">
             <Feather name="search" size={18} color="#6B7280" />
@@ -154,7 +174,8 @@ export default function InventoryScreen() {
             value={query}
             onChangeText={setQuery}
             placeholder={t("searchByNameGenericBatchPlaceholder")}
-            className="rounded-lg border border-midGray bg-white py-3 pl-10 pr-4"
+            placeholderTextColor="#6B7280"
+            className="h-9 rounded-lg bg-[#E8E8EA] pl-10 pr-3 font-sans text-sm text-richBlack"
           />
         </View>
         {canAddMedicine || canManageExpiry || isOwner ? (
@@ -164,10 +185,10 @@ export default function InventoryScreen() {
                 onPress={() => router.push("/inventory/add-medicine")}
                 accessibilityRole="button"
                 accessibilityLabel={t("addStockLabel")}
-                className="flex-1 flex-row items-center justify-center gap-2 rounded-lg bg-brand-green py-3 active:opacity-80"
+                className="h-8 flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-brand-green px-3 active:opacity-80"
               >
                 <Feather name="plus-circle" size={16} color="#FFFFFF" />
-                <Text className="font-sans-semibold text-sm text-white">
+                <Text className="font-sans-bold text-xs text-white">
                   {t("addStockLabel")}
                 </Text>
               </Pressable>
@@ -177,10 +198,10 @@ export default function InventoryScreen() {
                 onPress={() => router.push("/inventory/expiry")}
                 accessibilityRole="button"
                 accessibilityLabel={t("expiryShortLabel")}
-                className="flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-brand-green bg-white py-3"
+                className="h-8 flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-brand-green bg-white px-3"
               >
                 <Feather name="clock" size={15} color="#059669" />
-                <Text className="font-sans-medium text-sm text-brand-green">
+                <Text className="font-sans-medium text-xs text-brand-green">
                   {t("expiryShortLabel")}
                 </Text>
               </Pressable>
@@ -190,17 +211,24 @@ export default function InventoryScreen() {
                 onPress={() => router.push("/inventory/import")}
                 accessibilityRole="button"
                 accessibilityLabel={t("importCsvLabel")}
-                className="flex-1 flex-row items-center justify-center gap-1.5 rounded-lg border border-brand-green bg-white py-3"
+                className="h-8 flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-[#0DB07B] px-3"
               >
-                <Feather name="upload" size={15} color="#059669" />
-                <Text className="font-sans-medium text-sm text-brand-green">
+                <Feather name="upload" size={15} color="#FFFFFF" />
+                <Text className="font-sans-medium text-xs text-white">
                   {t("importCsvLabel")}
                 </Text>
               </Pressable>
             ) : null}
           </View>
         ) : null}
-        <View className="flex-row gap-2">
+      </View>
+      <ScrollView
+        testID="inventory-filters"
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0 }}
+        contentContainerClassName="gap-2 px-4 pb-4"
+      >
           {FILTERS.map(({ value, labelKey }) => {
             const count =
               value === "all"
@@ -218,14 +246,14 @@ export default function InventoryScreen() {
               <Pressable
                 key={value}
                 onPress={() => setFilter(value)}
-                className={`flex-row items-center gap-1 rounded-full px-3 py-2 ${active ? "bg-brand-green" : "bg-white"}`}
+                className={`h-7 flex-row items-center gap-1.5 rounded-full px-3 ${active ? "bg-brand-green" : "bg-[#E8E8EA]"}`}
               >
                 <Text
                   className={`font-sans-medium text-xs ${active ? "text-white" : "text-richBlack"}`}
                 >
                   {t(labelKey)}
                 </Text>
-                {count > 0 ? (
+                {value !== "all" && count > 0 ? (
                   <View
                     className={`rounded-full px-1.5 ${active ? "bg-white/20" : "bg-brand-softGreen"}`}
                   >
@@ -239,13 +267,13 @@ export default function InventoryScreen() {
               </Pressable>
             );
           })}
-        </View>
-      </View>
+      </ScrollView>
       <FlatList
+        testID="inventory-list"
         data={visible}
         keyExtractor={(item) => item.medicineId}
         className="flex-1"
-        contentContainerClassName="flex-grow gap-3 p-4"
+        contentContainerClassName="flex-grow gap-4 px-4 pb-24 pt-0"
         onRefresh={reloadMedicines}
         refreshing={false}
         ListEmptyComponent={

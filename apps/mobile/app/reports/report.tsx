@@ -1,13 +1,113 @@
-import { Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import Feather from '@expo/vector-icons/Feather';
+import { router } from 'expo-router';
+import { asPaisa } from '@muthoy/types';
+import { AccessDenied } from '../../components/ui/AccessDenied';
+import { StandardHeader } from '../../components/ui/StandardHeader';
+import { DonutChart, TrendChart } from '../../components/reports/ReportCharts';
+import { getReportSnapshot, type ReportSnapshot } from '../../db/reports';
+import { currentBusinessDate } from '../../db/cash';
+import { addDays, assertDateRange, reportHasActivity } from '../../domain/reporting';
+import { exportAndShareReport } from '../../services/reportExport';
+import { useI18n } from '../../state/localeStore';
+import { captureSessionFor } from '../../state/sessionGuard';
+import { usePermission } from '../../state/usePermission';
 
-// Report (date-range totals) — Volume 4 REPORTS. Not in Volume 0's explicit
-// P0 day-by-day list; grouped with Volume 0's P1 "Reports polish" item.
-// Read-only aggregation over local SQLite — no network dependency.
-// TODO(P1): date-range totals via db/reports.ts's getDateRangeTotals.
-export default function ReportScreen() {
+function ActionIcon({ name, label, onPress }: { name: 'download' | 'share-2'; label: string; onPress: () => void }) {
   return (
-    <View>
-      <Text>TODO: Report — date-range totals (P1, Volume 4 REPORTS)</Text>
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} className="h-10 w-10 items-center justify-center rounded-full active:bg-white">
+      <Feather name={name} size={20} color="#059669" />
+    </Pressable>
+  );
+}
+
+export default function ReportScreen() {
+  const { locale, formatMoney, formatNumber } = useI18n(); const bn = locale === 'bn';
+  const { session, isAllowed } = usePermission('reports');
+  const today = currentBusinessDate();
+  const [startDate, setStartDate] = useState(today); const [endDate, setEndDate] = useState(today);
+  const [report, setReport] = useState<ReportSnapshot | null>(null); const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false); const [failedExport, setFailedExport] = useState(false);
+  const requestRef = useRef(0);
+  const range = useMemo(() => ({ startDate, endDate }), [startDate, endDate]);
+  const load = useCallback(async () => {
+    if (!session || !isAllowed) return;
+    const request = ++requestRef.current; setLoading(true); setReport(null);
+    try { assertDateRange(range); } catch (cause) {
+      if (request === requestRef.current) { setError(cause instanceof Error ? cause.message : 'Invalid date range'); setLoading(false); }
+      return;
+    }
+    const guard = captureSessionFor(session);
+    try {
+      const value = await getReportSnapshot(session.shopId, session.userId, range);
+      if (guard?.isStale() || request !== requestRef.current) return; setReport(value); setError(null); setFailedExport(false);
+    } catch (cause) {
+      if (!guard?.isStale() && request === requestRef.current) { setReport(null); setError(cause instanceof Error ? cause.message : (bn ? 'রিপোর্ট লোড হয়নি' : 'Report failed to load')); }
+    } finally { if (!guard?.isStale() && request === requestRef.current) setLoading(false); }
+  }, [bn, isAllowed, range, session]);
+  useEffect(() => {
+    // Route/range changes are the external trigger for this SQLite read.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void load();
+  }, [load]);
+  const setRangeSafely = (start: string, end: string) => { requestRef.current += 1; setReport(null); setError(null); setStartDate(start); setEndDate(end); };
+  const preset = (days: number, offset = 0) => { const end = addDays(today, offset); setRangeSafely(addDays(end, -(days - 1)), end); };
+  const share = () => {
+    if (!report || !reportHasActivity(report.totals)) { setError(bn ? 'শেয়ার করার জন্য কোনো ডাটা নেই' : 'No data to share'); return; }
+    const totals = report.totals;
+    void Share.share({ message: `${bn ? 'বিক্রয় রিপোর্ট' : 'Sales Report'} (${startDate} — ${endDate})\n${bn ? 'মোট বিক্রয়' : 'Total Sales'}: ${formatMoney(totals.netSales)}\n${bn ? 'লেনদেন' : 'Transactions'}: ${formatNumber(totals.transactions)}\n${bn ? 'নিট মুনাফা' : 'Net Profit'}: ${formatMoney(totals.netProfit)}${totals.taxCollected !== 0 ? `\n${bn ? 'নিট ট্যাক্স' : 'Net Tax'}: ${formatMoney(totals.taxCollected)}` : ''}` });
+  };
+  const download = async () => {
+    if (!session) return;
+    if (!report || !reportHasActivity(report.totals)) { setError(bn ? 'ডাউনলোড করার জন্য কোনো ডাটা নেই' : 'No data to download'); setFailedExport(false); return; }
+    setExporting(true); setError(null); setFailedExport(false);
+    try { await exportAndShareReport({ shopId: session.shopId, actorUserId: session.userId, range, datasets: ['sales'], format: 'csv' }); }
+    catch (cause) { setFailedExport(true); setError(cause instanceof Error ? cause.message : (bn ? 'এক্সপোর্ট ব্যর্থ হয়েছে' : 'Export failed')); }
+    finally { setExporting(false); }
+  };
+  if (!session) return <AccessDenied message={bn ? 'সক্রিয় সেশন প্রয়োজন।' : 'Active session required.'} />;
+  if (!isAllowed) return <AccessDenied />;
+  const totals = report?.totals;
+  const changeLabel = report?.changeBp === null || report?.changeBp === undefined ? (bn ? 'আগের কোনো ডাটা নেই' : 'No previous period data') : `${report.changeBp >= 0 ? '↑' : '↓'} ${Math.abs(report.changeBp) / 100}%`;
+  return (
+    <View className="flex-1 bg-brand-softGreen">
+      <StandardHeader title={bn ? 'রিপোর্ট' : 'Report'} onBackPress={() => router.back()} rightAccessory={(
+        <View className="flex-row"><ActionIcon name="download" label={exporting ? 'Exporting' : 'Download'} onPress={() => { if (!exporting) void download(); }} /><ActionIcon name="share-2" label="Share" onPress={share} /></View>
+      )} />
+      <ScrollView contentContainerClassName="gap-4 p-4 pb-28" keyboardShouldPersistTaps="handled">
+        <View className="gap-4 rounded-3xl bg-white p-5">
+          <Text className="font-sans-bold text-sm text-richBlack">{bn ? 'রিপোর্ট পিরিয়ড' : 'Report Period'}</Text>
+          <View className="flex-row gap-2">
+            {[{ label: bn ? 'আজ' : 'Today', days: 1, offset: 0 }, { label: bn ? 'গতকাল' : 'Yesterday', days: 1, offset: -1 }, { label: bn ? 'সপ্তাহ' : 'Week', days: 7, offset: 0 }, { label: bn ? 'মাস' : 'Month', days: 30, offset: 0 }].map((item) => (
+              <Pressable key={item.label} onPress={() => preset(item.days, item.offset)} className="flex-1 items-center rounded-xl bg-brand-softGreen px-1 py-2 active:bg-brand-green">
+                <Text className="font-sans-bold text-xs text-brand-green">{item.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View className="flex-row gap-3">
+            {[{ label: bn ? 'শুরুর তারিখ' : 'Start', value: startDate, set: setStartDate }, { label: bn ? 'শেষের তারিখ' : 'End', value: endDate, set: setEndDate }].map((field) => (
+              <View key={field.label} className="flex-1 gap-2"><Text className="font-sans-semibold text-xs text-midGray">{field.label}</Text><TextInput value={field.value} onChangeText={(value) => { requestRef.current += 1; setReport(null); setError(null); field.set(value); }} maxLength={10} className="h-12 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] px-3 font-mono text-sm text-richBlack" /></View>
+            ))}
+          </View>
+        </View>
+        {error ? <View className="flex-row items-center gap-2 rounded-2xl border border-[#FCA5A5] bg-[#FEE2E2] p-3"><Text className="flex-1 font-sans text-xs text-[#7F1D1D]">{error}</Text><Pressable onPress={() => failedExport ? void download() : void load()}><Text className="font-sans-bold text-xs text-error">{bn ? 'আবার চেষ্টা' : 'Retry'}</Text></Pressable></View> : null}
+        {loading && !report ? <View className="items-center rounded-3xl bg-white p-10"><Text className="font-sans text-midGray">{bn ? 'রিপোর্ট তৈরি হচ্ছে…' : 'Building report…'}</Text></View> : null}
+        {totals ? <>
+          <View className="rounded-3xl bg-brand-green p-5">
+            <View className="flex-row items-start justify-between"><View><Text className="font-sans text-xs uppercase text-white/70">{bn ? 'মোট বিক্রয়' : 'Total Sales'}</Text><Text className="mt-1 font-mono text-3xl text-white">{formatMoney(totals.netSales)}</Text></View><View className="rounded-full bg-white/20 px-3 py-1"><Text className="font-mono text-xs text-white">{changeLabel}</Text></View></View>
+            <View className="mt-4 flex-row border-t border-white/20 pt-4">{[{ label: bn ? 'লেনদেন' : 'Transactions', value: formatNumber(totals.transactions) }, { label: bn ? 'গড় বিক্রয়' : 'Avg Sale', value: formatMoney(totals.averageSale) }, { label: bn ? 'মুনাফা' : 'Profit', value: formatMoney(totals.netProfit) }].map((item) => <View key={item.label} className="flex-1"><Text className="font-sans text-[10px] uppercase text-white/70">{item.label}</Text><Text className="mt-1 font-mono text-sm text-white">{item.value}</Text></View>)}</View>
+          </View>
+          <View className="rounded-3xl bg-white p-5"><Text className="mb-3 font-sans-bold text-sm text-richBlack">{bn ? 'বিক্রয় ট্রেন্ড' : 'Sales Trend'}</Text>{report.trend.length ? <TrendChart data={report.trend} /> : <Text className="py-16 text-center font-sans text-sm text-midGray">{bn ? 'কোনো ডাটা নেই' : 'No data available'}</Text>}</View>
+          <View className="flex-row gap-4">
+            <View className="flex-1 rounded-3xl bg-white p-4"><Text className="font-sans-bold text-xs text-richBlack">{bn ? 'পেমেন্ট ব্রেকডাউন' : 'Payment Breakdown'}</Text>{totals.cashSales > 0 || totals.creditSales > 0 ? <><DonutChart cash={totals.cashSales} credit={totals.creditSales} />{[{ label: bn ? 'নগদ' : 'Cash', value: totals.cashSales, color: 'bg-brand-green' }, { label: bn ? 'ক্রেডিট' : 'Credit', value: totals.creditSales, color: 'bg-[#D97706]' }].map((item) => <View key={item.label} className="mt-2 flex-row items-center justify-between"><View className="flex-row items-center gap-1"><View className={`h-2.5 w-2.5 rounded-full ${item.color}`} /><Text className="font-sans text-[10px]">{item.label}</Text></View><Text className="font-mono text-[10px]">{formatMoney(item.value)}</Text></View>)}</> : <Text className="py-12 text-center text-xs text-midGray">{bn ? 'কোনো ডাটা নেই' : 'No data'}</Text>}</View>
+            <View className="flex-1 rounded-3xl bg-white p-4"><Text className="mb-2 font-sans-bold text-xs text-richBlack">{bn ? 'শীর্ষ ঔষধ' : 'Top Medicines'}</Text>{report.topMedicines.length ? report.topMedicines.map((medicine, index) => <View key={medicine.medicineId} className="flex-row items-center gap-2 border-b border-[#F3F4F6] py-2"><View className="h-5 w-5 items-center justify-center rounded-full bg-brand-softGreen"><Text className="font-mono text-[10px] text-brand-green">{index + 1}</Text></View><View className="flex-1"><Text numberOfLines={1} className="font-sans-semibold text-[11px] text-richBlack">{medicine.name}</Text><Text className="font-mono text-[9px] text-midGray">{formatNumber(medicine.qty)} {bn ? 'টি' : 'units'} · {formatMoney(medicine.sales)}</Text></View></View>) : <Text className="py-12 text-center text-xs text-midGray">{bn ? 'কোনো ডাটা নেই' : 'No data'}</Text>}</View>
+          </View>
+          <View className="rounded-3xl bg-white p-5"><Text className="mb-3 font-sans-bold text-sm">{bn ? 'লাভের হিসাব' : 'Profit Summary'}</Text>{[{ label: bn ? 'MRP-সহ বিক্রয়' : 'MRP-inclusive sales', value: totals.netSales }, ...(totals.taxCollected > 0 ? [{ label: bn ? 'অন্তর্ভুক্ত ট্যাক্স' : 'Included tax', value: asPaisa(-totals.taxCollected) }] : totals.taxCollected < 0 ? [{ label: bn ? 'ফেরত ট্যাক্স' : 'Tax reversed', value: asPaisa(-totals.taxCollected) }] : []), ...(totals.cogs >= 0 ? [{ label: bn ? 'বিক্রিত পণ্যের খরচ' : 'COGS', value: asPaisa(-totals.cogs) }] : [{ label: bn ? 'ফেরত পণ্যের খরচ' : 'COGS reversed', value: asPaisa(-totals.cogs) }]), { label: bn ? 'পরিচালন খরচ' : 'Expenses', value: asPaisa(-totals.expenses) }].map((row) => <View key={row.label} className="flex-row justify-between py-1"><Text className="font-sans text-xs text-midGray">{row.label}</Text><Text className="font-mono text-xs">{formatMoney(row.value)}</Text></View>)}<View className="mt-2 flex-row justify-between border-t border-richBlack pt-2"><Text className="font-sans-bold text-sm">{bn ? 'নিট মুনাফা' : 'Net Profit'}</Text><Text className={`font-mono text-base ${totals.netProfit < 0 ? 'text-error' : 'text-brand-green'}`}>{formatMoney(totals.netProfit)}</Text></View></View>
+          <Pressable onPress={() => router.push('/reports/monthly-report')} className="items-center rounded-2xl border border-brand-green bg-white p-4"><Text className="font-sans-bold text-brand-green">{bn ? 'মাসিক লাভ-ক্ষতি দেখুন' : 'View Monthly P&L'}</Text></Pressable>
+        </> : null}
+      </ScrollView>
     </View>
   );
 }

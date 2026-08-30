@@ -37,6 +37,7 @@ beforeAll(() => {
     '0015_b3_shop_settings.sql', '0016_payment_note.sql', '0017_cash_reconcile.sql', '0018_expense_category_taxonomy.sql',
     '0019_supplier_archive.sql', '0020_purchase_item_status.sql', '0021_purchase_void.sql',
     '0022_supplier_profile_fields.sql', '0023_purchase_invoice_metadata.sql',
+    '0024_b3_report_indexes.sql', '0025_b3_sale_tax_snapshot.sql',
   ]) applyMigration(name);
   const now = new Date().toISOString();
   db.insert(schema.shops).values({ id: 'shop', ownerId: 'owner', name: 'B2', phone: '01700000000', createdAt: now, updatedAt: now }).run();

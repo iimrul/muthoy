@@ -38,42 +38,44 @@ export default function AddMedicineScreen() {
         title={t("addMedicineTitle")}
         onBackPress={() => router.back()}
       />
-      <View className="flex-row gap-2 px-6 pt-4">
-        <Pressable
-          onPress={() => setTab("search")}
-          accessibilityRole="button"
-          accessibilityLabel={t("searchMedicineLabel")}
-          className={`flex-1 items-center rounded-lg py-2.5 ${
-            tab === "search" ? "bg-brand-green" : "bg-white"
-          }`}
-        >
-          <Text
-            className={`font-sans-semibold text-sm ${
-              tab === "search" ? "text-white" : "text-richBlack"
+      <View className="border-b border-[#E5E7EB] px-4 py-4">
+        <View className="flex-row gap-2">
+          <Pressable
+            onPress={() => setTab("search")}
+            accessibilityRole="button"
+            accessibilityLabel={t("searchMedicineLabel")}
+            className={`flex-1 items-center rounded-xl px-4 py-2 ${
+              tab === "search" ? "bg-brand-green" : "bg-[#F3F4F6]"
             }`}
           >
-            {t("searchMedicineLabel")}
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={() => setTab("manual")}
-          accessibilityRole="button"
-          accessibilityLabel={t("manualEntryTitle")}
-          className={`flex-1 items-center rounded-lg py-2.5 ${
-            tab === "manual" ? "bg-brand-green" : "bg-white"
-          }`}
-        >
-          <Text
-            className={`font-sans-semibold text-sm ${
-              tab === "manual" ? "text-white" : "text-richBlack"
+            <Text
+              className={`font-sans-semibold text-sm ${
+                tab === "search" ? "text-white" : "text-midGray"
+              }`}
+            >
+              {t("searchMedicineLabel")}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setTab("manual")}
+            accessibilityRole="button"
+            accessibilityLabel={t("manualEntryTitle")}
+            className={`flex-1 items-center rounded-xl px-4 py-2 ${
+              tab === "manual" ? "bg-brand-green" : "bg-[#F3F4F6]"
             }`}
           >
-            {t("manualEntryTitle")}
-          </Text>
-        </Pressable>
+            <Text
+              className={`font-sans-semibold text-sm ${
+                tab === "manual" ? "text-white" : "text-midGray"
+              }`}
+            >
+              {t("manualEntryTitle")}
+            </Text>
+          </Pressable>
+        </View>
       </View>
       <ScrollView
-        contentContainerClassName="gap-5 p-6"
+        contentContainerClassName="gap-4 p-4 pb-32"
         keyboardShouldPersistTaps="handled"
       >
         {tab === "search" ? (

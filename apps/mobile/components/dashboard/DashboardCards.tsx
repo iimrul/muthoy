@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
+import Feather from "@expo/vector-icons/Feather";
 
 // Presentational Owner Dashboard primitives. No DB, no session, no
 // navigation decisions — dashboard.tsx owns all three and passes results in.
@@ -20,6 +21,8 @@ interface KpiCardProps {
   /** Live marker on Today's Sales. */
   isLive?: boolean;
   liveLabel?: string;
+  width?: "default" | "wide" | "compact";
+  highlight?: boolean;
   onPress?: () => void;
   accessibilityLabel: string;
 }
@@ -31,11 +34,21 @@ export function KpiCard({
   accessory,
   isLive,
   liveLabel,
+  width = "default",
+  highlight = false,
   onPress,
   accessibilityLabel,
 }: KpiCardProps) {
+  const widthClass =
+    width === "wide"
+      ? "min-w-[230px]"
+      : width === "compact"
+        ? "min-w-[150px]"
+        : "min-w-[170px]";
   const body = (
-    <View className="min-w-44 justify-between gap-1 rounded-xl border border-white/20 bg-brand-deepGreen px-4 py-3">
+    <View
+      className={`h-[88px] justify-between rounded-xl border border-white/20 px-4 py-3 ${widthClass} ${highlight ? "bg-[#1FC294A1]" : "bg-brand-deepGreen"}`}
+    >
       <View className="flex-row items-center justify-between gap-2">
         <Text
           numberOfLines={1}
@@ -86,31 +99,51 @@ export type AlertTone = "danger" | "warning" | "neutral" | "positive";
 
 const TONE: Record<
   AlertTone,
-  { container: string; title: string; value: string; action: string }
+  {
+    container: string;
+    title: string;
+    value: string;
+    action: string;
+    iconBg: string;
+    iconColor: string;
+    icon: ComponentProps<typeof Feather>["name"];
+  }
 > = {
   danger: {
-    container: "border-error/40 bg-errorBg",
+    container: "border-[#FCA5A5] bg-[#FFF7F7]",
     title: "text-error",
     value: "text-error",
     action: "text-error",
+    iconBg: "bg-error",
+    iconColor: "#FFFFFF",
+    icon: "clock",
   },
   warning: {
-    container: "border-warning/40 bg-warningBg",
+    container: "border-[#FCD34D] bg-[#FFFDF5]",
     title: "text-warning",
     value: "text-warning",
     action: "text-warning",
+    iconBg: "bg-warning",
+    iconColor: "#FFFFFF",
+    icon: "package",
   },
   neutral: {
-    container: "border-midGray/30 bg-white",
+    container: "border-2 border-[#E5E7EB] bg-white",
     title: "text-richBlack",
     value: "text-richBlack",
     action: "text-brand-green",
+    iconBg: "bg-[#047857]",
+    iconColor: "#FFFFFF",
+    icon: "users",
   },
   positive: {
-    container: "border-brand-green bg-brand-softGreen",
+    container: "border-2 border-brand-green bg-brand-softGreen",
     title: "text-brand-green",
     value: "text-brand-green",
     action: "text-brand-green",
+    iconBg: "bg-brand-green",
+    iconColor: "#FFFFFF",
+    icon: "file-text",
   },
 };
 
@@ -155,41 +188,69 @@ export function AlertCard({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${title}. ${rows.length ? actionLabel : emptyLabel}`}
-      className={`gap-2 rounded-2xl border p-4 ${palette.container}`}
+      className={`rounded-2xl border p-4 shadow-sm ${palette.container}`}
     >
-      <Text className={`font-sans-bold text-sm ${palette.title}`}>{title}</Text>
-      {subtitle ? (
-        <Text className="font-sans text-xs text-midGray">{subtitle}</Text>
-      ) : null}
-      {rows.length ? (
-        <View className="gap-1">
-          {rows.map((row) => (
-            <View key={row.key} className="flex-row justify-between gap-3">
-              <Text
-                numberOfLines={1}
-                className="flex-1 font-sans text-xs text-midGray"
-              >
-                {row.label}
-              </Text>
-              <Text
-                className={`text-xs ${row.isMoney ? "font-mono" : "font-sans-semibold"} ${palette.value}`}
-              >
-                {row.value}
-              </Text>
-            </View>
-          ))}
-          {moreCount > 0 ? (
-            <Text className={`font-sans-semibold text-xs ${palette.value}`}>
-              + {formatCount(moreCount)} {moreLabel}
+      <View className="flex-row items-start gap-3">
+        <View
+          className={`h-10 w-10 shrink-0 items-center justify-center rounded-full ${palette.iconBg}`}
+        >
+          <Feather name={palette.icon} size={20} color={palette.iconColor} />
+        </View>
+        <View className="flex-1 gap-2">
+          <View className="flex-row items-center justify-between gap-2">
+            <Text className={`flex-1 font-sans-bold text-sm ${palette.title}`}>
+              {title}
+            </Text>
+            {tone === "neutral" || tone === "positive" ? (
+              <Feather
+                name="chevron-right"
+                size={20}
+                color={tone === "positive" ? "#059669" : "#9CA3AF"}
+              />
+            ) : null}
+          </View>
+          {subtitle ? (
+            <Text
+              className={
+                tone === "neutral"
+                  ? "font-mono text-xl text-richBlack"
+                  : "font-sans text-xs text-midGray"
+              }
+            >
+              {subtitle}
             </Text>
           ) : null}
+          {rows.length ? (
+            <View className="gap-1">
+              {rows.map((row) => (
+                <View key={row.key} className="flex-row justify-between gap-3">
+                  <Text
+                    numberOfLines={1}
+                    className="flex-1 font-sans text-xs text-midGray"
+                  >
+                    {row.label}
+                  </Text>
+                  <Text
+                    className={`text-xs ${row.isMoney ? "font-mono" : "font-sans-semibold"} ${palette.value}`}
+                  >
+                    {row.value}
+                  </Text>
+                </View>
+              ))}
+              {moreCount > 0 ? (
+                <Text className={`font-sans-semibold text-xs ${palette.value}`}>
+                  + {formatCount(moreCount)} {moreLabel}
+                </Text>
+              ) : null}
+            </View>
+          ) : subtitle !== emptyLabel ? (
+            <Text className="font-sans text-xs text-midGray">{emptyLabel}</Text>
+          ) : null}
+          <Text className={`font-sans-bold text-xs underline ${palette.action}`}>
+            {actionLabel}
+          </Text>
         </View>
-      ) : (
-        <Text className="font-sans text-xs text-midGray">{emptyLabel}</Text>
-      )}
-      <Text className={`font-sans-bold text-xs underline ${palette.action}`}>
-        {actionLabel}
-      </Text>
+      </View>
     </Pressable>
   );
 }

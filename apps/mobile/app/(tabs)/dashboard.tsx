@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import { router, useFocusEffect } from "expo-router";
+import Feather from "@expo/vector-icons/Feather";
 import { formatMoney } from "@muthoy/utils";
 import type { Paisa } from "@muthoy/types";
 import {
@@ -363,76 +372,84 @@ export default function MorningDashboardScreen() {
   const canCompleteDay = data.today.totalSales > 0 && !data.today.isClosed;
 
   return (
-    <View className="flex-1 bg-brand-softGreen">
+    <View className="flex-1 bg-[#F5F5F5]">
       <ScrollView contentContainerClassName="pb-28">
         {/* Header */}
-        <View className="flex-row items-center justify-between bg-brand-green px-4 pb-2 pt-4">
-          <Pressable
-            onPress={() => setMenuOpen(true)}
-            accessibilityRole="button"
-            accessibilityLabel={t("menu")}
-          >
-            <Text className="text-2xl text-white">☰</Text>
-          </Pressable>
+        <View
+          className="h-14 flex-row items-center justify-between bg-[#047857] px-4"
+          style={{ elevation: 4 }}
+        >
           <View className="flex-row items-center gap-3">
+            <Pressable
+              onPress={() => setMenuOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t("menu")}
+              className="h-9 w-9 items-center justify-center rounded-full active:bg-white/10"
+            >
+              <Feather name="menu" size={20} color="#FFFFFF" />
+            </Pressable>
+            <Text className="font-sans-bold text-base uppercase tracking-wider text-white">
+              PHARMAPOS
+            </Text>
+          </View>
+          <View className="flex-row items-center gap-1">
             <Pressable
               disabled={isSyncing}
               onPress={() => void handleSync()}
               accessibilityRole="button"
               accessibilityState={{ disabled: isSyncing }}
-              accessibilityLabel={t("sync")}
+              accessibilityLabel={`${t("sync")}. ${lastSyncedAt ? `${t("lastSynced")} ${formatTime(lastSyncedAt)}` : t("notSyncedYet")}`}
+              className="h-9 w-9 items-center justify-center rounded-full active:bg-white/10"
             >
-              <Text className="font-sans-semibold text-white">
-                {isSyncing ? "…" : "⟳"}
-              </Text>
+              {isSyncing ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Feather name="refresh-cw" size={17} color="#FFFFFF" />
+              )}
             </Pressable>
             <Pressable
               onPress={() => router.push("/notifications")}
               accessibilityRole="button"
               accessibilityLabel={`${t("notifications")} ${unread > 0 ? formatNumber(unread) : ""}`}
+              className="relative h-9 w-9 items-center justify-center rounded-full active:bg-white/10"
             >
-              <Text className="text-white">
-                🔔
-                {formatUnreadBadge(unread, formatNumber)}
-              </Text>
+              <Feather name="bell" size={18} color="#FFFFFF" />
+              {unread > 0 ? (
+                <View className="absolute right-0 top-0 min-w-4 items-center rounded-full bg-error px-1 py-0.5">
+                  <Text className="font-sans-bold text-[8px] text-white">
+                    {formatUnreadBadge(unread, formatNumber)}
+                  </Text>
+                </View>
+              ) : null}
             </Pressable>
-            <LanguageToggle />
+            <LanguageToggle onDark />
           </View>
         </View>
 
         {/* Hero: greeting, date, KPI carousel */}
-        <View className="gap-4 rounded-b-3xl bg-brand-green px-4 pb-16 pt-2">
-          <View className="gap-0.5">
-            <Text className="font-sans-bold text-xl text-white">
+        <View className="rounded-b-[18px] bg-[#047857] pb-20 pt-6">
+          <View className="mb-6 gap-0.5 px-4">
+            <Text className="font-sans-semibold text-lg text-white">
               {greeting}, {data.ownerName}
             </Text>
             <Text className="font-sans text-xs text-white/70">
               {dateLabel(data.businessDate)}
-            </Text>
-            <Text className="font-sans text-xs text-white/70">
-              {data.shopName ?? "Muthoy"} · {t("owner")}
             </Text>
           </View>
 
           {syncFailed ? (
             <Text
               accessibilityRole="alert"
-              className="font-sans text-xs text-white"
+              className="mb-3 px-4 font-sans text-xs text-white"
             >
               {t("syncFailed")}
             </Text>
-          ) : (
-            <Text className="font-sans text-[10px] text-white/60">
-              {lastSyncedAt
-                ? `${t("lastSynced")} ${formatTime(lastSyncedAt)}`
-                : t("notSyncedYet")}
-            </Text>
-          )}
+          ) : null}
 
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerClassName="gap-3 pr-4"
+            contentContainerClassName="gap-3 px-4 pb-2"
           >
             <KpiCard
               label={t("todaysSales")}
@@ -448,6 +465,7 @@ export default function MorningDashboardScreen() {
               value={formatMoney(data.cash.expected)}
               onPress={() => router.push("/cash-summary")}
               accessibilityLabel={`${t("expectedInDrawer")} ${formatMoney(data.cash.expected)}`}
+              width="wide"
               accessory={
                 hasOpeningCash ? (
                   <Text className="font-sans-semibold text-[10px] text-white/80">
@@ -474,6 +492,8 @@ export default function MorningDashboardScreen() {
               label={`↩ ${t("yesterdaysSale")}`}
               value={formatMoney(data.yesterday.totalSales)}
               footer={t("tapToView")}
+              width="compact"
+              highlight
               onPress={() => {
                 setPreviousDay(data.yesterday);
                 setPreviousDayOpen(true);
@@ -485,6 +505,7 @@ export default function MorningDashboardScreen() {
               label={t("outstandingCredit")}
               value={formatMoney(data.credit.outstanding)}
               footer={`${formatNumber(data.credit.customerCount)} ${t("people")}`}
+              width="compact"
               onPress={() => router.push("/credit/credit-sales")}
               accessibilityLabel={`${t("outstandingCredit")} ${formatMoney(data.credit.outstanding)}`}
             />
@@ -493,6 +514,7 @@ export default function MorningDashboardScreen() {
               label={t("supplierPayable")}
               value={formatMoney(data.supplierPayable.payable)}
               footer={`${formatNumber(data.supplierPayable.supplierCount)} ${t("suppliers")}`}
+              width="compact"
               onPress={() => router.push("/suppliers/list")}
               accessibilityLabel={`${t("supplierPayable")} ${formatMoney(data.supplierPayable.payable)}`}
             />
@@ -500,7 +522,7 @@ export default function MorningDashboardScreen() {
         </View>
 
         {/* Alerts */}
-        <View className="-mt-12 gap-3 px-4">
+        <View className="-mt-16 gap-3 px-4 pb-6">
           {error ? (
             <Text
               accessibilityRole="alert"
@@ -587,8 +609,8 @@ export default function MorningDashboardScreen() {
           />
 
           {canCompleteDay ? (
-            <View className="gap-3 rounded-2xl border border-warning/40 bg-warningBg p-4">
-              <View className="gap-1">
+            <View className="flex-row items-center gap-4 rounded-2xl border-2 border-warning bg-[#FFF4E6] p-4 shadow-sm">
+              <View className="flex-1 gap-1">
                 <Text className="font-sans-bold text-sm text-warning">
                   {t("readyToClose")}
                 </Text>
@@ -605,7 +627,7 @@ export default function MorningDashboardScreen() {
                 onPress={() => router.push("/end-of-day")}
                 accessibilityRole="button"
                 accessibilityLabel={t("completeDay")}
-                className="items-center rounded-xl bg-brand-green py-3"
+                className="items-center rounded-xl bg-[#047857] px-5 py-3"
               >
                 <Text className="font-sans-bold text-white">
                   {t("completeDay")}
@@ -616,7 +638,7 @@ export default function MorningDashboardScreen() {
         </View>
 
         {/* Today's active staff */}
-        <View className="gap-2 px-4 pt-6">
+        <View className="gap-3 px-4 pb-6">
           <SectionHeader
             title={t("staffSalesToday")}
             actionLabel={t("viewAll")}
@@ -634,14 +656,27 @@ export default function MorningDashboardScreen() {
                   onPress={() => router.push("/staff/management")}
                   accessibilityRole="button"
                   accessibilityLabel={`${member.name} ${formatMoney(member.sales)}`}
-                  className="min-w-36 gap-1 rounded-2xl bg-white p-3"
+                  className="min-w-36 gap-1 rounded-2xl border border-[#E5E7EB] bg-white p-3 shadow-sm"
                 >
-                  <Text
-                    numberOfLines={1}
-                    className="font-sans-semibold text-xs text-richBlack"
-                  >
-                    {member.name}
-                  </Text>
+                  <View className="mb-1 flex-row items-center gap-2">
+                    <View className="h-9 w-9 items-center justify-center rounded-full bg-[#D1FAE5]">
+                      <Text className="font-sans-bold text-xs text-[#047857]">
+                        {member.name
+                          .split(/\s+/)
+                          .filter(Boolean)
+                          .slice(0, 2)
+                          .map((part) => part[0])
+                          .join("")
+                          .toUpperCase()}
+                      </Text>
+                    </View>
+                    <Text
+                      numberOfLines={1}
+                      className="flex-1 font-sans-semibold text-xs text-richBlack"
+                    >
+                      {member.name}
+                    </Text>
+                  </View>
                   <Text className="font-mono text-base text-brand-green">
                     {formatMoney(member.sales)}
                   </Text>
@@ -661,18 +696,18 @@ export default function MorningDashboardScreen() {
         </View>
 
         {/* Recent activity */}
-        <View className="gap-2 px-4 pt-6">
+        <View className="gap-3 px-4 pb-24">
           <SectionHeader
             title={t("recentActivity")}
             actionLabel={t("viewAll")}
             onPressAction={() => router.push("/reports/sales-history")}
           />
           {data.recentActivity.length ? (
-            <View className="gap-2">
+            <View className="gap-3">
               {data.recentActivity.map((line) => (
                 <View
                   key={line.id}
-                  className="flex-row items-center justify-between gap-3 rounded-xl bg-white p-3"
+                  className="flex-row items-center justify-between gap-3 rounded-xl bg-white p-3 shadow-sm"
                 >
                   <View className="flex-1 gap-0.5">
                     <Text

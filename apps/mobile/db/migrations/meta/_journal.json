@@ -169,6 +169,20 @@
       "when": 1787500500000,
       "tag": "0023_purchase_invoice_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1787760000000,
+      "tag": "0024_b3_report_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1787760100000,
+      "tag": "0025_b3_sale_tax_snapshot",
+      "breakpoints": true
     }
   ]
 }
