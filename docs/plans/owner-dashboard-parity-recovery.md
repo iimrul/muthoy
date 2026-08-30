@@ -1,7 +1,13 @@
 # Owner Dashboard Functional Parity — Recovery Plan
 
+> **Historical implementation plan — superseded for status on 2026-08-30.**
+> Owner Dashboard recovery is implemented and committed. Preserve this file for
+> requirements/rationale; current B1-B3 behavior/status lives in `DECISIONS.md`
+> and the root/mobile READMEs.
+
 Date: 2026-08-22
-Mode: read-only audit + plan. No B3/B4 implementation, no commit, no deploy, no migration execution.
+Mode at authoring: read-only audit + plan. No B3/B4 implementation, no commit,
+no deploy, no migration execution.
 Functional source of truth: `apps/prototype-web/Muthoy (prototype)/src/app/screens/MorningDashboard.tsx` and the components it mounts, read directly.
 Implementation authority: current production SQLite read models, `domain/`, permissions, sync, paisa, FEFO, ledger.
 

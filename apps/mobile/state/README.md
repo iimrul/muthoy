@@ -29,8 +29,9 @@ Zustand stores — in-memory session/cart/UI state, NOT the source of truth
   persisted before migration 0007 deserialises and falls back to the role
   default. Nothing security-bearing reads it: every guarded write re-reads
   overrides from SQLite, and the server re-derives them from its own tables.
-- `cartStore.ts` — defines the Cart/CartLine shape only (Sales skeleton); no
-  zustand import yet, functions throw `TODO: ...`. Real Zustand wiring is
-  Day 3; the store's actual logic is Day 6.
+- `cartStore.ts` — live in-memory Zustand cart: bounded add/update/remove,
+  quote snapshots, held-draft identity, revision invalidation, integer-paisa
+  total, and clear-after-success behavior. SQLite remains the completed-sale
+  source of truth.
 - `usePlan.ts` — Subscription (P1, post-beta). Not a Zustand store; reads
   the cached `shops.plan` fast-path value, `TODO: ...` stub for now.

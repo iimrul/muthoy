@@ -1,5 +1,13 @@
 # Sync Queue Writer + Minimum-Viable Sync Engine + Real Phone OTP
 
+> **Historical implementation/security plan — superseded for status on
+> 2026-08-30.** Sync, separate-device login, per-user permissions, derived
+> inventory ledger, and B2-B3 grouped operations are implemented locally.
+> Statements below describing one-phone Beta, absolute LWW stock, or work still
+> to build are historical. Durable current contracts live in `DECISIONS.md`,
+> `apps/mobile/sync/README.md`, and the Supabase migration README. Remote
+> migrations/functions remain pending.
+
 ## In plain English
 
 Right now the app only lives on one phone — nothing leaves the device. This build makes three things true:

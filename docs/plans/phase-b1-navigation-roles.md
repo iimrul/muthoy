@@ -1,7 +1,16 @@
 # Phase B1 — Prototype-Exact Navigation, Roles, Permissions, Settings, and Notifications
 
+> **Historical implementation plan — superseded for status on 2026-08-30.**
+> B1 is implemented and committed. Preserve this file as the detailed design
+> record; use the root `README.md`, `apps/mobile/README.md`, `DECISIONS.md`, and
+> `backend/supabase/migrations/README.md` for current behavior and rollout
+> status. Specifically, the plan's 12-key/default/route text is superseded by
+> the 13-key production contract: dedicated `inventory_add`, default OFF for
+> Manager/Staff, explicitly grantable per user, and required by Add Medicine.
+> The durable prototype-vs-production authority rule remains active.
+
 Date: 2026-08-21  
-Mode: plan only; no production implementation.  
+Mode at authoring: plan only; no production implementation.
 Product source: latest runtime prototype under `apps/prototype-web/Muthoy (prototype)/src/app`.  
 Correctness source: current mobile SQLite/auth/sync/domain/native code, PostgreSQL migrations/RLS, repository rules, and Volume 12 V3.
 

@@ -33,7 +33,9 @@
 ## State Management & Caching
 - Zustand (in-app UI/session/cart state — not the source of truth)
 - TanStack Query (sync layer only — never used to fetch what a screen displays)
-- MMKV (PIN hash + session, fast synchronous storage)
+- MMKV (session plus device-local locale/notification/printer preferences;
+  never a PIN or PIN hash). PIN hashes remain SQLite-only; Android Keystore
+  holds the non-exportable key for local lookup tags.
 
 ## Native Features
 - Local Android Expo module backed by `at.favre.lib:bcrypt` 0.10.2 for
@@ -47,6 +49,9 @@
 - expo-task-manager
 - expo-local-authentication
 - expo-location
+- Local Android Expo BLE printer module: BLE scan/connect plus ESC/POS byte
+  transport. Pairing metadata is device-local in MMKV; Beta printing is
+  Android-only and requires a development/EAS build.
 
 ## Backend — Supabase
 - Supabase PostgreSQL

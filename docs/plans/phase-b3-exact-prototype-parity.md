@@ -1,7 +1,18 @@
 # Phase B3 — Customer / Supplier / Finance Completeness (Exact Prototype Parity)
 
+> **Historical implementation plan — superseded for status on 2026-08-30.**
+> B3 is implemented and committed, and its founder-reported physical-device
+> acceptance and final Supabase migration dry-run passed. The MISSING/PARTIAL,
+> blocker, migration-number forecast, and READY-FOR-IMPLEMENTATION sections
+> below are pre-implementation history. Preserve them for requirements and
+> decision rationale; actual migration names/order/status live in
+> `backend/supabase/migrations/README.md`, and durable behavior lives in
+> `DECISIONS.md` and `apps/mobile/README.md`. Remote migration execution and
+> deployment remain pending.
+
 Date: 2026-08-22
-Mode: read-only audit + plan. No implementation, commit, deploy, or remote migration execution.
+Mode at authoring: read-only audit + plan. No implementation, commit, deploy,
+or remote migration execution.
 Source rule: the **latest prototype** (`apps/prototype-web/Muthoy (prototype)/src/app`) is the complete B3 product/function source of truth. The **current production architecture** (`apps/mobile`, `backend/supabase`) is the safe implementation source of truth (CLAUDE.md rule 15).
 
 Scope boundary (Volume 3 §12 "B3. Customer / supplier / finance completeness"): credit/customer details, supplier invoice flows, purchases, cash/expenses/EOD, reports/monthly report, export, printer settings — plus the Settings rows and the Tax/VAT and Credit-Period contracts that `phase-b1-navigation-roles.md` and `phase-b2-sales-inventory.md` explicitly deferred to B3.

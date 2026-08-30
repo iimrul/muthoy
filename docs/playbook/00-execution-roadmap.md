@@ -1,6 +1,12 @@
 # MUTHOY POS — AI ENGINEERING PLAYBOOK
 ## VOLUME 0 — 15-Day Execution Roadmap & Sprint Management
 
+> **Scope-history note (2026-08-30):** later approved B1-B3 work supersedes this
+> roadmap's P0/P1 timing/status classifications for roles, permissions,
+> notifications, suppliers/purchases, sales/inventory completion, reports,
+> export, tax, and BLE printing. Preserve this volume as the original roadmap;
+> use `DECISIONS.md` and current component/migration READMEs for shipped status.
+
 ## BETA DEFINITION (governs everything in this volume)
 Beta Launch = a complete working MVP with BOTH offline AND online functionality:
 SQLite offline-first architecture, Sync Queue, Supabase backend, RLS, cloud

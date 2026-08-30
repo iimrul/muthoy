@@ -1,5 +1,10 @@
 # Prototype Functional Gap Audit
 
+> **Historical pre-B1 audit — superseded for status on 2026-08-30.** Counts,
+> gap labels, and next tasks below are retained as audit evidence; they are not
+> a current implementation dashboard. Current B1-B3 status is documented in
+> the root `README.md`, `apps/mobile/README.md`, and `DECISIONS.md`.
+
 Date: 2026-08-21  
 Mode: read-only functional audit; this file is the only change.  
 Scope: Volume 12 V3, repo rules/decisions, current `apps/mobile`, and the latest `apps/prototype-web/Muthoy (prototype)` sources.

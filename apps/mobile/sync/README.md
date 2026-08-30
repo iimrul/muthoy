@@ -102,3 +102,35 @@ changed-row payload itself is discarded, and receipt just re-runs the existing
 incremental pull. This keeps exactly one apply path (this pull → `db/
 sync-helpers.ts`) responsible for FK ordering, LWW, and ledger idempotency;
 applying realtime payloads directly would fork that logic into a second place.
+
+## Atomic operation groups and idempotency (B2-B3)
+
+Standalone LWW rows are insufficient for a sale, refund, expense, withdrawal,
+credit collection, purchase, return, or other graph whose money and stock rows
+must appear together. Each such SQLite transaction writes outbox rows with one
+operation ID/kind, contiguous sequence, and expected row count. Push stages
+chunks server-side and applies only a complete group in one PostgreSQL
+transaction. Incomplete or invalid groups expose none of their rows.
+
+Supported grouped contracts include sale, refund, withdrawal, expense
+create/delete, credit collection, supplier payment, purchase create/receive/
+void, purchase return, and `inventory_add_purchase`. Persisted operation/row
+IDs, contiguous sequence/expected-count staging, and server replay checks make
+redelivery idempotent; refunds additionally derive deterministic operation and
+child IDs. The server re-derives permission, shop, amount, stock, and
+operation-shape invariants instead of trusting client totals.
+
+Full-sale refund is the deliberate online exception to offline-first mutation:
+before physical payout or any local write, `refundClaim.ts` obtains the sale's
+sole active server claim bound to deterministic operation, actor, and device.
+Offline, timeout, claim conflict, or invalid authority causes zero sale, stock,
+cash, credit, or ledger mutation. Same-operation/device retry resumes safely;
+claims do not auto-expire or silently reassign.
+
+## Rollout status — 2026-08-30
+
+The B1-B3 migration/function bundle is present and its final Supabase dry-run
+was founder-reported PASS. Remote migration execution and Edge Function deploy
+are still pending. The dry-run transcript is not committed, so deployment must
+retain its reviewed prechecks, backup, ordered migration, invariant checks,
+custom access-token-hook registration, and post-deploy two-device verification.

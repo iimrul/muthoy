@@ -2,9 +2,10 @@
 
 Supabase cloud mirror and Edge Functions.
 
-- `migrations/`: 21-table PostgreSQL mirror, RLS, service-role-only sync RPCs,
-  and the narrow `SELECT` grants the Day 14 admin panel and the sync push path
-  need — see that folder's README on why `BYPASSRLS` is not a `GRANT`.
+- `migrations/`: timestamped PostgreSQL mirror, RLS, service-role-only sync
+  RPCs, B1-B3 grouped-operation dispatchers, report/tax schema, and narrow
+  direct-read grants. See that folder's README for exact order/status and why
+  `BYPASSRLS` is not a `GRANT`.
 - `functions/sync/`: authenticated push, pull, and device-link actions.
 
 - `pgtest/`: the migrations, RLS policies, permission functions and access-token
@@ -15,6 +16,15 @@ Supabase cloud mirror and Edge Functions.
 
 SQLite remains the mobile source of truth. Notifications and the local sync/conflict
 queues are intentionally not mirrored.
+
+## Current rollout status — 2026-08-30
+
+The complete B1-B3 migration/function bundle is present. Founder-reported final
+Supabase migration dry-run passed; the transcript is not committed. Remote
+migration execution and matching Edge Function deployment remain pending. Do
+not deploy a B2/B3 client before the schema-compatible grouped-operation
+dispatchers are live. This status supersedes older plan/decision text that says
+individual migrations are merely future work.
 
 ## Required manual step after deploying migrations
 

@@ -3,10 +3,11 @@
 The ONLY code in this app that imports Drizzle or touches SQLite directly.
 SQLite is the app's single source of truth (CLAUDE.md rule 1).
 
-## Live (Day 2)
+## Current schema (Day 2 foundation through B3)
 
-- `schema.ts` — the full local schema, 24 tables. Money columns are INTEGER
-  paisa typed as `Paisa`; see DECISIONS.md.
+- `schema.ts` — the current local schema, 36 tables. The original `0000`
+  foundation created 24; later additive B1/B2 tables bring the current model to
+  36. Money columns are INTEGER paisa typed as `Paisa`; see DECISIONS.md.
 - `client.ts` — opens `muthoy.db` and sets both required PRAGMAs. **`PRAGMA
 foreign_keys = ON` is per-connection and must stay in the open path** —
   SQLite disables FK enforcement by default, which would make every
@@ -57,27 +58,23 @@ applicable owner row routes as follows:
 Migration `0002` backfilled existing staff markers because staff hashes were
 already real PIN hashes; existing owners resume PIN Setup once.
 
-### Permissions (Day 11)
+### Permissions (B1)
 
-The P0 model is the SIMPLE two-role check Volume 0 specifies: Owner = every
-permission, Staff = `sales` + `inventory_view` only. `domain/permissions.ts`
-is the app's one grant table; this file's `requirePermission(shopId,
-actorUserId, permission)` and `requireOwner(shopId, actorUserId)` are its
-action-level half — both re-derive the actor's role from SQLite (never the
-session store) and are called FIRST, before any query or transaction opens,
-so a denied write leaves zero rows and zero outbox entries. Route guards
-(`state/usePermission.ts`, rendering `components/ui/AccessDenied.tsx`) only
-decide what's shown; these are the actual enforcement, proven directly
-against a real SQLite engine in `permissions.sqlite.test.ts` by calling the
-`db/` actions with no screen involved (the direct-navigation-bypass case).
+Owner, Manager, and Staff/Cashier are operational. `domain/permissions.ts` is
+the canonical product-key/default/preset map. `navigation/routes.ts` and
+`db/dataAccessGates.ts` share the same gates, while every protected `db/`
+action re-derives the live actor and effective per-user overrides from SQLite
+before reading or writing. UI hiding is convenience; the DB action is the
+enforcement boundary. Unknown roles and stale sessions fail closed.
 
-A P1 `manager` role row exists in every shop from registration but is denied
-outright (`domain/permissions.ts`'s `toRole`), never silently granted staff
-or owner access, and never mints a session at all if its PIN is used
-(`verifyPin` skips a manager match). The full Owner/Manager/Staff matrix and
-owner-configurable per-staff permissions remain P1.
+The prototype matrix has 12 keys. Production adds a thirteenth, narrower key:
+`inventory_add`. It defaults OFF for Manager and Staff and must be explicitly
+granted by the Owner. It authorizes only Add Medicine with its atomic opening
+supplier-purchase/batch/movement graph. It does not imply `inventory_edit`,
+supplier management, general purchase creation/receive/void, or any other
+financial permission. Owner always has it.
 
-### Per-staff permissions (migration 0007)
+### Per-staff permissions (migrations 0007 and 0009)
 
 `permissions` is ROLE-scoped and shared by everyone holding that role.
 `user_permissions` is the per-USER override layer an owner edits when adding or
@@ -111,21 +108,19 @@ only WHICH SHOP a row belonged to, so a tampered client could push a medicine, a
 stock adjustment, an expense or a users row unchallenged. `sync_row_permitted`
 now gates every pushed row, with restrictive RLS policies as defence in depth.
 
-Current owner-only permission keys: `staff_management` (`staff.ts`),
-`cash_management` (`cash.ts`, including its reads — see "Cash" below),
-`settings_manage` (`settings.ts`, including an owner's own PIN change —
-staff self-service PIN change is not allowed, only an owner-driven
-`resetStaffPin`), `credit_management` (`customers.ts`'s standalone
-credit-management screens/actions — separate from `sales`, since a Staff-made
-credit SALE at checkout still works through `sales.ts`), and `inventory_write`
-(`inventory.ts`). Suppliers/purchases (shipped early, P1) independently gate
-on `requireOwner` — see "Suppliers and purchases" below.
+Current product keys are `sale_entry`, `sale_discount`, `sale_return`,
+`sale_history`, `inventory_view`, `inventory_edit`, `inventory_add`,
+`expiry_manage`, `credit_view`, `credit_manage`, `cash_drawer`, `reports`, and
+`staff_manage`. Legacy storage names remain mapped so existing offline
+overrides are not rewritten. Settings/profile, expenses, suppliers, full
+purchase management, staff-sales detail, and the Data Export route remain
+Owner-only surfaces; the service-level export gap is documented below.
 
 - `staff.ts` (Day 11) — `listStaff` (staff only, not the owner),
   `createStaff`, `resetStaffPin`, `deactivateStaff`, `writeAuditLog`. Every
   PIN change/deactivation writes an audit_logs row with no PIN-shaped value.
-- `settings.ts`'s `changeOwnPin` (Day 11's P0 slice) — the rest of that file
-  (`getShopProfile`/`updateShopProfile`/`restoreFromBackupKey`) is still a stub.
+- `settings.ts` owns profile, B2/B3 shop settings, tax settings, and Owner PIN
+  change. Only backup-key restore remains a stub.
 - `inventory.ts` (Day 8) — `listMedicines`, `createMedicineWithBatch`,
   `addBatchToMedicine`, `getMedicine`, `listBatchesForMedicine`. The
   UNIQUE(shop_id, medicine_id, batch_no) constraint is enforced by
@@ -151,19 +146,18 @@ payload) matches nothing and is dropped, instead of rendering that other
 shop's medicine name under this shop's batch — filtering only
 `batches.shop_id` would have leaked it.
 
-The "Soon" threshold uses the shared repo-wide default
-(`domain/notificationRules.ts`'s `EXPIRY_WINDOW_DAYS_DEFAULT = 30`), the same
-window the Notifications expiry job alerts on. A per-shop configurable
-threshold does not exist in the schema; it needs a real Settings slice
-(Volume 4 SETTINGS) and is intentionally not built here yet.
+Expiry bands come from the shop's synced SQLite settings: expired `< 0`, Near
+`0..expiryNearDays` (default 30), Far through `expiryFarDays` (default 60).
+All comparisons use the Asia/Dhaka business date and real `expiry_date`; null
+expiry stays sellable and sorts FEFO-last. Expiry promotion and notification
+consumers use the same settings contract.
 
-### Suppliers and purchases
+### Suppliers, purchases, returns, and supplier credit
 
-`suppliers.ts` and `purchases.ts` are live. Although this feature is classified
-P1/post-beta, it was explicitly approved and implemented early. Supplier and
-purchase screens require an owner session; the DB functions independently
-revalidate the active owner from SQLite (including the active shop) rather than
-trusting the UI. Every operation is shop-scoped.
+Supplier details, payables, purchase creation/receive/void, supplier payments,
+and purchase returns are Owner-only. The only exception is the explicit
+`inventory_add` Add Medicine flow described above. Every operation revalidates
+the active actor against local SQLite and remains shop-scoped.
 
 Purchase invoice numbers use `PUR-{YYYY}-{6-digit-seq}-{12 uppercase hex}`,
 the same suffixed format as sales — see "Inventory ledger" below. Purchase
@@ -174,9 +168,16 @@ movements, and—when COD—the supplier payment and cash-drawer recomputation.
 - COD sets `paid_amount = total`, records a cash `supplier_payment`, and reduces
   expected drawer cash through the fixed cash formula.
 - Credit sets `paid_amount = 0` and creates no immediate payment/cash movement.
-  Supplier payable is derived as `SUM(purchases.total - purchases.paid_amount)`;
-  a future supplier-payment/pay-down flow must update `paid_amount`, not merely
-  insert a `payments` row.
+- Supplier payments are capped at the invoice's current effective payable,
+  update `paid_amount`, write the payment/outbox graph atomically, and recompute
+  cash when the method is cash.
+- Purchase returns require a received original line, reason, open business day,
+  and sufficient current stock. They write deterministic negative movements and
+  supplier credit; they never treat a physical return as an immediate cash
+  refund. Credit first offsets its originating invoice, then pools FIFO across
+  older outstanding invoices; any remainder is the supplier credit balance.
+- Pending purchase lines create no batch, movement, or invoice value until Mark
+  Received applies exactly one movement and recomputes the invoice.
 - Existing active batch with matching batch number and expiry: increment stock
   only; preserve the stored purchase and sale prices.
 - Existing active batch with a different expiry: reject with
@@ -204,24 +205,22 @@ one uninterrupted transaction.
 Standalone credit mutation is not exposed. Checkout
 already creates sale-backed credit rows atomically.
 
-Standalone credit management (`createCustomer`, `collectPayment` — the
-`app/credit/*` screens) is owner-only (Day 11's `credit_management`
-permission), checked before any row is written or transaction opens. This is
-separate from a Staff-made credit SALE at checkout, which still works via
-`sales.ts` under the `sales` grant.
+Credit list/detail/balance reads require `credit_view`; customer creation and
+collection require `credit_manage`. Manager gets both by default and either may
+be overridden per user. These checks run before any protected write opens. This
+is separate from a credit sale at checkout, which is part of the atomic sale
+graph under `sale_entry`.
 
 ### Cash — Expenses, Cash Summary, End of Day (Day 10)
 
-`cash.ts` is live and shop-scoped, gated owner-only (`cash_management`) on
-every write and every read: `recordExpense` (one transaction writing both the
-`expenses` row and its `payments` row, type='expense'), `setOpeningCash`
-(CLAUDE.md rule 5 — defaults to 0, set by the user, written only against the
-business date passed in, never inherited from yesterday), `listExpenses`,
-`getCashSummary`/`getEndOfDaySummary` (every figure derived from
-`domain/cashFormula.ts`'s fixed formula — CLAUDE.md rule 4, never re-derived
-here), and `closeDay` (locks `cash_drawer`, recomputing `closing_expected`
-from the ledger rather than trusting the screen, and storing
-`closing_counted` plus the resulting variance).
+`cash.ts` is shop-scoped with a deliberate split. `cash_drawer` gates opening
+cash, summary/breakdown, mid-day reconcile, End of Day summary, and close;
+Manager receives that permission by default and per-user overrides may change
+it. Expenses/list/delete/duplicate checks and withdrawals are stricter
+Owner-only actions. `recordExpense` atomically writes the expense plus its cash
+payment; `setOpeningCash` defaults to zero for the requested business date;
+`closeDay` recomputes `closing_expected` from the ledger and stores counted cash
+plus variance.
 
 The internal synchronous `getCashSummarySync` is deliberately NOT
 permission-gated — its only callers are mid-transaction drawer refreshes in
@@ -237,8 +236,55 @@ purchase's stock write is blocked too, not just its payment). A write
 against a closed date throws `DayClosedError` before touching any row.
 Proven in `closed-day-guard.sqlite.test.ts`.
 
-Receipt-photo capture UI remains deferred — `recordExpense` accepts a
-`receiptPhotoUri` string today, but no screen produces one yet.
+Expense receipt-photo capture remains deferred; neither the current input
+contract nor the UI stores an image.
+
+B3 adds withdrawals with reasons, a repeatable mid-day reconcile that does not
+close the day, expense create/delete grouped operations and the five-category
+Rent/Salary/Utilities/Conveyance/Other taxonomy, cash breakdowns, and the full
+End of Day summary. The fixed formula remains:
+
+`Opening + Cash Sales + Credit Collections - Expenses - Refunds - Supplier Payments - Withdrawals`.
+
+Opening cash defaults to zero for each new Asia/Dhaka business date and never
+inherits yesterday's amount. `closeDay` is the only operation that locks the
+date.
+
+### B2 sales, FEFO, stale quotes, and refunds
+
+Checkout accepts quantity intent only. Inside one SQLite transaction it
+re-reads active shop-scoped batches, excludes stock expired before the
+Asia/Dhaka business date, allocates FEFO, resolves batch promotions and sale
+discounts in integer paisa, snapshots inclusive tax, validates payment, and
+writes sale/items/credit/stock/cash/audit/outbox effects atomically.
+
+If the transaction-time total or batch allocation differs from the displayed
+quote, `SaleQuoteChangedError` aborts with the refreshed quote. The cashier must
+review and confirm that exact quote; any cart edit invalidates confirmation.
+
+Refund is full-sale, reason-required, within the configured window, and online
+claim-gated before physical payout or local mutation. The operation ID and all
+children are deterministic. Same-operation retries return the same result;
+conflicting claims fail. The atomic refund restores exact original batches,
+reverses original cash/credit/collection components, updates expected cash, and
+queues one grouped operation. Offline/claim failure changes nothing.
+
+### B3 reports, tax, export, and printing
+
+Permission-gated report reads query SQLite by Asia/Dhaka business date; Owner
+and users with `reports` may read them. Data Export's route is Owner-only, but
+the service orchestration has no top-level Owner check: sales/refund/expense
+export reads accept `reports`, while inventory/credit export reads re-check
+Owner. This service-level authorization gap is a rollout risk. Report and
+monthly P&L totals cover gross sales, discounts, refunds, MRP-inclusive tax,
+net revenue, actual-batch COGS, gross profit, operating expenses, and net
+profit. Sale tax is snapshotted as integer basis points plus label and extracted
+from the already-discounted total; it is never added above the shelf total.
+
+Export streams paged SQLite data to UTF-8 CSV or XLSX in app cache, neutralizes
+spreadsheet formulas, caps each dataset at 50,000 rows, and uses the OS share
+sheet. Android BLE printing scans, stores pairing metadata locally in MMKV, and
+sends ESC/POS bytes through the local Expo module with retry/error states.
 
 ## Inventory ledger
 
@@ -248,9 +294,11 @@ plain LWW-synced `stock` column let two devices' offline sales silently
 overwrite one another instead of combining (full account in `DECISIONS.md`,
 2026-08-18).
 
-Every stock change — sale, purchase, adjustment, or a new batch's opening
-quantity — is a signed `inventory_movements` row, applied through `stockLedger
-.ts`'s `addStock`/`deductStock`. A new batch is inserted with `stock: 0`, then
+Every stock change — sale, purchase, adjustment, return, disposal,
+reconciliation, or a new batch's opening quantity — is a signed
+`inventory_movements` row applied through `stockLedger.ts` movement helpers
+(`addStock`, `deductStock`, `adjustStock`, or the guarded record helper). A new
+batch is inserted with `stock: 0`, then
 takes its opening quantity through that same path, never baked into the
 insert. `batches_stock_guard` (a SQLite trigger; `apply_inventory_movement`'s
 Postgres counterpart) rejects any write to `stock` that isn't `OLD.stock`
@@ -277,27 +325,48 @@ tail of the row's own UUID) is what `sales_shop_invoice_unique` /
 `purchases_shop_invoice_unique` actually enforces, so a same-sequence
 collision from two offline devices no longer costs the second sale its sync.
 
-**Still pending:** the Postgres side of this ledger
-(`backend/supabase/migrations/`) is written and tested but not yet pushed to
-Dev/Test — see that directory's README. Return/write-off UI does not exist
-yet; the ledger's `reason` vocabulary supports it structurally but no screen
-uses it.
+**Remote status:** the PostgreSQL ledger and later B1-B3 migrations are written
+and locally tested but the current B1-B3 remote rollout is pending. Purchase
+return and audited stock-adjust/reconcile UI now exist; a distinct general
+write-off workflow remains deferred.
 
-## Still stubs
+## Known deferred items
 
-Unimplemented APIs remain in `settings.ts` (`getShopProfile`,
-`updateShopProfile`, `restoreFromBackupKey`) and `reports.ts`; `customers.ts`
-routes credit through the atomic sale graph. Verify
-individual exports in source.
+- Backup-key restore remains a P1 stub.
+- Expense receipt-photo capture is not implemented.
+- A distinct general stock write-off workflow remains deferred; audited
+  adjustment and physical-count reconciliation exist.
+- BLE printing is Android-only in Beta and needs rollout validation against
+  each supported printer model/firmware combination.
+- SQLCipher, real production OTP, DEV OTP bypass removal, remote migrations and
+  functions, custom access-token-hook registration, and post-deploy live
+  two-device checks remain rollout gates.
+- The earlier PIN performance work still lacks a recorded target-device timing
+  pass; the B3 physical acceptance PASS does not close that separate latency
+  gate.
+- `conflict_queue` has no writer/resolution UI; general conflict surfacing is
+  deferred even though ledger/grouped-operation safety has replaced stock LWW.
+- Data Export needs a service-level Owner guard before rollout; its current
+  Owner-only route is insufficient as the sole authorization boundary.
 
 ## Sync outbox (Day 13)
 
 `sync-helpers.ts` owns the SQLite/Supabase boundary: canonical ISO timestamps,
 snake/camel case conversion, persisted-row outbox payloads, monotonic `seq`
-ordering, retry status, and strict LWW hydration. `audit_logs` remains append-only
-on pull (`ON CONFLICT DO NOTHING`). Pulled rows never enqueue outbox rows.
+ordering, retry status, and table-aware hydration. LWW applies only to eligible
+mutable row fields; movements/audits and grouped-derived records retain their
+append-only/idempotent contracts. `audit_logs` remains append-only on pull (`ON
+CONFLICT DO NOTHING`). Pulled rows never enqueue outbox rows.
 
-Every live business write in auth, staff, inventory, sales, purchases, customers,
-suppliers, and settings now records its outbox row inside the same SQLite
-transaction. Notifications remain device-local; sync failures use one unresolved
-`sync` alert per shop.
+All synced business writers record their outbox row inside the same SQLite
+transaction as the local mutation. Notifications remain device-local; sync
+failures use one unresolved `sync` alert per shop.
+
+Multi-row money/stock operations carry an operation ID, kind, sequence, and
+expected row count. The server stages complete groups and applies them in one
+transaction; persisted operation/row IDs and replay checks make sale, refund,
+withdrawal, expense, supplier-payment, purchase create/receive/void,
+purchase-return, credit-collection, and `inventory_add_purchase` retries
+idempotent. Refunds additionally derive deterministic operation/child IDs.
+Incremental/full pull applies the same ordered SQLite hydration path; realtime
+only triggers that pull.

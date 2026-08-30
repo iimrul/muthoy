@@ -1,5 +1,12 @@
 # ML Kit Text Recognition (OCR) — Sale Entry + Add Medicine
 
+> **Historical implementation plan — superseded for status on 2026-08-30.**
+> On-device OCR and barcode recognition are implemented. B2 Sale Entry uses
+> exact same-shop barcode candidates and an ambiguity picker; Add Medicine
+> keeps explicit user confirmation. Statements below that barcode is not
+> implemented describe the original plan boundary, not current production.
+> A separate committed physical OCR/barcode test artifact was not found.
+
 ## Context
 
 This is Volume 6's "OCR PROMPT" (`docs/playbook/06-ai-prompt-library.md` §13), documented as **P1 — post-beta fast-follow**, not part of the 15-day P0 sprint (`docs/playbook/00-execution-roadmap.md`, `TECH_STACK.md` Volume 4). Beta hadn't shipped when this was requested: Day 13 (sync) had just landed, but Day 14 (Basic Admin Panel) was only a README stub and Day 15 (Beta Readiness Checklist) hadn't run. **The user was flagged this scope-lock conflict explicitly (per CLAUDE.md rule 13) and chose to proceed with OCR now anyway** — an intentional, explicit override, not an oversight.

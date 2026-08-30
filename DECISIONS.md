@@ -143,7 +143,7 @@ engine moves a single row.
 
 ---
 
-## 2026-08-09 (Day 2) — Local schema is 24 tables, not 23
+## 2026-08-09 (Day 2) — Local foundation schema is 24 tables, not 23 (historical baseline)
 
 The playbook said 23 in five places; the finalized `schema.ts` defines 24.
 The extra table is `conflict_queue` (P1 — the conflict-resolution UI is
@@ -151,6 +151,9 @@ post-beta, but the table ships now so the sync engine has somewhere to write).
 Founder confirmed: keep all 24 including `conflict_queue`, correct the docs.
 Updated in `00-execution-roadmap.md` (x2), `03-database-backend.md` (x2), and
 `06-ai-prompt-library.md`.
+
+> **Current status:** later additive B1/B2 migrations bring `schema.ts` to 36
+> SQLite tables. The 24-table count remains correct for migration `0000` only.
 
 ---
 
@@ -442,6 +445,11 @@ financial data independently revalidates the active owner against local SQLite;
 all reads and writes remain shop-scoped. Purchase invoices use
 `PUR-{YYYY}-{6-digit-seq}`.
 
+> **Superseded 2026-08-30:** invoices now add the 12-character UUID-tail suffix.
+> General supplier/purchase management remains Owner-only, but the narrow
+> explicit `inventory_add` grant may create one new medicine through its opening
+> purchase graph. Supplier pay-down and purchase-return credit have shipped.
+
 COD purchases are fully paid at creation, record a cash supplier payment, and
 recompute the cash drawer. Credit purchases create no immediate cash movement;
 their outstanding supplier payable is derived from
@@ -467,7 +475,7 @@ checkout already creates sale-backed credit rows atomically.
 
 ---
 
-## 2026-08-12 — Notifications shipped early; device-local and fail-closed
+## 2026-08-12 — Notifications shipped early; device-local and fail-closed (historical scope classification)
 
 Notifications remain classified P1/post-beta, but the founder explicitly
 approved implementing them early as a scope exception. Low-stock alerts use a
@@ -497,14 +505,24 @@ prerequisite. Android also ensures the channel immediately before posting. If
 OS permission is denied, the system banner is suppressed, but the in-app row
 created before delivery may still exist in Notification Center.
 
+> **Current status:** B1 later completed notification inbox preferences,
+> per-user device-local receipts, permission filtering, and overdue-credit/
+> closing-time behavior. The device-local/fail-closed decisions above remain.
+
 ---
 
-## 2026-08-13 — Beta sync uses row-level last-write-wins
+## 2026-08-13 — Beta sync uses row-level last-write-wins (superseded for stock and grouped operations)
 
 The Beta sync engine resolves every competing row version, including stock,
 using updated_at last-write-wins. conflict_queue and stock delta-merge stay P1
 and must ship before any multi-device shop pilot. Beta remains one active device
 per shop.
+
+> **Superseded:** the 2026-08-18 derived inventory ledger replaces LWW stock;
+> separate-device login and atomic B2-B3 operation groups now ship in committed
+> code. LWW remains only for eligible standalone row fields, never as a
+> substitute for stock or a multi-row money/stock transaction. Remote rollout
+> of the current schema/functions is still pending.
 
 ---
 
@@ -533,7 +551,7 @@ comparing mixed SQLite and ISO strings.
 
 ---
 
-## 2026-08-16 — Day 5 Morning Dashboard and navigation shell are complete (backfilled)
+## 2026-08-16 — Day 5 Morning Dashboard and navigation shell are complete (historical; superseded by B1)
 
 Volume 0 Day 5's navigation shell, PIN login loop, and MorningDashboard shell
 all ship. `app/(tabs)/_layout.tsx` is a minimal 3-tab bar (Dashboard, Sale,
@@ -558,6 +576,10 @@ state management are never ported into React Native, on any timeline, not
 just "for now." Beyond that permanent architectural boundary, no day in
 `docs/playbook/00-execution-roadmap.md` commits to a specific visual-polish
 pass, and neither does the P1/P2 list in that same volume.
+
+> **Current status:** B1 replaced the minimal 3-tab/incomplete-route shell with
+> role-correct Owner/Manager/Staff navigation, Scan/More, Quick Links, and
+> route/data permission parity. The prototype-reference boundary above remains.
 
 **Audit note:** this entry was written in response to a request to also
 record that prototype-level UI parity is "deferred to Days 26–28." That
@@ -593,6 +615,10 @@ threshold does not exist in the schema and needs a real Settings slice
 (Volume 4 SETTINGS) before it can be built — intentionally deferred, not
 started.
 
+> **Superseded 2026-08-30:** shop settings now persist/sync configurable Near
+> and Far bands (defaults 30/60), and all expiry consumers use them against the
+> Asia/Dhaka business date.
+
 ---
 
 ## 2026-08-16 — Day 10 Expenses/Cash Summary/End of Day are complete (backfilled)
@@ -617,9 +643,8 @@ its payment). A write against a closed date throws `DayClosedError` before
 touching any row, so the transaction rolls back with zero partial rows or
 outbox entries (proven in `db/closed-day-guard.sqlite.test.ts`).
 
-Receipt-photo capture UI (camera/attach flow) remains deferred;
-`recordExpense` accepts a `receiptPhotoUri` string today, but no screen
-produces one yet.
+> **Superseded interface note:** receipt-photo capture remains deferred, but
+> `recordExpense` no longer accepts or stores a `receiptPhotoUri`.
 
 **Verification on record:** automated coverage (`db/cash.sqlite.test.ts`,
 `db/closed-day-guard.sqlite.test.ts`, `domain/cashFormula.test.ts`) runs a
@@ -633,7 +658,7 @@ entry — automated test coverage is not a substitute for it
 
 ---
 
-## 2026-08-16 — Day 11's centralized P0 permission model is complete (backfilled; supersedes the (Days 4-5/11) fragments above)
+## 2026-08-16 — Day 11's centralized P0 permission model is complete (historical; superseded by the 2026-08-30 B1 baseline)
 
 The SIMPLE two-role model Volume 0 Day 11 specifies (Owner = everything,
 Staff = `sales` + `inventory_view` only; the full Owner/Manager/Staff matrix
@@ -916,6 +941,12 @@ actually rests on. Before this, a same-sequence collision from two offline
 devices was silent, permanent data loss for the second sale at sync time.
 
 **Deferred, explicitly:**
+
+> **Status superseded 2026-08-30:** the ledger rationale below remains active,
+> but separate-device login, full-sale return/refund, purchase returns, and
+> audited stock adjustment/reconciliation have since shipped. A distinct
+> general write-off workflow and the remote rollout remain pending.
+
 - The Dev/Test Postgres migration (both ledger migration files, plus the
   read-only `backend/supabase/checks/ledger_invariant.sql` verification
   query) is written and tested but **not yet pushed** to the linked Dev/Test
@@ -1010,8 +1041,9 @@ Phase B2 follows `docs/plans/phase-b2-sales-inventory.md`. Locked rules:
   no unresolved oversell, and no active promotion. Owner CSV import is previewed,
   validated, and committed as one ledger/outbox operation.
 
-The founder approved the B2 safety gate for local implementation only. Remote
-migration push/execution, deployment, and commit remain separately prohibited.
+The founder approved the B2 safety gate for local implementation only. This
+implementation-status sentence is historical: B2 code was later implemented
+and committed. Remote migration execution and deployment remain pending.
 
 ---
 
@@ -1047,7 +1079,217 @@ zero (`CASE WHEN payment_type = 'cash'`) and listed non-selling staff under
 "Today's Active Staff"; and the dashboard rendered a blank screen for a
 non-owner and swallowed load failures as unhandled rejections.
 
-Local implementation only. Remote migration push/execution, deployment, and
-commit remain separately prohibited: `0013_owner_dashboard_credit_period.sql`
-and `20260822000000_owner_dashboard_credit_period.sql` are written and tested
-locally but unpushed.
+> **Status superseded 2026-08-30:** the dashboard and B1-B3 product code are
+> implemented and committed. Remote migration execution/deployment remains
+> pending; `0013_owner_dashboard_credit_period.sql` is packaged locally and its
+> PostgreSQL mirror stays in the pending ordered remote bundle.
+
+---
+
+## 2026-08-30 — B1-B3 production baseline and rollout state
+
+This entry moves durable B1-B3 behavior out of temporary plans and supersedes
+their implementation-status tables, blocker lists, forecast migration numbers,
+and READY-FOR-IMPLEMENTATION conclusions. The plans remain preserved as design
+and audit history.
+
+### Authority and architecture
+
+`apps/prototype-web` is the source of truth for product UI/UX, visible flow, and
+parity expectations. It is not an implementation source. Production
+SQLite/domain/auth/native/sync code plus PostgreSQL migrations/RLS are the
+correctness authority. Prototype localStorage, demo data, money/stock math, and
+web architecture are superseded wherever they conflict with production
+invariants.
+
+SQLite is the only source of truth for mobile screens. `db/` alone touches
+SQLite/Drizzle; `sync/` alone talks to Supabase; `domain/` stays pure;
+`native/` wraps device modules. Cloud is backup, synchronization, and admin
+visibility, never the live screen read path.
+
+All money is whole integer paisa. Every business-day boundary is Asia/Dhaka,
+independent of device timezone. Shop ID and live actor checks apply to every
+protected read/write, and stale sessions fail closed.
+
+### B1 — navigation, roles, permissions, language, settings, notifications
+
+Owner, Manager, and Staff/Cashier are all operational. Owner routes to the
+Owner dashboard; Manager and Staff route to their role branch under Staff Home.
+Bottom navigation, Scan, More, Owner Quick Links, and direct-route guards use
+the centralized route/data-gate registry.
+
+The current production matrix is 13 keys: the prototype's 12 plus
+`inventory_add`. Owner has all permissions and ignores stored denies. Manager
+defaults to every operational permission except `staff_manage` and
+`inventory_add`; Staff defaults to `sale_entry` and `inventory_view`. Per-user
+allow/deny overrides then apply. Unknown roles deny everything.
+
+`inventory_add` is intentionally separate from `inventory_edit` and defaults
+OFF for every non-owner. When explicitly granted it permits only Add Medicine
+with its atomic opening supplier-purchase, received-line, batch, stock-movement,
+audit/outbox graph. It does not grant supplier management, ordinary purchase
+creation, receive/void, inventory edit, or other financial authority. The
+server validates this narrow graph atomically under the same key.
+
+Global locale is device-local MMKV, Bangla by default, with Bangla/English
+catalog and number/date/time/money formatting. Owner profile, inventory/expiry/
+refund/credit/closing-hour/tax settings, notification preferences, and own-PIN
+change are implemented in committed product code. Settings/profile remain
+Owner-only.
+
+Notification rows are local SQLite. Preferences are device-local and
+shop-keyed; read/dismiss receipts are local per user/device and do not sync.
+Notification listing filters each sensitive type through the live permission
+map. Low-stock, expiry, overdue-credit, daily-summary, and sync generators use
+production data; daily cash summary remains Owner-only. The `refund` inbox type
+and permission/route mapping exist, but no automatic refund notification
+generator is currently shipped.
+
+### B2 — sales, inventory, refunds, sync
+
+Sale search/cart/checkout, insights, barcode/OCR, holds, prescription metadata,
+discounts, cash/credit/split payment, history/detail, and full-sale refund are
+implemented in committed product code. Checkout accepts medicine quantity
+intent, then re-reads and prices the actual batch allocation inside one SQLite
+transaction. Server-dependent refund/grouped-sync paths are not rollout-ready
+until the pending remote migrations/functions are deployed.
+
+Stock expired before the Asia/Dhaka business date is unsellable. Null expiry is
+sellable and FEFO-last. Transaction-time FEFO allocates the earliest sellable
+real expiry first, applies eligible per-batch promotions before the sale-level
+discount, and performs all arithmetic in integer paisa.
+
+Displayed quotes are advisory. If transaction-time total, batch, quantity, or
+effective unit-price allocation changed, checkout aborts with the refreshed
+quote. The cashier must review and confirm that exact quote again; any later
+cart edit invalidates the confirmation. No stale quote may silently commit.
+
+`batches.stock` is always the sum of append-only inventory movements. New
+batches start at zero and receive an opening movement. Sale, purchase, return,
+adjustment, disposal, and reconciliation are ledger operations; direct absolute
+stock assignment is rejected. Offline oversells stay recorded and flagged;
+display clamping never rewrites ledger truth. Archive is soft and requires
+ledger-safe state; late valid movements/refunds can reactivate an invalidated
+archive.
+
+Refund is full-sale, reason-required, bounded by the configured refund window,
+and requires an online server claim before physical payout or any local
+mutation. One active claim is bound to deterministic operation, actor, and
+device and never auto-expires/reassigns. Offline, timeout, or claim conflict
+changes no sale, stock, cash, credit, or ledger row. Successful refund restores
+exact original batches and reverses original cash, outstanding credit, and
+collection allocations atomically and idempotently.
+
+Multi-row sale/refund/inventory operations use persisted operation/row IDs,
+sequence, expected count, server staging, one-transaction apply, and replay
+checks. Refunds additionally derive deterministic operation/child IDs. Full and
+incremental hydration share one ordered SQLite apply path; realtime is only a
+pull signal.
+
+### B3 — cash, expenses, credit, suppliers, reports, tax, export, printing
+
+Expected cash is fixed and never re-derived by a screen:
+
+`Opening + Cash Sales + Credit Collections - Expenses - Refunds - Supplier Payments - Withdrawals`.
+
+Opening defaults to zero for every new Asia/Dhaka business date and never
+inherits yesterday. Withdrawals require a reason. Mid-day reconcile records a
+count/variance but does not close the date. End of Day recomputes the expected
+amount inside the close transaction and is the only operation that locks the
+business date. Closed-day guards cover every money/stock write that would alter
+that snapshot.
+
+Expenses are Owner-only, positive integer paisa, and atomically pair an expense
+row with its cash payment/outbox group. The canonical categories are Rent,
+Salary, Utilities, Conveyance, and Other; legacy categories are migrated.
+Expense deletion is a soft, grouped reversal. Receipt-photo capture is not
+implemented.
+
+Customer outstanding credit is derived from credit sales minus allocated
+collections, never cached as a separately editable total. Over-collection is
+rejected. Cash collection changes expected cash; non-cash collection does not.
+Unpaid/partial/settled and overdue use the same per-shop credit-period setting.
+
+Supplier position is one pure derivation. Return credit offsets its originating
+invoice first, excess pools FIFO across other oldest outstanding invoices, and
+any remainder becomes standalone supplier credit. Payment is capped by the
+derived effective payable. Supplier archive is blocked by either payable or
+credit. Purchase pending lines create no batch/movement/value until Mark
+Received; receive applies one movement; void is limited to invoices with no
+stock/payment effects. Purchase returns target the original received batch,
+are capped by received-minus-returned and current stock, require reason/open
+day, write a negative movement plus audit/supplier credit, and never create a
+cash refund merely because goods physically left the shop.
+
+Reports are SQLite reads gated by `reports`; Owner and explicitly authorized
+Manager/Staff sessions may read them. The Data Export route is Owner-only, but
+`services/reportExport.ts` lacks its own top-level Owner guard: sales/refund/
+expense export reads accept `reports`, while inventory/credit export reads
+re-check Owner. Treat the missing service-level guard as a rollout authorization
+risk, not proof that the whole export action is Owner-only. Report/monthly P&L
+uses gross sales, discounts, refunds, tax, net revenue, actual-batch COGS,
+gross profit, categorized expenses, and net profit. Tax is shop-level,
+MRP-inclusive, stored as integer basis points plus label, extracted from the
+post-discount total, and snapshotted immutably on each sale so later setting
+changes cannot rewrite history. Refund reports reverse the original snapshot.
+
+Export pages permission-checked SQLite reads into UTF-8 CSV or real XLSX in app
+cache, preserves Bangla, neutralizes spreadsheet formulas, caps a dataset at
+50,000 rows, and shares through the OS. BLE printing is Android-only in Beta:
+device-local MMKV pairing, runtime permission/scan/connect, ESC/POS bytes, a
+bounded retry, and explicit unsupported/range/disconnect/send errors. A printer
+is marked validated only after a real successful write.
+
+B3 money/stock graphs use the same grouped server staging and replay model:
+withdrawal, expense create/delete, credit collection, supplier payment,
+purchase create/receive/void, purchase return, and `inventory_add_purchase`.
+The server re-derives shop, actor, permission, shape, amount, and stock
+invariants instead of trusting client totals.
+
+### Migrations and verification
+
+Local SQLite migrations `0000` through `0025` are registered in numeric order.
+B1 begins at `0009`; B2 is `0010`-`0014`; B3 is `0015`-`0025`. PostgreSQL has 20
+timestamped files in lexical order through
+`20260827010000_b3_group9_sale_tax_snapshot.sql`. Exact order and rollout steps
+live in `backend/supabase/migrations/README.md`.
+
+The full `pnpm test` suite passed 124 files/1,268 tests. It covers migrations and
+the principal role, shop-isolation, stock, money, grouped-replay, report, tax,
+export, and printer contracts. The first sandboxed attempt stopped before test
+collection because esbuild could not spawn (`EPERM`); the approved outside-
+sandbox rerun is the recorded PASS. Migration SQL executed only inside ephemeral
+SQLite/PGlite test databases, not a persistent app DB or linked Supabase project.
+
+Founder-reported B3 physical-device acceptance: **PASS**. Founder-reported
+final Supabase migration dry-run: **PASS**. The repository contains no committed
+device/build checklist or dry-run command/output transcript, so those are
+recorded manual outcomes, not reproducible artifacts.
+
+Remote B1-B3 Supabase migration execution and matching Edge Function deployment
+remain **PENDING**. This recovery executes no migration against a persistent app
+database or linked remote environment and does no deploy, push, or commit.
+
+### Deferred items and rollout risks
+
+- Confirm the exact linked remote migration version; local files do not prove
+  remote state. Back up schema/data, re-run dry-run, apply in order, then run the
+  ledger invariant and full post-deploy two-device smoke suite.
+- Deploy schema-compatible grouped-operation SQL before the matching mobile/
+  Edge versions. Version skew can halt or reject queued money/stock groups.
+- Register and verify `public.custom_access_token_hook` manually after
+  migrations; SQL cannot enable the Auth hook.
+- Expense-category and Asia/Dhaka business-date backfills rewrite existing data
+  and need real-data pre/postchecks. Ledger backfill aborts on actorless gaps.
+- SQLCipher remains required before pilot data. Production OTP/provider setup,
+  DEV OTP bypass removal, and anonymous-auth hardening remain release gates.
+- B3 physical PASS does not prove every BLE printer/firmware model and does not
+  close the separate recorded PIN-latency timing gate.
+- Backup-key restore, expense receipt photos, a distinct general stock-write-off
+  workflow, broader receipt-print surfaces, B4 plan/payment/multi-shop work, and
+  backup/remote-wipe administration remain deferred or out of B1-B3 scope.
+- `conflict_queue` remains schema-only with no app writer/resolution UI. Ledger
+  stock and grouped operations supersede its old stock-LWW safety rationale, but
+  general row-conflict surfacing remains deferred.
+- Add a service-level Owner check to the Data Export orchestration before
+  rollout; the route guard alone is not the authorization boundary.

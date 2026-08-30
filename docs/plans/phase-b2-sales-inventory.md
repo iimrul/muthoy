@@ -1,7 +1,15 @@
 # Phase B2 — Sales and Inventory Functional Completion
 
+> **Historical implementation plan — superseded for status on 2026-08-30.**
+> B2 is implemented and committed. The PARTIAL/MISSING tables and
+> READY-FOR-IMPLEMENTATION statements below describe the pre-B2 baseline, not
+> current production. Preserve this file for contracts and rationale; use the
+> root `README.md`, `apps/mobile/README.md`, `DECISIONS.md`, and the migration
+> README for current behavior and rollout status.
+
 Date: 2026-08-21
-Mode: local B2 implementation safety gate approved; no commit, deploy, or remote migration push/execution.
+Mode at authoring: local B2 implementation safety gate approved; no commit,
+deploy, or remote migration push/execution.
 Source rule: latest prototype defines product behavior; current production architecture defines safe implementation.
 
 ## B2 AUDIT
