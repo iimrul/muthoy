@@ -1,6 +1,7 @@
 import { type Caller, callerShopId, HttpError } from "./_shared/auth.ts";
 import { assertBindingTarget, ensureAuthBinding } from "./_shared/identity.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
+import { onboardOwner } from "./onboarding.ts";
 
 export async function linkDevice(caller: Caller, body: Record<string, unknown>) {
   const shopId = body.shopId;
@@ -66,8 +67,25 @@ export async function linkDevice(caller: Caller, body: Record<string, unknown>) 
     // before it is trusted: the row must exist, be live, belong to THIS shop,
     // and actually be the owner. Anything else is refused with one generic
     // message, so this cannot be used to probe which user ids exist.
+    // Canonical onboarding, for EVERY flow — not a DEV side door.
+    //
+    // assertBindingTarget below requires the Owner's users row to already exist
+    // on the server, and it cannot get there by sync: push refuses a caller
+    // with no app_user_id claim, which needs the binding this very call is
+    // about to write. A brand-new registration is only able to close that loop
+    // because onboarding creates the rows first. Registration sends the payload;
+    // a resume, where the shop is already on the server, omits it and skips
+    // straight to the binding.
+    if (body.onboarding !== undefined) {
+      await onboardOwner(shopId, ownerUserId, body.onboarding);
+    }
     await assertBindingTarget(ownerUserId, shopId, "owner");
     await ensureAuthBinding(ownerUserId, caller.authUserId);
+    const { error: billingError } = await supabaseAdmin.rpc("b4_ensure_owner_billing_account", {
+      p_owner_user_id: ownerUserId,
+      p_shop_id: shopId,
+    });
+    if (billingError) throw new HttpError(500, "Could not initialize owner billing");
   }
 
   return { shopId };

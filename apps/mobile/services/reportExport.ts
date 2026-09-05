@@ -5,6 +5,7 @@ import {
   type CreditExportRow, type InventoryExportRow, type ReportExpenseRow, type ReportRefundRow, type ReportSaleRow,
 } from '../db/reports';
 import { getShopName } from '../db/settings';
+import { requirePremiumFeature } from '../db/commercial';
 import { paisaToTakaText, type ExportCell } from '../domain/export';
 import type { DateRange } from '../domain/reporting';
 import { shareWrittenExport, writeReportExport, type ExportFormat, type ExportSheetStream, type WrittenExport } from '../native/reportExport';
@@ -82,6 +83,7 @@ function creditSource(request: ExportRequest): ExportSheetStream {
 }
 
 export async function buildReportExport(request: ExportRequest): Promise<WrittenExport> {
+  await requirePremiumFeature(request.shopId, 'export');
   if (request.datasets.length === 0) throw new Error('Select at least one dataset');
   const sources: ExportSheetStream[] = [];
   if (request.monthly) {

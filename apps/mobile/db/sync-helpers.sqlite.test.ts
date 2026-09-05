@@ -18,7 +18,11 @@ const {
   recordChange,
   toSnakeCasePayload,
 } = await import("./sync-helpers");
-const { getRegistrationStatus, markShopCloudLinked } = await import("./auth");
+const {
+  getOwnerOnboardingPayload,
+  getRegistrationStatus,
+  markShopCloudLinked,
+} = await import("./auth");
 const { eq } = await import("drizzle-orm");
 
 const SHOP_ID = "10000000-0000-4000-8000-000000000001";
@@ -62,12 +66,31 @@ describe("sync helper behavior on real SQLite", () => {
       userId: USER_ID,
       phone: "01700000000",
     });
+    await expect(getOwnerOnboardingPayload(SHOP_ID, USER_ID)).resolves.toMatchObject({
+      shop: { id: SHOP_ID, ownerId: USER_ID },
+      owner: { id: USER_ID, shopId: SHOP_ID, roleId: ROLE_ID },
+    });
+    // Roles come from the shop's roles table, not just the Owner's own row —
+    // createShopAndOwner creates manager and staff up front and local rows
+    // reference them, so a server copy missing them breaks the first staff
+    // member added. This fixture seeds only the owner role, so that is what
+    // should travel: all of them, and nothing from another shop.
+    const onboarding = await getOwnerOnboardingPayload(SHOP_ID, USER_ID);
+    expect(onboarding.roles.map((role) => role.name)).toEqual(["owner"]);
+    expect(onboarding.roles.every((role) => role.shopId === SHOP_ID)).toBe(true);
+    // No shop_b2_settings row in this fixture; the payload says so rather than
+    // inventing an id the server would then create out of nothing.
+    expect(onboarding.settings).toBeNull();
+    await expect(
+      getOwnerOnboardingPayload(SHOP_ID, "10000000-0000-4000-8000-000000000099"),
+    ).rejects.toThrow("does not belong to this shop");
 
     await markShopCloudLinked(SHOP_ID);
     await expect(getRegistrationStatus()).resolves.toEqual({
       status: "complete",
       shopId: SHOP_ID,
       userId: USER_ID,
+      phone: "01700000000",
     });
     expect(queueRows()).toHaveLength(queueCountBefore);
 

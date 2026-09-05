@@ -11,7 +11,14 @@
 // app_metadata, RLS enforcement, PIN setup, and sync — is the production path,
 // unmodified.
 
-import { createShopAndOwner, getRegistrationStatus, markShopCloudLinked } from '../db/auth';
+import {
+  clearUnverifiedOwnerPhone,
+  createShopAndOwner,
+  getOwnerOnboardingPayload,
+  getRegistrationStatus,
+  markShopCloudLinked,
+  type OwnerOnboardingPayload,
+} from '../db/auth';
 import { linkDeviceToShop } from '../sync/linkDevice';
 import { requireSupabaseConfiguration, supabase } from '../sync/supabaseClient';
 
@@ -33,8 +40,8 @@ export function isDevPlaceholderPhone(phone: string): boolean {
 export type DevRegistrationState =
   | { status: 'none' }
   /** Local shop exists but the device-link never completed — safe to retry. */
-  | { status: 'link_incomplete'; shopId: string }
-  | { status: 'ready'; shopId: string };
+  | { status: 'link_incomplete'; shopId: string; ownerUserId: string }
+  | { status: 'ready'; shopId: string; ownerUserId: string };
 
 /**
  * Describes where a previous dev attempt stopped, so the UI can show a real
@@ -48,15 +55,53 @@ export async function getDevRegistrationState(): Promise<DevRegistrationState> {
   if (registration.status === 'none') {
     return { status: 'none' };
   }
-  if (registration.status === 'link_pending') {
-    return isDevPlaceholderPhone(registration.phone)
-      ? { status: 'link_incomplete', shopId: registration.shopId }
-      : { status: 'none' };
+  if (!isDevPlaceholderPhone(registration.phone)) {
+    return { status: 'none' };
   }
-  return { status: 'ready', shopId: registration.shopId };
+  return registration.status === 'link_pending'
+    ? { status: 'link_incomplete', shopId: registration.shopId, ownerUserId: registration.userId }
+    : { status: 'ready', shopId: registration.shopId, ownerUserId: registration.userId };
+}
+
+/**
+ * The repair affordance belongs only to the anonymous DEV account already
+ * linked to this placeholder shop. A different/missing session may not see or
+ * run it merely because a local completed registration exists.
+ */
+export async function hasMatchingDevRepairSession(shopId: string): Promise<boolean> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  return data.session?.user.is_anonymous === true
+    && data.session.user.app_metadata.shop_id === shopId;
 }
 
 export class DevAuthError extends Error {}
+
+/**
+ * Strips the Owner's phone from the payload this flow sends to the server.
+ *
+ * `users_phone_unique` is GLOBAL — one live user per number across every shop —
+ * and this flow writes the SAME placeholder into every DEV registration. The
+ * second DEV shop could therefore never get an Owner row: the insert died with
+ * 23505, surfaced as an opaque 500, and no amount of retrying could fix it.
+ *
+ * Sending null is not a workaround, it is the accurate record. Skip-OTP never
+ * proved ownership of that number, so it must not be stored as the credential
+ * that names this account on a fresh device. b4_create_owned_shop already does
+ * exactly this for every secondary shop. The local row keeps the placeholder,
+ * which is what marks the registration as a dev one.
+ */
+async function onboardingWithoutUnverifiedPhone(
+  shopId: string,
+  ownerUserId: string,
+): Promise<OwnerOnboardingPayload> {
+  // Cleared locally FIRST, so the payload and the local row agree. Otherwise
+  // the queued users insert would keep pushing the placeholder back up, to be
+  // rejected 23505 by the same global index, forever.
+  await clearUnverifiedOwnerPhone(shopId, ownerUserId);
+  const payload = await getOwnerOnboardingPayload(shopId, ownerUserId);
+  return { ...payload, owner: { ...payload.owner, phone: null } };
+}
 
 /**
  * Returns an anonymous Supabase session, creating one if needed.
@@ -96,6 +141,22 @@ async function ensureAnonymousSession(): Promise<void> {
   }
 }
 
+/** Repair must reuse the account that already owns shop_claims, never mint a
+ * second anonymous identity and hope the server accepts it. */
+async function requireExistingAnonymousSession(expectedShopId?: string): Promise<void> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  if (!data.session) {
+    throw new DevAuthError('The existing anonymous DEV session is required for repair.');
+  }
+  if (data.session.user.is_anonymous !== true) {
+    throw new DevAuthError('Owner-link repair only accepts the existing anonymous DEV session.');
+  }
+  if (expectedShopId && data.session.user.app_metadata.shop_id !== expectedShopId) {
+    throw new DevAuthError('Owner-link repair requires the anonymous session already linked to this DEV shop.');
+  }
+}
+
 /**
  * Signs in anonymously (or reuses an existing ANONYMOUS session) and completes
  * registration exactly as `app/(auth)/otp-verify.tsx` does after a successful
@@ -111,17 +172,51 @@ export async function devSignInAnonymouslyAndRegister(): Promise<{ shopId: strin
   await ensureAnonymousSession();
 
   const state = await getDevRegistrationState();
-  const shopId =
-    state.status === 'none'
-      ? (await createShopAndOwner({ shopName: DEV_SHOP_NAME, phone: DEV_SHOP_PHONE })).shopId
-      : state.shopId;
+  const created = state.status === 'none'
+    ? await createShopAndOwner({ shopName: DEV_SHOP_NAME, phone: DEV_SHOP_PHONE })
+    : { shopId: state.shopId, userId: state.ownerUserId };
 
-  // Production helper, untouched: invokes the `sync` Edge Function's
-  // link-device action (which claims the shop in shop_claims and writes
-  // app_metadata.shop_id), then refreshSession() and verifies the refreshed
-  // JWT actually carries that shop_id. RLS depends on that claim.
-  await linkDeviceToShop(shopId);
-  await markShopCloudLinked(shopId);
+  // The SAME canonical onboarding the real OTP flow runs. Not a DEV variant:
+  // link-device creates the shop, roles and Owner through b4_onboard_owner,
+  // writes the auth binding, and lets the server grant the trial. The only
+  // thing this flow skipped was proving a phone number.
+  const onboarding = await onboardingWithoutUnverifiedPhone(created.shopId, created.userId);
+  await linkDeviceToShop(created.shopId, created.userId, { onboarding });
+  await markShopCloudLinked(created.shopId);
 
-  return { shopId };
+  return { shopId: created.shopId };
+}
+
+/**
+ * Repairs an already-registered device whose auth account was linked WITHOUT an
+ * owner binding.
+ *
+ * Every step is the existing production path and every step is idempotent:
+ * link-device re-claims a shop it already owns, `ensureAuthBinding` upserts and
+ * then re-reads the agreed row, and `b4_ensure_owner_billing_account` writes
+ * `launch_trial_granted_at` once with the entitlement row `on conflict do
+ * nothing`. Running it on a healthy device changes nothing; running it on this
+ * one writes the missing binding. It cannot create a second owner, a second
+ * account, or a second trial, and it cannot reset or extend an existing one.
+ */
+export async function repairOwnerDeviceLink(): Promise<{
+  shopId: string;
+  ownerUserId: string;
+}> {
+  requireSupabaseConfiguration();
+  const state = await getDevRegistrationState();
+  if (state.status === 'none') {
+    throw new DevAuthError('No local dev registration to repair.');
+  }
+  await requireExistingAnonymousSession(state.status === 'ready' ? state.shopId : undefined);
+
+  const onboarding = await onboardingWithoutUnverifiedPhone(state.shopId, state.ownerUserId);
+  await linkDeviceToShop(state.shopId, state.ownerUserId, { onboarding });
+  // A completed registration may already carry a genuine cloud-link marker.
+  // Preserve it byte-for-byte; only a previously incomplete link needs the
+  // success marker written after strict refreshed-token verification passes.
+  if (state.status === 'link_incomplete') {
+    await markShopCloudLinked(state.shopId);
+  }
+  return { shopId: state.shopId, ownerUserId: state.ownerUserId };
 }

@@ -27,6 +27,7 @@ import m0022 from './0022_supplier_profile_fields.sql';
 import m0023 from './0023_purchase_invoice_metadata.sql';
 import m0024 from './0024_b3_report_indexes.sql';
 import m0025 from './0025_b3_sale_tax_snapshot.sql';
+import m0026 from './0026_b4_commercial_cache.sql';
 
 export default {
   journal,
@@ -57,5 +58,6 @@ export default {
     m0023,
     m0024,
     m0025,
+    m0026,
   },
 };

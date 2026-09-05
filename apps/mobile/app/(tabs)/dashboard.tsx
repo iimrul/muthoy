@@ -23,6 +23,9 @@ import { PreviousDaySummaryModal } from "../../components/cash/PreviousDaySummar
 import { AccessDenied } from "../../components/ui/AccessDenied";
 import { DashboardLoadState } from "../../components/staff/DashboardLoadState";
 import { LanguageToggle } from "../../components/ui/LanguageToggle";
+import { PlanBadge } from "../../components/ui/PlanBadge";
+import { TrialBanner } from "../../components/ui/TrialBanner";
+import { ShopSwitcher } from "../../components/ui/ShopSwitcher";
 import {
   currentBusinessDate,
   hasCashDrawerForDate,
@@ -48,13 +51,17 @@ import {
 import { useI18n } from "../../state/localeStore";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useSessionStore } from "../../state/sessionStore";
+import { switchActiveShop } from "../../state/switchShop";
+import { usePlan } from "../../state/usePlan";
 import { switchUser } from "../../state/switchUser";
+import { useMultiShopAccess } from "../../state/useMultiShopAccess";
 import { useUnreadCount } from "../../state/useUnreadCount";
 import {
   getLastSuccessfulSyncAt,
   subscribeToSyncCompletion,
   triggerSyncNow,
 } from "../../sync";
+import { hasNetworkConnection } from "../../sync/connectivity";
 
 // Owner MorningDashboard. Functional parity with the prototype screen of the
 // same name; final typography and spacing remain Phase C.
@@ -74,6 +81,8 @@ export default function MorningDashboardScreen() {
   const session = useSessionStore((state) => state.session);
   const { t, locale, formatNumber, formatTime } = useI18n();
   const unread = useUnreadCount(session?.shopId, session?.userId);
+  const plan = usePlan();
+  const multiShop = useMultiShopAccess();
 
   const [data, setData] = useState<OwnerDashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -90,6 +99,10 @@ export default function MorningDashboardScreen() {
   const [previousDayOpen, setPreviousDayOpen] = useState(false);
   const [openCashAfterPreviousDay, setOpenCashAfterPreviousDay] =
     useState(false);
+  const [returningToPrimaryShop, setReturningToPrimaryShop] = useState(false);
+  const [returnToPrimaryError, setReturnToPrimaryError] = useState<
+    string | null
+  >(null);
 
   useEffect(
     () => completePendingAuthTimingStage("navigation_render_completion"),
@@ -264,6 +277,24 @@ export default function MorningDashboardScreen() {
     [reload, session],
   );
 
+  // Free/expired owners lose ordinary multi-shop switching, but must never be
+  // stranded on a secondary shop the plan no longer covers — this reuses the
+  // same primary-shop exception switchActiveShop/requireShopSwitchAccess
+  // already grant, instead of opening the locked Multi-Shop screen.
+  const handleReturnToPrimaryShop = useCallback(async () => {
+    if (!multiShop.primaryShopId) return;
+    setReturningToPrimaryShop(true);
+    setReturnToPrimaryError(null);
+    try {
+      await switchActiveShop(multiShop.primaryShopId, await hasNetworkConnection());
+      router.replace("/dashboard");
+    } catch {
+      setReturnToPrimaryError(t("dashboardLoadFailed"));
+    } finally {
+      setReturningToPrimaryShop(false);
+    }
+  }, [multiShop.primaryShopId, t]);
+
   const handleLogout = useCallback(() => {
     Alert.alert(t("logout"), t("logoutConfirmBody"), [
       { text: t("cancel"), style: "cancel" },
@@ -370,6 +401,16 @@ export default function MorningDashboardScreen() {
   const greeting = t(greetingKeyForHour(new Date().getHours()));
   const hasOpeningCash = data.hasCashDrawer;
   const canCompleteDay = data.today.totalSales > 0 && !data.today.isClosed;
+  const bn = locale === "bn";
+  // Recovery only — never a substitute for Multi-Shop management. Shown
+  // exclusively when the plan no longer covers the shop the owner is
+  // currently viewing, and disappears the instant they are back on the
+  // account's primary shop.
+  const showReturnToPrimaryShop =
+    !multiShop.loading &&
+    !multiShop.entitled &&
+    Boolean(multiShop.primaryShopId) &&
+    multiShop.primaryShopId !== session.shopId;
 
   return (
     <View className="flex-1 bg-[#F5F5F5]">
@@ -426,15 +467,22 @@ export default function MorningDashboardScreen() {
           </View>
         </View>
 
-        {/* Hero: greeting, date, KPI carousel */}
+        {/* Hero: greeting + plan badge, date, shop switcher, KPI carousel.
+            Prototype MorningDashboard order — the badge sits inline with the
+            greeting and the shop pill sits under the date, both inside the
+            green hero. */}
         <View className="rounded-b-[18px] bg-[#047857] pb-20 pt-6">
-          <View className="mb-6 gap-0.5 px-4">
-            <Text className="font-sans-semibold text-lg text-white">
-              {greeting}, {data.ownerName}
-            </Text>
-            <Text className="font-sans text-xs text-white/70">
+          <View className="mb-6 px-4">
+            <View className="flex-row flex-wrap items-center gap-2">
+              <Text className="font-sans-semibold text-lg text-white">
+                {greeting}, {data.ownerName}
+              </Text>
+              <PlanBadge plan={plan.plan} daysLeft={plan.daysLeft} compact expired={plan.reason === 'paid_expired' || plan.reason === 'verification_stale'} grace={plan.reason === 'paid_grace'} />
+            </View>
+            <Text className="mt-1 font-sans text-xs text-white/70">
               {dateLabel(data.businessDate)}
             </Text>
+            <ShopSwitcher />
           </View>
 
           {syncFailed ? (
@@ -521,8 +569,48 @@ export default function MorningDashboardScreen() {
           </ScrollView>
         </View>
 
-        {/* Alerts */}
+        {/* Alerts — the trial/plan banner leads this block. Prototype order is
+            hero → banner → alert cards; it lives INSIDE this container because
+            the container's -mt-16 pull would otherwise draw the alert cards
+            straight over a banner rendered as an earlier sibling. */}
         <View className="-mt-16 gap-3 px-4 pb-6">
+          <TrialBanner plan={plan} />
+          {showReturnToPrimaryShop ? (
+            <View className="items-center gap-2 rounded-2xl border border-[#FDE68A] bg-[#FEF3C7] p-4">
+              <Feather name="corner-up-left" size={20} color="#92400E" />
+              <Text className="text-center font-sans-bold text-sm text-[#92400E]">
+                {bn ? "আপনি একটি সেকেন্ডারি দোকানে আছেন" : "You're on a secondary shop"}
+              </Text>
+              <Text className="text-center font-sans text-xs text-[#92400E]">
+                {bn
+                  ? "আপনার বর্তমান প্ল্যান একাধিক দোকান সমর্থন করে না। প্রধান দোকানে ফিরে যান।"
+                  : "Your current plan doesn't cover multiple shops. Return to your primary shop."}
+              </Text>
+              {returnToPrimaryError ? (
+                <Text className="text-center font-sans text-xs text-error">
+                  {returnToPrimaryError}
+                </Text>
+              ) : null}
+              <Pressable
+                disabled={returningToPrimaryShop}
+                onPress={() => void handleReturnToPrimaryShop()}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: returningToPrimaryShop }}
+                accessibilityLabel={
+                  bn ? "প্রধান দোকানে ফিরে যান" : "Return to primary shop"
+                }
+                className="mt-1 items-center rounded-xl bg-[#92400E] px-4 py-2"
+              >
+                {returningToPrimaryShop ? (
+                  <ActivityIndicator color="white" size="small" />
+                ) : (
+                  <Text className="font-sans-bold text-xs text-white">
+                    {bn ? "প্রধান দোকানে ফিরে যান" : "Return to primary shop"}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+          ) : null}
           {error ? (
             <Text
               accessibilityRole="alert"

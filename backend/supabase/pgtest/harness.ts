@@ -34,6 +34,17 @@ const MIGRATIONS_DIR = resolve('backend/supabase/migrations');
  *   privileges. The migrations' own REVOKEs run afterwards and still win, which
  *   is the real ordering — and is why `authenticated` can reach a table at all
  *   for the RLS tests to then deny it.
+ *
+ * service_role is DELIBERATELY excluded from those default privileges.
+ *
+ * This file used to grant it everything, on the assumption that the hosted
+ * project does. It does not: 20260817000000's own root-cause note records an
+ * admin read dying with 42501 on a table with an empty ACL, and 20260817000100
+ * records the same for public.roles. Only the migrations' explicit GRANTs
+ * count. Granting more here made this harness more permissive than production
+ * in the one direction that matters, and is how a direct INSERT on shops
+ * shipped in the DEV bootstrap and failed on every physical attempt while the
+ * suite stayed green.
  */
 const PLATFORM_BOOTSTRAP = `
 create schema if not exists auth;
@@ -69,8 +80,8 @@ $roles$;
 grant usage on schema public to anon, authenticated, service_role;
 grant usage on schema auth to anon, authenticated, service_role, supabase_auth_admin;
 
-alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
-alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+alter default privileges in schema public grant all on tables to anon, authenticated;
+alter default privileges in schema public grant all on sequences to anon, authenticated;
 alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
 `;
 

@@ -1,0 +1,7 @@
+project_id = "muthoy-pos"
+
+# SSLCommerz posts browser callbacks/webhooks without a Supabase JWT. The
+# function authenticates the event with SSLCommerz's validation API before the
+# service-role payment RPC can activate entitlement.
+[functions.payment-webhook]
+verify_jwt = false

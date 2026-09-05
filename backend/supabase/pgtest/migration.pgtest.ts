@@ -473,6 +473,10 @@ describe("every synced table still applies through the wrapper", () => {
         shopId: SHOP_A,
         callerUserId: OWNER_A,
       });
+      if (payload.table === "subscriptions") {
+        expect(inserted.error).toMatch(/server-owned|permission/i);
+        return;
+      }
       expect(inserted).toMatchObject({ ok: true, error: null });
 
       // audit_logs is append-only by design; the base function raises MU001 on

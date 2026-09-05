@@ -313,6 +313,7 @@ describe('handover leaves the shop and the device link standing', () => {
       status: 'complete',
       shopId: fixture.shopId,
       userId: fixture.ownerId,
+      phone: '+8801700000000',
     });
   });
 

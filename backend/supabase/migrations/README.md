@@ -27,6 +27,7 @@ and every PostgreSQL money column mirrors integer paisa.
 20260825000000_inventory_add_purchase_sync.sql
 20260827000000_b3_group8_report_indexes.sql
 20260827010000_b3_group9_sale_tax_snapshot.sql
+20260831000000_b4_commercial_platform.sql
 ```
 
 Do not reorder the function-wrapper migrations: each later grouped-operation

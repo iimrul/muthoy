@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   online: vi.fn(),
   pull: vi.fn(),
   push: vi.fn(),
+  nudgeBilling: vi.fn(),
   uploadAttachments: vi.fn(),
   notify: vi.fn(),
   notifyHalted: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("./connectivity", () => ({
 }));
 vi.mock("./pull", () => ({ pullChanges: mocks.pull }));
 vi.mock("./push", () => ({ pushPendingRows: mocks.push }));
+vi.mock("./billingHydration", () => ({ nudgeBillingHydration: mocks.nudgeBilling }));
 vi.mock("./attachments", () => ({ uploadPendingPrescriptionAttachments: mocks.uploadAttachments }));
 vi.mock("./scheduler", () => ({ startForegroundScheduler: mocks.startForegroundScheduler }));
 vi.mock("./stuckNotification", () => ({
@@ -121,6 +123,26 @@ describe("sync cycle orchestration", () => {
     await vi.waitFor(() => expect(mocks.notify).toHaveBeenCalled());
 
     expect(mocks.pull).toHaveBeenCalledWith("shop-complete", undefined, expect.any(Function));
+  });
+
+  it("nudges Owner trial hydration after the owner row push and data pull", async () => {
+    loginTo("shop-new-owner");
+
+    startSyncEngine("shop-new-owner");
+    await vi.waitFor(() => expect(mocks.nudgeBilling).toHaveBeenCalledWith("shop-new-owner"));
+
+    expect(mocks.push.mock.invocationCallOrder[0]).toBeLessThan(mocks.pull.mock.invocationCallOrder[0]!);
+    expect(mocks.pull.mock.invocationCallOrder[0]).toBeLessThan(mocks.nudgeBilling.mock.invocationCallOrder[0]!);
+  });
+
+  it("nudges entitlement hydration after every completed sync without coupling cycle success", async () => {
+    loginTo("shop-delayed-owner");
+    startSyncEngine("shop-delayed-owner");
+    await vi.waitFor(() => expect(mocks.nudgeBilling).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(mocks.notify).toHaveBeenCalledTimes(1));
+
+    await expect(triggerSyncNow("shop-delayed-owner")).resolves.toMatchObject({ status: "completed" });
+    expect(mocks.nudgeBilling).toHaveBeenCalledTimes(2);
   });
 
   it("notifies focused consumers only after a background pull has applied", async () => {

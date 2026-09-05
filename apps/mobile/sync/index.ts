@@ -2,6 +2,7 @@ import { AppState, InteractionManager, type AppStateStatus } from 'react-native'
 import { subscribeToReconnect, hasNetworkConnection } from './connectivity';
 import { pullChanges } from './pull';
 import { pushPendingRows } from './push';
+import { nudgeBillingHydration } from './billingHydration';
 import { SyncHaltedError } from './invoke';
 import { startInventoryRealtime, stopInventoryRealtime } from './realtime';
 import { startForegroundScheduler } from './scheduler';
@@ -99,6 +100,11 @@ async function runCycle(
     if (isCancelled()) return { status: 'skipped', reason: 'cancelled' };
     await pullChanges(shopId, undefined, isCancelled);
     if (isCancelled()) return { status: 'skipped', reason: 'cancelled' };
+    // A fresh Owner may become visible during this push. Signal the dedicated
+    // hydration controller after pull; its per-session mutex owns the request,
+    // retry, cache guard, and cancellation lifecycle.
+    nudgeBillingHydration(shopId);
+    if (isCancelled()) return { status: 'skipped', reason: 'cancelled' };
 
     const completedAt = new Date().toISOString();
     recordSuccessfulSync(shopId, completedAt);
@@ -193,6 +199,10 @@ function scheduleInitialCycle(shopId: string): void {
 }
 
 export function startSyncEngine(shopId: string): void {
+  if (useSessionStore.getState().session?.cloudShopConfirmed === false) {
+    stopSyncEngine();
+    return;
+  }
   if (activeShopId === shopId) {
     void triggerSyncNow(shopId);
     return;

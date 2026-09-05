@@ -34,6 +34,9 @@ export interface Caller {
   authUserId: string;
   /** users.id — the BUSINESS identity, from the hook's claim. */
   appUserId: string | null;
+  /** Stable auth-bound identity; appUserId may be a per-shop actor. */
+  principalUserId: string | null;
+  billingAccountId: string | null;
   shopId: string | null;
   role: string | null;
   permissionVersion: number | null;
@@ -92,6 +95,9 @@ export async function verifyCallerJwt(request: Request): Promise<Caller> {
   return {
     authUserId: data.user.id,
     appUserId: claimString(metadata, "app_user_id"),
+    principalUserId: claimString(metadata, "principal_user_id")
+      ?? claimString(metadata, "app_user_id"),
+    billingAccountId: claimString(metadata, "billing_account_id"),
     // shop_id predates the hook and is ALSO stored on the row (linkDevice and
     // deviceLogin both write it there, and every pre-existing RLS policy reads
     // it). Claims first, row as the fallback, so a token minted moments before
@@ -137,6 +143,8 @@ export interface CallerRecord {
   roleName: string;
   isOwner: boolean;
   permissionVersion: number;
+  billingAccountId: string | null;
+  commercialStatus: "active" | "read_only";
 }
 
 /**
@@ -156,21 +164,27 @@ export async function assertCallerCurrent(caller: Caller): Promise<CallerRecord>
   const appUserId = requireCallerAppUserId(caller);
   const { data, error } = await supabaseAdmin
     .from("users")
-    .select("id, shop_id, permission_version, is_active, is_deleted, roles!inner(name)")
+    .select("id, shop_id, permission_version, is_active, is_deleted, plan_suspended_at, roles!inner(name), shops!inner(billing_account_id, commercial_status, archived_at, is_deleted)")
     .eq("id", appUserId)
     .maybeSingle();
 
   if (error) {
     throw new HttpError(500, "Could not verify caller");
   }
-  if (!data || data.is_deleted || !data.is_active) {
+  if (!data || data.is_deleted || !data.is_active || data.plan_suspended_at) {
     throw new HttpError(403, "Account is no longer active");
   }
+  const { data: withinLimit, error: limitError } = await supabaseAdmin.rpc(
+    "b4_user_within_current_staff_limit",
+    { p_app_user_id: appUserId },
+  );
+  if (limitError) throw new HttpError(500, "Could not verify plan access");
+  if (!withinLimit) throw new HttpError(403, "Account is suspended by the current plan");
 
   const { data: binding, error: bindingError } = await supabaseAdmin
     .from("auth_bindings")
     .select("auth_user_id")
-    .eq("app_user_id", appUserId)
+    .eq("app_user_id", caller.principalUserId ?? appUserId)
     .maybeSingle();
   if (bindingError) {
     throw new HttpError(500, "Could not verify caller");
@@ -193,12 +207,21 @@ export async function assertCallerCurrent(caller: Caller): Promise<CallerRecord>
   }
 
   const roleName = (data.roles as unknown as { name: string } | null)?.name ?? "";
+  const shop = data.shops as unknown as {
+    billing_account_id: string | null;
+    commercial_status: "active" | "read_only";
+    archived_at: string | null;
+    is_deleted: boolean;
+  };
+  if (shop.archived_at || shop.is_deleted) throw new HttpError(403, "Shop is archived");
   return {
     appUserId,
     shopId: data.shop_id,
     roleName,
     isOwner: roleName === "owner",
     permissionVersion: data.permission_version,
+    billingAccountId: shop.billing_account_id,
+    commercialStatus: shop.commercial_status,
   };
 }
 

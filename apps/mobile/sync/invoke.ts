@@ -46,11 +46,15 @@ async function readFunctionsHttpErrorBody(error: unknown): Promise<FunctionError
  */
 export async function invokeSyncWithClaimRefresh(
   body: Record<string, unknown>,
+  options: { signal?: AbortSignal } = {},
 ): Promise<{ data: unknown; error: Error | null }> {
   let refreshed = false;
 
   while (true) {
-    const { data, error } = await supabase.functions.invoke('sync', { body });
+    const { data, error } = await supabase.functions.invoke('sync', {
+      body,
+      signal: options.signal,
+    });
     if (!error) {
       return { data, error: null };
     }

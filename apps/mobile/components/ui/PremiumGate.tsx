@@ -1,25 +1,43 @@
 import type { ReactNode } from 'react';
-import { Text, View } from 'react-native';
-
-// PremiumGate — Volume 4 SUBSCRIPTION: "Free/Pro/Ultra gating via
-// PremiumGate + a usePlan hook." P1 (entire feature is post-beta per
-// Volume 0's scope lock). For UI/layout reference only (never logic — the
-// Prototype Rule), see apps/prototype-web's PremiumLock.tsx.
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { premiumAccessStatus, type PremiumFeature } from '../../domain/entitlements';
+import { usePlan } from '../../state/usePlan';
+import { PremiumLock } from './PremiumLock';
 
 export interface PremiumGateProps {
-  /** Minimum plan required to see `children` unlocked. */
-  requiredPlan: 'pro' | 'ultra';
-  children: ReactNode;
+  feature?: PremiumFeature;
+  requiredPlan?: 'pro' | 'ultra';
+  children?: ReactNode;
+  compact?: boolean;
+  /**
+   * Renders the locked/loading state as an absolutely-filled cover instead of a
+   * flex child. NavigationBoundary needs this: it must keep the <Stack />
+   * navigator mounted underneath, because replacing it resets route state.
+   */
+  overlay?: boolean;
 }
 
-// TODO(P1): reads state/usePlan.ts; if the shop's plan (or an active trial)
-// doesn't meet requiredPlan, render an upgrade prompt instead of children —
-// limits are enforced at creation time with an upgrade prompt, NEVER a
-// crash (Volume 4 SUBSCRIPTION).
-export function PremiumGate(_props: PremiumGateProps) {
-  return (
-    <View>
-      <Text>TODO: PremiumGate (P1 — post-beta, Volume 4 SUBSCRIPTION)</Text>
-    </View>
-  );
+/**
+ * In-place entitlement gate for a subtree. A live trial resolves to
+ * effectiveTier 'ultra' (domain/entitlements), so a trial owner passes without
+ * any trial-specific special case.
+ *
+ * This is presentation. It is never the only check — every protected
+ * operation re-verifies against the SQLite entitlement cache (db/commercial)
+ * and, for anything that leaves the device, against the server.
+ */
+export function PremiumGate({ feature = 'reports', requiredPlan, children, compact = false, overlay = false }: PremiumGateProps) {
+  const plan = usePlan();
+  const status = requiredPlan === 'ultra'
+    ? (plan.loading ? 'loading' : plan.effectiveTier === 'ultra' ? 'open' : 'locked')
+    : premiumAccessStatus(plan, feature);
+  if (status === 'loading') {
+    return (
+      <View style={overlay ? StyleSheet.absoluteFill : undefined} className="flex-1 items-center justify-center bg-brand-softGreen">
+        <ActivityIndicator color="#059669" />
+      </View>
+    );
+  }
+  if (status === 'open') return <>{children}</>;
+  return <PremiumLock feature={feature} compact={compact} overlay={overlay} />;
 }

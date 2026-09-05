@@ -13,6 +13,7 @@ import { asPaisa, multiplyPaisa, type Paisa } from '@muthoy/types';
 import { computeSupplierPosition } from '../domain/supplierPosition';
 import { generateId } from '../native/id';
 import { requireOwner } from './auth';
+import { requirePremiumFeature } from './commercial';
 import { assertBusinessDateOpen } from './cash';
 import { db, sqliteConnection } from './client';
 import {
@@ -195,6 +196,7 @@ export async function createPurchaseReturn(
   input: CreatePurchaseReturnInput,
 ): Promise<{ returnId: string; creditAmount: Paisa }> {
   await requireOwner(input.shopId, input.actorUserId);
+  await requirePremiumFeature(input.shopId, 'supplier_invoices');
   const reason = input.reason.trim();
   if (!reason) {
     throw new PurchaseReturnReasonRequiredError();

@@ -52,6 +52,7 @@ vi.mock("react-native", () => ({
     ),
   Modal: ({ children, visible }: StubProps) =>
     visible ? createElement("div", null, children) : null,
+  ActivityIndicator: () => createElement("span", null, "spinner"),
   Alert: { alert: vi.fn() },
 }));
 
@@ -114,6 +115,27 @@ vi.mock("../components/cash/PreviousDaySummaryModal", () => ({
       : null,
 }));
 vi.mock("../state/useUnreadCount", () => ({ useUnreadCount: () => 0 }));
+vi.mock("../state/usePlan", () => ({
+  usePlan: () => ({ plan: "free", effectiveTier: "free", status: "active", reason: "free", loading: false, refresh: vi.fn() }),
+}));
+vi.mock("../components/ui/PlanBadge", () => ({ PlanBadge: () => null }));
+vi.mock("../components/ui/TrialBanner", () => ({ TrialBanner: () => null }));
+vi.mock("../components/ui/ShopSwitcher", () => ({ ShopSwitcher: () => null }));
+const multiShopAccess = vi.hoisted(() => ({
+  entitled: true,
+  primaryShopId: null as string | null,
+  liveShopCount: 0,
+  allowed: true,
+  hasMultipleShops: false,
+  loading: false,
+}));
+vi.mock("../state/useMultiShopAccess", () => ({
+  useMultiShopAccess: () => multiShopAccess,
+}));
+vi.mock("../state/switchShop", () => ({ switchActiveShop: vi.fn() }));
+vi.mock("../sync/connectivity", () => ({
+  hasNetworkConnection: vi.fn(async () => true),
+}));
 vi.mock("../dev/authTiming", () => ({
   completePendingAuthTimingStage: vi.fn(),
 }));
@@ -149,6 +171,7 @@ const { asPaisa } = await import("@muthoy/types");
 const { markBusinessDateSeen } = await import("../state/businessDayStore");
 const { useLocaleStore } = await import("../state/localeStore");
 const { useSessionStore } = await import("../state/sessionStore");
+const { switchActiveShop } = await import("../state/switchShop");
 const Dashboard = (await import("../app/(tabs)/dashboard")).default;
 
 const DAY_SUMMARY = {
@@ -187,6 +210,12 @@ beforeEach(() => {
   deps.hasCashDrawerForDate.mockResolvedValue(false);
   deps.getOwnerDashboard.mockResolvedValue(DASHBOARD_DATA);
   deps.getDaySummary.mockResolvedValue(DAY_SUMMARY);
+  multiShopAccess.entitled = true;
+  multiShopAccess.primaryShopId = null;
+  multiShopAccess.liveShopCount = 0;
+  multiShopAccess.allowed = true;
+  multiShopAccess.hasMultipleShops = false;
+  multiShopAccess.loading = false;
 });
 
 afterEach(cleanup);
@@ -222,5 +251,80 @@ describe("dashboard day rollover modal sequence", () => {
     expect(screen.queryByTestId("opening-cash")).toBeNull();
     expect(deps.getDaySummary).toHaveBeenCalledTimes(1);
     expect(deps.hasCashDrawerForDate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("dashboard downgrade recovery: return to primary shop", () => {
+  const login = () =>
+    useSessionStore
+      .getState()
+      .login({ shopId: SHOP_ID, userId: OWNER_ID, role: "owner" });
+
+  it("stays hidden while entitled, or while already on the primary shop", async () => {
+    login();
+    multiShopAccess.entitled = true;
+    multiShopAccess.primaryShopId = "some-other-shop";
+    render(createElement(Dashboard));
+    await waitFor(() => expect(screen.getByText("PHARMAPOS")).toBeTruthy());
+    expect(screen.queryByText("Return to primary shop")).toBeNull();
+
+    cleanup();
+    multiShopAccess.entitled = false;
+    multiShopAccess.primaryShopId = SHOP_ID;
+    render(createElement(Dashboard));
+    await waitFor(() => expect(screen.getByText("PHARMAPOS")).toBeTruthy());
+    expect(screen.queryByText("Return to primary shop")).toBeNull();
+  });
+
+  it("shows only the recovery action, never the full Multi-Shop switcher, for a stranded Free owner", async () => {
+    login();
+    multiShopAccess.entitled = false;
+    multiShopAccess.primaryShopId = "primary-shop-id";
+    render(createElement(Dashboard));
+
+    await waitFor(() =>
+      expect(screen.getByText("Return to primary shop")).toBeTruthy(),
+    );
+    expect(screen.getByText(/doesn't cover multiple shops/)).toBeTruthy();
+  });
+
+  it("switches to the primary shop through the existing safe exception, then the control disappears", async () => {
+    login();
+    multiShopAccess.entitled = false;
+    multiShopAccess.primaryShopId = "primary-shop-id";
+    vi.mocked(switchActiveShop).mockResolvedValue(undefined);
+    render(createElement(Dashboard));
+    await waitFor(() =>
+      expect(screen.getByText("Return to primary shop")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByText("Return to primary shop"));
+    await waitFor(() =>
+      expect(switchActiveShop).toHaveBeenCalledWith("primary-shop-id", true),
+    );
+    expect(router.replace).toHaveBeenCalledWith("/dashboard");
+
+    // The switch landed the owner back on the primary shop: re-render with
+    // that reflected and the control is gone.
+    multiShopAccess.primaryShopId = SHOP_ID;
+    cleanup();
+    render(createElement(Dashboard));
+    await waitFor(() => expect(screen.getByText("PHARMAPOS")).toBeTruthy());
+    expect(screen.queryByText("Return to primary shop")).toBeNull();
+  });
+
+  it("surfaces an error and keeps the control when the switch fails", async () => {
+    login();
+    multiShopAccess.entitled = false;
+    multiShopAccess.primaryShopId = "primary-shop-id";
+    vi.mocked(switchActiveShop).mockRejectedValue(new Error("offline"));
+    render(createElement(Dashboard));
+    await waitFor(() =>
+      expect(screen.getByText("Return to primary shop")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByText("Return to primary shop"));
+    await waitFor(() => expect(switchActiveShop).toHaveBeenCalled());
+    expect(screen.getByText("Return to primary shop")).toBeTruthy();
   });
 });

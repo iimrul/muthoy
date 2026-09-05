@@ -7,6 +7,7 @@ import { parseTakaTextToPaisa } from '@muthoy/utils';
 import { AccessDenied } from '../components/ui/AccessDenied';
 import { StandardHeader } from '../components/ui/StandardHeader';
 import { closeDay, currentBusinessDate, getEndOfDaySummary, type EndOfDaySummary } from '../db/cash';
+import { requirePremiumFeature } from '../db/commercial';
 import { getCustomerListTotals } from '../db/customers';
 import { getEndOfDayReportSnapshot, type ReportSnapshot } from '../db/reports';
 import { getB2Settings, getShopName } from '../db/settings';
@@ -61,7 +62,7 @@ export default function EndOfDayScreen() {
   };
   const print = async () => {
     if (!report) return; setAction('print'); setError(null); setPrintFailed(false);
-    try { await printEscPos(buildEodReportPrint((await getShopName(session.shopId)) ?? 'Muthoy Pharmacy', report)); }
+    try { await requirePremiumFeature(session.shopId, 'printer'); await printEscPos(buildEodReportPrint((await getShopName(session.shopId)) ?? 'Muthoy Pharmacy', report)); }
     catch (cause) { setPrintFailed(true); setError(cause instanceof PrinterError ? printerMessage(cause.code,bn) : printerMessage('unknown',bn)); }
     finally { setAction(null); }
   };

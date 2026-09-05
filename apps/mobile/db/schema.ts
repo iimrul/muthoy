@@ -18,6 +18,7 @@ import {
   integer,
   real,
   index,
+  primaryKey,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
@@ -175,6 +176,140 @@ export const users = sqliteTable(
     phoneUnique: uniqueIndex("users_phone_unique")
       .on(t.phone)
       .where(sql`phone is not null and is_deleted = 0`),
+  }),
+);
+
+// ── B4 owner principal, memberships, and commercial caches ─────────────
+// Server rows are authoritative. These tables exist for instant/offline reads;
+// none is written to the normal client outbox.
+export const billingAccounts = sqliteTable(
+  "billing_accounts",
+  {
+    id: text("id").primaryKey(),
+    // Cross-shop identifiers: their rows may intentionally not be hydrated on
+    // this device, so local FKs would reject a valid isolated shop cache.
+    principalOwnerUserId: text("principal_owner_user_id").notNull(),
+    primaryShopId: text("primary_shop_id").notNull(),
+    launchTrialGrantedAt: text("launch_trial_granted_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => ({
+    principalUnique: uniqueIndex("billing_accounts_principal_unique").on(t.principalOwnerUserId),
+  }),
+);
+
+export const shopMemberships = sqliteTable(
+  "shop_memberships",
+  {
+    id: text("id").primaryKey(),
+    billingAccountId: text("billing_account_id")
+      .notNull()
+      .references(() => billingAccounts.id, { onDelete: "cascade" }),
+    // Principal may belong to another isolated shop and is not hydrated here.
+    principalUserId: text("principal_user_id").notNull(),
+    shopId: text("shop_id")
+      .notNull()
+      .references(() => shops.id, { onDelete: "restrict" }),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    role: text("role", { enum: ["owner", "manager", "staff"] }).notNull(),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => ({
+    principalShopUnique: uniqueIndex("shop_memberships_principal_shop_unique").on(t.principalUserId, t.shopId),
+    actorShopUnique: uniqueIndex("shop_memberships_actor_shop_unique").on(t.actorUserId, t.shopId),
+    principalActiveIdx: index("shop_memberships_principal_active_idx").on(t.principalUserId, t.isActive, t.shopId),
+    billingAccountIdx: index("shop_memberships_billing_account_idx").on(t.billingAccountId),
+  }),
+);
+
+export const shopDirectory = sqliteTable(
+  "shop_directory",
+  {
+    shopId: text("shop_id").primaryKey(),
+    billingAccountId: text("billing_account_id")
+      .notNull()
+      .references(() => billingAccounts.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    nameEn: text("name_en"),
+    commercialStatus: text("commercial_status", { enum: ["active", "read_only"] }).notNull(),
+    commercialReason: text("commercial_reason"),
+    archivedAt: text("archived_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => ({ accountIdx: index("shop_directory_account_idx").on(t.billingAccountId, t.archivedAt, t.createdAt) }),
+);
+
+export const shopSummaryCache = sqliteTable(
+  "shop_summary_cache",
+  {
+    billingAccountId: text("billing_account_id")
+      .notNull()
+      .references(() => billingAccounts.id, { onDelete: "cascade" }),
+    shopId: text("shop_id").notNull(),
+    businessDate: text("business_date").notNull(),
+    salesPaisa: integer("sales_paisa").$type<Paisa>().notNull(),
+    outstandingCreditPaisa: integer("outstanding_credit_paisa").$type<Paisa>().notNull(),
+    lowStockCount: integer("low_stock_count").notNull(),
+    expiringCount: integer("expiring_count").notNull(),
+    transactionCount: integer("transaction_count").notNull(),
+    averageSalePaisa: integer("average_sale_paisa").$type<Paisa>().notNull(),
+    verifiedAt: text("verified_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.billingAccountId, t.businessDate, t.shopId] }),
+    lookupIdx: index("shop_summary_cache_lookup_idx").on(t.billingAccountId, t.businessDate),
+  }),
+);
+
+export const entitlementCache = sqliteTable(
+  "entitlement_cache",
+  {
+    billingAccountId: text("billing_account_id")
+      .primaryKey()
+      .references(() => billingAccounts.id, { onDelete: "cascade" }),
+    tier: text("tier", { enum: ["free", "pro", "ultra"] }).notNull(),
+    status: text("status", { enum: ["trialing", "active", "past_due", "grace", "canceled", "expired"] }).notNull(),
+    trialEndsAt: text("trial_ends_at"),
+    paidThrough: text("paid_through"),
+    graceEndsAt: text("grace_ends_at"),
+    verifiedAt: text("verified_at").notNull(),
+    lastObservedAt: text("last_observed_at").notNull(),
+    version: integer("version").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => ({ verifiedIdx: index("entitlement_cache_verified_idx").on(t.verifiedAt) }),
+);
+
+export const paymentAttempts = sqliteTable(
+  "payment_attempts",
+  {
+    id: text("id").primaryKey(),
+    billingAccountId: text("billing_account_id")
+      .notNull()
+      .references(() => billingAccounts.id, { onDelete: "restrict" }),
+    clientRequestId: text("client_request_id").notNull(),
+    serverOrderId: text("server_order_id"),
+    tier: text("tier", { enum: ["pro", "ultra"] }).notNull(),
+    billingCycle: text("billing_cycle", { enum: ["monthly", "annual"] }).notNull(),
+    amountPaisa: integer("amount_paisa").$type<Paisa>().notNull(),
+    provider: text("provider", { enum: ["sslcommerz"] }).notNull(),
+    status: text("status", { enum: ["created", "pending", "verified", "failed", "canceled", "expired"] }).notNull(),
+    checkoutUrl: text("checkout_url"),
+    failureCode: text("failure_code"),
+    expiresAt: text("expires_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => ({
+    requestUnique: uniqueIndex("payment_attempts_request_unique").on(t.billingAccountId, t.clientRequestId),
+    accountStatusIdx: index("payment_attempts_account_status_idx").on(t.billingAccountId, t.status, t.createdAt),
+    serverOrderIdx: index("payment_attempts_server_order_idx").on(t.serverOrderId),
   }),
 );
 

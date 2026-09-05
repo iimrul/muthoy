@@ -1,14 +1,44 @@
-import { Text, View } from 'react-native';
+import Feather from '@expo/vector-icons/Feather';
+import { router } from 'expo-router';
+import { useState } from 'react';
+import { Pressable, ScrollView, Text, View } from 'react-native';
+import { StandardHeader } from '../../components/ui/StandardHeader';
+import { GreenGradient } from '../../components/ui/GreenGradient';
+import { PLAN_OFFERINGS, type BillingCycle, type PlanTier } from '../../domain/entitlements';
+import { useLocaleStore } from '../../state/localeStore';
+import { usePlan } from '../../state/usePlan';
 
-// Plans — Volume 4 SUBSCRIPTION. P1 (entire feature is post-beta per
-// Volume 0's scope lock).
-// TODO(P1): Free/Pro/Ultra plan comparison + selection, reading
-//   state/usePlan.ts. The 14-day trial unlocks everything and must be
-//   shown as "Trial", never mislabeled "Ultra" (Volume 4 SUBSCRIPTION).
+const FEATURES = {
+  free: [['বিক্রয়','Sales'],['ইনভেন্টরি','Inventory'],['স্ক্যান','Scan'],['১ জন স্টাফ','1 staff'],['১টি দোকান','1 shop']],
+  pro: [['ফ্রি-এর সবকিছু','Everything in Free'],['৩টি দোকান পর্যন্ত','Up to 3 shops'],['প্রতি দোকানে ৪ জন স্টাফ','4 staff per shop'],['সরবরাহকারী ইনভয়েস','Supplier invoices'],['খরচ ট্র্যাকিং','Expense tracking'],['মাসিক লাভ-ক্ষতি','Monthly P&L'],['রিপোর্ট ও এক্সপোর্ট','Reports & export'],['প্রিন্টার','Printer']],
+  ultra: [['প্রো-এর সবকিছু','Everything in Pro'],['আনলিমিটেড দোকান','Unlimited shops'],['আনলিমিটেড স্টাফ','Unlimited staff'],['প্রায়োরিটি সাপোর্ট','Priority support']],
+} as const;
+
+function PlanCard({ tier, cycle, current, blockedDowngrade, bn }: { tier: PlanTier; cycle: BillingCycle; current: boolean; blockedDowngrade: boolean; bn: boolean }) {
+  const dark = tier === 'ultra';
+  const price = cycle === 'monthly' ? PLAN_OFFERINGS[tier].monthlyPaisa / 100 : PLAN_OFFERINGS[tier].annualPaisa / 100;
+  const digits = (value: number) => bn ? String(value).replace(/\d/g, (digit) => '০১২৩৪৫৬৭৮৯'[Number(digit)]!) : String(value);
+  const title = tier === 'free' ? (bn ? 'ফ্রি' : 'Free') : tier === 'pro' ? (bn ? 'প্রো' : 'Pro') : (bn ? 'আল্ট্রা' : 'Ultra');
+  const card = <View className={`rounded-[22px] p-5 ${dark ? 'bg-transparent' : 'bg-white'}`}>
+    <View className="flex-row items-center justify-between"><Text className={`font-sans-semibold text-base ${dark ? 'text-white' : 'text-richBlack'}`}>{title}</Text>{tier === 'pro' ? <View className="flex-row items-center gap-1 rounded-full bg-brand-green px-2.5 py-1"><Feather name="zap" size={11} color="white" /><Text className="font-sans text-[10px] text-white">{bn ? 'জনপ্রিয়' : 'Popular'}</Text></View> : tier === 'ultra' ? <Feather name="award" size={21} color="#6EE7B7" /> : null}</View>
+    <View className="mt-3 flex-row flex-wrap items-end"><Text className={`${bn ? 'font-bangla' : 'font-mono'} text-[30px] ${dark ? 'text-white' : 'text-richBlack'}`}>৳{digits(price)}</Text><Text className={`mb-1 ml-1 font-sans text-xs ${dark ? 'text-[#A7F3D0]' : 'text-midGray'}`}>/{cycle === 'monthly' ? (bn ? 'মাস' : 'mo') : (bn ? 'বছর' : 'yr')}</Text>{cycle === 'annual' && tier !== 'free' ? <Text className={`mb-1 ml-2 font-sans text-[11px] ${dark ? 'text-[#6EE7B7]' : 'text-brand-green'}`}>{bn ? `(মাসিক ৳${digits(tier === 'pro' ? 399 : 499)})` : `৳${tier === 'pro' ? 399 : 499}/mo billed yearly`}</Text> : null}</View>
+    <View className="my-4 gap-2">{FEATURES[tier].map(([b,e]) => <View key={e} className="flex-row items-center gap-2"><Feather name="check" size={15} color={dark ? '#6EE7B7' : '#059669'} /><Text className={`flex-1 font-sans text-xs ${dark ? 'text-white' : 'text-[#374151]'}`}>{bn ? b : e}</Text></View>)}</View>
+    <Pressable disabled={current || tier === 'free' || blockedDowngrade} onPress={() => router.push({ pathname: '/settings/plan-payment', params: { tier, billing: cycle } })} className={`items-center rounded-xl py-3 ${(current || blockedDowngrade) ? 'bg-[#9CA3AF]' : dark ? 'bg-white' : tier === 'pro' ? 'bg-brand-green' : 'border-2 border-brand-green'}`}><Text className={`font-sans-bold text-sm ${tier === 'free' && !current ? 'text-brand-green' : dark && !current ? 'text-brand-deepGreen' : 'text-white'}`}>{current ? (bn ? 'বর্তমান প্ল্যান' : 'Current Plan') : blockedDowngrade ? (bn ? 'আল্ট্রা মেয়াদ শেষে পাওয়া যাবে' : 'Available after Ultra expires') : tier === 'free' ? (bn ? 'মেয়াদ শেষে ফ্রি হবে' : 'Free after expiry') : (bn ? `${title} নিন` : `Get ${title}`)}</Text></Pressable>
+  </View>;
+  if (tier === 'pro') return <View className="overflow-hidden rounded-3xl shadow-lg"><GreenGradient><View className="p-0.5">{card}</View></GreenGradient></View>;
+  if (tier === 'ultra') return <View className="overflow-hidden rounded-3xl"><GreenGradient dark>{card}</GreenGradient></View>;
+  return card;
+}
+
 export default function PlansScreen() {
-  return (
-    <View>
-      <Text>TODO: Plans — Free/Pro/Ultra (P1 — post-beta, Volume 4 SUBSCRIPTION)</Text>
-    </View>
-  );
+  const bn = useLocaleStore((state) => state.locale === 'bn');
+  const plan = usePlan();
+  const daysLeft = bn ? String(plan.daysLeft ?? 0).replace(/\d/g, (digit) => '০১২৩৪৫৬৭৮৯'[Number(digit)]!) : String(plan.daysLeft ?? 0);
+  const [cycle, setCycle] = useState<BillingCycle>('monthly');
+  const [tab, setTab] = useState<'plans'|'compare'>('plans');
+  return <View className="flex-1 bg-brand-softGreen"><StandardHeader title={bn ? 'প্ল্যান বেছে নিন' : 'Choose Your Plan'} onBackPress={() => router.back()} /><ScrollView contentContainerClassName="gap-4 px-4 pb-28">
+    {plan.plan === 'trial' ? <View className="rounded-2xl border border-[#FDE68A] bg-[#FEF3C7] p-4"><View className="flex-row items-center justify-between"><Text className="font-sans-bold text-base text-[#92400E]">{bn ? 'বর্তমান প্ল্যান: ট্রায়াল' : 'Current plan: Trial'}</Text><View className="rounded-full bg-white/70 px-2.5 py-1"><Text className="font-sans-bold text-[11px] text-[#92400E]">{daysLeft} {bn ? 'দিন বাকি' : 'days left'}</Text></View></View><Text className="mt-1 font-sans text-xs leading-5 text-[#92400E]">{bn ? 'আপনার ১৪ দিনের ট্রায়াল স্বয়ংক্রিয়ভাবে চালু হয়েছে। আল্ট্রা-সমমান সব ফিচার ও সীমা ব্যবহার করুন।' : 'Your 14-day trial activated automatically. All Ultra-equivalent features and limits are available.'}</Text></View> : null}
+    <View className="flex-row rounded-xl border border-[#D1FAE5] bg-white/60 p-1">{(['plans','compare'] as const).map((item) => <Pressable key={item} onPress={() => setTab(item)} className={`flex-1 items-center rounded-lg py-2 ${tab === item ? 'bg-white' : ''}`}><Text className={`font-sans text-sm ${tab === item ? 'text-brand-green' : 'text-midGray'}`}>{item === 'plans' ? (bn ? 'প্ল্যান' : 'Plans') : (bn ? 'তুলনা করুন' : 'Compare')}</Text></Pressable>)}</View>
+    {tab === 'plans' ? <><Text className="text-center font-sans text-xs text-midGray">{bn ? 'আপনার দোকানের জন্য সঠিক প্ল্যান' : 'The right plan for your shop'}</Text><View className="items-center"><View className="flex-row rounded-full border border-[#D1FAE5] bg-white p-1 shadow-sm"><Pressable onPress={() => setCycle('monthly')} className={`rounded-full px-4 py-2 ${cycle === 'monthly' ? 'bg-brand-green' : ''}`}><Text className={`font-sans text-xs ${cycle === 'monthly' ? 'text-white' : 'text-midGray'}`}>{bn ? 'মাসিক' : 'Monthly'}</Text></Pressable><Pressable onPress={() => setCycle('annual')} className={`flex-row items-center gap-1.5 rounded-full px-4 py-2 ${cycle === 'annual' ? 'bg-brand-green' : ''}`}><Text className={`font-sans text-xs ${cycle === 'annual' ? 'text-white' : 'text-midGray'}`}>{bn ? 'বার্ষিক' : 'Yearly'}</Text><View className={`rounded-full px-1.5 py-0.5 ${cycle === 'annual' ? 'bg-white/20' : 'bg-[#FEF3C7]'}`}><Text className={`font-sans text-[10px] ${cycle === 'annual' ? 'text-white' : 'text-[#B45309]'}`}>{bn ? '২০% সাশ্রয়' : '20% off'}</Text></View></Pressable></View></View>{(['free','pro','ultra'] as const).map((tier) => <PlanCard key={tier} tier={tier} cycle={cycle} current={plan.plan !== 'trial' && plan.effectiveTier === tier} blockedDowngrade={tier === 'pro' && plan.effectiveTier === 'ultra' && (plan.reason === 'paid' || plan.reason === 'paid_grace')} bn={bn} />)}<Text className="text-center font-sans text-xs text-midGray">{bn ? 'যোগ্য মালিকদের ১৪ দিনের ট্রায়াল স্বয়ংক্রিয়ভাবে চালু হয়' : 'The 14-day trial activates automatically for eligible owners'}</Text></> : <><View className="overflow-hidden rounded-2xl bg-white"><View className="flex-row bg-brand-deepGreen p-3"><Text className="flex-1 font-sans-bold text-xs text-white">{bn ? 'ফিচার' : 'Feature'}</Text>{[bn?'ফ্রি':'Free',bn?'প্রো':'Pro',bn?'আল্ট্রা':'Ultra'].map((x,j) => <Text key={x} className={`w-16 text-center font-sans-bold text-xs text-white ${j === 1 ? 'bg-brand-green/60' : ''}`}>{x}</Text>)}</View>{[['বিক্রয়','Sales','✓','✓','✓'],['ইনভেন্টরি','Inventory','✓','✓','✓'],['স্ক্যান','Scan','✓','✓','✓'],['দোকান সংখ্যা','Shops',bn?'১':'1',bn?'৩':'3','∞'],['স্টাফ সংখ্যা','Staff',bn?'১':'1',bn?'৪':'4','∞'],['সরবরাহকারী ইনভয়েস','Supplier invoices','×','✓','✓'],['খরচ ও P&L','Expenses & P&L','×','✓','✓'],['রিপোর্ট ও এক্সপোর্ট','Reports & export','×','✓','✓'],['প্রিন্টার','Printer','×','✓','✓'],['সাপোর্ট','Support',bn?'সাধারণ':'Standard',bn?'সাধারণ':'Standard',bn?'প্রায়োরিটি':'Priority']].map((r,i) => <View key={String(r[1])} className={`flex-row items-center border-b border-[#D1FAE5] p-3 ${i%2 ? 'bg-[#F0FDF4]' : 'bg-white'}`}><Text className="flex-1 font-sans text-xs text-richBlack">{bn ? r[0] : r[1]}</Text>{r.slice(2).map((v,j) => <View key={j} className={`w-16 items-center ${j === 1 ? 'bg-brand-softGreen' : ''}`}><Text className={`text-center font-sans text-[11px] ${v === '✓' ? 'text-brand-green' : v === '×' ? 'text-[#D1D5DB]' : 'text-richBlack'}`}>{v}</Text></View>)}</View>)}</View><Pressable onPress={() => setTab('plans')} className="items-center rounded-2xl bg-brand-green py-3.5 shadow-lg"><Text className="font-sans-bold text-sm text-white">{bn ? 'আপগ্রেড করুন' : 'Upgrade Now'}</Text></Pressable></>}
+  </ScrollView></View>;
 }

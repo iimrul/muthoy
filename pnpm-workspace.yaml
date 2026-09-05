@@ -43,6 +43,8 @@ minimumReleaseAgeExclude:
   - expo-modules-jsi@57.0.5
   - expo-camera@57.0.4
   - expo-sharing@57.0.16
+virtualStoreDir: D:/mv4
+virtualStoreDirMaxLength: 24
 
 # Deliberately not a wildcard on "apps/*": apps/prototype-web ships its own
 # independent pnpm-workspace.yaml/package.json (Vite + React 18 + Tailwind v4)

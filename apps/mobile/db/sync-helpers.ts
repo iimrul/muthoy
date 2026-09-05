@@ -1,4 +1,4 @@
-import { and, asc, count, eq, max } from "drizzle-orm";
+import { and, asc, count, eq, isNull, max } from "drizzle-orm";
 import { canonicalizeExpenseCategory } from "@muthoy/validation";
 import { db } from "./client";
 import {
@@ -11,6 +11,7 @@ import {
   credits,
   customers,
   expenses,
+  entitlementCache,
   inventoryImports,
   inventoryMovements,
   medicines,
@@ -29,6 +30,7 @@ import {
   sales,
   salesReturns,
   shopB2Settings,
+  shopDirectory,
   shops,
   subscriptions,
   suppliers,
@@ -37,6 +39,8 @@ import {
   users,
 } from "./schema";
 import { generateId } from "../native/id";
+import { CommercialReadOnlyError } from "./errors";
+import { planLimits, resolveEntitlement } from "../domain/entitlements";
 
 export const TABLE_REGISTRY = {
   shops,
@@ -502,6 +506,8 @@ function toSyncPayload(
     delete payload.permissionVersion;
     delete payload.pinLookupTag;
     delete payload.pinLookupPinSetAt;
+    delete payload.planSuspendedAt;
+    delete payload.planSuspensionReason;
   }
   if (tableName === "sale_attachments") {
     delete payload.localUri;
@@ -510,6 +516,25 @@ function toSyncPayload(
   }
   return payload;
 }
+function readCommercialWriteState(tx: DbTransaction, shopId: string) {
+  return tx.select({
+    status: shopDirectory.commercialStatus,
+    archivedAt: shopDirectory.archivedAt,
+    billingAccountId: shopDirectory.billingAccountId,
+    tier: entitlementCache.tier,
+    entitlementStatus: entitlementCache.status,
+    trialEndsAt: entitlementCache.trialEndsAt,
+    paidThrough: entitlementCache.paidThrough,
+    graceEndsAt: entitlementCache.graceEndsAt,
+    verifiedAt: entitlementCache.verifiedAt,
+    lastObservedAt: entitlementCache.lastObservedAt,
+    version: entitlementCache.version,
+  }).from(shopDirectory).leftJoin(
+    entitlementCache,
+    eq(shopDirectory.billingAccountId, entitlementCache.billingAccountId),
+  ).where(eq(shopDirectory.shopId, shopId)).get();
+}
+
 export function recordChange(
   tx: DbTransaction,
   params: {
@@ -521,6 +546,53 @@ export function recordChange(
     operation?: SyncOperationGroup;
   },
 ): void {
+  let commercial: ReturnType<typeof readCommercialWriteState>;
+  let commercialSchemaInstalled = true;
+  try {
+    commercial = readCommercialWriteState(tx, params.shopId);
+  } catch (error) {
+    // During an in-place upgrade the JS bundle can load before migration 0026
+    // finishes. Only that known missing-column state bypasses the B4 gate; all
+    // other read failures remain fail-closed.
+    if (error instanceof Error && /no such table.*?(shop_directory|entitlement_cache)/i.test(error.message)) {
+      commercial = undefined;
+      commercialSchemaInstalled = false;
+    } else {
+      throw error;
+    }
+  }
+  if (commercialSchemaInstalled && commercial && (commercial.status !== 'active' || commercial.archivedAt)) {
+    throw new CommercialReadOnlyError();
+  }
+  if (commercialSchemaInstalled && commercial?.billingAccountId && commercial.tier && commercial.entitlementStatus
+    && commercial.verifiedAt && commercial.version !== null) {
+    const highWater = Date.parse(commercial.lastObservedAt ?? '');
+    const effectiveNow = new Date(Math.max(Date.now(), Number.isFinite(highWater) ? highWater : Date.now()));
+    if (effectiveNow.getTime() > highWater) {
+      tx.update(entitlementCache).set({ lastObservedAt: effectiveNow.toISOString() })
+        .where(eq(entitlementCache.billingAccountId, commercial.billingAccountId)).run();
+    }
+    const entitlement = resolveEntitlement({
+      billingAccountId: commercial.billingAccountId,
+      tier: commercial.tier,
+      status: commercial.entitlementStatus,
+      trialEndsAt: commercial.trialEndsAt,
+      paidThrough: commercial.paidThrough,
+      graceEndsAt: commercial.graceEndsAt,
+      verifiedAt: commercial.verifiedAt,
+      version: commercial.version,
+    }, effectiveNow);
+    const limit = planLimits(entitlement.effectiveTier).maxActiveShops;
+    if (limit !== null) {
+      let ranked = tx.select({ id: shopDirectory.shopId }).from(shopDirectory).where(and(
+        eq(shopDirectory.billingAccountId, commercial.billingAccountId),
+        isNull(shopDirectory.archivedAt),
+      )).orderBy(shopDirectory.createdAt, shopDirectory.shopId).all();
+      if (ranked.findIndex((row) => row.id === params.shopId) >= limit) {
+        throw new CommercialReadOnlyError();
+      }
+    }
+  }
   const outgoingPayload =
     params.op === "delete"
       ? buildDeletePayload(tx, params)

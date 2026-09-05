@@ -20,6 +20,7 @@ import { db, sqliteConnection } from './client';
 import { cashDrawer, payments, purchases, suppliers } from './schema';
 import { recordChange, stampUpdatedAt, type SyncOperationGroup } from './sync-helpers';
 import type { CustomerPaymentMethod } from './customers';
+import { requirePremiumFeature } from './commercial';
 
 export interface Supplier {
   id: string;
@@ -448,6 +449,7 @@ export interface RecordSupplierPaymentInput {
 export async function recordSupplierPayment(
   input: RecordSupplierPaymentInput,
 ): Promise<{ paymentId: string; amount: Paisa }> {
+  await requirePremiumFeature(input.shopId, 'supplier_invoices');
   await requireOwner(input.shopId, input.actorUserId);
   if (!Number.isInteger(input.amount) || input.amount <= ZERO_PAISA) {
     throw new Error('Payment amount must be a positive whole number of paisa');

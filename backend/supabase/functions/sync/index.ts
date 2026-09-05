@@ -7,6 +7,8 @@ import { push } from "./push.ts";
 import { pushGroup } from "./pushGroup.ts";
 import { recoverPin } from "./recoverPin.ts";
 import { refundClaim } from "./refundClaim.ts";
+import { billingStatus, finalizeBillingAttempt, initiateBilling } from "./billing.ts";
+import { createOwnedShop, mutateOwnedShop, shopSummaries, switchShop } from "./multiShop.ts";
 
 const headers = { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, x-client-info, apikey, content-type" };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers });
@@ -56,6 +58,13 @@ Deno.serve(async (request) => {
     if (body.action === "push") return json(await push(caller, body));
     if (body.action === "push-group") return json(await pushGroup(caller, body));
     if (body.action === "refund-claim") return json(await refundClaim(caller, body));
+    if (body.action === "billing-init") return json(await initiateBilling(caller, body));
+    if (body.action === "billing-status") return json(await billingStatus(caller, body));
+    if (body.action === "billing-terminal") return json(await finalizeBillingAttempt(caller, body));
+    if (body.action === "shop-switch") return json(await switchShop(caller, body));
+    if (body.action === "shop-create") return json(await createOwnedShop(caller, body));
+    if (body.action === "shop-mutate") return json(await mutateOwnedShop(caller, body));
+    if (body.action === "shop-summaries") return json(await shopSummaries(caller, body));
     if (body.action === "pull") {
       const result = authTiming
         ? await authTiming.measure("pull_server_processing", () => pull(caller, body))

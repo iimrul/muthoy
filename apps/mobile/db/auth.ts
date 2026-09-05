@@ -1,6 +1,6 @@
 import { eq, and, desc, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
 import { db } from './client';
-import { auditLogs, shopB2Settings, shops, roles, users, userPermissions } from './schema';
+import { auditLogs, shopB2Settings, shopDirectory, shopMemberships, shops, roles, users, userPermissions } from './schema';
 import { generateId } from '../native/id';
 import { createPinLookupTag, hashPin, verifyPinHash } from '../native/crypto';
 import type { AuthTimingTrace } from '../dev/authTiming';
@@ -15,6 +15,8 @@ import {
 import { normalizeBdPhone } from '@muthoy/validation';
 import { DuplicatePinError, NotAuthorizedError } from './errors';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
+import { readLastShopIdSync } from '../state/sessionStore';
+import { commercialSchemaInstalled, isUserWithinStaffLimit } from './commercial';
 
 // db/auth.ts — the ONLY file that will touch Drizzle/SQLite for auth
 // (DEVELOPMENT_RULES.md). Hashing itself never happens here — that's
@@ -29,8 +31,176 @@ export interface RegisterShopInput {
 export type RegistrationStatus =
   | { status: 'none' }
   | { status: 'link_pending'; shopId: string; userId: string; phone: string }
-  | { status: 'incomplete'; shopId: string; userId: string }
-  | { status: 'complete'; shopId: string; userId: string };
+  | { status: 'incomplete'; shopId: string; userId: string; phone: string }
+  | { status: 'complete'; shopId: string; userId: string; phone: string };
+
+/**
+ * The rows that establish a brand-new cloud identity, for EVERY registration.
+ *
+ * The outbox cannot carry them: push refuses a caller with no app_user_id
+ * claim, that claim comes from the auth binding, and the binding is only
+ * written once link-device can already see the Owner ON THE SERVER. Sending
+ * them with link-device is what closes that loop — for the real OTP flow just
+ * as much as for DEV Skip-OTP, which is why this is no longer DEV-only.
+ *
+ * Commercial fields are deliberately absent: plan, trial and billing are the
+ * server's to decide, never the device's.
+ */
+export interface OwnerOnboardingPayload {
+  shop: {
+    id: string;
+    ownerId: string;
+    name: string;
+    nameEn: string | null;
+    phone: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  roles: {
+    id: string;
+    shopId: string;
+    name: string;
+    createdAt: string;
+    updatedAt: string;
+  }[];
+  owner: {
+    id: string;
+    shopId: string;
+    name: string;
+    phone: string | null;
+    pinHash: string;
+    pinSetAt: string | null;
+    roleId: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  settings: { id: string } | null;
+}
+
+/**
+ * Clears an Owner's phone locally, for a registration that never proved one.
+ *
+ * `users_phone_unique` is global — one live user per number across every shop —
+ * so a placeholder number can belong to exactly one Owner in the whole project.
+ * Leaving it on the local row after onboarding sent null would also poison the
+ * outbox: the queued users insert would push the placeholder back up and be
+ * rejected 23505 forever.
+ *
+ * The shop's own phone is untouched, which is what still identifies the
+ * registration; only the Owner's login credential is removed.
+ */
+export async function clearUnverifiedOwnerPhone(
+  shopId: string,
+  ownerUserId: string,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const updatedAt = new Date().toISOString();
+    await tx
+      .update(users)
+      .set({ phone: null, updatedAt })
+      .where(and(eq(users.id, ownerUserId), eq(users.shopId, shopId)));
+    recordChange(tx, {
+      shopId,
+      table: 'users',
+      rowId: ownerUserId,
+      op: 'update',
+      payload: { id: ownerUserId, phone: null, updatedAt },
+    });
+  });
+}
+
+/** Reads one same-shop Owner onboarding payload atomically from SQLite. */
+export async function getOwnerOnboardingPayload(
+  shopId: string,
+  ownerUserId: string,
+): Promise<OwnerOnboardingPayload> {
+  const row = await db
+    .select({
+      shopId: shops.id,
+      shopOwnerId: shops.ownerId,
+      shopName: shops.name,
+      shopNameEn: shops.nameEn,
+      shopPhone: shops.phone,
+      shopCreatedAt: shops.createdAt,
+      shopUpdatedAt: shops.updatedAt,
+      roleName: roles.name,
+      ownerId: users.id,
+      ownerShopId: users.shopId,
+      ownerName: users.name,
+      ownerPhone: users.phone,
+      ownerPinHash: users.pinHash,
+      ownerPinSetAt: users.pinSetAt,
+      ownerRoleId: users.roleId,
+      ownerCreatedAt: users.createdAt,
+      ownerUpdatedAt: users.updatedAt,
+    })
+    .from(users)
+    .innerJoin(shops, and(eq(shops.id, users.shopId), eq(shops.isDeleted, false)))
+    .innerJoin(
+      roles,
+      and(eq(roles.id, users.roleId), eq(roles.shopId, users.shopId), eq(roles.isDeleted, false)),
+    )
+    .where(
+      and(
+        eq(users.id, ownerUserId),
+        eq(users.shopId, shopId),
+        eq(users.isDeleted, false),
+        eq(users.isActive, true),
+        eq(roles.name, 'owner'),
+      ),
+    )
+    .get();
+
+  if (!row || row.shopOwnerId !== ownerUserId || row.roleName !== 'owner') {
+    throw new Error('The local Owner does not belong to this shop.');
+  }
+
+  // All three system roles, not just the Owner's. createShopAndOwner creates
+  // manager and staff up front so no backfill is needed later; onboarding has
+  // to carry them or the server's copy of the shop would be missing two roles
+  // that local rows already reference.
+  const shopRoles = await db
+    .select({
+      id: roles.id,
+      shopId: roles.shopId,
+      name: roles.name,
+      createdAt: roles.createdAt,
+      updatedAt: roles.updatedAt,
+    })
+    .from(roles)
+    .where(and(eq(roles.shopId, shopId), eq(roles.isDeleted, false)));
+
+  const settings = await db
+    .select({ id: shopB2Settings.id })
+    .from(shopB2Settings)
+    .where(eq(shopB2Settings.shopId, shopId))
+    .get();
+
+  return {
+    shop: {
+      id: row.shopId,
+      ownerId: row.shopOwnerId,
+      name: row.shopName,
+      nameEn: row.shopNameEn ?? null,
+      phone: row.shopPhone,
+      createdAt: row.shopCreatedAt,
+      updatedAt: row.shopUpdatedAt,
+    },
+    roles: shopRoles,
+    owner: {
+      id: row.ownerId,
+      shopId: row.ownerShopId,
+      name: row.ownerName,
+      phone: row.ownerPhone,
+      pinHash: row.ownerPinHash,
+      pinSetAt: row.ownerPinSetAt,
+      roleId: row.ownerRoleId,
+      createdAt: row.ownerCreatedAt,
+      updatedAt: row.ownerUpdatedAt,
+    },
+    settings: settings ? { id: settings.id } : null,
+  };
+}
 
 /** Resolves local owner-registration completion from SQLite, never MMKV. */
 export async function getRegistrationStatus(): Promise<RegistrationStatus> {
@@ -69,8 +239,8 @@ export async function getRegistrationStatus(): Promise<RegistrationStatus> {
   }
 
   return owner.pinSetAt
-    ? { status: 'complete', shopId: owner.shopId, userId: owner.userId }
-    : { status: 'incomplete', shopId: owner.shopId, userId: owner.userId };
+    ? { status: 'complete', shopId: owner.shopId, userId: owner.userId, phone: owner.phone }
+    : { status: 'incomplete', shopId: owner.shopId, userId: owner.userId, phone: owner.phone };
 }
 
 /**
@@ -100,7 +270,7 @@ export async function getActiveSessionRole(
     )
     .limit(1);
 
-  return sessionUser?.role ?? null;
+  return sessionUser && await isUserWithinStaffLimit(shopId, userId) ? sessionUser.role : null;
 }
 
 /**
@@ -178,7 +348,7 @@ export async function getActiveSessionContext(
     .limit(1);
 
   const role = toRole(sessionUser?.role);
-  if (!sessionUser || !role) {
+  if (!sessionUser || !role || !await isUserWithinStaffLimit(shopId, userId)) {
     return null;
   }
 
@@ -352,6 +522,9 @@ export interface LocalPinSession {
   userId: string;
   role: Role;
   permissions: PermissionOverrides;
+  principalUserId?: string;
+  billingAccountId?: string;
+  cloudShopConfirmed?: boolean;
 }
 
 /** Records an authenticated login without storing credential material. */
@@ -368,15 +541,23 @@ export async function recordSuccessfulLogin(session: LocalPinSession): Promise<v
     createdAt: now,
     updatedAt: now,
   };
+  const b4 = commercialSchemaInstalled();
+  const commercial = b4 ? await db.select({ status: shopDirectory.commercialStatus, archivedAt: shopDirectory.archivedAt })
+    .from(shopDirectory).where(eq(shopDirectory.shopId, session.shopId)).get() : undefined;
   await db.transaction(async (tx) => {
     await tx.insert(auditLogs).values(values);
-    recordChange(tx, {
-      shopId: session.shopId,
-      table: 'audit_logs',
-      rowId: id,
-      op: 'insert',
-      payload: values,
-    });
+    // A commercially read-only shop must remain login/viewable. Keep this
+    // device-local audit, but do not create an outbox write the server must
+    // reject. Every business mutation remains blocked by recordChange.
+    if (!commercial || (commercial.status === 'active' && !commercial.archivedAt)) {
+      recordChange(tx, {
+        shopId: session.shopId,
+        table: 'audit_logs',
+        rowId: id,
+        op: 'insert',
+        payload: values,
+      });
+    }
   });
 }
 
@@ -388,26 +569,40 @@ interface LoginUserRow {
   roleId: string;
 }
 
-const livePinWhere = and(
-  eq(users.isActive, true),
-  eq(users.isDeleted, false),
+const livePinWhere = () => and(
+  eq(users.isActive, true), eq(users.isDeleted, false),
   isNotNull(users.pinSetAt),
 );
 
 async function toLocalPinSession(user: LoginUserRow): Promise<LocalPinSession | null> {
+  const b4 = commercialSchemaInstalled();
   const roleRow = await db
     .select({ name: roles.name })
     .from(roles)
     .where(and(eq(roles.id, user.roleId), eq(roles.shopId, user.shopId), eq(roles.isDeleted, false)))
     .get();
   const role = toRole(roleRow?.name);
-  if (!role) return null;
-  return {
+  if (!role || (b4 && !await isUserWithinStaffLimit(user.shopId, user.id))) return null;
+  const membership = b4 ? await db.select({
+    principalUserId: shopMemberships.principalUserId,
+    billingAccountId: shopMemberships.billingAccountId,
+  }).from(shopMemberships).where(and(
+    eq(shopMemberships.actorUserId, user.id),
+    eq(shopMemberships.shopId, user.shopId),
+    eq(shopMemberships.isActive, true),
+  )).get() : undefined;
+  const baseSession = {
     shopId: user.shopId,
     userId: user.id,
     role,
     permissions: await getUserPermissionOverrides(user.shopId, user.id),
   };
+  return b4 ? {
+    ...baseSession,
+    principalUserId: membership?.principalUserId ?? user.id,
+    billingAccountId: membership?.billingAccountId,
+    cloudShopConfirmed: true,
+  } : baseSession;
 }
 
 async function storeCurrentPinLookup(user: LoginUserRow, tag: string): Promise<void> {
@@ -433,7 +628,9 @@ function selectLoginUsers() {
     pinHash: users.pinHash,
     pinSetAt: users.pinSetAt,
     roleId: users.roleId,
-  }).from(users);
+  }).from(users).innerJoin(shops, and(
+    eq(shops.id, users.shopId), eq(shops.isDeleted, false),
+  ));
 }
 
 /**
@@ -446,13 +643,15 @@ export async function verifyPin(
   rawPin: string,
   timing?: AuthTimingTrace,
 ): Promise<LocalPinSession | null> {
+  const lastShopId = readLastShopIdSync();
   const lookup = async () => {
     const tag = await createPinLookupTag(rawPin);
     const matches = await selectLoginUsers().where(
       and(
-        livePinWhere,
+        livePinWhere(),
         eq(users.pinLookupTag, tag),
         sql`${users.pinLookupPinSetAt} = ${users.pinSetAt}`,
+        lastShopId ? eq(users.shopId, lastShopId) : undefined,
       ),
     );
     return { tag, candidates: matches.map((user) => ({ user, tag })) };
@@ -465,12 +664,13 @@ export async function verifyPin(
   // steady-state path. They are native-verified once, then tagged.
   const legacyUsers = await selectLoginUsers().where(
     and(
-      livePinWhere,
+      livePinWhere(),
       or(
         isNull(users.pinLookupTag),
         isNull(users.pinLookupPinSetAt),
         sql`${users.pinLookupPinSetAt} IS NOT ${users.pinSetAt}`,
       ),
+      lastShopId ? eq(users.shopId, lastShopId) : undefined,
     ),
   );
 
@@ -507,7 +707,7 @@ export async function verifyPinForUser(
   timing?: AuthTimingTrace,
 ): Promise<LocalPinSession | null> {
   const user = await selectLoginUsers().where(
-    and(livePinWhere, eq(users.shopId, shopId), eq(users.id, userId)),
+    and(livePinWhere(), eq(users.shopId, shopId), eq(users.id, userId)),
   ).get();
   if (!user) return null;
   const matches = timing
@@ -542,7 +742,7 @@ export async function assertPinUnique(
   const targetTag = await createPinLookupTag(rawPin);
   const indexedMatch = await db.select({ id: users.id }).from(users).where(
     and(
-      livePinWhere,
+      livePinWhere(),
       eq(users.pinLookupTag, targetTag),
       sql`${users.pinLookupPinSetAt} = ${users.pinSetAt}`,
       exceptUserId ? ne(users.id, exceptUserId) : undefined,
@@ -555,7 +755,7 @@ export async function assertPinUnique(
     .from(users)
     .where(
       and(
-        livePinWhere,
+        livePinWhere(),
         exceptUserId ? ne(users.id, exceptUserId) : undefined,
         or(
           isNull(users.pinLookupTag),

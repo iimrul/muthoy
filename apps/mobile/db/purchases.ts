@@ -16,6 +16,7 @@ import { expectedCash } from '../domain/cashFormula';
 import { effectivePayableFor } from '../domain/supplierPosition';
 import { generateId } from '../native/id';
 import { requireOwner } from './auth';
+import { requirePremiumFeature } from './commercial';
 import { assertBusinessDateOpen, getCashSummarySync } from './cash';
 import { db, sqliteConnection } from './client';
 import {
@@ -432,6 +433,7 @@ export async function createPurchase(
   input: CreatePurchaseInput,
 ): Promise<{ purchaseId: string; invoiceNo: string; total: Paisa }> {
   await requireOwner(input.shopId, input.staffId);
+  await requirePremiumFeature(input.shopId, 'supplier_invoices');
 
   return db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
@@ -478,6 +480,7 @@ export async function markPurchaseLineReceived(
   input: MarkPurchaseLineReceivedInput,
 ): Promise<{ total: Paisa; pendingCount: number }> {
   await requireOwner(input.shopId, input.actorUserId);
+  await requirePremiumFeature(input.shopId, 'supplier_invoices');
   const now = new Date();
   const businessDate = dhakaBusinessDate(now);
   const operationId = generateId();
@@ -682,6 +685,7 @@ export interface VoidPurchaseInput {
 // purchase return (Group 7, out of scope), not a void. Writes an
 // `invoice_void`-style audit row naming the amount and supplier.
 export async function voidPurchase(input: VoidPurchaseInput): Promise<void> {
+  await requirePremiumFeature(input.shopId, 'supplier_invoices');
   await requireOwner(input.shopId, input.actorUserId);
   db.transaction((tx) => {
     assertSessionLive(input.isStillActive);

@@ -15,6 +15,7 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { resolvePermission } from "../../domain/permissions";
 import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
+import { useMultiShopAccess } from "../../state/useMultiShopAccess";
 import { authenticatedHome, visibleMoreRoutes } from "../../navigation/routes";
 
 function NavButton({
@@ -171,6 +172,7 @@ function AnimatedScanButton({
 
 export function AppNavigationShell({ children }: { children: ReactNode }) {
   const session = useSessionStore((state) => state.session);
+  const multiShop = useMultiShopAccess();
   const pathname = usePathname();
   const { t } = useI18n();
   const [moreContext, setMoreContext] = useState<{
@@ -209,7 +211,10 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
     return <>{children}</>;
   }
 
-  const moreRoutes = visibleMoreRoutes(session);
+  const moreRoutes = visibleMoreRoutes(
+    session,
+    multiShop.allowed && multiShop.hasMultipleShops,
+  );
   const hasMore = moreRoutes.length > 0;
   const home = authenticatedHome(session);
   const canSale = resolvePermission(
@@ -230,6 +235,16 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
   const deny = () => Alert.alert(t("accessDenied"), t("askOwner"));
   const go = (href: Parameters<typeof router.replace>[0], allowed = true) =>
     allowed ? router.replace(href) : deny();
+  const openMoreRoute = (href: Parameters<typeof router.push>[0]) => {
+    // Dispatch the push FIRST, then close the sheet. Deferring the push behind
+    // InteractionManager made it depend on the scan button's infinite
+    // Animated.loop draining, and closing the Modal first put a native
+    // dismissal between the press and the navigation. Both were ordering
+    // workarounds for a bug that was really NavigationBoundary unmounting the
+    // Stack; the push itself is synchronous and needs neither.
+    router.push(href);
+    setMoreContext(null);
+  };
 
   return (
     <View className="flex-1">
@@ -252,10 +267,7 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
               {moreRoutes.map((item) => (
                 <Pressable
                   key={item.key}
-                  onPress={() => {
-                    setMoreContext(null);
-                    router.push(item.href);
-                  }}
+                  onPress={() => openMoreRoute(item.href)}
                   className="w-1/4 items-center gap-1 p-2"
                 >
                   <View className="h-11 w-11 items-center justify-center rounded-xl bg-brand-softGreen">

@@ -1293,3 +1293,19 @@ database or linked remote environment and does no deploy, push, or commit.
   general row-conflict surfacing remains deferred.
 - Add a service-level Owner check to the Data Export orchestration before
   rollout; the route guard alone is not the authorization boundary.
+
+## 2026-08-31 — B4 commercial platform locked
+
+- Free is ৳0. Pro is ৳399/month or the prototype annual SKU (৳3,830).
+  Ultra is ৳499/month or the prototype annual SKU (৳4,790). Stored as integer
+  paisa and priced only from server-owned `plan_offerings`.
+- Pro permits 3 active shops and 4 active non-owner users per shop; managers
+  count as staff. Ultra and the 14-day one-time launch trial are unlimited.
+- SSLCommerz is first provider. Verified provider data plus an exact server
+  order match is required before the idempotent payment RPC grants access.
+- One owner billing account covers all owned shops. Paid access has 7 days of
+  grace; trial has none. Offline premium is bounded by access/grace expiry and
+  30 days after the last server verification.
+- Downgrade deletes nothing. Deterministically excess shops become read-only;
+  excess active staff become plan-suspended. Server entitlement and membership
+  are authoritative; SQLite is the fast/offline cache.

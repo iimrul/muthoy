@@ -43,6 +43,9 @@ export interface Session {
    * refreshes this snapshot on every launch and session change.
    */
   permissions?: PermissionOverrides;
+  principalUserId?: string;
+  billingAccountId?: string;
+  cloudShopConfirmed?: boolean;
 }
 
 /** Headless-context read only; components must use useSessionStore. */
@@ -55,6 +58,17 @@ export function readPersistedSessionSync(): Session | null {
   try {
     const persisted = JSON.parse(serialized) as { state?: { session?: Session | null } };
     return persisted.state?.session ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function readLastShopIdSync(): string | null {
+  const serialized = sessionStorage.getString('session');
+  if (!serialized) return null;
+  try {
+    const persisted = JSON.parse(serialized) as { state?: { lastShopId?: string | null } };
+    return persisted.state?.lastShopId ?? null;
   } catch {
     return null;
   }
@@ -73,6 +87,7 @@ interface SessionState {
    * state/sessionGuard.ts) rather than comparing identities.
    */
   epoch: number;
+  lastShopId: string | null;
   login: (session: Session) => void;
   /**
    * Ends the ACTIVE LOCAL USER's session and nothing else.
@@ -96,12 +111,14 @@ export const useSessionStore = create<SessionState>()(
     (set) => ({
       session: null,
       epoch: 0,
+      lastShopId: null,
       // Both transitions bump. clearActiveUser() alone is not enough: work
       // started before a handover must be invalidated even if the SAME person
       // logs back in before it finishes.
       login: (session) => set((state) => ({
         session: { ...session, startedAt: session.startedAt ?? new Date().toISOString() },
         epoch: state.epoch + 1,
+        lastShopId: session.shopId,
       })),
       clearActiveUser: () => set((state) => ({ session: null, epoch: state.epoch + 1 })),
     }),

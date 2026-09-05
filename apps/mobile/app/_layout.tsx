@@ -25,8 +25,15 @@ import {
   syncClosingTimeScheduleAsync,
 } from '../native/notifications';
 import { useSessionStore } from '../state/sessionStore';
-import { handleAppStateChangeForAuthRefresh } from '../sync/supabaseClient';
+import {
+  handleAppStateChangeForAuthRefresh,
+  isSupabaseConfigured,
+  missingSupabaseConfigKeys,
+} from '../sync/supabaseClient';
 import { startSyncEngine, stopSyncEngine } from '../sync';
+import { startBillingHydration, stopBillingHydration } from '../sync/billingHydration';
+import { subscribeToReconnect } from '../sync/connectivity';
+import { revalidateOfflineSelectedShop } from '../state/switchShop';
 import '../global.css';
 import { AppNavigationShell } from '../components/navigation/AppNavigationShell';
 import { AuthenticatedRuntimeErrorBoundary } from '../components/navigation/AuthenticatedRuntimeErrorBoundary';
@@ -77,13 +84,41 @@ export default function RootLayout() {
   }, [isDatabaseReady]);
 
   useEffect(() => {
-    if (!isDatabaseReady) {
+    // An unconfigured build renders the error screen below, but effects still
+    // run for whatever was rendered — so the guard belongs here too. No sync,
+    // no billing refresh, no background work on a build that cannot verify
+    // anything.
+    if (!isDatabaseReady || !isSupabaseConfigured) {
       return;
     }
     handleAppStateChangeForAuthRefresh(AppState.currentState);
     if (session) {
       startSyncEngine(session.shopId);
+      // Hydrate the server-owned entitlement on every session start, so a
+      // relogin shows the existing trial immediately instead of waiting for
+      // the first full sync cycle — and keep retrying on its own (backoff,
+      // then reconnect/foreground) if that first attempt fails, independent
+      // of push/pull. Never a one-shot swallowed failure: that used to leave
+      // the device reading "unverified" until a manual Sync, which is the
+      // exact confusion B4 was reported for.
+      //
+      // Deliberately NOT gated on cloudShopConfirmed. An unconfirmed session
+      // is the one that most needs verifying, and gating it created a trap: a
+      // shop switch that believed itself offline sets that flag false, and the
+      // only path that clears it (revalidateOfflineSelectedShop) is itself
+      // behind a connectivity check — so a single wrong "offline" reading
+      // could strand an owner as unverified forever. billing-status is
+      // read-only, server-authoritative and fail-closed: always safe to ask.
+      startBillingHydration(session.shopId);
     }
+    let revalidating = false;
+    const revalidateOfflineShop = () => {
+      if (!session || session.cloudShopConfirmed !== false || revalidating) return;
+      revalidating = true;
+      void revalidateOfflineSelectedShop().catch(() => undefined).finally(() => { revalidating = false; });
+    };
+    const unsubscribeReconnect = subscribeToReconnect(revalidateOfflineShop);
+    revalidateOfflineShop();
     const checkIfDue = () => {
       if (!session || AppState.currentState !== 'active') {
         return;
@@ -102,16 +137,19 @@ export default function RootLayout() {
       handleAppStateChangeForAuthRefresh(state);
       if (state === 'active') {
         checkIfDue();
+        revalidateOfflineShop();
       }
     });
     return () => {
       subscription.remove();
+      unsubscribeReconnect();
       stopSyncEngine();
+      stopBillingHydration();
     };
   }, [isDatabaseReady, session]);
 
   useEffect(() => {
-    if (!isDatabaseReady || !session) {
+    if (!isDatabaseReady || !isSupabaseConfigured || !session) {
       return;
     }
     // D-11: (re)establish the OS-scheduled closing-time trigger once per
@@ -139,6 +177,32 @@ export default function RootLayout() {
           The app cannot start safely. Please report this message:
         </Text>
         <Text className="font-mono text-center text-xs text-richBlack">{databaseError.message}</Text>
+      </View>
+    );
+  }
+
+  // A build without Supabase credentials cannot verify anything a plan depends
+  // on: billing-status never runs, the entitlement cache is never written, and
+  // every owner silently reads as Free with no trial. That is a broken build,
+  // not an offline device — offline is a supported state with a verified cache
+  // behind it. Fail closed and say so, rather than shipping a POS that quietly
+  // downgrades its own customers.
+  if (!isSupabaseConfigured) {
+    return (
+      <View className="flex-1 items-center justify-center gap-3 bg-errorBg p-6">
+        <Text className="font-sans-bold text-lg text-error">App is not configured</Text>
+        <Text className="font-sans text-center text-sm text-richBlack">
+          This build is missing its cloud settings, so sync, backup, and plan
+          verification cannot run. Please report this message.
+        </Text>
+        <Text className="font-mono text-center text-xs text-richBlack">
+          {missingSupabaseConfigKeys.join('\n')}
+        </Text>
+        <Text className="font-sans text-center text-xs text-midGray">
+          Dev builds read these from apps/mobile/.env — start Metro from that
+          folder and reload. Cloud builds need them as EAS environment
+          variables.
+        </Text>
       </View>
     );
   }

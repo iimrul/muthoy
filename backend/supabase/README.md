@@ -17,9 +17,9 @@ Supabase cloud mirror and Edge Functions.
 SQLite remains the mobile source of truth. Notifications and the local sync/conflict
 queues are intentionally not mirrored.
 
-## Current rollout status — 2026-08-30
+## Current rollout status — 2026-08-31
 
-The complete B1-B3 migration/function bundle is present. Founder-reported final
+The complete B1-B4 migration/function bundle is present. Founder-reported final
 Supabase migration dry-run passed; the transcript is not committed. Remote
 migration execution and matching Edge Function deployment remain pending. Do
 not deploy a B2/B3 client before the schema-compatible grouped-operation
@@ -41,3 +41,18 @@ resolves a null actor to false), which is the safe direction but equally silent.
 
 Verify after deploying: mint a session, decode the access token, and confirm
 `app_metadata.app_user_id` is present.
+
+## B4 billing deployment requirements
+
+Deploy `sync` and `payment-webhook` only with migration
+`20260831000000_b4_commercial_platform.sql`. Configure Edge secrets
+`SSLCOMMERZ_STORE_ID`, `SSLCOMMERZ_STORE_PASSWORD`, `SSLCOMMERZ_MODE`,
+`PAYMENT_CALLBACK_BASE_URL`, and `PAYMENT_APP_RETURN_URL`. `config.toml`
+deliberately disables platform JWT
+verification only for `payment-webhook`; SSLCommerz validation and the
+server-priced payment order remain mandatory before entitlement activation.
+Post-deploy smoke must cover valid payment, duplicate webhook, transaction or
+amount mismatch, failed/canceled browser return, 7-day grace, trial expiry,
+offline verification ceiling, Pro shop/staff limits, archive/restore, and a
+two-device shop switch. No remote migration or function deployment was run by
+the B4 implementation work.

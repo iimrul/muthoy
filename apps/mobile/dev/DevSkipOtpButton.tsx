@@ -5,11 +5,18 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { devSignInAnonymouslyAndRegister, getDevRegistrationState } from './devAnonAuth';
+import {
+  devSignInAnonymouslyAndRegister,
+  getDevRegistrationState,
+  hasMatchingDevRepairSession,
+  repairOwnerDeviceLink,
+} from './devAnonAuth';
 
 export function DevSkipOtpButton() {
   const [isEntering, setIsEntering] = useState(false);
   const [isResumable, setIsResumable] = useState(false);
+  const [isRepairable, setIsRepairable] = useState(false);
+  const [isRepairing, setIsRepairing] = useState(false);
 
   // Surfaces the recovery state after a failed link or a restart mid-flow:
   // app/index.tsx routes such a registration back here rather than into the
@@ -18,13 +25,22 @@ export function DevSkipOtpButton() {
   useEffect(() => {
     let isCurrent = true;
     void getDevRegistrationState()
-      .then((state) => {
+      .then(async (state) => {
+        const repairable = state.status === 'ready'
+          && await hasMatchingDevRepairSession(state.shopId);
         if (isCurrent) {
           setIsResumable(state.status === 'link_incomplete');
+          // A completed dev registration can still hold an auth account that
+          // was linked WITHOUT an owner binding, which is invisible until sync
+          // fails as hook_not_configured. Offer the idempotent repair.
+          setIsRepairable(repairable);
         }
       })
       .catch(() => {
-        // Best-effort hint only; the button still works without it.
+        if (isCurrent) {
+          setIsResumable(false);
+          setIsRepairable(false);
+        }
       });
     return () => {
       isCurrent = false;
@@ -47,6 +63,22 @@ export function DevSkipOtpButton() {
       Alert.alert('Dev sign-in failed', cause instanceof Error ? cause.message : 'Unknown error');
     } finally {
       setIsEntering(false);
+    }
+  };
+
+  const handleRepair = async () => {
+    setIsRepairing(true);
+    try {
+      await repairOwnerDeviceLink();
+      Alert.alert(
+        'Owner link repaired',
+        'The auth binding and billing account are in place, and the refreshed token carries the owner claims. Sync and plan verification will run on their own.',
+      );
+      router.replace('/');
+    } catch (cause) {
+      Alert.alert('Repair failed', cause instanceof Error ? cause.message : 'Unknown error');
+    } finally {
+      setIsRepairing(false);
     }
   };
 
@@ -74,6 +106,28 @@ export function DevSkipOtpButton() {
           </Text>
         )}
       </Pressable>
+      {isRepairable ? (
+        <>
+          <Pressable
+            onPress={handleRepair}
+            disabled={isRepairing}
+            accessibilityRole="button"
+            accessibilityLabel="Dev: Repair owner link"
+            className="items-center rounded-lg border border-warning py-3 active:opacity-80"
+          >
+            {isRepairing ? (
+              <ActivityIndicator color="#B45309" />
+            ) : (
+              <Text className="font-sans-semibold text-sm text-warning">Dev: Repair owner link</Text>
+            )}
+          </Pressable>
+          <Text className="font-sans text-xs text-midGray">
+            Re-runs link-device with this shop&apos;s owner id. Use when sync reports
+            &quot;hook_not_configured&quot;: that means the auth account has no owner binding. Idempotent — it
+            cannot create a second owner, account, or trial, and never resets or extends an existing one.
+          </Text>
+        </>
+      ) : null}
       <Text className="font-sans text-xs text-midGray">
         Signs in anonymously to Supabase, then runs the real shop-creation, device-link and sync path. Requires
         Anonymous sign-ins enabled on the dev project.

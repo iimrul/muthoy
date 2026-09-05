@@ -3,6 +3,8 @@ import {
   authenticatedHome,
   authenticatedHomeCorrection,
   canAccessPath,
+  MORE_ROUTES,
+  MULTI_SHOP_HREF,
   OWNER_QUICK_LINKS,
   visibleMoreRoutes,
 } from './routes';
@@ -34,8 +36,16 @@ describe('B1 routes', () => {
     expect(authenticatedHomeCorrection(owner, '/dashboard')).toBeNull();
   });
   it('guards owner and staff homes', () => { expect(canAccessPath(owner, '/dashboard')).toBe(true); expect(canAccessPath(manager, '/dashboard')).toBe(false); expect(canAccessPath(manager, '/staff-home')).toBe(true); expect(canAccessPath(owner, '/staff-home')).toBe(false); });
+  it('guards the canonical Multi-Shop route without a home redirect loop', () => {
+    expect(MULTI_SHOP_HREF).toBe('/multi-shop');
+    expect(canAccessPath(owner, MULTI_SHOP_HREF)).toBe(true);
+    expect(canAccessPath(cashier, MULTI_SHOP_HREF)).toBe(false);
+    expect(canAccessPath(manager, MULTI_SHOP_HREF)).toBe(false);
+    expect(authenticatedHomeCorrection(owner, MULTI_SHOP_HREF)).toBeNull();
+    expect(MORE_ROUTES.find((route) => route.key === 'multi-shop')?.href).toBe(MULTI_SHOP_HREF);
+  });
   it('guards scan and deep links by exact permission', () => { expect(canAccessPath(cashier, '/scan')).toBe(true); expect(canAccessPath({ ...cashier, permissions: { sale_entry: false } }, '/scan')).toBe(false); expect(canAccessPath(cashier, '/reports/report')).toBe(false); expect(canAccessPath(manager, '/reports/report')).toBe(true); });
-  it('uses exact More visibility/order', () => { expect(visibleMoreRoutes(cashier).map((item) => item.key)).toEqual([]); expect(visibleMoreRoutes(manager).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report']); expect(visibleMoreRoutes(owner).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales']); });
+  it('uses exact More visibility/order', () => { expect(visibleMoreRoutes(cashier).map((item) => item.key)).toEqual([]); expect(visibleMoreRoutes(manager).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report']); expect(visibleMoreRoutes(owner).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales']); expect(visibleMoreRoutes(owner, true).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','multi-shop']); });
   it('keeps the approved Owner Quick Links in one exact registry', () => {
     expect(OWNER_QUICK_LINKS.map((item) => [item.labelKey, item.href])).toEqual([
       ['sale', '/sale'],

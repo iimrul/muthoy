@@ -19,7 +19,11 @@ function hydrationOrder(): string[] {
 }
 
 function syncedSchemaTables(): string[] {
-  const localOnly = new Set(["notifications", "notification_receipts", "sync_queue", "conflict_queue"]);
+  const localOnly = new Set([
+    "notifications", "notification_receipts", "sync_queue", "conflict_queue",
+    "billing_accounts", "shop_memberships", "shop_directory", "shop_summary_cache",
+    "entitlement_cache", "payment_attempts",
+  ]);
   return [...schemaSource.matchAll(/sqliteTable\(\s*["']([^"']+)["']/g)]
     .map((match) => match[1])
     .filter((table): table is string => table !== undefined)

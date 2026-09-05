@@ -4,7 +4,11 @@ import { router, useLocalSearchParams } from "expo-router";
 import { otpCodeSchema } from "@muthoy/validation";
 import type { Session } from "@supabase/supabase-js";
 import { OtpInput } from "../../components/ui/OtpInput";
-import { createShopAndOwner, markShopCloudLinked } from "../../db/auth";
+import {
+  createShopAndOwner,
+  getOwnerOnboardingPayload,
+  markShopCloudLinked,
+} from "../../db/auth";
 import { linkDeviceToShop } from "../../sync/linkDevice";
 import { resendOtp, sendOtp, verifyOtp } from "../../sync/otp";
 import { pullChanges } from "../../sync/pull";
@@ -126,7 +130,17 @@ export default function OtpVerifyScreen() {
             pendingShopIdRef.current = shopId;
             pendingOwnerUserIdRef.current = created.userId;
           }
-          await linkDeviceToShop(shopId, pendingOwnerUserIdRef.current ?? undefined);
+          const ownerUserId = pendingOwnerUserIdRef.current ?? undefined;
+          // The shop, roles and Owner travel WITH the link, because nothing
+          // else can put them on the server: link-device reads the Owner back
+          // to write the auth binding, and ordinary sync push refuses a caller
+          // that has no binding yet. Without this a brand-new registration
+          // never completes — the same gap DEV Skip-OTP had been papering over
+          // with its own private bootstrap.
+          const onboarding = ownerUserId
+            ? await getOwnerOnboardingPayload(shopId, ownerUserId)
+            : undefined;
+          await linkDeviceToShop(shopId, ownerUserId, { onboarding });
           completedShopId = shopId;
         }
         await markShopCloudLinked(completedShopId);

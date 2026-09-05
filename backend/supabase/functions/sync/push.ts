@@ -248,6 +248,40 @@ async function authorizeRow(
       };
 }
 
+async function commercialShopFieldsUnchanged(
+  payload: RowObject,
+  shopId: string,
+  operation: string,
+): Promise<AuthorizationResult> {
+  const { data, error } = await supabaseAdmin
+    .from("shops")
+    .select("plan,trial_ends_at,billing_account_id,commercial_status,commercial_reason,archived_at")
+    .eq("id", shopId)
+    .maybeSingle();
+  if (error) {
+    return { status: "rejected", reason: "transient", error: "Could not verify commercial fields" };
+  }
+  if (!data && operation === "insert") {
+    const safe = (payload.plan === undefined || payload.plan === "free")
+      && (payload.trial_ends_at === undefined || payload.trial_ends_at === null)
+      && (payload.billing_account_id === undefined || payload.billing_account_id === null)
+      && (payload.commercial_status === undefined || payload.commercial_status === "active")
+      && (payload.commercial_reason === undefined || payload.commercial_reason === null)
+      && (payload.archived_at === undefined || payload.archived_at === null);
+    return safe ? { status: "authorized" } : { status: "rejected", reason: "permanent", error: "Commercial fields are server-owned" };
+  }
+  if (!data) return { status: "rejected", reason: "transient", error: "Could not verify commercial fields" };
+  const protectedFields = [
+    "plan", "trial_ends_at", "billing_account_id", "commercial_status", "commercial_reason", "archived_at",
+  ] as const;
+  for (const field of protectedFields) {
+    if (field in payload && payload[field] !== data[field]) {
+      return { status: "rejected", reason: "permanent", error: "Commercial fields are server-owned" };
+    }
+  }
+  return { status: "authorized" };
+}
+
 export async function push(caller: Caller, body: Record<string, unknown>) {
   if (typeof body.shopId !== "string")
     throw new HttpError(400, "shopId is required");
@@ -274,6 +308,18 @@ export async function push(caller: Caller, body: Record<string, unknown>) {
     if (!isSyncTable(row.tableName)) {
       results.push(rejection(row.queueId, "permanent", "Unsupported table"));
       halted = true;
+      continue;
+    }
+    if (row.tableName === "subscriptions") {
+      results.push(
+        rejection(row.queueId, "permanent", "Subscriptions are server-owned"),
+      );
+      continue;
+    }
+    if (record.commercialStatus === "read_only") {
+      results.push(
+        rejection(row.queueId, "permanent", "Shop is read-only under the current plan"),
+      );
       continue;
     }
     if (
@@ -344,6 +390,14 @@ export async function push(caller: Caller, body: Record<string, unknown>) {
       );
       halted = authorization.reason === "transient";
       continue;
+    }
+    if (row.tableName === "shops") {
+      const commercial = await commercialShopFieldsUnchanged(row.payload, shopId, row.op);
+      if (commercial.status === "rejected") {
+        results.push(rejection(row.queueId, commercial.reason, commercial.error));
+        halted = commercial.reason === "transient";
+        continue;
+      }
     }
     // Shop ownership first, permission second: a row from another shop is not
     // this caller's to be permitted or refused in the first place.

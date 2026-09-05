@@ -9,6 +9,7 @@ import {
 } from '../db/dataAccessGates';
 
 export type AuthenticatedHomePath = '/dashboard' | '/staff-home';
+export const MULTI_SHOP_HREF = '/multi-shop' as const satisfies Href;
 
 export type RouteRule = DataAccessGate;
 
@@ -28,6 +29,7 @@ export const RULES: readonly {
   { prefixes: ['/reports/sales-history'], dataGate: 'saleHistory', rule: DATA_ACCESS_GATES.saleHistory },
   { prefixes: ['/reports/report', '/reports/monthly-report'], dataGate: 'reports', rule: DATA_ACCESS_GATES.reports },
   { prefixes: ['/staff/management'], dataGate: 'staffManage', rule: DATA_ACCESS_GATES.staffManage },
+  { prefixes: [MULTI_SHOP_HREF], dataGate: 'owner', rule: DATA_ACCESS_GATES.owner },
   { prefixes: ['/expenses', '/suppliers', '/staff/sales-view', '/reports/data-export'], dataGate: 'owner', rule: DATA_ACCESS_GATES.owner },
   { prefixes: ['/settings'], dataGate: 'owner', rule: DATA_ACCESS_GATES.owner },
   { prefixes: ['/notifications'], dataGate: 'authenticated', rule: DATA_ACCESS_GATES.authenticated },
@@ -127,12 +129,17 @@ export const MORE_ROUTES: readonly MoreRoute[] = [
   { key: 'suppliers', labelKey: 'suppliers', href: '/suppliers/list', ownerOnly: true },
   { key: 'staff', labelKey: 'staff', href: '/staff/management', permission: 'staff_manage' },
   { key: 'staff-sales', labelKey: 'staffSales', href: '/staff/sales-view', ownerOnly: true },
-  { key: 'multi-shop', labelKey: 'multiShop', href: '/settings/plans', ownerOnly: true, multiShopOnly: true },
+  // multiShopOnly mirrors the prototype's MainLayout tile filter. The caller
+  // passes entitlement AND "more than one shop"; a Free/expired owner and a
+  // single-shop owner both lose the tile, so More never advertises a route the
+  // plan does not cover.
+  { key: 'multi-shop', labelKey: 'multiShop', href: MULTI_SHOP_HREF, ownerOnly: true, multiShopOnly: true },
 ];
 
-export function visibleMoreRoutes(session: Session, hasMultipleShops = false): readonly MoreRoute[] {
+/** `multiShopAllowed` = entitled to multi-shop AND holding more than one shop. */
+export function visibleMoreRoutes(session: Session, multiShopAllowed = false): readonly MoreRoute[] {
   return MORE_ROUTES.filter((route) => {
-    if (route.multiShopOnly && !hasMultipleShops) return false;
+    if (route.multiShopOnly && !multiShopAllowed) return false;
     if (session.role === 'owner') return true;
     if (route.ownerOnly) return false;
     return route.permission ? resolvePermission(session.role, route.permission, session.permissions) : false;

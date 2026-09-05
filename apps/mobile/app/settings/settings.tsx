@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ComponentProps } from "react";
+import Feather from "@expo/vector-icons/Feather";
 import {
   Alert,
   Modal,
@@ -19,6 +20,7 @@ import {
   usePinEntry,
 } from "../../components/ui/PinPad";
 import { StandardHeader } from "../../components/ui/StandardHeader";
+import { PlanBadge } from "../../components/ui/PlanBadge";
 import {
   changeOwnPin,
   getB2Settings,
@@ -44,8 +46,11 @@ import {
 } from "../../state/notificationPreferencesStore";
 import type { Session } from "../../state/sessionStore";
 import { useSessionStore } from "../../state/sessionStore";
+import { usePlan } from "../../state/usePlan";
+import { useMultiShopAccess } from "../../state/useMultiShopAccess";
 import { switchUser } from "../../state/switchUser";
 import { triggerSyncNow } from "../../sync";
+import { MULTI_SHOP_HREF } from "../../navigation/routes";
 
 const profileSchema = z.object({
   name: z.string().trim().min(2),
@@ -56,21 +61,47 @@ const profileSchema = z.object({
 function Row({
   label,
   value,
+  sub,
+  icon,
+  iconColor,
+  iconBg,
+  badge,
   onPress,
   disabled = false,
 }: {
   label: string;
   value?: string;
+  /** Prototype SettingRow's secondary line. */
+  sub?: string;
+  icon?: ComponentProps<typeof Feather>["name"];
+  iconColor?: string;
+  iconBg?: string;
+  /** Prototype SettingRow's right-hand pill (e.g. PREMIUM). */
+  badge?: string;
   onPress?: () => void;
   disabled?: boolean;
 }) {
   return (
     <Pressable
+      accessibilityRole={onPress ? "button" : undefined}
       disabled={disabled || !onPress}
       onPress={onPress}
-      className={`flex-row items-center justify-between border-b border-brand-softGreen py-4 ${disabled ? "opacity-40" : ""}`}
+      className={`flex-row items-center gap-3 border-b border-brand-softGreen py-4 ${disabled ? "opacity-40" : ""}`}
     >
-      <Text className="font-sans-semibold text-sm">{label}</Text>
+      {icon ? (
+        <View className="h-10 w-10 items-center justify-center rounded-full" style={{ backgroundColor: iconBg ?? "#ECFDF5" }}>
+          <Feather name={icon} size={19} color={iconColor ?? "#059669"} />
+        </View>
+      ) : null}
+      <View className="flex-1">
+        <Text className="font-sans-semibold text-sm">{label}</Text>
+        {sub ? <Text className="mt-0.5 font-sans text-[11px] text-midGray">{sub}</Text> : null}
+      </View>
+      {badge ? (
+        <View className="rounded-full bg-[#F3E8FF] px-2 py-0.5">
+          <Text className="font-sans-bold text-[9px] tracking-wide text-[#7C3AED]">{badge}</Text>
+        </View>
+      ) : null}
       <Text className="font-sans text-xs text-midGray">
         {value ?? (onPress ? "›" : "")}
       </Text>
@@ -117,6 +148,8 @@ function formatClosingHour(hour: number): string {
 export default function SettingsScreen() {
   const session = useSessionStore((state) => state.session);
   const { t, locale } = useI18n();
+  const plan = usePlan();
+  const multiShop = useMultiShopAccess();
   const [profile, setProfile] = useState<ShopProfile | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [b2Settings, setB2Settings] = useState<B2Settings | null>(null);
@@ -182,11 +215,31 @@ export default function SettingsScreen() {
           </View>
         </View>
         <View className="rounded-xl bg-white px-4">
+          {/* Prototype Settings "Your Plan" row: shield bubble, badge, and an
+              Upgrade cue for anything below Ultra. */}
+          <Pressable accessibilityRole="button" onPress={() => router.push('/settings/plans')} className="flex-row items-center gap-3 border-b border-brand-softGreen py-4">
+            <View className="h-10 w-10 items-center justify-center rounded-full bg-[#ECFDF5]"><Feather name="shield" size={19} color="#059669" /></View>
+            <View className="flex-1">
+              <Text className="font-sans-semibold text-sm">{locale === 'bn' ? 'আপনার প্ল্যান' : 'Your Plan'}</Text>
+              <View className="mt-1 flex-row items-center gap-2">
+                <PlanBadge interactive={false} onLight plan={plan.plan} daysLeft={plan.daysLeft} expired={plan.reason === 'paid_expired' || plan.reason === 'verification_stale'} grace={plan.reason === 'paid_grace'} />
+                {plan.effectiveTier !== 'ultra' ? <Text className="font-sans-bold text-xs text-brand-green">{locale === 'bn' ? 'আপগ্রেড' : 'Upgrade'}</Text> : null}
+              </View>
+            </View>
+            <Text className="font-sans text-lg text-midGray">›</Text>
+          </Pressable>
+          {/* Always listed, never silently hidden: the row is how a Free owner
+              discovers the feature. Entitlement is enforced on the screen and
+              on the server, not by removing the entry point. */}
           <Row
-            label={t("plans")}
-            onPress={() => router.push("/settings/plans")}
+            icon="shopping-bag"
+            iconColor="#7C3AED"
+            iconBg="#F3E8FF"
+            label={locale === 'bn' ? 'একাধিক দোকান পরিচালনা' : 'Manage Multiple Shops'}
+            sub={locale === 'bn' ? 'দোকান যোগ করুন, বদলান ও সারসংক্ষেপ দেখুন' : 'Add, switch, and view summary across shops'}
+            badge={multiShop.entitled ? undefined : 'PREMIUM'}
+            onPress={() => router.push(MULTI_SHOP_HREF)}
           />
-          <Row label={t("multiShop")} value="B4" disabled />
           <Row
             label={t("printer")}
             onPress={() => router.push("/settings/printer-settings")}

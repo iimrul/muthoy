@@ -7,7 +7,6 @@ import { normalizeBdPhone } from '@muthoy/validation';
 import {
   assertPinUnique,
   getShopRoleId,
-  getUserPermissionOverrides,
   getActiveSessionRole,
   requirePermission,
   requireOwner,
@@ -15,6 +14,8 @@ import {
 import { assertSessionLive, DuplicatePhoneError, isUniqueConstraintViolation } from './errors';
 import { permissionForDataGate } from './dataAccessGates';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
+import { getEffectiveEntitlementForShop, requireStaffSlot } from './commercial';
+import { planLimits } from '../domain/entitlements';
 import {
   CASHIER_DEFAULT_PERMISSIONS,
   PERMISSION_KEYS,
@@ -46,6 +47,8 @@ export interface StaffMember {
   phone: string | null;
   role: Role;
   isActive: boolean;
+  planSuspendedAt: string | null;
+  planSuspensionReason: string | null;
   /** The owner's explicit overrides. Empty means "role default" throughout. */
   permissions: PermissionOverrides;
 }
@@ -85,7 +88,10 @@ export async function listStaff(shopId: string, actorUserId: string): Promise<St
   await requirePermission(shopId, actorUserId, permissionForDataGate('staffManage'));
 
   const rows = await db
-    .select({ id: users.id, name: users.name, phone: users.phone, isActive: users.isActive, role: roles.name })
+    .select({
+      id: users.id, name: users.name, phone: users.phone,
+      isActive: users.isActive, role: roles.name, createdAt: users.createdAt,
+    })
     .from(users)
     .innerJoin(roles, eq(users.roleId, roles.id))
     .where(and(
@@ -94,22 +100,37 @@ export async function listStaff(shopId: string, actorUserId: string): Promise<St
       or(eq(roles.name, 'staff'), eq(roles.name, 'manager')),
     ));
 
-  // Sequential rather than a join: the roster is a handful of rows, and reusing
-  // getUserPermissionOverrides keeps ONE place that decides which override rows
-  // count (shop-scoped, non-deleted, known key) instead of a second query here
-  // that could drift from the one the guards use.
-  const members: StaffMember[] = [];
-  for (const row of rows) {
-    members.push({
+  const permissionRows = await db.select({
+    userId: userPermissions.userId,
+    key: userPermissions.key,
+    allowed: userPermissions.allowed,
+  }).from(userPermissions).where(and(
+    eq(userPermissions.shopId, shopId),
+    eq(userPermissions.isDeleted, false),
+  ));
+  const permissionsByUser = new Map<string, PermissionOverrides>();
+  for (const permissionRow of permissionRows) {
+    const permission = fromStoragePermissionKey(permissionRow.key);
+    if (!permission) continue;
+    const overrides = permissionsByUser.get(permissionRow.userId) ?? {};
+    overrides[permission] = permissionRow.allowed;
+    permissionsByUser.set(permissionRow.userId, overrides);
+  }
+  const entitlement = await getEffectiveEntitlementForShop(shopId);
+  const limit = planLimits(entitlement?.effectiveTier ?? 'ultra').maxActiveNonOwnerStaffPerShop;
+  const allowedIds = limit === null ? null : new Set(rows.filter((row) => row.isActive)
+    .sort((left,right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
+    .slice(0,limit).map((row) => row.id));
+  return rows.map((row) => ({
       id: row.id,
       name: row.name,
       phone: row.phone,
       role: toRole(row.role) ?? 'staff',
       isActive: row.isActive,
-      permissions: await getUserPermissionOverrides(shopId, row.id),
-    });
-  }
-  return members;
+      planSuspendedAt: row.isActive && allowedIds && !allowedIds.has(row.id) ? 'plan' : null,
+      planSuspensionReason: row.isActive && allowedIds && !allowedIds.has(row.id) ? 'plan_staff_limit' : null,
+      permissions: permissionsByUser.get(row.id) ?? {},
+    }));
 }
 
 /**
@@ -262,6 +283,7 @@ export async function createStaff(
   isStillActive: () => boolean,
   timing?: AuthTimingTrace,
 ): Promise<StaffMember> {
+  await requireStaffSlot(shopId);
   // Volume 0 Day 11: only an owner can add a login to the shop. Gated before
   // the PIN is hashed or any row is written.
   const checkPermission = () => requirePermission(shopId, actorUserId, permissionForDataGate('staffManage'));
@@ -366,6 +388,8 @@ export async function createStaff(
     phone,
     role: targetRole,
     isActive: true,
+    planSuspendedAt: null,
+    planSuspensionReason: null,
     permissions: input.permissions,
   };
 }
@@ -443,6 +467,7 @@ export async function activateStaff(
 ): Promise<void> {
   const staff = await getManageableStaffTarget(staffId);
   await requireOwner(staff.shopId, performedByUserId);
+  await requireStaffSlot(staff.shopId);
   await db.transaction(async (tx) => {
     assertSessionLive(isStillActive);
     updateStaffSecurityFields(tx, { shopId: staff.shopId, staffId, extraValues: { isActive: true } });

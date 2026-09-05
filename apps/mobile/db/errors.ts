@@ -81,6 +81,13 @@ export class NotAuthorizedError extends Error {
   }
 }
 
+export class CommercialReadOnlyError extends Error {
+  constructor() {
+    super('This shop is read-only under the current plan. No data was changed.');
+    this.name = 'CommercialReadOnlyError';
+  }
+}
+
 // Thrown by db/cash.ts's assertBusinessDateOpen, and by any write path that
 // calls it (sales, customer credit collections, purchases) before touching a
 // business date whose cash_drawer.closed_at is already set. Volume 0 Day 10:

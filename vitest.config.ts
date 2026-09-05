@@ -55,6 +55,12 @@ export default defineConfig({
       // the OTP-bypass files listed in dev/README.md before production.
       "apps/mobile/dev/*.test.ts",
       "apps/mobile/db/cash.sqlite.test.ts",
+      "apps/mobile/db/b4-commercial-cache.sqlite.test.ts",
+      "apps/mobile/db/b4-entitlement-hydration.sqlite.test.ts",
+      // Fail-closed multi-shop entitlement on real SQLite: trial and paid pass,
+      // Free and expired are refused, and only the account primary shop stays
+      // reachable after a downgrade.
+      "apps/mobile/db/b4-multi-shop-entitlement.sqlite.test.ts",
       // Migration 0018's data backfill against a populated pre-migration
       // fixture — the taxonomy remap, not the CHECK-constraint rebuild the
       // plan doc originally assumed (there is none on this column).
@@ -127,6 +133,10 @@ export default defineConfig({
       // at the module boundary), so the default node environment below is
       // unaffected.
       "apps/mobile/state/switchUser.test.tsx",
+      "apps/mobile/state/switchShop.test.ts",
+      // Staff/Manager must trigger zero owner-wide shop/primary-shop SQLite
+      // reads — the role check gates the hook's effect itself.
+      "apps/mobile/state/useMultiShopAccess.test.tsx",
       "apps/mobile/state/businessDayStore.test.ts",
       "apps/mobile/tests/sale/checkout.test.tsx",
       "apps/mobile/tests/sale/cartStore.test.ts",
@@ -139,10 +149,19 @@ export default defineConfig({
       "apps/mobile/tests/reports-final-fixes.test.tsx",
       "apps/mobile/tests/app-layout.test.tsx",
       "apps/mobile/tests/authenticated-routing.test.tsx",
+      // B4 physical regression: the Multi-Shop press must open /multi-shop
+      // without the <Stack /> navigator being unmounted (which read as a
+      // reload on device), across trial/free/expired and every role.
+      "apps/mobile/tests/b4-multi-shop-navigation.test.tsx",
       "apps/mobile/tests/auth-pin-latency.test.tsx",
       "apps/mobile/tests/staff-home-routing.test.tsx",
       "apps/mobile/tests/staff-management-pin.test.tsx",
       "apps/mobile/sync/**/*.test.ts",
+      // Auto-hydration end-to-end: real SQLite + real usePlan/useMultiShopAccess,
+      // only the network edge mocked — proves the server Trial appears without a
+      // manual Sync, retries on reconnect/foreground, and fails closed rather
+      // than silently reading as Free.
+      "apps/mobile/db/b4-billing-hydration.sqlite.test.tsx",
       // Reads the edge-function sources and migration SQL as text to check that
       // every direct PostgREST read has a matching grant. Named file, not a
       // backend/** glob: the rest of that directory is Deno and will not load.
@@ -161,6 +180,15 @@ export default defineConfig({
       // re-derivation of max returnable, credit_amount, and row shape.
       "backend/supabase/pgtest/b3-group7-purchase-return-sync.pgtest.ts",
       "backend/supabase/pgtest/inventory-add-purchase-sync.pgtest.ts",
+      "backend/supabase/pgtest/b4.pgtest.ts",
+      // One onboarding function for BOTH the real OTP flow and DEV Skip-OTP,
+      // proving they reach the same rows and the same token claims — plus the
+      // Multi-Shop rename/archive path that had the identical 42501.
+      //
+      // Also the only suite that executes as service_role. Every PostgREST call
+      // in production runs under that ACL, and until this file nothing tested
+      // it — which is how a direct INSERT on shops shipped and died at 42501.
+      "backend/supabase/pgtest/canonical-onboarding.pgtest.ts",
       // CREDIT CONVERGENCE PROOF (review-fix): the credit_collection
       // dispatcher branch has shipped since B2 with zero coverage through
       // sync_stage_operation_chunk. Proves sync/pull canonical balance,
@@ -180,6 +208,13 @@ export default defineConfig({
       "backend/supabase/functions/sync/inventory-ledger.test.ts",
       "backend/supabase/functions/sync/expenses.test.ts",
       "backend/supabase/functions/sync/purchases.test.ts",
+      "backend/supabase/functions/sync/sslcommerz.test.ts",
+      "backend/supabase/functions/sync/multiShop.test.ts",
+      // billing-status self-heal: MU032 is the only failure that may answer
+      // 404; every other RPC/database error stays a 500.
+      "backend/supabase/functions/sync/billing.test.ts",
+      "backend/supabase/functions/sync/onboarding.test.ts",
+      "backend/supabase/functions/sync/linkDevice.test.ts",
       // apps/admin's pure logic + service-role exposure guards. Framework-free:
       // nothing here imports Next or opens a Supabase connection.
       "apps/admin/lib/**/*.test.ts",

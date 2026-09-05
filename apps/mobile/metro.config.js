@@ -4,6 +4,8 @@ const path = require('path');
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '../..');
+const expoPackageRoot = path.dirname(require.resolve('expo/package.json'));
+const externalVirtualStoreRoot = path.resolve(expoPackageRoot, '../../..');
 
 const config = getDefaultConfig(projectRoot);
 
@@ -17,6 +19,11 @@ const config = getDefaultConfig(projectRoot);
 // stops resolving cleanly: uncomment node-linker=hoisted in the root .npmrc
 // and reinstall.
 config.watchFolders = [workspaceRoot];
+if (path.relative(workspaceRoot, expoPackageRoot).startsWith('..')) {
+  // The short Windows pnpm virtual store is intentionally outside the repo.
+  // Metro must watch its real target or pnpm package symlinks resolve as missing.
+  config.watchFolders.push(externalVirtualStoreRoot);
+}
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),

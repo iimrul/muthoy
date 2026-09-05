@@ -34,15 +34,21 @@ const mmkv = vi.hoisted(() => {
 
 vi.mock('react-native-mmkv', () => ({ createMMKV: mmkv.createMMKV }));
 
+const config = vi.hoisted(() => ({ isSupabaseConfigured: true }));
+
 const native = vi.hoisted(() => ({
   addEventListener: vi.fn(),
   startSyncEngine: vi.fn(),
   stopSyncEngine: vi.fn(),
+  startBillingHydration: vi.fn(),
+  stopBillingHydration: vi.fn(),
   handleAppStateChangeForAuthRefresh: vi.fn(),
   registerNotificationBackgroundTaskAsync: vi.fn(),
   requestNotificationPermissionsAsync: vi.fn(),
   runNotificationChecks: vi.fn(),
   syncClosingTimeScheduleAsync: vi.fn(),
+  subscribeToReconnect: vi.fn(() => vi.fn()),
+  revalidateOfflineSelectedShop: vi.fn(),
 }));
 
 vi.mock('react-native', () => ({
@@ -76,6 +82,8 @@ vi.mock('@expo-google-fonts/hind-siliguri', () => ({
 }));
 vi.mock('@expo-google-fonts/dm-mono', () => ({ DMMono_400Regular: 'k', DMMono_500Medium: 'l' }));
 vi.mock('../global.css', () => ({}));
+vi.mock('../sync/connectivity', () => ({ subscribeToReconnect: native.subscribeToReconnect }));
+vi.mock('../state/switchShop', () => ({ revalidateOfflineSelectedShop: native.revalidateOfflineSelectedShop }));
 
 vi.mock('../db', () => ({
   useDatabaseMigrations: () => ({ isReady: true, error: null }),
@@ -88,10 +96,22 @@ vi.mock('../native/notifications', () => ({
 }));
 vi.mock('../sync/supabaseClient', () => ({
   handleAppStateChangeForAuthRefresh: native.handleAppStateChangeForAuthRefresh,
+  get isSupabaseConfigured() {
+    return config.isSupabaseConfigured;
+  },
+  get missingSupabaseConfigKeys() {
+    return config.isSupabaseConfigured
+      ? []
+      : ['EXPO_PUBLIC_SUPABASE_URL', 'EXPO_PUBLIC_SUPABASE_ANON_KEY'];
+  },
 }));
 vi.mock('../sync', () => ({
   startSyncEngine: native.startSyncEngine,
   stopSyncEngine: native.stopSyncEngine,
+}));
+vi.mock('../sync/billingHydration', () => ({
+  startBillingHydration: native.startBillingHydration,
+  stopBillingHydration: native.stopBillingHydration,
 }));
 
 const { useSessionStore } = await import('../state/sessionStore');
@@ -105,14 +125,46 @@ beforeEach(() => {
   vi.clearAllMocks();
   mmkv.stores.forEach((store) => store.clear());
   useSessionStore.setState({ session: null });
+  config.isSupabaseConfigured = true;
   native.addEventListener.mockReturnValue({ remove: vi.fn() });
   native.registerNotificationBackgroundTaskAsync.mockResolvedValue(undefined);
   native.requestNotificationPermissionsAsync.mockResolvedValue(undefined);
+  native.revalidateOfflineSelectedShop.mockResolvedValue(undefined);
   native.runNotificationChecks.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   cleanup();
+});
+
+describe('a build with no Supabase configuration fails visibly', () => {
+  it('names the missing variables and starts nothing', () => {
+    config.isSupabaseConfigured = false;
+
+    const view = render(createElement(RootLayout));
+
+    // Without these the entitlement can never be verified, so every owner would
+    // silently read as Free. Say so loudly rather than downgrading them.
+    expect(view.container.textContent).toContain('App is not configured');
+    expect(view.container.textContent).toContain('EXPO_PUBLIC_SUPABASE_URL');
+    expect(view.container.textContent).toContain('EXPO_PUBLIC_SUPABASE_ANON_KEY');
+    // Naming the variables is not enough on its own — the screen has to say
+    // where they are read from, or the founder is left guessing which of Metro,
+    // .env, or EAS is at fault.
+    expect(view.container.textContent).toContain('apps/mobile/.env');
+    expect(view.container.textContent).toContain('EAS');
+
+    act(() => useSessionStore.getState().login(OWNER));
+    expect(native.startSyncEngine).not.toHaveBeenCalled();
+  });
+
+  it('boots normally once the configuration is present', () => {
+    const view = render(createElement(RootLayout));
+
+    expect(view.container.textContent).not.toContain('App is not configured');
+    act(() => useSessionStore.getState().login(OWNER));
+    expect(native.startSyncEngine).toHaveBeenCalledWith(SHOP_ID);
+  });
 });
 
 describe('root layout drives the sync engine from the active session', () => {
@@ -146,5 +198,38 @@ describe('root layout drives the sync engine from the active session', () => {
     // Same shop id, never a re-derived or re-created one (CLAUDE.md rule 7).
     expect(native.startSyncEngine).toHaveBeenCalledTimes(1);
     expect(native.startSyncEngine).toHaveBeenCalledWith(SHOP_ID);
+  });
+});
+
+describe('root layout drives automatic entitlement hydration — no manual Sync required', () => {
+  it('starts hydration on login, with no press of Sync anywhere in the path', () => {
+    render(createElement(RootLayout));
+
+    act(() => useSessionStore.getState().login(OWNER));
+
+    expect(native.startBillingHydration).toHaveBeenCalledWith(SHOP_ID);
+  });
+
+  it('still verifies a session whose shop is not yet cloud-confirmed', () => {
+    render(createElement(RootLayout));
+
+    act(() => useSessionStore.getState().login({ ...OWNER, cloudShopConfirmed: false }));
+
+    // This flag gets set by a shop switch that believed itself offline, and the
+    // only path that clears it is itself behind a connectivity check. Gating
+    // verification on it meant one wrong "offline" reading could strand an
+    // owner as unverified forever — so the unconfirmed session, which needs
+    // verifying most, is exactly the one that must still be allowed to ask.
+    expect(native.startBillingHydration).toHaveBeenCalledWith(SHOP_ID);
+  });
+
+  it('stops hydration when the session ends, alongside the sync engine', () => {
+    render(createElement(RootLayout));
+    act(() => useSessionStore.getState().login(OWNER));
+    native.stopBillingHydration.mockClear();
+
+    act(() => useSessionStore.getState().clearActiveUser());
+
+    expect(native.stopBillingHydration).toHaveBeenCalled();
   });
 });

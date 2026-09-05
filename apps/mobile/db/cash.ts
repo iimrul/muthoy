@@ -21,6 +21,7 @@ import { DHAKA_SQL_OFFSET, dhakaBusinessDate } from "@muthoy/utils";
 import { expectedCash, type CashFormulaInput } from "../domain/cashFormula";
 import { generateId } from "../native/id";
 import { requireOwner, requirePermission } from "./auth";
+import { requirePremiumFeature } from "./commercial";
 import { permissionForDataGate } from "./dataAccessGates";
 import { getEndOfDayReportSnapshot } from "./reports";
 import { db, sqliteConnection } from "./client";
@@ -237,6 +238,7 @@ export async function recordExpense(
   // is `{ kind: 'owner' }`), closing the drift where a Manager reaching this
   // by direct call, not navigation, could otherwise write an expense.
   await requireOwner(input.shopId, input.staffId);
+  await requirePremiumFeature(input.shopId, "expenses");
 
   if (!Number.isInteger(input.amount) || input.amount <= ZERO_PAISA) {
     throw new Error("Expense amount must be a positive whole number of paisa");
@@ -480,6 +482,7 @@ export interface DeleteExpenseInput {
 // produces expense+payment+drawer (3 rows); the (practically unreachable,
 // since recordExpense always ensures one) missing-drawer case adds a 4th.
 export async function deleteExpense(input: DeleteExpenseInput): Promise<void> {
+  await requirePremiumFeature(input.shopId, "expenses");
   await requireOwner(input.shopId, input.staffId);
 
   db.transaction((tx) => {

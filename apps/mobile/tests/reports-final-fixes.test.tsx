@@ -27,6 +27,18 @@ vi.mock('../state/sessionGuard',()=>({ captureSessionFor:()=>({ isStale:()=>fals
 vi.mock('../state/localeStore',()=>({ useI18n:()=>({ locale:state.locale,formatMoney:(value:number)=>`P${value}`,formatNumber:(value:number)=>String(value),formatDateTime:(value:string)=>value,t:(key:string)=>({ categoryUtilities:state.locale==='bn'?'ইউটিলিটি':'Utilities' } as Record<string,string>)[key]??key }) }));
 vi.mock('../db/cash',()=>({ currentBusinessDate:()=> '2026-02-10' }));
 vi.mock('../db/reports',()=>({ getReportSnapshot:state.report,getMonthlyReport:state.monthly }));
+vi.mock('../db/commercial',()=>({
+  listOwnerShops:vi.fn(async()=>[]),
+  readShopSummaries:vi.fn(async()=>[]),
+  // The cross-shop comparison block is entitlement-gated now, so the report
+  // screen resolves multi-shop access and a billing account like any other
+  // protected read.
+  subscribeCommercialCache:vi.fn(()=>()=>undefined),
+  readMultiShopContext:vi.fn(async()=>({ entitled:false,primaryShopId:null,liveShopCount:0 })),
+  getBillingAccountIdForShop:vi.fn(async()=>null),
+}));
+vi.mock('../sync/connectivity',()=>({ hasNetworkConnection:vi.fn(async()=>false) }));
+vi.mock('../sync/multiShop',()=>({ refreshShopSummaries:vi.fn(async()=>[]) }));
 vi.mock('../db/settings',()=>({ getShopName:vi.fn(async()=> 'Shop') }));
 vi.mock('../services/reportExport',()=>({ exportAndShareReport:state.export }));
 vi.mock('../native/printer',()=>{

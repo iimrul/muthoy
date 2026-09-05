@@ -10,8 +10,17 @@ const deps = vi.hoisted(() => ({
   pathname: '/staff-home',
   session: null as null | { shopId: string; userId: string; role: Role },
   replace: vi.fn(),
+  premiumGate: vi.fn(),
+  effectiveTier: 'free' as 'free' | 'pro' | 'ultra',
 }));
 
+// NavigationBoundary keeps the Stack mounted and draws gates as an absolute
+// overlay, so it renders real react-native primitives. Stub them at the module
+// boundary — Vite cannot parse React Native's Flow-typed entry point.
+vi.mock('react-native', () => ({
+  StyleSheet: { absoluteFill: { position: 'absolute' } },
+  View: ({ children }: { children?: unknown }) => createElement('div', null, children as never),
+}));
 vi.mock('expo-router', () => ({
   router: { replace: deps.replace },
   usePathname: () => deps.pathname,
@@ -21,6 +30,17 @@ vi.mock('../components/ui/AccessDenied', () => ({
 }));
 vi.mock('../components/staff/DashboardLoadState', () => ({
   DashboardLoadState: () => createElement('span', null, 'loading'),
+}));
+// The boundary owns the entitlement decision now and draws PremiumLock as a
+// cover; PremiumGate is no longer in this path.
+vi.mock('../state/usePlan', () => ({
+  usePlan: () => ({ effectiveTier: deps.effectiveTier, loading: false }),
+}));
+vi.mock('../components/ui/PremiumLock', () => ({
+  PremiumLock: ({ feature }: { feature: string }) => {
+    deps.premiumGate(feature);
+    return createElement('span', null, 'locked');
+  },
 }));
 vi.mock('../dev/runtimeDiagnostics', () => ({
   markRuntimeDiagnosticStep: vi.fn(),
@@ -54,6 +74,8 @@ function renderBoundary() {
 
 beforeEach(() => {
   deps.replace.mockReset();
+  deps.premiumGate.mockReset();
+  deps.effectiveTier = 'ultra';
 });
 
 afterEach(cleanup);
@@ -78,6 +100,44 @@ describe('authenticated home routing boundary', () => {
     renderBoundary();
 
     expect(deps.replace).not.toHaveBeenCalled();
+  });
+
+  it('Trial-capable Owner enters /multi-shop without redirect, cover, or duplicate routing', () => {
+    deps.pathname = '/multi-shop';
+    deps.session = { shopId: 'shop-1', userId: 'owner-1', role: 'owner' };
+    deps.effectiveTier = 'ultra';
+
+    const view = renderBoundary();
+
+    expect(view.getByText('route content')).toBeTruthy();
+    expect(deps.replace).not.toHaveBeenCalled();
+    expect(deps.premiumGate).not.toHaveBeenCalled();
+  });
+
+  it('Free Owner reaches /multi-shop but is covered by the multi_shop lock', () => {
+    deps.pathname = '/multi-shop';
+    deps.session = { shopId: 'shop-1', userId: 'owner-1', role: 'owner' };
+    deps.effectiveTier = 'free';
+
+    renderBoundary();
+
+    expect(deps.premiumGate).toHaveBeenCalledTimes(1);
+    expect(deps.premiumGate).toHaveBeenCalledWith('multi_shop');
+    expect(deps.replace).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['Staff', 'staff' as const],
+    ['Manager', 'manager' as const],
+  ])('%s is blocked from /multi-shop before premium evaluation', (_label, role) => {
+    deps.pathname = '/multi-shop';
+    deps.session = { shopId: 'shop-1', userId: `${role}-1`, role };
+
+    const view = renderBoundary();
+
+    expect(view.getByText('denied')).toBeTruthy();
+    expect(deps.replace).not.toHaveBeenCalled();
+    expect(deps.premiumGate).not.toHaveBeenCalled();
   });
 
   it.each([
