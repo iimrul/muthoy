@@ -46,8 +46,10 @@ managed on the phone). Role-gated if more than one admin user exists later.
 
 ## SUBSCRIPTION (P1 — depends on the Subscription/billing feature itself, P1)
 List by status (trialing/active/past_due/grace/canceled/expired), due-soon view
-via `next_billing_at`, manual override actions (extend trial, force a status
-change) — reads/writes `subscriptions` directly via the service-role key.
+via `next_billing_at`. The older manual extend-trial/force-status/direct-table
+write design is superseded and unapproved. Trial derives from its original
+server grant and cannot reset/extend through client retry, reinstall, or login;
+any future admin override requires a separately approved audited server API.
 
 ## AUDIT LOGS (P1)
 A read-only view into each shop's `audit_logs` (support/debugging use only —

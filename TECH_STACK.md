@@ -62,6 +62,22 @@
 - Limited Realtime (used sparingly — battery/data cost on low-end phones)
 - Custom Sync Queue (Outbox Pattern) — SQLite → Sync Queue → Supabase
 
+### Commercial, onboarding, and deployed state
+
+- Server-owned Free/Pro/Ultra entitlement and Owner-level billing-account model.
+  SQLite stores a verified cache for instant/offline UX; it never grants access.
+- Canonical Owner onboarding is an Edge orchestration call into the
+  `SECURITY DEFINER` `b4_onboard_owner(...)` PostgreSQL function. Production
+  reaches it after OTP verification; DEV Skip OTP bypasses only that proof and
+  then uses the same onboarding, auth-binding, refreshed-claim, and trial path.
+- Multi-shop rename/archive/restore uses the narrow `SECURITY DEFINER`
+  `b4_mutate_owned_shop(...)` function rather than broad table-write grants.
+- PostgreSQL migration parity is verified through
+  `20260905000000_b4_canonical_onboarding.sql`; deployed `sync` is v10 ACTIVE.
+- SSLCommerz is the first planned provider. The provider abstraction and webhook
+  source exist, but real credentials/live validation are not configured; payment
+  fails closed and is not production-ready.
+
 ## Admin Panel — Next.js
 - Next.js 15
 - Tailwind CSS
@@ -81,6 +97,12 @@
 - Expo EAS
 - Vercel
 - pnpm workspaces + Turborepo (this monorepo)
+
+Expo local development reads non-committed values from `apps/mobile/.env`.
+EAS builds require the same public configuration as EAS Environment Variables;
+`EXPO_PUBLIC_*` values are transform-time inlined, not runtime secret storage.
+Only non-secret placeholders belong in `.env.example`, and DEV diagnostics may
+report presence/host only—never keys or tokens.
 
 ## Monitoring & Analytics
 - Sentry (crash reporting)

@@ -1,12 +1,14 @@
 # Sync Queue Writer + Minimum-Viable Sync Engine + Real Phone OTP
 
-> **Historical implementation/security plan — superseded for status on
-> 2026-08-30.** Sync, separate-device login, per-user permissions, derived
-> inventory ledger, and B2-B3 grouped operations are implemented locally.
+> **Historical implementation/security plan — superseded for status and
+> onboarding architecture on 2026-09-05.** Sync, separate-device login,
+> permissions, ledger, grouped operations, and B4 are deployed/verified.
 > Statements below describing one-phone Beta, absolute LWW stock, or work still
-> to build are historical. Durable current contracts live in `DECISIONS.md`,
-> `apps/mobile/sync/README.md`, and the Supabase migration README. Remote
-> migrations/functions remain pending.
+> to build—including local-first Owner creation followed by later cloud push—are
+> historical. Production OTP and DEV Skip OTP now converge on canonical
+> server-authoritative `b4_onboard_owner(...)`; the old separate DEV bootstrap
+> is removed. Durable current contracts live in `DECISIONS.md`,
+> `apps/mobile/sync/README.md`, and the Supabase migration README.
 
 ## In plain English
 

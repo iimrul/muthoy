@@ -210,6 +210,11 @@ role/user]. Scope the permission check strictly to the role_id it targets."
 
 ## 27. SUBSCRIPTION & PAYMENTS PROMPT
 
+> **Commercial values superseded 2026-09-05:** use the locked B4 decision in
+> `DECISIONS.md`, not older prompt values: Free ৳0; Pro ৳399/month with 3 active
+> shops and 4 active non-owner staff/shop; Ultra ৳499/month and unlimited;
+> SSLCommerz first. Annual SKUs are fixed at Pro ৳3,830 and Ultra ৳4,790.
+
 **Purpose:** Build real Free/Pro/Ultra gating and payment processing.
 **When to Use:** Day 21. **Tool: Cursor Pro for gating/UI; the payment
 webhook specifically benefits from Claude Code (server-side, security-
@@ -217,10 +222,10 @@ sensitive).**
 **Prompt:**
 > "Wire PremiumGate + a usePlan hook to the `subscriptions` table (cached on
 > `shops.plan` for fast reads). Enforce limits at creation time — Free: 1
-> store/1 staff; Pro ৳399/mo: max 2 stores, max 3 staff/store; Ultra ৳499/mo:
+> store/1 staff; Pro ৳399/mo: max 3 stores, max 4 staff/store; Ultra ৳499/mo:
 > unlimited — with an upgrade prompt, never a crash, when a limit is hit.
 > 14-day trial unlocks everything, badge shows 'Trial' not 'Ultra'. Build
-> /subscribe with SSLCommerz + direct bKash, and a payment webhook Edge
+> /subscribe with SSLCommerz first, and a payment webhook Edge
 > Function that verifies the provider's signature before writing a
 > subscriptions row — the phone must NEVER self-declare its own premium
 > status. On trial-end/downgrade, archive extras (first-created stays
@@ -279,25 +284,24 @@ query and confirm it's not double-counting or missing a shop filter."
 > "Add to the Admin Panel: a Leaflet map plotting shops by their captured
 > latitude/longitude, marker color = plan tier, click → drill-down; a
 > Subscriptions page listing by status (trialing/active/past_due/grace/
-> canceled/expired) with due-soon view and manual override actions (extend
-> trial, force a status change); an Audit Logs read-only view per shop; and
+> canceled/expired) with due-soon view; an Audit Logs read-only view per shop; and
 > simple Role Management for admin-panel users themselves (super-admin vs
 > support-read-only), separate from the pharmacy-side Owner/Manager/Staff
 > roles. Plan first."
 
 **Expected Output:** a working shop map and subscription/role admin tools.
 
-**Validation:** a shop with a captured location appears correctly plotted;
-a manual trial extension immediately reflects in that shop's mobile app on
-next sync.
+**Validation:** a shop with a captured location appears correctly plotted.
+The older manual trial-extension validation is superseded and requires a
+separate founder decision plus an audited server API before implementation.
 
 **Human Review:** confirm an admin action (e.g. toggle premium) is itself
 logged somewhere traceable — admin actions on other people's data deserve
 the same accountability as the pharmacy-side audit log.
 
-**Recovery Prompt:** "An admin override didn't propagate to the mobile app
-after sync. Trace whether the override actually wrote to `subscriptions` or
-only to a cached admin-side value."
+**Recovery Prompt:** "A subscription state did not propagate to the mobile app
+after sync. Trace the authoritative server entitlement and verified local cache;
+do not patch `subscriptions` directly."
 
 ---
 
@@ -337,7 +341,7 @@ plan's limit. **This is the last P1 prompt — full prototype parity is
 reached once this ships.**
 **When to Use:** Day 25. **Tool: Cursor Pro.**
 **Prompt:**
-> "Build Multi-Shop Management: an owner on Pro (max 2) or Ultra (unlimited)
+> "Build Multi-Shop Management: an owner on Pro (max 3) or Ultra (unlimited)
 > can create additional shops and switch the active shop from a single
 > screen. Enforce the plan's store limit at creation time with an upgrade
 > prompt. Switching shops must reload EVERY shop-scoped screen (staff,

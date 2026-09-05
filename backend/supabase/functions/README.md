@@ -1,7 +1,17 @@
 # backend/supabase/functions/
 
-`sync/` exposes one authenticated Edge Function with three POST actions:
-`push`, `pull`, and `link-device`. It verifies the caller's JWT and shop claim
-before using service-role-only RPCs.
+`sync/` exposes the authenticated Edge boundary for push/pull, grouped replay,
+device login/linking, canonical Owner onboarding, billing status/initiation,
+refund authority, and Owner multi-shop operations. It verifies JWT claims,
+live binding/role/permission/shop state, and entitlement where required before
+using narrow service-role-only RPCs.
 
-The payment webhook remains P1/post-beta.
+`20260905000000_b4_canonical_onboarding.sql` provides service-role-only
+`SECURITY DEFINER` functions `b4_onboard_owner(...)` and
+`b4_mutate_owned_shop(...)`; no broad protected-table write grants were added.
+Production OTP and DEV Skip OTP converge on the same onboarding/binding/claims/
+trial path. The separate DEV bootstrap and `devRegistration.ts` are removed.
+
+Remote `sync` is v10 ACTIVE. `payment-webhook` source exists, but SSLCommerz
+credentials/live validation are not configured; payment fails closed and is
+not production-ready.

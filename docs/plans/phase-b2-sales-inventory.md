@@ -1,6 +1,6 @@
 # Phase B2 — Sales and Inventory Functional Completion
 
-> **Historical implementation plan — superseded for status on 2026-08-30.**
+> **Historical implementation plan — superseded for status on 2026-09-05.**
 > B2 is implemented and committed. The PARTIAL/MISSING tables and
 > READY-FOR-IMPLEMENTATION statements below describe the pre-B2 baseline, not
 > current production. Preserve this file for contracts and rationale; use the
@@ -142,7 +142,9 @@ No schema change is required for basic history queries, derived Recent/Top/Favor
 - Rx Storage paths are `{shop_id}/{sale_id}/{attachment_id}` and require a live same-shop user. Only `sync/` uploads; attachment failure/retry never changes sale state.
 - Direct `audit_logs` SELECT and Staff Sales pull/query are Owner-only. Sales/history SELECT and pull require `sale_history`, except explicitly required actor-own sale rows. Staff/Manager hydration filters unauthorized all-shop history/audit rows before local insertion; no direct route or local query may recover them. Every path remains same-shop.
 - Preserve append-only movement idempotency and server-derived batch stock. The sole active server claim prevents two devices from receiving refund payout authority; deterministic refund/header/child IDs and immutable conflict checks independently prevent duplicate database effects.
-- Run PostgreSQL migration/ledger invariant checks against Dev/Test before any B2 deploy. Existing ledger migrations are documented as written/tested but not yet pushed to the linked Dev/Test project.
+- Historical rollout prerequisite, now satisfied: run PostgreSQL migration and
+  ledger-invariant checks before deployment. Current remote status lives in the
+  Supabase migration README.
 
 ## UPDATED DECISIONS
 

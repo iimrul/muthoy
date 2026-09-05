@@ -325,9 +325,9 @@ tail of the row's own UUID) is what `sales_shop_invoice_unique` /
 `purchases_shop_invoice_unique` actually enforces, so a same-sequence
 collision from two offline devices no longer costs the second sale its sync.
 
-**Remote status:** the PostgreSQL ledger and later B1-B3 migrations are written
-and locally tested but the current B1-B3 remote rollout is pending. Purchase
-return and audited stock-adjust/reconcile UI now exist; a distinct general
+**Remote status:** the PostgreSQL B1-B4 ledger is applied and matches local
+through `20260905000000_b4_canonical_onboarding.sql`; `sync` v10 is ACTIVE.
+Purchase return and audited stock-adjust/reconcile UI exist; a distinct general
 write-off workflow remains deferred.
 
 ## Known deferred items
@@ -338,9 +338,10 @@ write-off workflow remains deferred.
   adjustment and physical-count reconciliation exist.
 - BLE printing is Android-only in Beta and needs rollout validation against
   each supported printer model/firmware combination.
-- SQLCipher, real production OTP, DEV OTP bypass removal, remote migrations and
-  functions, custom access-token-hook registration, and post-deploy live
-  two-device checks remain rollout gates.
+- SQLCipher, production OTP hardening, DEV OTP bypass removal, final RC
+  multi-device coverage, and real SSLCommerz validation remain release gates.
+  The custom access-token hook is currently enabled but must be rechecked after
+  future auth rollout changes.
 - The earlier PIN performance work still lacks a recorded target-device timing
   pass; the B3 physical acceptance PASS does not close that separate latency
   gate.

@@ -23,11 +23,13 @@ skips **only** the phone-ownership proof, and nothing else.
 
 1. `supabase.auth.signInAnonymously()` — a **real** Supabase user and JWT. No
    token, claim, `shop_id`, or RLS decision is faked or hand-written anywhere.
-2. `createShopAndOwner()` — the same production helper registration uses.
-3. `linkDeviceToShop()` — the same production helper: invokes the `sync` Edge
-   Function's `link-device` action, which claims the shop in `shop_claims` and
-   writes `app_metadata.shop_id`, then calls `refreshSession()` and verifies the
-   refreshed JWT really carries that `shop_id`.
+2. `createShopAndOwner()` prepares the same validated local payload used by
+   production registration; it is not an independent cloud-authority path.
+3. `linkDeviceToShop()` invokes `sync/link-device`, which claims the shop and
+   calls the canonical `b4_onboard_owner(...)` server function. That function
+   atomically/idempotently creates the shop, roles, Owner, and settings before
+   auth binding and automatic trial grant. The client refreshes and requires
+   the complete Owner claim set with exact shop/user identity matches.
 4. `markShopCloudLinked()` — production helper.
 5. `router.replace('/')` — hands back to the normal root gate, which routes on
    to PIN Setup and then the dashboard. PIN setup is **not** skipped.
@@ -47,8 +49,10 @@ Verified against `backend/supabase/` before this was written:
   are likewise revoked from `anon, authenticated` and granted to `service_role`.
 - `verifyCallerJwt()` accepts any valid JWT and never inspects phone identity.
 
-Nothing was weakened to make this work — no RLS, Edge Function, `shop_claims`,
-or link-device code was modified.
+Nothing is locally self-authorized. DEV bypasses only OTP verification; RLS,
+`shop_claims`, canonical onboarding, binding, claims, trial, and sync are the
+same server-authoritative path as production. The old separate DEV bootstrap
+was removed; `devRegistration.ts` is gone and must not return.
 
 ### Known dev-only hazards
 
@@ -93,7 +97,7 @@ or link-device code was modified.
 Do not delete `apps/mobile/dev/` or remove its Vitest include glob: auth timing
 code and tests remain there. The real OTP screens (`register.tsx`'s form,
 `otp-verify.tsx`, `pin-setup.tsx`, `pin-login.tsx`), `sync/otp.ts`,
-`sync/linkDevice.ts`, and all backend code are untouched by the bypass removal.
+`sync/linkDevice.ts`, canonical onboarding, and backend auth code remain.
 
 #### 2. Supabase project settings
 

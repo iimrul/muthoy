@@ -28,6 +28,7 @@ and every PostgreSQL money column mirrors integer paisa.
 20260827000000_b3_group8_report_indexes.sql
 20260827010000_b3_group9_sale_tax_snapshot.sql
 20260831000000_b4_commercial_platform.sql
+20260905000000_b4_canonical_onboarding.sql
 ```
 
 Do not reorder the function-wrapper migrations: each later grouped-operation
@@ -65,10 +66,12 @@ The mobile runner and Drizzle journal register this exact numeric order:
 0023_purchase_invoice_metadata.sql
 0024_b3_report_indexes.sql
 0025_b3_sale_tax_snapshot.sql
+0026_b4_commercial_cache.sql
 ```
 
 B1 starts at `0009`; B2 sales/inventory occupies `0010`-`0012`, followed by
 dashboard credit-period migrations `0013`-`0014`; B3 occupies `0015`-`0025`.
+B4 local commercial membership/entitlement/payment caching is `0026`.
 
 `0018` backfills the old expense categories to
 Rent/Salary/Utilities/Conveyance/Other. `0024` backfills missing sale business
@@ -76,27 +79,23 @@ dates using Asia/Dhaka. `0025` adds immutable MRP-inclusive integer-paisa tax
 snapshots. These data-shape steps need production backups and postchecks; they
 are not routine column-only changes.
 
-## Current status — 2026-08-30
+## Current status — 2026-09-05
 
-- All repository migration files are written and covered by real SQLite/PGlite
+- All repository migration files are written, remotely applied through
+  `20260905000000_b4_canonical_onboarding.sql`, and covered by real SQLite/PGlite
   migration tests, including fresh order, legacy upgrade/backfill, repeated
   application where supported, RLS/shop isolation, grouped operation replay,
   inventory ledger, `inventory_add`, reporting, and tax constraints.
-- Full automated suite: **PASS** — 124 files, 1,268 tests (`pnpm test`).
-- Founder-reported final Supabase migration dry-run: **PASS**.
-- The exact dry-run command/output transcript is not committed. Treat PASS as a
-  recorded manual result, not a reproducible artifact.
-- B1-B3 remote Supabase migration execution: **PENDING**.
-- Matching Edge Function deployment: **PENDING**.
-- Tests execute migration SQL only in ephemeral SQLite/PGlite databases. This
-  recovery runs no migration against a persistent app database or linked
-  Supabase project and performs no deploy, push, or commit.
+- Local and remote ledgers match through the 2026-09-05 migration, exactly once.
+- B4 DB/migration parity, RLS, Auth hook configuration, ledger invariants, and
+  valid production-row preservation were verified during controlled rollout.
+- Deployed `sync` is v10 ACTIVE; `payment-webhook` is not production-ready while
+  SSLCommerz credentials/live validation remain absent.
+- Recorded B4 completion suite: **PASS** — 146 files, 1,537 tests; typecheck and
+  lint PASS. Coverage includes canonical onboarding, hosted ACL/grants,
+  commercial/trial/Multi-Shop behavior, direct-write denial, and migration parity.
 
-Repository evidence does not prove the exact migration version currently
-installed in the linked remote project. Confirm it before rollout; never infer
-remote state from the presence of local files.
-
-## Required rollout sequence
+## Required sequence for future migrations
 
 1. Confirm the linked project/environment and current remote migration table.
 2. Take schema and data backups.
@@ -107,10 +106,10 @@ remote state from the presence of local files.
 6. Run `backend/supabase/checks/ledger_invariant.sql`; PASS is check 0 =
    `PASS`, zero rows from checks 1-4, and all four triggers present in check 5.
 7. Deploy the matching sync Edge Function only after schema success.
-8. Register `public.custom_access_token_hook` in Supabase Auth Hooks; migrations
-   cannot perform this manual step. Mint/decode a token and verify
-   `app_metadata.app_user_id`, `shop_id`, `role`, and `permission_version`.
-9. Run post-deploy B1-B3 smoke tests: role revocation, `inventory_add`, sale and
+8. Confirm `public.custom_access_token_hook` remains selected in Supabase Auth
+   Hooks; migrations cannot preserve/enable this hosted setting. Mint/decode a
+   token and verify all current Owner claims.
+9. Run post-deploy B1-B4 smoke tests: role revocation, `inventory_add`, sale and
    stale quote, grouped replay, refund claim, credit convergence, purchase/
    return/supplier credit, reports/tax/export, and two-device stock convergence.
 
@@ -144,18 +143,27 @@ still require explicit least-privilege grants:
 | `20260817000000_admin_read_grants.sql` | `SELECT` on `shops`, `sales` | P0 admin pages |
 | `20260817000100_sync_roles_read_grant.sql` | `SELECT` on `roles` | sync permission-row authorization |
 
+Canonical onboarding and owned-shop mutation deliberately add no broad
+service-role table writes. `20260905000000_b4_canonical_onboarding.sql` exposes
+only service-role execution of `SECURITY DEFINER` functions
+`b4_onboard_owner(...)` and `b4_mutate_owned_shop(...)`; execution is revoked
+from public, `anon`, and `authenticated`. The PGlite harness models hosted ACLs,
+and grant tests fail if direct protected-table writes appear without an explicit,
+reviewed boundary.
+
 No migration grants table writes to `anon` or `authenticated`, and no default
 privilege grants future tables automatically. New direct reads must add an
 explicit grant and extend the grant tests.
 
 ## Known rollout risks
 
-- Remote version is not durably recorded in this repo; environment mismatch is
-  the first check.
+- Confirm the linked project and ledger before every future rollout; the current
+  verified cutoff is `20260905000000_b4_canonical_onboarding.sql`.
 - Expense-category and business-date backfills touch existing data.
 - Ledger backfill needs a valid actor for every historical gap.
 - Client/function/schema version skew can strand atomic groups.
-- The access-token hook is manual and fails closed when absent.
+- The access-token hook is currently enabled, remains a manual hosted setting,
+  and fails closed when absent.
 - Live two-device convergence, refund authority, and revocation must be checked
   after deploy even though PGlite coverage passes.
 - SQLCipher, production OTP/provider hardening, DEV bypass removal, and broader

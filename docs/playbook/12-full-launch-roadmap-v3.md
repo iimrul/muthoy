@@ -2,9 +2,12 @@
 
 ## VOLUME 12 V3 — Prototype-Complete Beta Roadmap, Functional Parity & UI/UX Release Gate
 
-**Status:** Governing roadmap for the remaining Beta work  
+**Status:** Governing roadmap; B1-B4 functional completion physically passed,
+with Phase C/Pre-RC gates still open.
+
 **Replaces:** Volume 12 V2 where V2 conflicts with this document  
 **Date:** 2026-08-21
+**Status updated:** 2026-09-05
 
 ---
 
@@ -418,13 +421,11 @@ Recommended grouping:
 
 ### B4. Commercial / platform completeness
 
-- Plans
-- trial state
-- premium gating
-- payment
-- payment success
-- multi-shop
-- shop switching
+**Completed and physically verified 2026-09-05 at `8d4c503`.** Plans, automatic
+trial state, premium gating, fail-closed payment/payment-success surfaces,
+Multi-Shop, and shop switching are implemented. Live SSLCommerz credentials and
+provider validation remain Pre-RC; completion here does not claim live payment
+acceptance.
 
 After this phase:
 
@@ -808,8 +809,8 @@ Muthoy Beta may be called prototype-complete only when:
 [ ] Navigation / Scan / More parity complete
 [ ] Sale / Inventory / Credit / Supplier / Cash workflows complete
 [ ] Reports / Export / Printer complete
-[ ] Plans / Trial / Payment complete if approved Beta scope
-[ ] Multi-shop complete if approved Beta scope
+[x] Plans / Trial / fail-closed Payment surfaces complete; live SSLCommerz remains Pre-RC
+[x] Multi-shop complete and physically verified
 [ ] Functional parity audit signed off
 [ ] UI/UX parity signed off
 [ ] Offline-first regression clean
@@ -872,17 +873,13 @@ Git already preserves historical plan versions.
 
 # 20. IMMEDIATE NEXT ACTION
 
-Do **not** begin final UI polishing yet.
-
-Run the functional prototype gap audit first.
+The B1-B4 functional sequence is complete. Do not rerun historical gap plans as
+implementation work.
 
 Sequence:
 
 ```text
-Current hardened foundation
-→ 39-screen functional gap audit
-→ complete PARTIAL/MISSING screens/features
-→ verify 39/39 functional accounting
+Current B1-B4 physically verified foundation
 → final UI/UX parity pass
 → security/observability
 → RC

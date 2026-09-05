@@ -1,14 +1,15 @@
 # Phase B3 — Customer / Supplier / Finance Completeness (Exact Prototype Parity)
 
-> **Historical implementation plan — superseded for status on 2026-08-30.**
+> **Historical implementation plan — superseded for status on 2026-09-05.**
 > B3 is implemented and committed, and its founder-reported physical-device
 > acceptance and final Supabase migration dry-run passed. The MISSING/PARTIAL,
 > blocker, migration-number forecast, and READY-FOR-IMPLEMENTATION sections
 > below are pre-implementation history. Preserve them for requirements and
 > decision rationale; actual migration names/order/status live in
 > `backend/supabase/migrations/README.md`, and durable behavior lives in
-> `DECISIONS.md` and `apps/mobile/README.md`. Remote migration execution and
-> deployment remain pending.
+> `DECISIONS.md` and `apps/mobile/README.md`. The remote B1-B4 rollout is now
+> complete through the canonical onboarding migration; old pending statements
+> below are historical.
 
 Date: 2026-08-22
 Mode at authoring: read-only audit + plan. No implementation, commit, deploy,

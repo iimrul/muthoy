@@ -17,7 +17,7 @@ The full day-by-day build plan lives in [`docs/playbook/`](docs/playbook/)
 (Volumes 0-10). Real decisions made along the way are logged in
 [`DECISIONS.md`](DECISIONS.md).
 
-## Current production baseline — B1 to B3
+## Current production baseline — B1 to B4
 
 `apps/prototype-web` is the UI/UX and product-flow source of truth. It is not
 the implementation authority. Production correctness comes from the mobile
@@ -43,6 +43,11 @@ production app.
   customer credit and collections, suppliers, purchase invoices/pending lines,
   supplier payments, purchase returns and supplier credit, reports/monthly P&L,
   MRP-inclusive tax snapshots, CSV/XLSX export, and Android BLE ESC/POS printing.
+- **B4:** server-authoritative Free/Pro/Ultra entitlements, automatic one-time
+  14-day Ultra-equivalent trial, verified offline entitlement cache, Plans and
+  payment states, premium gates, and Owner multi-shop create/rename/switch/
+  archive/restore. One Owner billing account covers all owned shops; downgrade
+  suspends deterministic excess shops/staff without deleting data.
 
 Standing invariants: screens read SQLite only; money is integer paisa; business
 dates are Asia/Dhaka; stock changes only through append-only inventory movements;
@@ -51,23 +56,34 @@ apply atomically and idempotently; protected actor-initiated business writes are
 shop-scoped and actor-checked. Deliberate background/system writes remain
 shop-scoped without inventing an actor.
 
-## Delivery status — 2026-08-30
+## Delivery status — 2026-09-05
 
-- B1-B3 product code is committed.
-- Local SQLite migrations `0000` through `0025` are packaged in order and have
+- B1-B4 product code is committed at `8d4c503` (`feat: complete B4 commercial
+  flows and canonical onboarding`). B4 physical Android verification passed,
+  including Trial discovery and Multi-Shop.
+- Local SQLite migrations `0000` through `0026` are packaged in order and have
   automated fresh/upgrade coverage.
-- Full automated suite: **PASS** — 124 files, 1,268 tests (`pnpm test`). Tests
-  execute migrations only in ephemeral SQLite/PGlite databases.
-- Founder-reported B3 physical-device acceptance: **PASS**.
-- Founder-reported final Supabase migration dry-run: **PASS**. The exact command
-  transcript is not committed in the repository.
-- B1-B3 remote Supabase migration execution and Edge Function deployment remain
-  **PENDING**. No migration ran against a persistent app database or linked
-  Supabase project; no deployment, push, or commit is part of this recovery.
+- Local and remote PostgreSQL migration ledgers match through
+  `20260905000000_b4_canonical_onboarding.sql`; migration parity and B4 DB
+  behavior are verified. The `sync` Edge Function is v10 ACTIVE.
+- Recorded B4 completion suite: **PASS** — 146 files, 1,537 tests; typecheck and
+  lint also passed. Migration tests cover canonical onboarding, hosted ACL/grant
+  behavior, RLS, commercial/trial limits, and multi-shop isolation.
+- Payment UI/domain/provider abstraction exists and fails closed while
+  SSLCommerz is unconfigured. Live payment acceptance is **not** production-ready.
 
 See [`backend/supabase/migrations/README.md`](backend/supabase/migrations/README.md)
-for exact migration order and rollout gates, and [`DECISIONS.md`](DECISIONS.md)
-for the durable B1-B3 contracts and known risks.
+for exact migration order and current parity, and [`DECISIONS.md`](DECISIONS.md)
+for the durable B1-B4 contracts and remaining release gates.
+
+## Pre-RC gates
+
+Still incomplete: production OTP provider hardening, real SSLCommerz credentials
+and validation, SQLCipher, `conflict_queue` UI/wiring, PIN timing/security
+hardening, broader printer hardware coverage, the export service-level Owner
+guard if still pending, admin completion, fixed shop location/map support,
+production observability, DEV bypass/debug removal, final 39/39 UI parity and
+security/RLS audits, and the RC fresh-install/upgrade/offline/multi-device matrix.
 
 ## Prerequisites
 

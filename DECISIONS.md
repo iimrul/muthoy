@@ -942,22 +942,11 @@ devices was silent, permanent data loss for the second sale at sync time.
 
 **Deferred, explicitly:**
 
-> **Status superseded 2026-08-30:** the ledger rationale below remains active,
-> but separate-device login, full-sale return/refund, purchase returns, and
-> audited stock adjustment/reconciliation have since shipped. A distinct
-> general write-off workflow and the remote rollout remain pending.
-
-- The Dev/Test Postgres migration (both ledger migration files, plus the
-  read-only `backend/supabase/checks/ledger_invariant.sql` verification
-  query) is written and tested but **not yet pushed** to the linked Dev/Test
-  Supabase project.
-- Return/write-off UI does not exist yet. The ledger's `reason` vocabulary
-  (already used by the backfill's `adjustment` reason) supports it
-  structurally; no screen or dedicated reason code has been built.
-- Separate-device Owner/Staff login — a Staff member authenticating from
-  their own device rather than an Owner handing theirs over — is not yet
-  supported by the session/auth flow. Planned as the next phase after this
-  ledger/sync work lands.
+> **Status superseded 2026-09-05:** separate-device login, full-sale refund,
+> purchase returns, audited adjustment/reconciliation, and the remote ledger
+> rollout have shipped and passed their recorded verification. A distinct
+> general write-off workflow remains deferred. The ledger rationale above
+> remains active.
 
 ---
 
@@ -1042,8 +1031,8 @@ Phase B2 follows `docs/plans/phase-b2-sales-inventory.md`. Locked rules:
   validated, and committed as one ledger/outbox operation.
 
 The founder approved the B2 safety gate for local implementation only. This
-implementation-status sentence is historical: B2 code was later implemented
-and committed. Remote migration execution and deployment remain pending.
+implementation-status sentence is historical: B2 code was later implemented,
+committed, and remotely deployed. See the 2026-09-05 completion entry.
 
 ---
 
@@ -1079,10 +1068,9 @@ zero (`CASE WHEN payment_type = 'cash'`) and listed non-selling staff under
 "Today's Active Staff"; and the dashboard rendered a blank screen for a
 non-owner and swallowed load failures as unhandled rejections.
 
-> **Status superseded 2026-08-30:** the dashboard and B1-B3 product code are
-> implemented and committed. Remote migration execution/deployment remains
-> pending; `0013_owner_dashboard_credit_period.sql` is packaged locally and its
-> PostgreSQL mirror stays in the pending ordered remote bundle.
+> **Status superseded 2026-09-05:** the dashboard and B1-B4 product code are
+> implemented and committed; the remote migration/function rollout completed.
+> See the 2026-09-05 completion entry for the current cutoff.
 
 ---
 
@@ -1151,8 +1139,9 @@ Sale search/cart/checkout, insights, barcode/OCR, holds, prescription metadata,
 discounts, cash/credit/split payment, history/detail, and full-sale refund are
 implemented in committed product code. Checkout accepts medicine quantity
 intent, then re-reads and prices the actual batch allocation inside one SQLite
-transaction. Server-dependent refund/grouped-sync paths are not rollout-ready
-until the pending remote migrations/functions are deployed.
+transaction. Matching remote grouped-operation migrations/functions are now
+deployed; the old pending-rollout warning is superseded by the 2026-09-05 B4
+completion entry below.
 
 Stock expired before the Asia/Dhaka business date is unsellable. Null expiry is
 sellable and FEFO-last. Transaction-time FEFO allocates the earliest sellable
@@ -1248,37 +1237,27 @@ invariants instead of trusting client totals.
 
 ### Migrations and verification
 
-Local SQLite migrations `0000` through `0025` are registered in numeric order.
-B1 begins at `0009`; B2 is `0010`-`0014`; B3 is `0015`-`0025`. PostgreSQL has 20
-timestamped files in lexical order through
-`20260827010000_b3_group9_sale_tax_snapshot.sql`. Exact order and rollout steps
+Local SQLite migrations `0000` through `0026` are registered in numeric order.
+B1 begins at `0009`; B2 is `0010`-`0014`; B3 is `0015`-`0025`; B4 commercial
+cache is `0026`. PostgreSQL has 22 timestamped files in lexical order through
+`20260905000000_b4_canonical_onboarding.sql`. Exact order and rollout history
 live in `backend/supabase/migrations/README.md`.
 
-The full `pnpm test` suite passed 124 files/1,268 tests. It covers migrations and
-the principal role, shop-isolation, stock, money, grouped-replay, report, tax,
-export, and printer contracts. The first sandboxed attempt stopped before test
-collection because esbuild could not spawn (`EPERM`); the approved outside-
-sandbox rerun is the recorded PASS. Migration SQL executed only inside ephemeral
-SQLite/PGlite test databases, not a persistent app DB or linked Supabase project.
+The recorded B4 completion suite passed 146 files/1,537 tests, plus typecheck and
+lint. It covers migrations, canonical onboarding, hosted ACL/grants, principal
+roles, shop isolation, commercial/trial limits, multi-shop, stock, money,
+grouped replay, reports, tax, export, and printer contracts.
 
-Founder-reported B3 physical-device acceptance: **PASS**. Founder-reported
-final Supabase migration dry-run: **PASS**. The repository contains no committed
-device/build checklist or dry-run command/output transcript, so those are
-recorded manual outcomes, not reproducible artifacts.
-
-Remote B1-B3 Supabase migration execution and matching Edge Function deployment
-remain **PENDING**. This recovery executes no migration against a persistent app
-database or linked remote environment and does no deploy, push, or commit.
+Founder-reported B3 and B4 physical-device acceptance: **PASS**. Controlled
+remote rollout completed; local/remote migration ledgers match through the
+2026-09-05 canonical onboarding migration and `sync` v10 is ACTIVE.
 
 ### Deferred items and rollout risks
 
-- Confirm the exact linked remote migration version; local files do not prove
-  remote state. Back up schema/data, re-run dry-run, apply in order, then run the
-  ledger invariant and full post-deploy two-device smoke suite.
-- Deploy schema-compatible grouped-operation SQL before the matching mobile/
-  Edge versions. Version skew can halt or reject queued money/stock groups.
-- Register and verify `public.custom_access_token_hook` manually after
-  migrations; SQL cannot enable the Auth hook.
+- Reconfirm the linked project and ledger before every future rollout. Version
+  skew can halt or reject queued money/stock groups.
+- `public.custom_access_token_hook` is enabled, but remains a manual hosted
+  setting that SQL cannot preserve or enable; recheck it after auth changes.
 - Expense-category and Asia/Dhaka business-date backfills rewrite existing data
   and need real-data pre/postchecks. Ledger backfill aborts on actorless gaps.
 - SQLCipher remains required before pilot data. Production OTP/provider setup,
@@ -1286,8 +1265,8 @@ database or linked remote environment and does no deploy, push, or commit.
 - B3 physical PASS does not prove every BLE printer/firmware model and does not
   close the separate recorded PIN-latency timing gate.
 - Backup-key restore, expense receipt photos, a distinct general stock-write-off
-  workflow, broader receipt-print surfaces, B4 plan/payment/multi-shop work, and
-  backup/remote-wipe administration remain deferred or out of B1-B3 scope.
+  workflow, broader receipt-print surfaces, and backup/remote-wipe administration
+  remain deferred or out of B1-B4 scope.
 - `conflict_queue` remains schema-only with no app writer/resolution UI. Ledger
   stock and grouped operations supersede its old stock-LWW safety rationale, but
   general row-conflict surfacing remains deferred.
@@ -1309,3 +1288,119 @@ database or linked remote environment and does no deploy, push, or commit.
 - Downgrade deletes nothing. Deterministically excess shops become read-only;
   excess active staff become plan-suspended. Server entitlement and membership
   are authoritative; SQLite is the fast/offline cache.
+
+---
+
+## 2026-09-05 — B4 complete: canonical onboarding, commercial access, and Multi-Shop
+
+Commit `8d4c503` (`feat: complete B4 commercial flows and canonical onboarding`)
+is the completed B4 baseline. Physical Android verification passed. Local and
+remote PostgreSQL migration ledgers match through
+`20260905000000_b4_canonical_onboarding.sql`; B4 migration/DB parity is clean and
+the deployed `sync` Edge Function is v10 ACTIVE. The recorded completion suite
+passed 146 files/1,537 tests, plus typecheck and lint.
+
+### Commercial and entitlement contract
+
+- Free is ৳0. Pro is ৳399/month or fixed ৳3,830/year. Ultra is ৳499/month or
+  fixed ৳4,790/year. All persisted money is integer paisa and server-priced.
+- Pro permits 3 active shops and 4 active non-owner staff per shop. Manager
+  counts as staff; Owner does not. Ultra is unlimited.
+- One Owner/account-level subscription and billing account covers all owned
+  shops. Server entitlement is authoritative; SQLite is a verified read cache
+  for instant/offline UI and never creates access.
+- Paid access has 7 days of grace. Trial has no grace. Offline premium stops at
+  paid/grace expiry or 30 days since server verification, whichever comes first.
+  Trial is bounded by the stored server trial end. Clock rollback fails closed.
+  Transient verification failure does not revoke a still-valid verified cache.
+- Downgrade deletes nothing. Deterministic oldest/primary survivors stay active;
+  excess shops become commercially suspended/read-only and excess non-owner
+  staff become plan-suspended.
+
+### Trial contract
+
+Trial starts automatically after authoritative Owner activation; there is no
+Start Trial action. It is granted server-side exactly once per billing account,
+lasts 14 days, renders as Trial, and supplies Ultra-equivalent features and
+limits. Existing eligible Owners receive the one-time rollout grant. The end is
+derived from the original stored grant timestamp; retry, relogin, reinstall, or
+device clock cannot reset or extend it. Expiry has no grace and resolves to Free.
+
+### Canonical Owner onboarding and claims
+
+Production follows:
+
+`phone → OTP verify → canonical server Owner/shop onboarding → auth binding → refreshed claims → automatic trial hydration`.
+
+DEV Skip OTP bypasses only phone OTP proof, remains `__DEV__`-only, and then
+uses the same canonical onboarding/binding/claims/trial path. The superseded
+separate DEV bootstrap was removed; `devRegistration.ts` is gone and must not
+return. DEV must never create a parallel local-authoritative onboarding model.
+Production release must remove/disable all DEV bypass UI and diagnostics.
+
+Fresh Owner success requires `app_user_id`, explicit `principal_user_id`,
+`shop_id`, `role=owner`, `permission_version` (including zero), and
+`billing_account_id`, with exact requested shop/user identity matches. No
+principal fallback is allowed. Missing/mismatched claims fail loudly and cannot
+mark the local shop cloud-linked.
+
+`20260905000000_b4_canonical_onboarding.sql` adds two narrow
+`SECURITY DEFINER` functions. `b4_onboard_owner(...)` atomically and
+idempotently creates the shop, its three system roles, Owner, and settings;
+`b4_mutate_owned_shop(...)` performs account-scoped rename/archive/restore.
+Execution is service-role-only and no broad service-role INSERT/UPDATE grants
+were added. The PG harness represents hosted ACL behavior; grants tests and PG
+tests guard direct PostgREST writes to protected tables.
+
+### Multi-Shop contract
+
+Active Trial Owners have effective Ultra access. Pro permits 3 active shops;
+Ultra is unlimited; Free/expired accounts are commercially locked. Owner may
+create, rename, switch, archive, and restore. A stranded Owner may return to the
+primary shop, but the exception grants no secondary-shop operation. Server shop
+switch/summaries enforce role, membership, entitlement, and billing account;
+session epoch, shop-scoped outboxes/cursors, cache hydration, and volatile-state
+clearing prevent cross-shop leakage. Physical Multi-Shop flow passed.
+
+### Connectivity and billing hydration
+
+Google/Android reachability is not an authoritative internet signal. Only
+`isConnected === false` is confidently offline; false/null internet reachability
+with transport present remains unknown and requests Supabase. Manual Sync, the
+sync engine, and billing hydration share this decision.
+
+Billing hydration is attempt-first and independent of push/pull/outbox progress.
+Retries are bounded and owned by a session/shop generation. Timer, reconnect,
+and foreground triggers coalesce into its single in-flight request. Logout or
+shop switch invalidates/aborts the old generation; stale responses cannot write
+SQLite or publish success/failure. Config, auth, server/relay, and transport
+failures remain distinct.
+
+### Payment reality and environment
+
+Payment initiation/order/provider abstractions and `payment-webhook` source
+exist; SSLCommerz is the first planned provider. Real credentials/account and
+live provider validation are not configured. Missing provider configuration
+fails closed, client/browser/deep-link state cannot unlock a plan, and only
+verified server confirmation may activate entitlement. Live payment acceptance
+remains Pre-RC/RC work.
+
+Local Expo configuration lives in uncommitted `apps/mobile/.env`; EAS builds
+require EAS Environment Variables. `EXPO_PUBLIC_*` is transform-time inlined,
+not secret storage. `.env.example` remains non-secret. Runtime/DEV diagnostics
+may report config presence and host, never keys, tokens, or identifiers.
+
+### Remaining Pre-RC gates — not done
+
+- Production OTP provider hardening.
+- Real SSLCommerz credentials/account and sandbox/live validation.
+- SQLCipher production completion.
+- `conflict_queue` UI/wiring.
+- PIN timing/security hardening.
+- Broader printer hardware coverage.
+- Export service-level Owner guard, if still pending.
+- Admin panel completion and fixed shop location/map support.
+- Production observability/release monitoring.
+- DEV bypass/debug cleanup.
+- Final 39/39 UI parity audit and final security/RLS audit.
+- RC fresh-install, upgrade, offline, offline→online, and multi-device testing.

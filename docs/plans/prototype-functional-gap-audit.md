@@ -1,9 +1,11 @@
 # Prototype Functional Gap Audit
 
-> **Historical pre-B1 audit — superseded for status on 2026-08-30.** Counts,
+> **Historical pre-B1 audit — superseded for status on 2026-09-05.** Counts,
 > gap labels, and next tasks below are retained as audit evidence; they are not
-> a current implementation dashboard. Current B1-B3 status is documented in
-> the root `README.md`, `apps/mobile/README.md`, and `DECISIONS.md`.
+> a current implementation dashboard. B4 commercial/trial/Multi-Shop is
+> implemented, physically passed, and committed at `8d4c503`; rows below that
+> label those surfaces MISSING are historical. Current B1-B4 status is in the
+> root `README.md`, `apps/mobile/README.md`, and `DECISIONS.md`.
 
 Date: 2026-08-21  
 Mode: read-only functional audit; this file is the only change.  
@@ -143,7 +145,8 @@ Visual mismatch is excluded. Prototype code is used only for WHAT/flow. Producti
 3. Reports, sales history, monthly P&L, export, and printer are stubs/missing.
 4. Plans/trial/premium/payment and multi-shop have schema hints but no production product flow or authoritative limit enforcement.
 5. Money/stock-sensitive prototype flows still lack production contracts: split payment, refund/return, batch edit/adjustment, supplier payment/void, and cash withdrawal/actual count.
-6. Prototype commercial limit conflict: `SCREENS.md` says Pro allows 2 shops; latest `Plans.tsx` says 3. Resolve before plan or multi-shop enforcement.
+6. Historical prototype commercial limit conflict: `SCREENS.md` said 2 shops;
+   the founder resolved this at **Pro = 3 active shops** before B4 enforcement.
 
 ## Next implementation group
 

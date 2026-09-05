@@ -10,6 +10,35 @@ through `db/sync-helpers.ts` and are never re-enqueued.
 Required Expo environment variables are documented in `../.env.example`.
 Without them background sync safely no-ops; foreground OTP calls fail loudly.
 
+## Canonical Owner onboarding (B4)
+
+Production registration verifies phone OTP, then `link-device` sends the local
+onboarding payload to server-owned `b4_onboard_owner(...)`, creates the auth
+binding, refreshes the session, validates all Owner claims, and hydrates the
+automatic trial. DEV Skip OTP bypasses only OTP and uses this same path. The old
+separate DEV bootstrap is removed; no sync screen or client path may create a
+subscription, trial, or authoritative cloud identity.
+
+Owner token acceptance requires explicit `app_user_id`, `principal_user_id`,
+`shop_id`, `role=owner`, `permission_version`, and `billing_account_id`, plus
+exact requested shop/user matches. Partial or mismatched tokens cannot mark the
+shop cloud-linked.
+
+## Connectivity and billing hydration (B4)
+
+`connectivity.ts` is the canonical decision for manual Sync, the sync engine,
+and entitlement hydration. Only `isConnected === false` is confidently offline;
+unknown/false internet reachability with a transport still attempts the actual
+Supabase request. No Google reachability endpoint is authoritative.
+
+Billing hydration is independent of outbox push/pull and always makes the
+session's first attempt. Its retry/mutex/listeners belong to one session-epoch
+and shop generation; reconnect, foreground, and timer triggers coalesce. Logout
+or shop switch invalidates and aborts the old generation, so stale results
+cannot write the entitlement cache or publish state. Offline, config, auth, and
+server/relay failures are classified separately. A transient failure preserves
+a still-valid verified cache within server expiry and the 30-day offline ceiling.
+
 ## Separate-device login (migration 0007)
 
 `deviceAuth.ts` is the fresh-device entry point: phone + PIN, verified by the
@@ -127,10 +156,10 @@ Offline, timeout, claim conflict, or invalid authority causes zero sale, stock,
 cash, credit, or ledger mutation. Same-operation/device retry resumes safely;
 claims do not auto-expire or silently reassign.
 
-## Rollout status — 2026-08-30
+## Rollout status — 2026-09-05
 
-The B1-B3 migration/function bundle is present and its final Supabase dry-run
-was founder-reported PASS. Remote migration execution and Edge Function deploy
-are still pending. The dry-run transcript is not committed, so deployment must
-retain its reviewed prechecks, backup, ordered migration, invariant checks,
-custom access-token-hook registration, and post-deploy two-device verification.
+The B1-B4 migration ledger is remotely applied and matches local through
+`20260905000000_b4_canonical_onboarding.sql`; `sync` v10 is ACTIVE and the Auth
+hook is enabled. B4 physical Trial/Multi-Shop verification passed. Future
+rollouts must retain backup, dry-run, ordered migration, invariant, hook, and
+multi-device checks. Real SSLCommerz and production OTP remain release gates.
