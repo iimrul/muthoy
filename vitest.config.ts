@@ -146,6 +146,10 @@ export default defineConfig({
       "apps/mobile/tests/switch-user-writes.test.tsx",
       "apps/mobile/tests/dashboard-rollover.test.tsx",
       "apps/mobile/tests/navigation-shell.test.tsx",
+      // M-1 / screen #39: registered fallback, role-aware replacement and Back.
+      // Neutral typos show Not Found; guarded prefixes retain their overlays.
+      "apps/mobile/tests/not-found.test.tsx",
+      "apps/mobile/tests/not-found.integration.test.tsx",
       "apps/mobile/tests/reports-final-fixes.test.tsx",
       "apps/mobile/tests/app-layout.test.tsx",
       "apps/mobile/tests/authenticated-routing.test.tsx",

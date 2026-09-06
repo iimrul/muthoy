@@ -1420,3 +1420,24 @@ Excel, and external Share controls are hidden or disabled for non-Owners.
 Report calculations, export formats, timestamps, and paging limits are unchanged.
 The earlier missing-service-guard warning is superseded by this H-1 change;
 physical Android export/share validation remains required before release.
+
+## 2026-09-06 — M-1 Not Found recovery and 39-screen functional accounting
+
+M-1 is DONE functionally: **39/39 functionally accounted for**. The Pre-RC
+accounting is DONE 34, PARTIAL 4, MISSING 0, SUPERSEDED 1. Four screens remain
+PARTIAL; this is not full completion, physical acceptance, or RC readiness.
+
+`app/+not-found.tsx` uses Expo Router's registered fallback and the existing
+role-to-home mapping. Home replaces the dead route; Back is offered only when
+history exists. Signed-out recovery targets `/`. NavigationBoundary, the app
+shell, permission rules, premium gates, and locale storage are unchanged.
+
+The integration suite discovers actual app files, runs the installed Expo route
+parser and StackRouter reducer, and renders the matched Not Found screen with
+the real boundary. This is core integration, not a native navigator test:
+Vitest/jsdom adapts imperative transport and substitutes nested-layout and
+destination bodies. Expo's Jest/native test renderer is not configured here.
+Physical Android validation remains PENDING until the founder checks deep links,
+role/signed-out recovery, hardware Back, guarded-prefix overlays, nested
+navigation, typography, and bottom insets. The screen reuses existing Bangla fonts,
+color tokens, and NativeWind shadow/elevation utilities.

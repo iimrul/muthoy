@@ -6,6 +6,12 @@
 > implemented, physically passed, and committed at `8d4c503`; rows below that
 > label those surfaces MISSING are historical. Current B1-B4 status is in the
 > root `README.md`, `apps/mobile/README.md`, and `DECISIONS.md`.
+>
+> **M-1 closeout — 2026-09-06:** #39 Not Found is now DONE functionally, with
+> router-core integration proof. **39/39 functionally accounted for**; four
+> screens remain PARTIAL. Founder physical Android validation is pending.
+> The historical counts below are unchanged; current accounting is in
+> `pre-rc-master-plan.md` and `DECISIONS.md`.
 
 Date: 2026-08-21  
 Mode: read-only functional audit; this file is the only change.  
@@ -89,7 +95,7 @@ Visual mismatch is excluded. Prototype code is used only for WHAT/flow. Producti
 | 36 | Plan Payment | MISSING | Selected plan/term, bKash or SSLCommerz, processing/failure, server-confirmed activation. | TODO placeholder; no payment Edge Function/webhook flow. | Define the server-owned payment initiation/callback/webhook contract. |
 | 37 | Plan Success | MISSING | Confirm activated plan and return Home. | No production route/file. | Add the route only after server-confirmed subscription state can be read locally. |
 | 38 | Multi-Shop Management | MISSING | Owner all-shop summary; add/rename/archive/restore/switch; enforce plan limits and isolation. | Schema and sync are shop-scoped, but no active-shop registry/switcher/management surface exists. | Plan active-shop session switching and sync teardown/start invariants before UI. |
-| 39 | Not Found / route fallback | MISSING | Friendly fallback with Back/Home actions inside and outside auth shell. | No Expo Router `+not-found.tsx`. | Add `app/+not-found.tsx` with Back and root actions. |
+| 39 | Not Found / route fallback | Historical: MISSING; now DONE (M-1) | Friendly fallback with Back/Home actions inside and outside auth shell. | Absent at audit date; `app/+not-found.tsx` now implemented with router-core integration proof. | Founder physical Android validation pending; see current master plan. |
 
 ## Shared-feature matrix
 
@@ -134,7 +140,7 @@ Visual mismatch is excluded. Prototype code is used only for WHAT/flow. Producti
 
 - Strong production foundations already present: SQLite-only screen reads, FEFO domain logic, integer-paisa money, cash close/closed-day guards, inventory movement ledger, atomic credit/purchase/sale writes, native PIN crypto, device auth, sync/hydration, stale-session protection, per-staff permissions, notification scheduling, and shop-scoped DB queries.
 - Explicit production placeholders: `app/reports/*`, `db/reports.ts`, `app/staff/sales-view.tsx`, `app/settings/plans.tsx`, `app/settings/plan-payment.tsx`, `app/settings/printer-settings.tsx`, `PlanBadge.tsx`, `PremiumGate.tsx`, and `usePlan.ts`.
-- Missing production routes: Staff Home, dedicated Scan, Supplier Invoice list/detail, Plan Success, Multi-Shop, and Not Found.
+- At the historical audit date, absent routes included Staff Home, dedicated Scan, Supplier Invoice list/detail, Plan Success, Multi-Shop, and Not Found. M-1 now implements Not Found; current statuses are in the master plan and `DECISIONS.md`.
 - No visual-only difference affected a status.
 - No runtime/device claims were made. This is static functional evidence only.
 
