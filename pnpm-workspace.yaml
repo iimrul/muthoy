@@ -43,8 +43,15 @@ minimumReleaseAgeExclude:
   - expo-modules-jsi@57.0.5
   - expo-camera@57.0.4
   - expo-sharing@57.0.16
-virtualStoreDir: D:/mv4
 virtualStoreDirMaxLength: 24
+
+# virtualStoreDir must NOT be pinned here. An absolute Windows path (e.g.
+# D:/mv4) is not a valid path on Linux/macOS — pnpm was creating a bogus
+# store under a literal "D:" folder on GitHub Actions (Linux), which broke
+# module resolution for eslint-config-next's own plugin deps
+# (eslint-plugin-react-hooks etc.) in apps/admin.
+# Windows devs hitting ENAMETOOLONG: set it in pnpm's per-machine global
+# config instead, never here: `pnpm config set virtual-store-dir D:/mv4 --global`
 
 # Deliberately not a wildcard on "apps/*": apps/prototype-web ships its own
 # independent pnpm-workspace.yaml/package.json (Vite + React 18 + Tailwind v4)
