@@ -269,6 +269,8 @@ vi.mock("../db/customers", () => ({
 vi.mock("../db/reports", () => ({
   getEndOfDayReportSnapshot: deps.getEndOfDayReportSnapshot,
 }));
+// Export/share authorization is exercised by reportExport.authorization.sqlite.test.ts.
+vi.mock("../services/reportExport", () => ({ shareReportSummary: vi.fn() }));
 vi.mock("../db/purchases", () => ({
   searchMedicinesForPurchase: deps.searchMedicinesForPurchase,
   findDuplicatePurchase: deps.findDuplicatePurchase,

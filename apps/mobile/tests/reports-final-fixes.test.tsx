@@ -5,6 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { asPaisa } from '@muthoy/types';
 import type { ReportSnapshot } from '../db/reports';
+import type { Session } from '../state/sessionStore';
+import type { ReportSummaryShareRequest } from '../services/reportExport';
 
 interface StubProps { children?:ReactNode;onPress?:()=>void;disabled?:boolean;value?:string;onChangeText?:(value:string)=>void;visible?:boolean;accessibilityLabel?:string; }
 vi.mock('react-native', () => ({
@@ -19,14 +21,16 @@ vi.mock('../components/ui/StandardHeader',()=>({ StandardHeader:({ title,rightAc
 vi.mock('../components/ui/AccessDenied',()=>({ AccessDenied:()=>createElement('div',null,'Denied') }));
 vi.mock('../components/reports/ReportCharts',()=>({ TrendChart:()=>createElement('div',null,'trend-chart'),DonutChart:()=>createElement('div',null,'donut-chart'),SixMonthBars:()=>createElement('div',null,'six-month-chart') }));
 
-const state=vi.hoisted(()=>({ locale:'en' as 'en'|'bn',report:vi.fn(),monthly:vi.fn(),export:vi.fn(),scan:vi.fn(),print:vi.fn(),printer:null as null|{id:string;name:string;pairedAt:string;validatedAt?:string} }));
-const session={ shopId:'shop',userId:'owner',role:'owner' as const,permissions:undefined };
+const state=vi.hoisted(()=>({ locale:'en' as 'en'|'bn',session:null as Session|null,report:vi.fn(),monthly:vi.fn(),export:vi.fn(),shareSummary:vi.fn(),scan:vi.fn(),print:vi.fn(),printer:null as null|{id:string;name:string;pairedAt:string;validatedAt?:string} }));
 vi.mock('expo-router',()=>({ router:{ back:vi.fn(),push:vi.fn() },useLocalSearchParams:()=>({}) }));
-vi.mock('../state/usePermission',()=>({ usePermission:()=>({ session,isAllowed:true }),useOwnerAccess:()=>({ session,isAllowed:true }) }));
+// Real permission hooks and role rules; only the persisted session input is replaced.
+vi.mock('../state/sessionStore',()=>({ useSessionStore:<T,>(selector:(value:{session:Session|null;epoch:number})=>T)=>selector({session:state.session,epoch:0}) }));
 vi.mock('../state/sessionGuard',()=>({ captureSessionFor:()=>({ isStale:()=>false,isStillActive:()=>true,ifLive:(action:()=>void)=>action() }) }));
 vi.mock('../state/localeStore',()=>({ useI18n:()=>({ locale:state.locale,formatMoney:(value:number)=>`P${value}`,formatNumber:(value:number)=>String(value),formatDateTime:(value:string)=>value,t:(key:string)=>({ categoryUtilities:state.locale==='bn'?'ইউটিলিটি':'Utilities' } as Record<string,string>)[key]??key }) }));
-vi.mock('../db/cash',()=>({ currentBusinessDate:()=> '2026-02-10' }));
-vi.mock('../db/reports',()=>({ getReportSnapshot:state.report,getMonthlyReport:state.monthly }));
+vi.mock('../db/cash',()=>({ currentBusinessDate:()=> '2026-02-10',getEndOfDaySummary:vi.fn(async()=>null),closeDay:vi.fn() }));
+vi.mock('../db/customers',()=>({ getCustomerListTotals:vi.fn(async()=>({totalOutstanding:0})) }));
+vi.mock('../sync',()=>({ triggerSyncNow:vi.fn() }));
+vi.mock('../db/reports',()=>({ getReportSnapshot:state.report,getEndOfDayReportSnapshot:state.report,getMonthlyReport:state.monthly }));
 vi.mock('../db/commercial',()=>({
   listOwnerShops:vi.fn(async()=>[]),
   readShopSummaries:vi.fn(async()=>[]),
@@ -39,8 +43,8 @@ vi.mock('../db/commercial',()=>({
 }));
 vi.mock('../sync/connectivity',()=>({ hasNetworkConnection:vi.fn(async()=>false) }));
 vi.mock('../sync/multiShop',()=>({ refreshShopSummaries:vi.fn(async()=>[]) }));
-vi.mock('../db/settings',()=>({ getShopName:vi.fn(async()=> 'Shop') }));
-vi.mock('../services/reportExport',()=>({ exportAndShareReport:state.export }));
+vi.mock('../db/settings',()=>({ getShopName:vi.fn(async()=> 'Shop'),getB2Settings:vi.fn(async()=>({closingHour:23})) }));
+vi.mock('../services/reportExport',()=>({ exportAndShareReport:state.export,shareReportSummary:state.shareSummary }));
 vi.mock('../native/printer',()=>{
   class PrinterError extends Error { constructor(readonly code:string,message:string){super(message);} }
   return { PrinterError,getPairedPrinter:()=>state.printer,removePairedPrinter:()=>{state.printer=null;},savePairedPrinter:(device:{id:string;name:string})=>(state.printer={...device,pairedAt:'now'}),scanBlePrinters:state.scan,printEscPos:state.print };
@@ -49,9 +53,11 @@ vi.mock('../domain/escpos',()=>({ buildMonthlyPnlPrint:()=>new Uint8Array([1]),b
 
 const ReportScreen=(await import('../app/reports/report')).default;
 const MonthlyReportScreen=(await import('../app/reports/monthly-report')).default;
+const EndOfDayScreen=(await import('../app/end-of-day')).default;
 const DataExportScreen=(await import('../app/reports/data-export')).default;
 const PrinterSettingsScreen=(await import('../app/settings/printer-settings')).default;
 const { PrinterError }=await import('../native/printer');
+const { Share }=await import('react-native');
 
 function fixture(overrides:Partial<ReportSnapshot['totals']>={}):ReportSnapshot {
   return { range:{startDate:'2026-02-10',endDate:'2026-02-10'},previousNetSales:asPaisa(0),changeBp:null,trend:[],topMedicines:[],expensesByCategory:[],totals:{
@@ -62,10 +68,91 @@ function fixture(overrides:Partial<ReportSnapshot['totals']>={}):ReportSnapshot 
 }
 function deferred<T>() { let resolve!:(value:T)=>void;let reject!:(error:unknown)=>void;const promise=new Promise<T>((ok,no)=>{resolve=ok;reject=no;});return {promise,resolve,reject}; }
 
-beforeEach(()=>{state.locale='en';state.report.mockReset();state.monthly.mockReset();state.export.mockReset();state.scan.mockReset();state.print.mockReset();state.printer=null;});
+beforeEach(()=>{state.locale='en';state.session={shopId:'shop',userId:'owner',role:'owner'};state.report.mockReset();state.monthly.mockReset();state.export.mockReset();state.shareSummary.mockReset();state.scan.mockReset();state.print.mockReset();state.printer=null;vi.mocked(Share.share).mockClear();});
 afterEach(()=>cleanup());
 
 describe('B3 report/export/printer final states',()=>{
+  it.each(['manager','staff'] as const)('keeps End of Day view for authorized %s but disables external Share',async(role)=>{
+    state.session={shopId:'shop',userId:role,role,permissions:{cash_drawer:true,reports:true}};
+    state.report.mockResolvedValue(fixture());
+    render(createElement(EndOfDayScreen));await screen.findAllByText('P100');
+    const share=screen.getByRole('button',{name:/Share/}) as HTMLButtonElement;
+    expect(share.disabled).toBe(true);
+    fireEvent.click(share);
+    expect(state.shareSummary).not.toHaveBeenCalled();
+    expect(Share.share).not.toHaveBeenCalled();
+  });
+
+  it('routes Owner End of Day summary through the same authorized share service',async()=>{
+    state.report.mockResolvedValue(fixture());
+    render(createElement(EndOfDayScreen));await screen.findAllByText('P100');
+    fireEvent.click(screen.getByRole('button',{name:/Share/}));
+    await waitFor(()=>expect(state.shareSummary).toHaveBeenCalledTimes(1));
+    const request=state.shareSummary.mock.calls[0]![0] as ReportSummaryShareRequest;
+    expect(request).toMatchObject({shopId:'shop',actorUserId:'owner'});
+    expect(request.formatSummary(fixture())).toBe('Sales Report 2026-02-10 — 2026-02-10\nTotal Sales: P100\nTransactions: 1\nNet Profit: P60');
+    expect(Share.share).not.toHaveBeenCalled();
+  });
+
+  it.each(['manager','staff'] as const)('lets reports-capable %s view reports with no Download or Share',async(role)=>{
+    state.session={shopId:'shop',userId:role,role,permissions:{reports:true}};
+    state.report.mockResolvedValue(fixture());
+    render(createElement(ReportScreen));
+    expect((await screen.findAllByText('P100')).length).toBeGreaterThan(0);
+    expect(state.report).toHaveBeenCalledWith('shop',role,expect.anything());
+    expect(screen.queryByRole('button',{name:'Download'})).toBeNull();
+    expect(screen.queryByRole('button',{name:'Share'})).toBeNull();
+    expect(state.export).not.toHaveBeenCalled();
+    expect(state.shareSummary).not.toHaveBeenCalled();
+    expect(Share.share).not.toHaveBeenCalled();
+  });
+
+  it.each(['manager','staff'] as const)('lets reports-capable %s view monthly P&L with no CSV or Excel',async(role)=>{
+    state.session={shopId:'shop',userId:role,role,permissions:{reports:true}};
+    state.monthly.mockResolvedValue({...fixture(),yearMonth:'2026-02',sixMonthTrend:[]});
+    render(createElement(MonthlyReportScreen));
+    expect((await screen.findAllByText('P60')).length).toBeGreaterThan(0);
+    expect(state.monthly).toHaveBeenCalledWith('shop',role,expect.anything());
+    expect(screen.queryByRole('button',{name:/CSV/})).toBeNull();
+    expect(screen.queryByRole('button',{name:/Excel/})).toBeNull();
+    expect(state.export).not.toHaveBeenCalled();
+    expect(Share.share).not.toHaveBeenCalled();
+  });
+
+  it('routes Owner summary Share through the service and preserves its text',async()=>{
+    state.report.mockResolvedValue(fixture());
+    render(createElement(ReportScreen));await screen.findAllByText('P100');
+    fireEvent.click(screen.getByRole('button',{name:'Share'}));
+    await waitFor(()=>expect(state.shareSummary).toHaveBeenCalledTimes(1));
+    const request=state.shareSummary.mock.calls[0]![0] as ReportSummaryShareRequest;
+    expect(request).toMatchObject({shopId:'shop',actorUserId:'owner',range:{startDate:'2026-02-10',endDate:'2026-02-10'}});
+    expect(request.formatSummary(fixture())).toBe('Sales Report (2026-02-10 — 2026-02-10)\nTotal Sales: P100\nTransactions: 1\nNet Profit: P60');
+    expect(Share.share).not.toHaveBeenCalled();
+  });
+
+  it('shows a service denial for an Owner-looking session without native sharing',async()=>{
+    state.report.mockResolvedValue(fixture());
+    state.shareSummary.mockRejectedValue(new Error('Owner access only'));
+    render(createElement(ReportScreen));await screen.findAllByText('P100');
+    fireEvent.click(screen.getByRole('button',{name:'Share'}));
+    expect(await screen.findByText('Owner access only')).toBeTruthy();
+    expect(Share.share).not.toHaveBeenCalled();
+  });
+
+  it('keeps Owner Download routed to CSV export',async()=>{
+    state.report.mockResolvedValue(fixture());
+    render(createElement(ReportScreen));await screen.findAllByText('P100');
+    fireEvent.click(screen.getByRole('button',{name:'Download'}));
+    await waitFor(()=>expect(state.export).toHaveBeenCalledWith(expect.objectContaining({shopId:'shop',actorUserId:'owner',format:'csv'})));
+  });
+
+  it.each([['CSV','csv'],['Excel','xlsx']])('keeps Owner monthly %s export',async(label,format)=>{
+    state.monthly.mockResolvedValue({...fixture(),yearMonth:'2026-02',sixMonthTrend:[]});
+    render(createElement(MonthlyReportScreen));await screen.findAllByText('P60');
+    fireEvent.click(screen.getByRole('button',{name:new RegExp(label)}));
+    await waitFor(()=>expect(state.export).toHaveBeenCalledWith(expect.objectContaining({shopId:'shop',actorUserId:'owner',format,monthly:'2026-02'})));
+  });
+
   it('clears prior totals immediately when a report preset changes',async()=>{
     const next=deferred<ReportSnapshot>();state.report.mockResolvedValueOnce(fixture()).mockReturnValueOnce(next.promise);
     render(createElement(ReportScreen));await screen.findAllByText('P100');

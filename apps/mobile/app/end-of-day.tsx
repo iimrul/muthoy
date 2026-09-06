@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { router } from 'expo-router';
 import { asPaisa } from '@muthoy/types';
@@ -14,6 +14,7 @@ import { getB2Settings, getShopName } from '../db/settings';
 import { buildEodReportPrint } from '../domain/escpos';
 import { daysInclusive } from '../domain/reporting';
 import { printEscPos, PrinterError } from '../native/printer';
+import { shareReportSummary } from '../services/reportExport';
 import { captureSessionFor } from '../state/sessionGuard';
 import { useI18n } from '../state/localeStore';
 import { useOwnerAccess, usePermission } from '../state/usePermission';
@@ -33,7 +34,7 @@ export default function EndOfDayScreen() {
   const [outstanding, setOutstanding] = useState(asPaisa(0)); const [todaySoFar, setTodaySoFar] = useState(false);
   const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null); const [countedText, setCountedText] = useState('');
   const [printFailed, setPrintFailed] = useState(false);
-  const [action, setAction] = useState<'close'|'print'|null>(null);
+  const [action, setAction] = useState<'close'|'print'|'share'|null>(null);
   const requestRef = useRef(0);
   const load = useCallback(async () => {
     if (!session || !isAllowed) return; const request = ++requestRef.current; const guard = captureSessionFor(session); setLoading(true); setReport(null); setDay(null);
@@ -66,7 +67,14 @@ export default function EndOfDayScreen() {
     catch (cause) { setPrintFailed(true); setError(cause instanceof PrinterError ? printerMessage(cause.code,bn) : printerMessage('unknown',bn)); }
     finally { setAction(null); }
   };
-  const share = () => { if (!report) return; void Share.share({ message: `${bn ? 'বিক্রয় রিপোর্ট' : 'Sales Report'} ${startDate} — ${endDate}\n${bn ? 'মোট বিক্রয়' : 'Total Sales'}: ${formatMoney(report.totals.netSales)}\n${bn ? 'লেনদেন' : 'Transactions'}: ${formatNumber(report.totals.transactions)}\n${bn ? 'নিট মুনাফা' : 'Net Profit'}: ${formatMoney(report.totals.netProfit)}` }); };
+  const share = async () => {
+    if (!report) return; setAction('share'); setError(null); setPrintFailed(false);
+    try {
+      await shareReportSummary({ shopId: session.shopId, actorUserId: session.userId, range, formatSummary: ({ totals: summary }) =>
+        `${bn ? 'বিক্রয় রিপোর্ট' : 'Sales Report'} ${startDate} — ${endDate}\n${bn ? 'মোট বিক্রয়' : 'Total Sales'}: ${formatMoney(summary.netSales)}\n${bn ? 'লেনদেন' : 'Transactions'}: ${formatNumber(summary.transactions)}\n${bn ? 'নিট মুনাফা' : 'Net Profit'}: ${formatMoney(summary.netProfit)}` });
+    } catch (cause) { setError(cause instanceof Error ? cause.message : (bn ? 'শেয়ার ব্যর্থ হয়েছে' : 'Share failed')); }
+    finally { setAction(null); }
+  };
   return (
     <View className="flex-1 bg-brand-softGreen"><StandardHeader title={bn ? 'বিক্রয় রিপোর্ট' : 'Sales Report'} onBackPress={() => router.back()} rightAccessory={todaySoFar ? <View className="rounded-full bg-[#FEF3C7] px-2 py-1"><Text className="font-sans-semibold text-[10px] text-[#D97706]">◷ {bn ? 'আজ পর্যন্ত' : 'Today so far'}</Text></View> : null} onSyncPress={() => { void triggerSyncNow(session.shopId); void load(); }} syncing={loading} />
       <ScrollView contentContainerClassName="gap-4 p-4 pb-28" keyboardShouldPersistTaps="handled">
@@ -80,7 +88,7 @@ export default function EndOfDayScreen() {
           <View className="rounded-xl border-2 border-brand-green bg-brand-softGreen p-4"><Text className="font-sans-semibold text-xs text-brand-deepGreen">{bn ? 'নিট মুনাফা' : 'Net Profit'}</Text><Text className={`mt-2 font-mono text-3xl ${totals.netProfit < 0 ? 'text-error' : 'text-brand-green'}`}>{formatMoney(totals.netProfit)}</Text><Text className="mt-2 font-sans text-xs text-brand-deepGreen">{bn ? 'নিট বিক্রয় − অন্তর্ভুক্ত ট্যাক্স − COGS − খরচ' : 'Net Sales − Included Tax − COGS − Expenses'}{totals.isCogsPartial ? ` (${bn ? 'আংশিক COGS' : 'partial COGS'})` : ''}</Text></View>
           {totals.cogs !== 0 ? <View className="rounded-xl bg-white p-4"><Text className="font-sans-semibold text-xs text-midGray">{totals.cogs < 0 ? (bn ? 'ফেরত পণ্যের খরচ' : 'COGS Reversed') : (bn ? 'পণ্য মূল্য (COGS)' : 'Cost of Goods Sold')}</Text><Text className="mt-2 font-mono text-2xl">{formatMoney(totals.cogs < 0 ? asPaisa(-totals.cogs) : totals.cogs)}</Text>{totals.expenses > 0 ? <Text className="mt-1 font-sans text-xs text-[#9CA3AF]">{bn ? 'অন্যান্য খরচ:' : 'Other expenses:'} {formatMoney(totals.expenses)}</Text> : null}</View> : null}</View>
           {oneDay && startDate === today && day ? day.isClosed ? <View className="rounded-xl bg-white p-4"><Text className="text-center font-sans text-sm text-midGray">{bn ? 'দিনটি বন্ধ এবং লক করা হয়েছে।' : 'This day is closed and locked.'}</Text>{day.countedCash !== null ? <Text className="mt-2 text-center font-mono">{bn ? 'গোনা নগদ' : 'Counted cash'}: {formatMoney(day.countedCash)}</Text> : null}</View> : <View className="gap-3 rounded-xl bg-white p-4"><Text className="font-sans-bold text-base">{bn ? 'ড্রয়ার গুনুন' : 'Count the drawer'}</Text><TextInput accessibilityLabel={bn ? 'গোনা নগদের পরিমাণ' : 'Counted cash amount'} value={countedText} onChangeText={setCountedText} keyboardType="decimal-pad" placeholder="0.00" className="rounded-lg border border-midGray px-4 py-3 font-mono" /><Pressable disabled={action !== null} onPress={() => void close()} className="items-center rounded-lg bg-richBlack py-3 disabled:opacity-50"><Text className="font-sans-semibold text-white">{action === 'close' ? '…' : (bn ? 'দিন বন্ধ করুন' : 'Close the day')}</Text></Pressable></View> : null}
-          <View className="flex-row gap-2">{[{ label: bn ? 'প্রিন্ট' : 'Print', icon:'printer' as const, run: print, disabled:false }, { label: bn ? 'রপ্তানি' : 'Export', icon:'download' as const, run: () => router.push({ pathname:'/reports/data-export', params:{ startDate,endDate } }), disabled:!isOwner }, { label: bn ? 'শেয়ার' : 'Share', icon:'share-2' as const, run:share, disabled:false }].map((item) => <Pressable key={item.label} disabled={item.disabled || action !== null} onPress={() => void item.run()} className="h-20 flex-1 items-center justify-center rounded-xl bg-white disabled:opacity-40"><Feather name={item.icon} size={20} color="#059669" /><Text className="mt-1 font-sans-semibold text-xs text-midGray">{item.label}</Text></Pressable>)}</View>
+          <View className="flex-row gap-2">{[{ label: bn ? 'প্রিন্ট' : 'Print', icon:'printer' as const, run: print, disabled:false }, { label: bn ? 'রপ্তানি' : 'Export', icon:'download' as const, run: () => router.push({ pathname:'/reports/data-export', params:{ startDate,endDate } }), disabled:!isOwner }, { label: bn ? 'শেয়ার' : 'Share', icon:'share-2' as const, run:share, disabled:!isOwner }].map((item) => <Pressable key={item.label} disabled={item.disabled || action !== null} onPress={() => void item.run()} className="h-20 flex-1 items-center justify-center rounded-xl bg-white disabled:opacity-40"><Feather name={item.icon} size={20} color="#059669" /><Text className="mt-1 font-sans-semibold text-xs text-midGray">{item.label}</Text></Pressable>)}</View>
         </> : null}
       </ScrollView>
     </View>

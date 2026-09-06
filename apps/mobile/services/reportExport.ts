@@ -2,13 +2,16 @@ import { asPaisa, type Paisa } from '@muthoy/types';
 import {
   getCreditExportRows, getInventoryExportRows, getMonthlyReport, getReportExpenseRows,
   getReportRefundRows, getReportSaleRows, getReportSnapshot,
-  type CreditExportRow, type InventoryExportRow, type ReportExpenseRow, type ReportRefundRow, type ReportSaleRow,
+  type CreditExportRow, type InventoryExportRow, type ReportExpenseRow, type ReportRefundRow, type ReportSaleRow, type ReportSnapshot,
 } from '../db/reports';
 import { getShopName } from '../db/settings';
+import { requireOwner } from '../db/auth';
 import { requirePremiumFeature } from '../db/commercial';
+import { NotAuthorizedError } from '../db/errors';
 import { paisaToTakaText, type ExportCell } from '../domain/export';
 import type { DateRange } from '../domain/reporting';
 import { shareWrittenExport, writeReportExport, type ExportFormat, type ExportSheetStream, type WrittenExport } from '../native/reportExport';
+import { shareReportText } from '../native/reportShare';
 
 export type ExportDataset = 'sales' | 'inventory' | 'credit' | 'expenses';
 export interface ExportRequest {
@@ -82,8 +85,16 @@ function creditSource(request: ExportRequest): ExportSheetStream {
   ) };
 }
 
-export async function buildReportExport(request: ExportRequest): Promise<WrittenExport> {
+// Every file export and external summary share requires a live SQLite Owner
+// and export entitlement before report reads, formatting, progress, or native I/O.
+async function authorizeExport(request: Pick<ExportRequest, 'shopId' | 'actorUserId'>): Promise<void> {
+  if (!request.shopId || !request.actorUserId) throw new NotAuthorizedError();
+  await requireOwner(request.shopId, request.actorUserId);
   await requirePremiumFeature(request.shopId, 'export');
+}
+
+export async function buildReportExport(request: ExportRequest): Promise<WrittenExport> {
+  await authorizeExport(request);
   if (request.datasets.length === 0) throw new Error('Select at least one dataset');
   const sources: ExportSheetStream[] = [];
   if (request.monthly) {
@@ -118,4 +129,14 @@ export async function buildReportExport(request: ExportRequest): Promise<Written
 
 export async function exportAndShareReport(request: ExportRequest): Promise<WrittenExport> {
   const file = await buildReportExport(request); await shareWrittenExport(file); return file;
+}
+
+export interface ReportSummaryShareRequest extends Pick<ExportRequest, 'shopId' | 'actorUserId' | 'range'> {
+  formatSummary: (report: ReportSnapshot) => string;
+}
+
+export async function shareReportSummary(request: ReportSummaryShareRequest): Promise<void> {
+  await authorizeExport(request);
+  const report = await getReportSnapshot(request.shopId, request.actorUserId, request.range);
+  await shareReportText(request.formatSummary(report));
 }

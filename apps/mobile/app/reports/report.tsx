@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { router } from 'expo-router';
 import { asPaisa } from '@muthoy/types';
@@ -10,10 +10,10 @@ import { getReportSnapshot, type ReportSnapshot } from '../../db/reports';
 import { listOwnerShops, readShopSummaries } from '../../db/commercial';
 import { currentBusinessDate } from '../../db/cash';
 import { addDays, assertDateRange, reportHasActivity } from '../../domain/reporting';
-import { exportAndShareReport } from '../../services/reportExport';
+import { exportAndShareReport, shareReportSummary } from '../../services/reportExport';
 import { useI18n } from '../../state/localeStore';
 import { captureSessionFor } from '../../state/sessionGuard';
-import { usePermission } from '../../state/usePermission';
+import { useOwnerAccess, usePermission } from '../../state/usePermission';
 import { useBillingAccountId } from '../../state/useBillingAccountId';
 import { useMultiShopAccess } from '../../state/useMultiShopAccess';
 import { hasNetworkConnection } from '../../sync/connectivity';
@@ -30,6 +30,7 @@ function ActionIcon({ name, label, onPress }: { name: 'download' | 'share-2'; la
 export default function ReportScreen() {
   const { locale, formatMoney, formatNumber } = useI18n(); const bn = locale === 'bn';
   const { session, isAllowed } = usePermission('reports');
+  const { isAllowed: canExternalize } = useOwnerAccess();
   const multiShop = useMultiShopAccess();
   const { billingAccountId } = useBillingAccountId(multiShop.allowed ? session?.shopId : undefined);
   const today = currentBusinessDate();
@@ -83,10 +84,15 @@ export default function ReportScreen() {
   }, [billingAccountId, bn, comparisonDate, multiShop.allowed, session?.role, session?.shopId]);
   const setRangeSafely = (start: string, end: string) => { requestRef.current += 1; setReport(null); setError(null); setStartDate(start); setEndDate(end); };
   const preset = (days: number, offset = 0) => { const end = addDays(today, offset); setRangeSafely(addDays(end, -(days - 1)), end); };
-  const share = () => {
+  const share = async () => {
+    if (!session) return;
     if (!report || !reportHasActivity(report.totals)) { setError(bn ? 'শেয়ার করার জন্য কোনো ডাটা নেই' : 'No data to share'); return; }
-    const totals = report.totals;
-    void Share.share({ message: `${bn ? 'বিক্রয় রিপোর্ট' : 'Sales Report'} (${startDate} — ${endDate})\n${bn ? 'মোট বিক্রয়' : 'Total Sales'}: ${formatMoney(totals.netSales)}\n${bn ? 'লেনদেন' : 'Transactions'}: ${formatNumber(totals.transactions)}\n${bn ? 'নিট মুনাফা' : 'Net Profit'}: ${formatMoney(totals.netProfit)}${totals.taxCollected !== 0 ? `\n${bn ? 'নিট ট্যাক্স' : 'Net Tax'}: ${formatMoney(totals.taxCollected)}` : ''}` });
+    setExporting(true); setError(null); setFailedExport(false);
+    try {
+      await shareReportSummary({ shopId: session.shopId, actorUserId: session.userId, range, formatSummary: ({ totals }) =>
+        `${bn ? 'বিক্রয় রিপোর্ট' : 'Sales Report'} (${startDate} — ${endDate})\n${bn ? 'মোট বিক্রয়' : 'Total Sales'}: ${formatMoney(totals.netSales)}\n${bn ? 'লেনদেন' : 'Transactions'}: ${formatNumber(totals.transactions)}\n${bn ? 'নিট মুনাফা' : 'Net Profit'}: ${formatMoney(totals.netProfit)}${totals.taxCollected !== 0 ? `\n${bn ? 'নিট ট্যাক্স' : 'Net Tax'}: ${formatMoney(totals.taxCollected)}` : ''}` });
+    } catch (cause) { setError(cause instanceof Error ? cause.message : (bn ? 'শেয়ার ব্যর্থ হয়েছে' : 'Share failed')); }
+    finally { setExporting(false); }
   };
   const download = async () => {
     if (!session) return;
@@ -106,9 +112,9 @@ export default function ReportScreen() {
   const changeLabel = report?.changeBp === null || report?.changeBp === undefined ? (bn ? 'আগের কোনো ডাটা নেই' : 'No previous period data') : `${report.changeBp >= 0 ? '↑' : '↓'} ${Math.abs(report.changeBp) / 100}%`;
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title={bn ? 'রিপোর্ট' : 'Report'} onBackPress={() => router.back()} rightAccessory={(
-        <View className="flex-row"><ActionIcon name="download" label={exporting ? 'Exporting' : 'Download'} onPress={() => { if (!exporting) void download(); }} /><ActionIcon name="share-2" label="Share" onPress={share} /></View>
-      )} />
+      <StandardHeader title={bn ? 'রিপোর্ট' : 'Report'} onBackPress={() => router.back()} rightAccessory={canExternalize ? (
+        <View className="flex-row"><ActionIcon name="download" label={exporting ? 'Exporting' : 'Download'} onPress={() => { if (!exporting) void download(); }} /><ActionIcon name="share-2" label="Share" onPress={() => { if (!exporting) void share(); }} /></View>
+      ) : null} />
       <ScrollView contentContainerClassName="gap-4 p-4 pb-28" keyboardShouldPersistTaps="handled">
         <View className="gap-4 rounded-3xl bg-white p-5">
           <Text className="font-sans-bold text-sm text-richBlack">{bn ? 'রিপোর্ট পিরিয়ড' : 'Report Period'}</Text>
