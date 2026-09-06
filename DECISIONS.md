@@ -1404,3 +1404,19 @@ may report config presence and host, never keys, tokens, or identifiers.
 - DEV bypass/debug cleanup.
 - Final 39/39 UI parity audit and final security/RLS audit.
 - RC fresh-install, upgrade, offline, offline→online, and multi-device testing.
+
+---
+
+## 2026-09-06 — H-1 report exports and external summary sharing are Owner-only
+
+CSV, XLSX, generated report files, and external report-summary text sharing
+require the live same-shop SQLite Owner plus the existing export entitlement
+check. `services/reportExport.ts` uses one authorization boundary before report
+reads, formatting, progress, file writes, or native sharing. Report and End of
+Day summary shares use that service; screen visibility is only a UI mirror.
+
+Manager/Staff keep their existing report-reading permissions. Download, CSV,
+Excel, and external Share controls are hidden or disabled for non-Owners.
+Report calculations, export formats, timestamps, and paging limits are unchanged.
+The earlier missing-service-guard warning is superseded by this H-1 change;
+physical Android export/share validation remains required before release.
