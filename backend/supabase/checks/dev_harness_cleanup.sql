@@ -56,15 +56,28 @@ order by s.created_at;
 create temporary table dev_harness_auth on commit drop as
   select id from auth.users where raw_app_meta_data->>'dev_harness' = 'true';
 
-create temporary table dev_harness_shops on commit drop as
-  select distinct sc.shop_id as id
-  from public.shop_claims sc
-  where sc.claimed_by_user_id in (select id from dev_harness_auth);
+create temporary table dev_harness_principals on commit drop as
+  select distinct ab.app_user_id as id
+  from public.auth_bindings ab
+  where ab.auth_user_id in (select id from dev_harness_auth);
 
 create temporary table dev_harness_accounts on commit drop as
   select distinct ba.id
   from public.billing_accounts ba
-  where ba.primary_shop_id in (select id from dev_harness_shops);
+  where ba.principal_owner_user_id in (select id from dev_harness_principals)
+     or ba.primary_shop_id in (
+       select sc.shop_id from public.shop_claims sc
+       where sc.claimed_by_user_id in (select id from dev_harness_auth)
+     );
+
+-- Include every Multi-Shop child on the harness Owner's billing account, plus
+-- a claimed primary shop if onboarding stopped before billing was initialized.
+create temporary table dev_harness_shops on commit drop as
+  select s.id from public.shops s
+  where s.billing_account_id in (select id from dev_harness_accounts)
+  union
+  select sc.shop_id from public.shop_claims sc
+  where sc.claimed_by_user_id in (select id from dev_harness_auth);
 
 -- ── 1. Break the mutual RESTRICT cycle. ─────────────────────────────────────
 -- shops.billing_account_id is nullable; primary_shop_id is not. So the shop
@@ -73,13 +86,20 @@ update public.shops set billing_account_id = null
 where id in (select id from dev_harness_shops);
 
 -- ── 2. Commercial rows that reference the billing account. ──────────────────
+-- Provider events RESTRICT deletion of their payment order, so they go first.
+delete from public.payment_provider_events
+where payment_order_id in (
+  select id from public.payment_orders
+  where billing_account_id in (select id from dev_harness_accounts)
+);
+
 delete from public.payment_orders
 where billing_account_id in (select id from dev_harness_accounts);
 
-delete from public.entitlements
+delete from public.entitlement_snapshots
 where billing_account_id in (select id from dev_harness_accounts);
 
-delete from public.subscriptions
+delete from public.billing_subscriptions
 where billing_account_id in (select id from dev_harness_accounts);
 
 delete from public.shop_memberships
@@ -100,7 +120,8 @@ delete from public.shops where id in (select id from dev_harness_shops);
 
 -- ── 5. Rows with no FK to shops, so no cascade reaches them. ────────────────
 delete from public.shop_claims
-where claimed_by_user_id in (select id from dev_harness_auth);
+where claimed_by_user_id in (select id from dev_harness_auth)
+   or shop_id in (select id from dev_harness_shops);
 
 delete from public.auth_bindings
 where auth_user_id in (select id from dev_harness_auth);

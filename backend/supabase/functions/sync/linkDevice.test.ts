@@ -190,7 +190,7 @@ describe("link-device registration order", () => {
         ...caller,
         verifiedPhone: null,
         email: "someone@example.com",
-        emailConfirmedAt: "2026-09-06T09:15:00.000Z",
+        emailConfirmedAt: null,
       } as unknown as Caller)).rejects.toMatchObject({ status: 403, code: "otp_required" });
       expect(mocks.onboardOwner).not.toHaveBeenCalled();
       expect(mocks.from).not.toHaveBeenCalled();
