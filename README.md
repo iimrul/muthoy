@@ -82,8 +82,19 @@ Still incomplete: production OTP provider hardening, real SSLCommerz credentials
 and validation, SQLCipher, `conflict_queue` UI/wiring, PIN timing/security
 hardening, broader printer hardware coverage, the export service-level Owner
 guard if still pending, admin completion, fixed shop location/map support,
-production observability, DEV bypass/debug removal, final 39/39 UI parity and
-security/RLS audits, and the RC fresh-install/upgrade/offline/multi-device matrix.
+production observability, final 39/39 UI parity and security/RLS audits, and the
+RC fresh-install/upgrade/offline/multi-device matrix.
+
+DEV bypass/debug removal is DONE in code (H-2, 2026-09-06) — the Skip-OTP entry,
+its anonymous sign-in, the owner-link repair, and the B4 build-marker log are
+gone, with static and behavioural guards against their return. A release-bundle
+grep on a native rebuild is still owed.
+
+Fresh local registration stays testable through a temporary DEV harness that
+skips only the SMS code and then runs the canonical onboarding path. It is kept
+out of every non-dev bundle by `apps/mobile/metro.config.js` rather than by a
+runtime flag, and **H-5 deletes it** when a real OTP provider lands; the removal
+checklist is in `apps/mobile/dev/README.md`.
 
 ## Prerequisites
 

@@ -64,14 +64,25 @@ describe('Supabase configuration reporting', () => {
     expect(description).not.toContain(FAKE_KEY);
     expect(description).not.toContain('eyJhbGciOi');
     expect(description).not.toContain(String(FAKE_KEY.length));
-    expect(client.runtimeConfigDiagnostics).toMatchObject({
-      marker: 'B4_CONFIG_DIAG_20260904_01',
-      buildType: __DEV__ ? 'debug' : 'release',
-      devMode: __DEV__,
-      bundleSource: __DEV__ ? 'metro/development' : 'embedded/release',
-      configured: true,
-      host: 'demo-ref.supabase.co',
-    });
+  });
+
+  // H-2. The B4 physical-debugging build marker printed buildType, devMode,
+  // bundleSource and the project host on every launch, release included. It
+  // answered a question nobody asks at runtime, so it is gone rather than
+  // merely quieted.
+  it('exposes no build-marker diagnostics object at all', async () => {
+    const client = await loadWith({ url: FAKE_URL, key: FAKE_KEY });
+    expect(client).not.toHaveProperty('runtimeConfigDiagnostics');
+  });
+
+  it('logs nothing on a healthy production boot — not even the host', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await loadWith({ url: FAKE_URL, key: FAKE_KEY });
+
+    // __DEV__ is pinned false by vitest.config.ts, so this is the release path.
+    expect(log).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('warns loudly at boot when unconfigured, and never leaks a key when it does', async () => {

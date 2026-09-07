@@ -67,9 +67,10 @@
 - Server-owned Free/Pro/Ultra entitlement and Owner-level billing-account model.
   SQLite stores a verified cache for instant/offline UX; it never grants access.
 - Canonical Owner onboarding is an Edge orchestration call into the
-  `SECURITY DEFINER` `b4_onboard_owner(...)` PostgreSQL function. Production
-  reaches it after OTP verification; DEV Skip OTP bypasses only that proof and
-  then uses the same onboarding, auth-binding, refreshed-claim, and trial path.
+  `SECURITY DEFINER` `b4_onboard_owner(...)` PostgreSQL function. Every build
+  reaches it the same way — after OTP verification — then auth binding,
+  refreshed claims, and trial. The DEV Skip-OTP bypass and its anonymous
+  sign-in were removed in H-2 (2026-09-06); there is no second path.
 - Multi-shop rename/archive/restore uses the narrow `SECURITY DEFINER`
   `b4_mutate_owned_shop(...)` function rather than broad table-write grants.
 - PostgreSQL migration parity is verified through

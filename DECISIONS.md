@@ -966,10 +966,11 @@ PIN values, phone/account identifiers, tokens, or other sensitive values are
 logged.
 
 No bcrypt cost, PIN validation, required server validation, hydration, or other
-security guarantee was weakened. The temporary DEV OTP bypass must be removed
-and anonymous sign-in disabled before production. Production Owner registration
-requires a real OTP provider. Normal Owner and Staff login remains phone + PIN;
-OTP is used only for registration and Owner PIN recovery.
+security guarantee was weakened. The temporary DEV OTP bypass was removed in H-2
+(2026-09-06); disabling anonymous sign-in in every Supabase project remains a
+hosted setting to apply. Production Owner registration requires a real OTP
+provider. Normal Owner and Staff login remains phone + PIN; OTP is used only for
+registration and Owner PIN recovery.
 
 ---
 
@@ -1332,11 +1333,11 @@ Production follows:
 
 `phone → OTP verify → canonical server Owner/shop onboarding → auth binding → refreshed claims → automatic trial hydration`.
 
-DEV Skip OTP bypasses only phone OTP proof, remains `__DEV__`-only, and then
-uses the same canonical onboarding/binding/claims/trial path. The superseded
-separate DEV bootstrap was removed; `devRegistration.ts` is gone and must not
-return. DEV must never create a parallel local-authoritative onboarding model.
-Production release must remove/disable all DEV bypass UI and diagnostics.
+**Superseded 2026-09-06 (H-2):** the DEV Skip-OTP bypass, the anonymous sign-in
+it used, and the owner-link repair are removed outright, so the line above is
+the only onboarding path in every build. The superseded separate DEV bootstrap
+was removed earlier; `devRegistration.ts` is gone. None of them may return, and
+DEV must never create a parallel local-authoritative onboarding model.
 
 Fresh Owner success requires `app_user_id`, explicit `principal_user_id`,
 `shop_id`, `role=owner`, `permission_version` (including zero), and
@@ -1441,3 +1442,88 @@ Physical Android validation remains PENDING until the founder checks deep links,
 role/signed-out recovery, hardware Back, guarded-prefix overlays, nested
 navigation, typography, and bottom insets. The screen reuses existing Bangla fonts,
 color tokens, and NativeWind shadow/elevation utilities.
+
+---
+
+## 2026-09-06 — H-2: one onboarding path, enforced structurally, not by a flag
+
+**A `__DEV__` guard is not a production boundary.** Metro does not tree-shake,
+so a module imported behind a guard still ships inside the release bundle — its
+strings, its Supabase calls, and its exported functions all one missing guard
+away from being reachable. Anything that can grant access is therefore deleted,
+not flagged. This rule is durable and applies to every future DEV affordance.
+
+**Removed:** `dev/DevSkipOtpButton.tsx`, `dev/devAnonAuth.ts` and their two test
+files; the owner-link repair affordance; `db/auth.ts`'s
+`clearUnverifiedOwnerPhone`; the `isDevPlaceholderPhone` branch in
+`app/index.tsx`'s `link_pending` case; and the `DevSkipOtpButton` render in
+`app/(auth)/register.tsx`. `devRegistration.ts` was already gone. None may
+return. The client can no longer call `supabase.auth.signInAnonymously()` at
+all, which matters because RLS keys only on `app_metadata.shop_id` and never
+inspects `is_anonymous` — once linked, an anonymous session is indistinguishable
+from a real one.
+
+The owner-link repair existed to work around a missing auth binding surfacing as
+`hook_not_configured`. `20260905000000_b4_canonical_onboarding.sql` fixed that
+at the source, and `linkDeviceToShop` verifies the refreshed token's full Owner
+claim set, so a missing binding fails loudly instead of needing a repair button.
+
+**Unchanged:** canonical Owner onboarding, `link-device`, auth binding, strict
+token-claim validation, billing/trial hydration, Multi-Shop, the production OTP
+path, and phone + PIN login on a fresh device. Registration is one path in every
+build: phone → OTP verify → canonical server onboarding → binding → refreshed
+full Owner claims → automatic trial hydration.
+
+**Temporary DEV registration harness (same-day adjustment).** Removing the
+bypass outright left no way to test a fresh registration before H-5, so
+`dev/devRegistrationHarness.tsx` + `dev/devOwnerOnboarding.ts` replace it under
+stricter rules. It skips only the SMS code and then runs the canonical path
+unchanged — `createShopAndOwner` → `getOwnerOnboardingPayload` →
+`linkDeviceToShop` (`b4_onboard_owner` → binding → refresh → strict Owner
+claims) → `markShopCloudLinked` → PIN setup. It is not the old architecture:
+the session is a real, re-signinable email identity rather than an anonymous
+user that could never sign back in and so orphaned its cloud shop; the Owner's
+phone is **null** rather than a placeholder claiming a verification that never
+happened; and there is no resume and no repair — it refuses to run when the
+device already holds a registration, and a failed link stays failed.
+
+`createShopAndOwner` gains `ownerPhone?: null`, typed to admit only `null`. The
+shop's contact number is a business field; `users.phone` is a credential with a
+global partial unique index, so the only honest alternative to "the number we
+just verified" is "none". Production OTP omits the field and is unchanged.
+
+**A `__DEV__` guard still is not a bundle boundary** — the harness gets a real
+one. `metro.config.js` resolves `dev/devRegistrationHarness` to an inert stub
+whenever Metro's `context.dev` is not exactly `true`, so a release bundle
+contains neither the harness nor anything it imports. Unknown means production:
+if a future Metro stops passing `dev`, the stub wins.
+`dev/devOnlyResolver.test.ts` executes that resolver rather than reading it.
+
+**H-5 removes the harness before RC** and owns the provider, the rate limits,
+and the server-side rejection of anonymous callers in `verifyCallerJwt()`;
+`dev/README.md` carries the removal checklist. Disabling Anonymous sign-ins in
+every Supabase project remains a hosted setting to apply, and the DEV project
+additionally needs its Email provider enabled with "Confirm email" off.
+
+**Diagnostics.** Release builds emit one boot line at most: the
+missing-configuration warning, which names absent `EXPO_PUBLIC_*` variables and
+nothing else — no host, no key, no identifier. The B4 `[muthoy-runtime]`
+build-marker line and its `runtimeConfigDiagnostics` object are deleted; the
+healthy-config line names the Supabase host and is now `__DEV__`-only.
+`dev/runtimeDiagnostics.ts` is a hard no-op in release and deliberately more
+than silent: it assembles no user id, shop id, role, or permission count at all,
+so there is nothing for a future caller to print or hand to a crash reporter.
+`sync/linkDevice.ts`'s failure log stays `__DEV__`-only. Genuine operational
+warnings (sync, notifications, billing hydration, inventory) are kept; H-8 owns
+turning them into real observability.
+
+**Enforcement.** `tests/dev-production-safety.test.ts` reads the source tree:
+the removed files stay absent, no production module references their symbols, no
+source anywhere calls `signInAnonymously`, production code imports only
+`authTiming` and `runtimeDiagnostics` from `dev/`, no `__DEV__` branch may
+navigate/await/return a decision/call Supabase/render UI, and no file under
+`app/(auth)/` or `app/index.tsx` contains a `__DEV__` conditional at all.
+`tests/dev-production-safety.render.test.tsx` proves production-mode
+Registration renders no Skip-OTP, resume, repair, or dev-banner affordance while
+still sending a real OTP. Release-bundle grep and native rebuild verification
+remain a physical gate, not a claim made here.

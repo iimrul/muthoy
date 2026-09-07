@@ -15,9 +15,10 @@ Without them background sync safely no-ops; foreground OTP calls fail loudly.
 Production registration verifies phone OTP, then `link-device` sends the local
 onboarding payload to server-owned `b4_onboard_owner(...)`, creates the auth
 binding, refreshes the session, validates all Owner claims, and hydrates the
-automatic trial. DEV Skip OTP bypasses only OTP and uses this same path. The old
-separate DEV bootstrap is removed; no sync screen or client path may create a
-subscription, trial, or authoritative cloud identity.
+automatic trial. This is the only registration path in any build: the DEV
+Skip-OTP bypass, its anonymous sign-in, the owner-link repair, and the older
+separate DEV bootstrap were removed in H-2 (2026-09-06). No sync screen or
+client path may create a subscription, trial, or authoritative cloud identity.
 
 Owner token acceptance requires explicit `app_user_id`, `principal_user_id`,
 `shop_id`, `role=owner`, `permission_version`, and `billing_account_id`, plus

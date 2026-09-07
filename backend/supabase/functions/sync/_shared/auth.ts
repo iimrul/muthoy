@@ -42,6 +42,10 @@ export interface Caller {
   permissionVersion: number | null;
   /** The phone Supabase itself verified, if this session came from an OTP. */
   verifiedPhone: string | null;
+  /** Row fields the onboarding gate needs; see _shared/devOnboarding.ts. */
+  isAnonymous: boolean;
+  email: string | null;
+  emailConfirmedAt: string | null;
   raw: User;
 }
 
@@ -95,8 +99,13 @@ export async function verifyCallerJwt(request: Request): Promise<Caller> {
   return {
     authUserId: data.user.id,
     appUserId: claimString(metadata, "app_user_id"),
-    principalUserId: claimString(metadata, "principal_user_id")
-      ?? claimString(metadata, "app_user_id"),
+    // NO fallback to app_user_id. custom_access_token_hook mints all six
+    // identity claims in ONE jsonb_build_object, so a token carrying
+    // app_user_id always carries principal_user_id too — the fallback could
+    // only ever mask a token the hook did not decorate, by inventing the
+    // stable identity that shop_memberships and every multi-shop RLS policy
+    // key on. Absent means absent.
+    principalUserId: claimString(metadata, "principal_user_id"),
     billingAccountId: claimString(metadata, "billing_account_id"),
     // shop_id predates the hook and is ALSO stored on the row (linkDevice and
     // deviceLogin both write it there, and every pre-existing RLS policy reads
@@ -107,6 +116,9 @@ export async function verifyCallerJwt(request: Request): Promise<Caller> {
     role: claimString(metadata, "role"),
     permissionVersion: typeof version === "number" ? version : null,
     verifiedPhone: data.user.phone_confirmed_at ? (data.user.phone ?? null) : null,
+    isAnonymous: data.user.is_anonymous === true,
+    email: data.user.email ?? null,
+    emailConfirmedAt: data.user.email_confirmed_at ?? null,
     raw: data.user,
   };
 }
@@ -181,10 +193,22 @@ export async function assertCallerCurrent(caller: Caller): Promise<CallerRecord>
   if (limitError) throw new HttpError(500, "Could not verify plan access");
   if (!withinLimit) throw new HttpError(403, "Account is suspended by the current plan");
 
+  // The PRINCIPAL owns the binding — under Multi-Shop, app_user_id is a
+  // per-shop actor while principal_user_id is the one stable auth identity.
+  // Falling back to app_user_id here checked the wrong row for any caller
+  // acting in a secondary shop, and quietly passed. The hook always mints
+  // both claims, so a missing principal is a broken token, not a default.
+  if (!caller.principalUserId) {
+    throw new HttpError(
+      503,
+      "Authentication hook is not configured",
+      "hook_not_configured",
+    );
+  }
   const { data: binding, error: bindingError } = await supabaseAdmin
     .from("auth_bindings")
     .select("auth_user_id")
-    .eq("app_user_id", caller.principalUserId ?? appUserId)
+    .eq("app_user_id", caller.principalUserId)
     .maybeSingle();
   if (bindingError) {
     throw new HttpError(500, "Could not verify caller");

@@ -154,11 +154,14 @@ export async function onboardOwner(
   if (known) {
     throw new HttpError(known.status, known.message, known.code);
   }
-  // Anything unmapped keeps its SQLSTATE and the step that raised it. The
-  // database's own message is dropped: it can quote the offending row.
-  throw new HttpError(
-    500,
-    `Could not complete onboarding (db=${error.code ?? "unknown"} op=onboard_owner)`,
-    "onboarding_failed",
+  // The SQLSTATE and the step that raised it go to the FUNCTION LOG, not to
+  // the device. They were in the message during physical debugging and were
+  // genuinely useful there, but a store build surfaces this text to a
+  // pharmacist: "(db=23505 op=onboard_owner)" tells them nothing, and it
+  // publishes the schema's failure modes to anyone who can trigger one. The
+  // database's own message is dropped either way — it can quote the row.
+  console.error(
+    `sync/link-device onboarding failed: db=${error.code ?? "unknown"} op=onboard_owner`,
   );
+  throw new HttpError(500, "Could not complete onboarding", "onboarding_failed");
 }

@@ -1,4 +1,9 @@
 import { type Caller, callerShopId, HttpError } from "./_shared/auth.ts";
+import {
+  assertOwnerOnboardingIdentity,
+  DEV_HARNESS_METADATA_KEY,
+  needsDevHarnessStamp,
+} from "./_shared/devOnboarding.ts";
 import { assertBindingTarget, ensureAuthBinding } from "./_shared/identity.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
 import { onboardOwner } from "./onboarding.ts";
@@ -7,6 +12,13 @@ export async function linkDevice(caller: Caller, body: Record<string, unknown>) 
   const shopId = body.shopId;
   if (typeof shopId !== "string")
     throw new HttpError(400, "shopId is required");
+
+  // BEFORE anything is claimed, bound or created. This function used to accept
+  // any authenticated JWT, which made an email or anonymous session a second
+  // route to Owner onboarding on every project. Production now accepts only a
+  // Supabase-verified phone; the DEV harness is admitted solely by a
+  // server-side project secret the client cannot influence.
+  const mode = assertOwnerOnboardingIdentity(caller);
   // The owner's users.id, sent by the device because that row has not synced up
   // yet at this point in registration. Optional so an older client still links;
   // without it the owner simply has no binding until their first device-login,
@@ -52,7 +64,25 @@ export async function linkDevice(caller: Caller, body: Record<string, unknown>) 
       }
     }
     const { error } = await supabaseAdmin.auth.admin.updateUserById(caller.authUserId, {
-      app_metadata: { ...caller.raw.app_metadata, shop_id: shopId },
+      app_metadata: {
+        ...caller.raw.app_metadata,
+        shop_id: shopId,
+        // Stamped here because ensureAuthBinding is about to REWRITE this
+        // account's email to the canonical u-<appUserId>@users.muthoy.invalid
+        // address every account gets, erasing the first-run marker. Only the
+        // service role can write app_metadata, so this is both durable and
+        // unforgeable — and it is what lets a resume be recognised, and what
+        // the DEV purge selects on.
+        ...(mode === "dev_harness" ? { [DEV_HARNESS_METADATA_KEY]: true } : {}),
+      },
+    });
+    if (error) throw new HttpError(500, "Could not link device");
+  } else if (needsDevHarnessStamp(caller, mode)) {
+    // A shop already claimed by this account, admitted by the first-run email
+    // marker but never stamped — the resume of an attempt that died between
+    // the claim and the binding.
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(caller.authUserId, {
+      app_metadata: { ...caller.raw.app_metadata, [DEV_HARNESS_METADATA_KEY]: true },
     });
     if (error) throw new HttpError(500, "Could not link device");
   }

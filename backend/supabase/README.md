@@ -42,10 +42,14 @@ the client refreshes and retries exactly once.
 Direct PostgREST access fails CLOSED in the same state (`auth_has_permission`
 resolves a null actor to false), which is the safe direction but equally silent.
 
-Owner registration uses one path: verified OTP session → `sync/link-device` →
-`b4_onboard_owner(...)` → auth binding → refreshed claims → automatic trial
-hydration. DEV Skip OTP bypasses only OTP and then uses the same path. The old
-separate `devRegistration.ts` bootstrap is removed and must not return.
+Owner registration uses one path, in every build: verified OTP session →
+`sync/link-device` → `b4_onboard_owner(...)` → auth binding → refreshed claims →
+automatic trial hydration. The DEV Skip-OTP bypass, the anonymous sign-in it
+used, and the owner-link repair were removed in H-2 (2026-09-06), as was the
+older separate `devRegistration.ts` bootstrap. None may return. Anonymous
+sign-ins must stay disabled in Authentication → Providers on every project: the
+client can no longer request one, and rejecting anonymous callers inside
+`verifyCallerJwt()` is H-5's hardening.
 
 `20260905000000_b4_canonical_onboarding.sql` owns two narrow `SECURITY DEFINER`
 boundaries: `b4_onboard_owner(...)` atomically/idempotently creates the shop,

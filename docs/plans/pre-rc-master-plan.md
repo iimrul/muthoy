@@ -227,10 +227,10 @@ in the parity sign-off rather than "fixed":
 | # | Item | Status | Risk | Files | Migration / deploy / native rebuild | Verification |
 |---:|---|---|---|---|---|---|
 | H-1 | Export service-level Owner guard | NOT DONE | CRITICAL — non-Owner financial export | `services/reportExport.ts` | none | Negative test: `reports`-only Manager/Staff calling the service is denied for every dataset |
-| H-2 | DEV bypass / diagnostics cleanup | NOT DONE | HIGH — parallel auth path or host/config leakage in a store build | `dev/DevSkipOtpButton.tsx`, `dev/devAnonAuth.ts`, `dev/runtimeDiagnostics.ts`, `app/(auth)/register.tsx:39`, `app/index.tsx:8`, `app/(auth)/pin-login.tsx`, `app/(tabs)/staff-home.tsx`, `components/navigation/*`, `components/staff/ManagerDashboard.tsx` | native rebuild to verify | Release-bundle grep proves no DEV entry point; a test asserts the production bundle has no bypass path |
+| H-2 | DEV bypass / diagnostics cleanup | **DONE in code 2026-09-06**; release-bundle grep + native rebuild PENDING | was HIGH — parallel auth path or host/config leakage in a store build | Removed: `dev/DevSkipOtpButton.tsx`, `dev/devAnonAuth.ts` (+ 2 test files), owner-link repair, `db/auth.ts` `clearUnverifiedOwnerPhone`, the `app/(auth)/register.tsx` render, the `app/index.tsx` placeholder-phone branch, `sync/supabaseClient.ts` `runtimeConfigDiagnostics`. Hardened: `dev/runtimeDiagnostics.ts`, `sync/linkDevice.ts` log | native rebuild to verify | `tests/dev-production-safety.test.ts` (static import-graph + `__DEV__` capability guard) and `tests/dev-production-safety.render.test.tsx` (production-mode Registration) PASS. Release-bundle grep on a native rebuild is still owed |
 | H-3 | SQLCipher | NOT DONE | CRITICAL — real pharmacy money/stock at rest unencrypted; blocks pilot per `DECISIONS.md` 2026-08-09 | `db/client.ts`, key storage via `expo-secure-store`, `db/init.ts` | **native rebuild + on-device data migration** | Fresh install encrypted; upgrade migrates existing `muthoy.db` with zero row loss; wrong key fails closed; restore path proven |
 | H-4 | PIN timing / security hardening | NOT DONE | HIGH — timing oracle on PIN verify; open latency gate | `db/auth.ts`, `native/crypto.ts`, `dev/authTiming.ts`, `db/pin-performance.sqlite.test.ts` | possible native rebuild | Constant-time compare proven; enrolled PIN login ≤ 2s on low-end Android (§16) |
-| H-5 | Production OTP provider | NOT DONE | CRITICAL — registration/recovery cannot run in production | `sync/otp.ts`, Supabase phone-auth provider config, rate limits, anonymous-auth hardening | hosted config + deploy | Real SMS delivered end-to-end; resend cooldown, retry cap, and abuse limits verified against the live provider |
+| H-5 | Production OTP provider **+ delete the temporary DEV registration harness** | NOT DONE | CRITICAL — registration/recovery cannot run in production | `sync/otp.ts`, Supabase phone-auth provider config, rate limits, anonymous-auth hardening in `verifyCallerJwt()`; removal of `dev/devRegistrationHarness*`, `dev/devOwnerOnboarding.ts`, `dev/devOnlyResolver.cjs`, the `metro.config.js` swap and `RegisterShopInput.ownerPhone` (checklist in `apps/mobile/dev/README.md`) | hosted config + deploy | Real SMS delivered end-to-end; resend cooldown, retry cap and abuse limits verified against the live provider; harness gone and the full suite green without it |
 | H-6 | `conflict_queue` wiring + resolution UI | NOT DONE | MEDIUM — true row conflicts are invisible (ledger stock and grouped ops already supersede the old stock-LWW rationale) | `db/schema.ts:1301`, `sync/pull.ts`, new writer + Owner-facing surface | local migration only if the table shape changes | A forced two-device conflict is queued, surfaced, resolved, and never silently loses a row |
 | H-7 | Final RLS / cross-shop isolation audit | NOT DONE | CRITICAL — cross-shop leakage | `backend/supabase/migrations/*`, PG test harness | none (audit) | Negative RLS tests per table for wrong shop, wrong role, stale claims, revoked staff, suspended shop |
 | H-8 | Observability | NOT DONE | HIGH — a production crash/sync/payment failure is invisible | new `apps/mobile` Sentry (or equivalent) init, `sync/*`, `db/init.ts`, `payment-webhook` | deploy + DSN as EAS env | Forced crash, migration failure, sync failure, payment failure, and auth failure each appear with **no** PIN/OTP/token/phone/money payload |
@@ -412,7 +412,10 @@ the admin map. Payment monitoring before live payment acceptance.
 **Wave 1 — close functional parity and the authorization hole** (no migration, no rebuild)
 1. H-1 export service-level Owner guard.
 2. M-1 `app/+not-found.tsx` — DONE functionally; founder physical Android check pending.
-3. H-2 DEV bypass/diagnostics production removal.
+3. H-2 DEV bypass/diagnostics production removal — DONE in code 2026-09-06.
+   Release-bundle grep on a native rebuild remains owed. A temporary DEV
+   registration harness keeps fresh local registration testable until H-5; it is
+   excluded from non-dev bundles by `metro.config.js` and H-5 deletes it.
 4. H-7 RLS / cross-shop isolation audit (read-only + negative tests).
 Accounting recorded in `DECISIONS.md`: **39/39 functionally accounted for**.
 Four screens remain PARTIAL; this does not close remaining Wave 1 or physical gates.
@@ -420,7 +423,8 @@ Four screens remain PARTIAL; this does not close remaining Wave 1 or physical ga
 **Wave 2 — local data protection and auth hardening** (native rebuild)
 5. H-3 SQLCipher (key management, upgrade migration, recovery).
 6. H-4 PIN timing/security hardening + close the latency gate.
-7. H-5 production OTP provider + anonymous-auth hardening.
+7. H-5 production OTP provider + anonymous-auth hardening, then delete the
+   temporary DEV registration harness (`apps/mobile/dev/README.md` checklist).
 8. H-9 secrets/env/EAS production configuration.
 9. H-10 auth/device-link/session hardening.
 10. H-11 migration/rollback/recovery rehearsal.

@@ -26,6 +26,21 @@ import { commercialSchemaInstalled, isUserWithinStaffLimit } from './commercial'
 export interface RegisterShopInput {
   shopName: string;
   phone: string;
+  /**
+   * Declares that no phone was PROVED for this Owner, so the account gets no
+   * phone credential at all.
+   *
+   * The type admits only `null` on purpose. `shops.phone` is a business contact
+   * field, but `users.phone` is a credential — it names the account on a fresh
+   * device at phone + PIN login and carries a GLOBAL partial unique index — so
+   * the only honest alternative to "the number we just verified" is "none".
+   * Allowing an arbitrary string here would invite writing an unverified number
+   * into a credential column.
+   *
+   * Omit it, as production OTP registration does, and the verified number is
+   * used for both.
+   */
+  ownerPhone?: null;
 }
 
 export type RegistrationStatus =
@@ -40,8 +55,8 @@ export type RegistrationStatus =
  * The outbox cannot carry them: push refuses a caller with no app_user_id
  * claim, that claim comes from the auth binding, and the binding is only
  * written once link-device can already see the Owner ON THE SERVER. Sending
- * them with link-device is what closes that loop — for the real OTP flow just
- * as much as for DEV Skip-OTP, which is why this is no longer DEV-only.
+ * them with link-device is what closes that loop, on the one canonical OTP
+ * registration path there is.
  *
  * Commercial fields are deliberately absent: plan, trial and billing are the
  * server's to decide, never the device's.
@@ -75,38 +90,6 @@ export interface OwnerOnboardingPayload {
     updatedAt: string;
   };
   settings: { id: string } | null;
-}
-
-/**
- * Clears an Owner's phone locally, for a registration that never proved one.
- *
- * `users_phone_unique` is global — one live user per number across every shop —
- * so a placeholder number can belong to exactly one Owner in the whole project.
- * Leaving it on the local row after onboarding sent null would also poison the
- * outbox: the queued users insert would push the placeholder back up and be
- * rejected 23505 forever.
- *
- * The shop's own phone is untouched, which is what still identifies the
- * registration; only the Owner's login credential is removed.
- */
-export async function clearUnverifiedOwnerPhone(
-  shopId: string,
-  ownerUserId: string,
-): Promise<void> {
-  await db.transaction(async (tx) => {
-    const updatedAt = new Date().toISOString();
-    await tx
-      .update(users)
-      .set({ phone: null, updatedAt })
-      .where(and(eq(users.id, ownerUserId), eq(users.shopId, shopId)));
-    recordChange(tx, {
-      shopId,
-      table: 'users',
-      rowId: ownerUserId,
-      op: 'update',
-      payload: { id: ownerUserId, phone: null, updatedAt },
-    });
-  });
 }
 
 /** Reads one same-shop Owner onboarding payload atomically from SQLite. */
@@ -437,6 +420,11 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
     throw new Error('Enter a valid Bangladeshi mobile number');
   }
 
+  // The shop's contact number and the Owner's login credential are the same
+  // value only because OTP proved that one number. A caller that proved
+  // nothing says so, and the Owner row gets no credential at all.
+  const ownerPhone = input.ownerPhone === null ? null : phone;
+
   await db.transaction(async (tx) => {
     const timestamp = new Date().toISOString();
     // shops.owner_id is intentionally NOT a foreign key (same reason as
@@ -483,7 +471,7 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
       id: userId,
       shopId,
       name: input.shopName,
-      phone,
+      phone: ownerPhone,
       pinHash: placeholderPinHash,
       roleId: ownerRoleId,
       isActive: true,

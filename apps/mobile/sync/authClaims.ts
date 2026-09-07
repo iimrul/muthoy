@@ -98,7 +98,8 @@ export type OwnerSessionClaimProblem =
   | ReturnType<typeof missingIdentityClaims>[number]
   | 'role_not_owner'
   | 'shop_id_mismatch'
-  | 'app_user_id_mismatch';
+  | 'app_user_id_mismatch'
+  | 'principal_user_id_mismatch';
 
 /**
  * Safe, value-free postcondition for the refreshed Owner token.
@@ -116,6 +117,14 @@ export function ownerSessionClaimProblems(
   if (claims.shopId && claims.shopId !== expected.shopId) problems.push('shop_id_mismatch');
   if (claims.appUserId && claims.appUserId !== expected.ownerUserId) {
     problems.push('app_user_id_mismatch');
+  }
+  // At registration the Owner IS the principal — the shop has no other actor
+  // yet, so the hook resolves both claims to the same users row. Checking only
+  // app_user_id left the stable, auth-bound identity unverified while the
+  // per-shop actor was matched, and it is the principal that shop_memberships
+  // and every multi-shop RLS policy key on.
+  if (claims.principalUserId && claims.principalUserId !== expected.ownerUserId) {
+    problems.push('principal_user_id_mismatch');
   }
   return problems;
 }

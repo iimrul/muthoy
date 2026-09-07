@@ -41,3 +41,11 @@ backend/supabase/.temp/
 
 # EAS local cache
 .eas/
+# Generated Supabase dumps (pg_dump artifacts, timestamped per run).
+# backup_data_* has carried DEV bcrypt hashes and phone-shaped values; these
+# are reproducible from the migration ledger and must never be tracked.
+backend/supabase/checks/backup_data_*.sql
+backend/supabase/checks/backup_schema_*.sql
+
+# Expo export output (regenerate with `npx expo export`).
+apps/mobile/dist/

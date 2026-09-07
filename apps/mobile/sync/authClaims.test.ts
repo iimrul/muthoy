@@ -53,8 +53,9 @@ describe('reading B4 identity from a minted access token', () => {
   });
 
   it('recognises the exact broken session: shop_id present, identity absent', () => {
-    // What an anonymous account looks like after link-device ran WITHOUT
-    // ownerUserId — the state the physical device was stuck in.
+    // What a token looks like after link-device ran WITHOUT ownerUserId — the
+    // state the physical device was stuck in. The client now always sends it,
+    // so this is a negative control the validator must keep rejecting.
     const claims = readAccessTokenClaims(token({ shop_id: 'shop-1' }));
 
     expect(claims.shopId).toBe('shop-1');

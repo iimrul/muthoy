@@ -33,36 +33,26 @@ export function describeSupabaseConfig(): string {
   return `host=${host}`;
 }
 
-export const runtimeConfigDiagnostics = Object.freeze({
-  marker: 'B4_CONFIG_DIAG_20260904_01',
-  buildType: __DEV__ ? 'debug' : 'release',
-  devMode: __DEV__,
-  bundleSource: __DEV__ ? 'metro/development' : 'embedded/release',
-  configured: isSupabaseConfigured,
-  host: describeSupabaseConfig().replace(/^host=/, ''),
-});
-
-// One line at boot, visible in Metro's console and in logcat. An unconfigured
-// build is the one failure that no amount of retrying or reconnecting can fix,
-// so it says so immediately and names the remedy, rather than resurfacing later
-// as a mysterious "offline".
+// One line at boot when the build is broken. An unconfigured build is the one
+// failure that no amount of retrying or reconnecting can fix, so it says so
+// immediately and names the remedy, rather than resurfacing later as a
+// mysterious "offline". This line survives into release deliberately: it prints
+// variable NAMES only — never the host, the key, or any identifier — and
+// `app/_layout.tsx` shows the same list on screen.
+//
+// The healthy-build line is the opposite case. It names the project host, which
+// is a config internal with no production audience, so it is DEV-only. The B4
+// `[muthoy-runtime]` build-marker line beside it was a temporary
+// physical-debugging aid and is gone; nothing reads a build marker at runtime.
 if (missingSupabaseConfigKeys.length > 0) {
   console.warn(
     `[muthoy] Supabase ${describeSupabaseConfig()}. `
     + 'Start Metro from apps/mobile so .env loads, and reload with --clear; '
     + 'for EAS builds set these as EAS environment variables.',
   );
-} else {
+} else if (__DEV__) {
   console.log(`[muthoy] Supabase config loaded — ${describeSupabaseConfig()}`);
 }
-console.log(
-  `[muthoy-runtime] marker=${runtimeConfigDiagnostics.marker}`
-  + ` buildType=${runtimeConfigDiagnostics.buildType}`
-  + ` devMode=${runtimeConfigDiagnostics.devMode}`
-  + ` bundleSource=${runtimeConfigDiagnostics.bundleSource}`
-  + ` configured=${runtimeConfigDiagnostics.configured}`
-  + ` host=${runtimeConfigDiagnostics.host}`,
-);
 
 const authStorage = createMMKV({ id: 'muthoy-supabase-auth' });
 const mmkvAuthStorage: SupportedStorage = {

@@ -40,10 +40,21 @@ export function isRuntimeDiagnosticsEnabled(): boolean {
   return typeof __DEV__ !== "undefined" && __DEV__;
 }
 
+/**
+ * Session breadcrumbs for the physical login path — DEV builds only.
+ *
+ * Production returns an EMPTY context rather than a populated one that merely
+ * goes unlogged. Every entry point below funnels through this, so a release
+ * build never assembles a user id, shop id, role, or permission count into a
+ * diagnostic object at all: there is nothing for a future caller to print,
+ * render, or hand to a crash reporter by accident. H-8 will add deliberate
+ * observability; until then production emits nothing from this module.
+ */
 export function sessionDiagnosticContext(
   session: Session | null,
   currentRoute?: string,
 ): RuntimeDiagnosticContext {
+  if (!isRuntimeDiagnosticsEnabled()) return {};
   const role = session ? toRole(session.role) : null;
   return {
     currentRoute,
@@ -95,6 +106,7 @@ export function runtimeDiagnosticError(
   context: RuntimeDiagnosticContext = {},
   fallbackStack?: string,
 ): RuntimeDiagnosticSnapshot {
+  if (!isRuntimeDiagnosticsEnabled()) return EMPTY_SNAPSHOT;
   const normalized =
     error instanceof Error ? error : new Error(String(error));
   const snapshot: RuntimeDiagnosticSnapshot = {
@@ -102,14 +114,13 @@ export function runtimeDiagnosticError(
     errorMessage: normalized.message,
     stack: normalized.stack ?? fallbackStack,
   };
-  if (isRuntimeDiagnosticsEnabled()) {
-    console.log("[staff-home:runtime-error]", snapshot);
-  }
+  console.log("[staff-home:runtime-error]", snapshot);
   return snapshot;
 }
 
 export function getRuntimeDiagnosticSnapshot(
   context: RuntimeDiagnosticContext = {},
 ): RuntimeDiagnosticSnapshot {
+  if (!isRuntimeDiagnosticsEnabled()) return EMPTY_SNAPSHOT;
   return mergeContext(context);
 }

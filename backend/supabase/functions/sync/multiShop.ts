@@ -117,7 +117,12 @@ export async function mutateOwnedShop(caller: Caller, body: Record<string, unkno
     if (error.code === "MU045") throw new HttpError(404, "Shop not found");
     if (error.code === "MU046") throw new HttpError(409, "Primary shop cannot be archived");
     if (error.code === "MU044") throw new HttpError(400, "Shop name is required");
-    throw new HttpError(500, `Could not update shop (db=${error.code ?? "unknown"} op=mutate_owned_shop)`);
+    // Detail to the function log; the device gets a stable product message.
+    // See onboarding.ts for why the SQLSTATE must not reach a store build.
+    console.error(
+      `sync/multi-shop update failed: db=${error.code ?? "unknown"} op=mutate_owned_shop`,
+    );
+    throw new HttpError(500, "Could not update shop", "shop_update_failed");
   }
   if (!data) throw new HttpError(404, "Shop not found");
   await supabaseAdmin.rpc("b4_reconcile_plan_limits", { p_billing_account_id: billingAccountId });

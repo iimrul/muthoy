@@ -1,6 +1,7 @@
 const { getDefaultConfig } = require('expo/metro-config');
 const { withNativeWind } = require('nativewind/metro');
 const path = require('path');
+const { resolveDevOnlyModule } = require('./dev/devOnlyResolver.cjs');
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(projectRoot, '../..');
@@ -33,4 +34,18 @@ config.resolver.nodeModulesPaths = [
 // (paired with babel.config.js's inline-import plugin).
 config.resolver.sourceExts.push('sql');
 
-module.exports = withNativeWind(config, { input: './global.css' });
+const finalConfig = withNativeWind(config, { input: './global.css' });
+
+// DEV-only module boundary — see dev/devOnlyResolver.cjs for the reasoning.
+// Applied AFTER withNativeWind so NativeWind's own resolver cannot clobber it,
+// and it delegates to whatever resolver NativeWind (or Metro) installed rather
+// than replacing it.
+const upstreamResolveRequest = finalConfig.resolver.resolveRequest;
+finalConfig.resolver.resolveRequest = (context, moduleName, platform) => {
+  const stub = resolveDevOnlyModule({ isDev: context.dev, moduleName, projectRoot });
+  if (stub) return stub;
+  const delegate = upstreamResolveRequest ?? context.resolveRequest;
+  return delegate(context, moduleName, platform);
+};
+
+module.exports = finalConfig;

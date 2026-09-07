@@ -166,5 +166,9 @@ explicit grant and extend the grant tests.
   and fails closed when absent.
 - Live two-device convergence, refund authority, and revocation must be checked
   after deploy even though PGlite coverage passes.
-- SQLCipher, production OTP/provider hardening, DEV bypass removal, and broader
-  BLE printer-model rollout remain separate release gates.
+- SQLCipher, production OTP/provider hardening, and broader BLE printer-model
+  rollout remain separate release gates.
+- Client DEV bypass removal is done (H-2, 2026-09-06). Two hosted settings still
+  belong to it: Anonymous sign-ins must stay disabled in Authentication →
+  Providers on every project, and rejecting anonymous callers inside
+  `verifyCallerJwt()` is H-5's hardening.

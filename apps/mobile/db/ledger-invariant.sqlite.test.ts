@@ -375,7 +375,6 @@ describe('negative control: a movement whose batch does not exist', () => {
 
   it('is refused by the trigger even with foreign keys switched off', () => {
     sqlite.exec('PRAGMA foreign_keys = OFF');
-    console.log('SQLOF', JSON.stringify(sqlite.prepare("SELECT sql FROM sqlite_master WHERE name='inventory_movement_requires_its_batch'").all()));
     try {
       expect(() =>
         sqlite

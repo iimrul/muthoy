@@ -5,10 +5,12 @@
 > permissions, ledger, grouped operations, and B4 are deployed/verified.
 > Statements below describing one-phone Beta, absolute LWW stock, or work still
 > to build—including local-first Owner creation followed by later cloud push—are
-> historical. Production OTP and DEV Skip OTP now converge on canonical
-> server-authoritative `b4_onboard_owner(...)`; the old separate DEV bootstrap
-> is removed. Durable current contracts live in `DECISIONS.md`,
-> `apps/mobile/sync/README.md`, and the Supabase migration README.
+> historical. Onboarding is now canonical server-authoritative
+> `b4_onboard_owner(...)`, reached only through verified OTP; the DEV Skip-OTP
+> bypass, its anonymous sign-in, the owner-link repair, and the old separate DEV
+> bootstrap were all removed in H-2 (2026-09-06). Durable current contracts live
+> in `DECISIONS.md`, `apps/mobile/sync/README.md`, and the Supabase migration
+> README.
 
 ## In plain English
 

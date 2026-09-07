@@ -4,8 +4,6 @@ import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { colors } from '@muthoy/constants';
 import { getActiveSessionContext, getRegistrationStatus } from '../db/auth';
 import type { Permission, PermissionOverrides } from '../domain/permissions';
-// ⚠️ TEMPORARY import — remove with the dev auth bypass (see dev/README.md).
-import { isDevPlaceholderPhone } from '../dev/devAnonAuth';
 import { authenticatedHome, type AuthenticatedHomePath } from '../navigation/routes';
 import { useSessionStore } from '../state/sessionStore';
 
@@ -73,17 +71,9 @@ export default function RootSessionGate() {
 
         if (registration.status === 'link_pending') {
           clearActiveUser();
-          // ⚠️ TEMPORARY (dev/README.md): a dev anonymous registration whose
-          // device-link did not finish carries a PLACEHOLDER phone, never a
-          // verified identity — sending it to otp-verify would start a real
-          // SMS OTP flow against a fake number. Route back to Registration,
-          // where "Dev: Skip OTP" resumes the link. Delete with the dev entry.
-          if (__DEV__ && isDevPlaceholderPhone(registration.phone)) {
-            if (isCurrent) {
-              setDestination('/register');
-            }
-            return;
-          }
+          // Every registration that reaches this state proved a real phone at
+          // Registration, so resuming it re-enters the same OTP verification —
+          // there is no build in which a placeholder number arrives here.
           if (isCurrent) {
             setDestination({
               pathname: '/otp-verify',

@@ -21,11 +21,22 @@ and remote `sync` is v10 ACTIVE.
 
 ## Owner onboarding
 
-Production is: phone → OTP verification → canonical server Owner/shop onboarding
-→ auth binding → refreshed full Owner claims → automatic trial hydration.
-DEV Skip OTP bypasses only OTP verification and then uses that same canonical
-path. The removed separate DEV bootstrap must not return. DEV bypass UI remains
-`__DEV__`-only and must be removed/disabled for production.
+There is exactly one path, in every build: phone → OTP verification → canonical
+server Owner/shop onboarding → auth binding → refreshed full Owner claims →
+automatic trial hydration. The DEV Skip-OTP entry, the anonymous sign-in it
+used, the owner-link repair affordance, and the earlier separate DEV bootstrap
+are all removed (H-2, 2026-09-06) and must not return; `dev/README.md` records
+why, and `tests/dev-production-safety*` fails the build if any of them comes
+back.
+
+Until H-5 configures a real OTP provider, a **temporary DEV registration
+harness** (`dev/devRegistrationHarness.tsx`) keeps fresh local registration
+testable. It skips only the SMS code and then joins the canonical path above at
+`createShopAndOwner`; it is not a second path. `metro.config.js` resolves it to
+an inert stub in every non-dev bundle, so no release build contains it, and the
+DEV Owner it creates has a **null** phone — nothing claims a verification that
+did not happen. **H-5 removes the harness before RC**; `dev/README.md` carries
+the removal checklist.
 
 A successful refreshed Owner token requires `app_user_id`,
 `principal_user_id`, `shop_id`, `role=owner`, `permission_version`, and
@@ -50,13 +61,19 @@ its server expiry and offline-verification bounds.
 Local Expo configuration belongs in the uncommitted `apps/mobile/.env`; use
 `.env.example` only for non-secret placeholders. EAS builds require EAS
 Environment Variables because `EXPO_PUBLIC_*` values are transform-time inlined.
-Runtime diagnostics may expose build mode, config presence, and Supabase host,
-never anon keys, tokens, or identifiers.
+
+A release build's only boot diagnostic is the missing-configuration warning,
+which names the absent `EXPO_PUBLIC_*` variables and nothing else — no host, no
+key, no identifier — and `app/_layout.tsx` shows the same list on screen and
+fails closed. The healthy-config line names the Supabase host and is therefore
+`__DEV__`-only; the B4 `[muthoy-runtime]` build-marker line is gone. Session
+diagnostics are inert in release: no user id, shop id, role, or permission count
+is assembled at all.
 
 Recorded B4 completion checks: physical Android PASS; 146 files/1,537 tests,
 typecheck, and lint PASS. Live SSLCommerz acceptance, production OTP hardening,
-SQLCipher, final UI/security audits, DEV cleanup, and the full RC matrix remain
-release work; see `../../DECISIONS.md`.
+SQLCipher, final UI/security audits, and the full RC matrix remain release work;
+see `../../DECISIONS.md`.
 
 ## Develop
 

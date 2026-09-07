@@ -10,10 +10,10 @@ import { requireSupabaseConfiguration, supabase } from './supabaseClient';
 
 interface LinkDeviceOptions {
   /**
-   * The shop, roles and Owner to create server-side. Sent by EVERY new
-   * registration — OTP and DEV alike — because link-device is the only point
-   * where the server can create them before it needs to read them back.
-   * Omitted when resuming a link for a shop the server already has.
+   * The shop, roles and Owner to create server-side. Sent by every new OTP
+   * registration, because link-device is the only point where the server can
+   * create them before it needs to read them back. Omitted when resuming a
+   * link for a shop the server already has.
    */
   onboarding?: OwnerOnboardingPayload;
 }
@@ -21,12 +21,16 @@ interface LinkDeviceOptions {
 /**
  * Server messages safe to show, matched by PREFIX.
  *
- * This was an exact-match Set, and that silently hid the answer to a
- * multi-round physical debug: the server had started appending
- * `(db=23505 op=insert:users)`, which no longer matched any member, so the
- * device showed a bare error code and the SQLSTATE never surfaced. These
- * strings are authored here, carry no row data, and the diagnostic suffix is
- * the most useful part — so the tail is kept, not discarded.
+ * The prefix match exists because the server once appended
+ * `(db=23505 op=insert:users)` to these strings, which an exact-match Set
+ * silently rejected — the device then showed a bare code and the SQLSTATE
+ * never surfaced during a multi-round physical debug.
+ *
+ * The server no longer sends that tail (it logs it instead), but the prefix
+ * match stays and the tail is now STRIPPED rather than shown: a pharmacist
+ * reading "(db=23505 op=onboard_owner)" learns nothing from it, and it
+ * publishes the schema's failure modes. `LinkDeviceServerError.code` carries
+ * the stable, product-safe identifier; DEV keeps the detail in its own log.
  */
 const SAFE_EDGE_PREFIXES = [
   'This account cannot be linked to that shop',
@@ -70,18 +74,24 @@ async function toLinkDeviceServerError(error: Error): Promise<LinkDeviceServerEr
         code = typeof fields.code === 'string' && /^[a-z0-9_]{1,64}$/i.test(fields.code)
           ? fields.code
           : null;
-        serverMessage = typeof fields.error === 'string'
-          && SAFE_EDGE_PREFIXES.some((safe) => fields.error === safe || (fields.error as string).startsWith(`${safe} (`))
-          ? fields.error
-          : null;
+        const message = typeof fields.error === 'string' ? fields.error : null;
+        const safe = message
+          ? SAFE_EDGE_PREFIXES.find((prefix) => message === prefix || message.startsWith(`${prefix} (`))
+          : undefined;
+        // The authored prefix only — never the parenthesised tail, wherever it
+        // came from. An older deployed function still appends one.
+        serverMessage = safe ?? null;
       }
     } catch {
       // Non-JSON proxy bodies are intentionally not surfaced or logged.
     }
   }
+  // DEV-only. Status and code carry no row data, no token and no identifier,
+  // but a release build has no audience for them either — H-8 owns production
+  // reporting of this failure.
   if (__DEV__) {
     console.warn(
-      `[dev-owner-link] function=sync action=link-device status=${status ?? 'unknown'} code=${code ?? 'none'}`,
+      `[link-device] function=sync action=link-device status=${status ?? 'unknown'} code=${code ?? 'none'}`,
     );
   }
   return new LinkDeviceServerError(status, code, serverMessage, error);

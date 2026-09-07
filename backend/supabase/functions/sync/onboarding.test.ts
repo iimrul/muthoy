@@ -127,8 +127,10 @@ describe("the diagnostic that was missing", () => {
   });
 
   it("keeps the SQLSTATE and the step for anything unmapped", async () => {
-    // The whole reason this took several physical rounds: the device was told
-    // only a generic code, and the real SQLSTATE never left the server.
+    // The SQLSTATE that took several physical rounds to surface now goes to the
+    // FUNCTION LOG, not into a message a pharmacist reads. The device gets a
+    // stable code instead, which is what it can actually act on.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.rpc.mockResolvedValue({
       data: null,
       error: { code: "23505", message: "duplicate key ... (phone)=(+8801700000000)" },
@@ -137,8 +139,22 @@ describe("the diagnostic that was missing", () => {
     await expect(onboardOwner(SHOP, OWNER, payload())).rejects.toMatchObject({
       status: 500,
       code: "onboarding_failed",
-      message: "Could not complete onboarding (db=23505 op=onboard_owner)",
+      message: "Could not complete onboarding",
     });
+    expect(logged).toHaveBeenCalledWith(
+      "sync/link-device onboarding failed: db=23505 op=onboard_owner",
+    );
+    logged.mockRestore();
+  });
+
+  it("keeps the SQLSTATE out of the message the device is shown", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: "23505", message: "duplicate key" } });
+
+    const failure = await onboardOwner(SHOP, OWNER, payload()).catch((cause: Error) => cause);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).not.toMatch(/db=|op=|23505/);
+    vi.restoreAllMocks();
   });
 
   it("never forwards database text, which can quote the offending row", async () => {

@@ -51,8 +51,11 @@ export default defineConfig({
       "apps/mobile/components/expenses/*.test.ts",
       "apps/mobile/components/expenses/*.test.tsx",
       "apps/mobile/components/suppliers/*.test.tsx",
-      // dev/ also contains production-disabled auth timing code. Remove only
-      // the OTP-bypass files listed in dev/README.md before production.
+      // dev/ holds production-disabled instrumentation (auth timing, runtime
+      // diagnostics — both inert unless __DEV__) plus the temporary DEV
+      // registration harness, which metro.config.js keeps out of every non-dev
+      // bundle and H-5 deletes. devOnlyResolver.test.ts proves that boundary;
+      // see dev/README.md.
       "apps/mobile/dev/*.test.ts",
       "apps/mobile/db/cash.sqlite.test.ts",
       "apps/mobile/db/b4-commercial-cache.sqlite.test.ts",
@@ -150,6 +153,11 @@ export default defineConfig({
       // Neutral typos show Not Found; guarded prefixes retain their overlays.
       "apps/mobile/tests/not-found.test.tsx",
       "apps/mobile/tests/not-found.integration.test.tsx",
+      // H-2: the DEV OTP bypass is absent from the import graph, no __DEV__
+      // branch grants capability, and a production-mode Registration renders no
+      // bypass/repair affordance while the real OTP path still runs.
+      "apps/mobile/tests/dev-production-safety.test.ts",
+      "apps/mobile/tests/dev-production-safety.render.test.tsx",
       "apps/mobile/tests/reports-final-fixes.test.tsx",
       "apps/mobile/tests/app-layout.test.tsx",
       "apps/mobile/tests/authenticated-routing.test.tsx",
