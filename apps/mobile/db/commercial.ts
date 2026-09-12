@@ -326,6 +326,22 @@ export async function requireStaffSlot(shopId: string): Promise<void> {
   if (active.filter((row) => row.role !== 'owner').length >= limit) throw new PlanAccessError('staff_limit');
 }
 
+/**
+ * H-7. Deliberately LOCK-AGNOSTIC: it does not consult `users.access_locked_at`.
+ *
+ * Two reasons. A device-local revocation must not change PLAN accounting for
+ * anyone else — the limit is filled in `created_at` order, so treating a locked
+ * user as absent would silently promote the next staff member into the plan on
+ * this device only. And `clearLocalUserAccessLock` asks this question while the
+ * lock is still on; a lock-aware answer would always be false, and the lock
+ * could never be released.
+ *
+ * The lock is enforced one level up instead, and every caller does it:
+ * `getActiveSessionRole` and `getActiveSessionContext` carry
+ * `isNull(users.accessLockedAt)` in their own WHERE, and `toLocalPinSession` is
+ * only ever reached through `liveLoginWhere()`. A lock filter here would be
+ * redundant at best and a deadlock at worst.
+ */
 export async function isUserWithinStaffLimit(shopId: string, userId: string): Promise<boolean> {
   if (!commercialSchemaInstalled()) return true;
   const candidates = await db.select({

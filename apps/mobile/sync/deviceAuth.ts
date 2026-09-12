@@ -1,9 +1,17 @@
 import { normalizeBdPhone } from '@muthoy/validation';
-import { markShopCloudLinked, recordSuccessfulLogin, verifyPinForUser } from '../db/auth';
+import {
+  clearLocalUserAccessLock,
+  markShopCloudLinked,
+  recordSuccessfulLogin,
+  verifyPinForUser,
+} from '../db/auth';
 import { handoffAuthTiming, type AuthTimingTrace } from '../dev/authTiming';
 import { useSessionStore } from '../state/sessionStore';
+import { SyncHaltedError } from './invoke';
 import { pullChanges } from './pull';
+import { enforceAuthoritativeRevocation } from './revocation';
 import { requireSupabaseConfiguration, supabase } from './supabaseClient';
+import { assertCloudActorBinding, inspectCloudActorBinding } from './authActorBinding';
 
 // sync/deviceAuth.ts — logging in on a device that has no local data yet.
 //
@@ -124,14 +132,40 @@ export async function loginOnNewDevice(
   if (sessionError) {
     throw new DeviceLoginError('Could not start your session. Please try again.', false);
   }
+  assertCloudActorBinding(
+    await inspectCloudActorBinding({ userId: response.userId, shopId: response.shopId }),
+    { userId: response.userId, shopId: response.shopId },
+  );
 
   // `null` forces FULL hydration rather than an incremental pull from a cursor
   // this device has never had. The same call app/(auth)/otp-verify.tsx already
   // makes for an owner restoring onto a new phone — one hydration path, not two.
-  if (timing) {
-    await timing.measure('full_hydration', () => pullChanges(response.shopId, null, undefined, timing));
-  } else {
-    await pullChanges(response.shopId, null);
+  try {
+    if (timing) {
+      await timing.measure('full_hydration', () => pullChanges(response.shopId, null, undefined, timing));
+    } else {
+      await pullChanges(response.shopId, null);
+    }
+  } catch (error) {
+    if (error instanceof SyncHaltedError) {
+      await enforceAuthoritativeRevocation(response.shopId, error.code, response.userId);
+    }
+    throw error;
+  }
+
+  // The lock is device-local and may only clear after BOTH credential proof
+  // and an authoritative pull succeeded for this exact actor — and then only if
+  // the row that pull produced says the actor is live. Credential proof alone
+  // is not enough: the server mints a session before plan suspension or an
+  // archived shop is resolved, and neither of those flips `is_active`.
+  const unlocked = await clearLocalUserAccessLock(response.shopId, response.userId);
+  if (!unlocked) {
+    // A credential refusal, not a transient fault: retrying cannot change the
+    // hydrated answer, and the device must stay locked.
+    throw new DeviceLoginError(
+      'Your access to this shop has been revoked. Ask the shop owner to restore it.',
+      true,
+    );
   }
 
   // The device now holds the shop in the same sense a registered one does, so
@@ -157,7 +191,7 @@ export async function loginOnNewDevice(
   // The same login() every other entry point calls, so the epoch bumps and
   // state/sessionGuard.ts, app/_layout.tsx's sync start and the cart cleanup all
   // behave exactly as they do after a normal PIN login.
-  useSessionStore.getState().login(local);
+  useSessionStore.getState().login({ ...local, cloudActorConfirmed: true });
   handoffAuthTiming(timing);
 }
 
@@ -197,6 +231,10 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
   if (sessionError) {
     throw new DeviceLoginError('Could not start your session. Please try again.', false);
   }
+  assertCloudActorBinding(
+    await inspectCloudActorBinding({ userId: response.userId, shopId: response.shopId }),
+    { userId: response.userId, shopId: response.shopId },
+  );
 
   // Recovery runs on a device that may hold nothing (lost phone) or everything
   // (forgotten PIN on the usual handset). pullChanges with an explicit null
@@ -209,5 +247,5 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
   if (!local || local.userId !== response.userId) {
     throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false);
   }
-  useSessionStore.getState().login(local);
+  useSessionStore.getState().login({ ...local, cloudActorConfirmed: true });
 }

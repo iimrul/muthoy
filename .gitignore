@@ -49,3 +49,6 @@ backend/supabase/checks/backup_schema_*.sql
 
 # Expo export output (regenerate with `npx expo export`).
 apps/mobile/dist/
+
+# Local H-7 device retest captures
+.codex-h7-retest/

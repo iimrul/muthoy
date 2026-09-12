@@ -153,7 +153,7 @@ function serverTrialSnapshot(input: {
 beforeAll(() => {
   sqlite.exec('PRAGMA foreign_keys=ON');
   const migrationDir = resolve('apps/mobile/db/migrations');
-  for (const file of readdirSync(migrationDir).filter((name) => /^00(?:0\d|1\d|2[0-6])_.*\.sql$/.test(name)).sort()) {
+  for (const file of readdirSync(migrationDir).filter((name) => /^00(?:0\d|1\d|2[0-9])_.*\.sql$/.test(name)).sort()) {
     sqlite.exec(readFileSync(resolve(migrationDir, file), 'utf8'));
   }
   db.insert(shops).values({ id: SHOP_ID, ownerId: OWNER_ID, name: 'Shop', phone: '01700000041', createdAt: T0, updatedAt: T0 }).run();

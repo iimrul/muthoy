@@ -4,11 +4,13 @@ import { pullChanges } from './pull';
 import { pushPendingRows } from './push';
 import { nudgeBillingHydration } from './billingHydration';
 import { SyncHaltedError } from './invoke';
+import { enforceAuthoritativeRevocation } from './revocation';
 import { startInventoryRealtime, stopInventoryRealtime } from './realtime';
 import { startForegroundScheduler } from './scheduler';
 import { notifyIfSyncIsStuck, notifySyncHalted } from './stuckNotification';
 import { isSupabaseConfigured } from './supabaseClient';
 import { recordSuccessfulSync } from './statusStore';
+import { inspectCloudActorBinding } from './authActorBinding';
 import { useSessionStore } from '../state/sessionStore';
 import {
   completePendingAuthTimingStage,
@@ -25,7 +27,8 @@ export type SyncSkipReason =
   | 'inactive_shop'
   | 'offline'
   | 'cancelled'
-  | 'push_incomplete';
+  | 'push_incomplete'
+  | 'auth_actor_mismatch';
 
 export type SyncCycleResult =
   | { status: 'completed'; completedAt: string }
@@ -74,7 +77,15 @@ async function runCycle(
   shopId: string,
   startedAt: number,
 ): Promise<SyncCycleResult> {
-  const isCancelled = () => generation !== startedAt;
+  const sessionAtStart = useSessionStore.getState();
+  const actorAtStart = sessionAtStart.session;
+  const isCancelled = () => {
+    const current = useSessionStore.getState();
+    return generation !== startedAt
+      || current.epoch !== sessionAtStart.epoch
+      || current.session?.userId !== actorAtStart?.userId
+      || current.session?.shopId !== actorAtStart?.shopId;
+  };
   if (!isSupabaseConfigured) {
     return { status: 'skipped', reason: 'not_configured' };
   }
@@ -83,6 +94,27 @@ async function runCycle(
   }
   if (isCancelled()) {
     return { status: 'skipped', reason: 'cancelled' };
+  }
+  const localActor = actorAtStart;
+  if (!localActor || localActor.shopId !== shopId) {
+    return { status: 'skipped', reason: 'inactive_shop' };
+  }
+  const binding = await inspectCloudActorBinding({
+    userId: localActor.userId,
+    shopId: localActor.shopId,
+  });
+  if (isCancelled()) {
+    return { status: 'skipped', reason: 'cancelled' };
+  }
+  if (
+    binding.status !== 'matched'
+    || binding.actorUserId !== localActor.userId
+    || binding.shopId !== localActor.shopId
+  ) {
+    // Decoded token identity is only used to stop this cycle. Never lock either
+    // actor here: only a server-verified error may authorize a local lock.
+    useSessionStore.getState().login({ ...localActor, cloudActorConfirmed: false });
+    return { status: 'skipped', reason: 'auth_actor_mismatch' };
   }
   try {
     // The token goes DOWN into push and pull. Checking it only out here would
@@ -112,6 +144,9 @@ async function runCycle(
     return { status: 'completed', completedAt };
   } catch (error) {
     if (error instanceof SyncHaltedError && !isCancelled()) {
+      if (error.shopId === shopId && error.actorUserId) {
+        await enforceAuthoritativeRevocation(shopId, error.code, error.actorUserId);
+      }
       await notifySyncHalted(shopId, error.message);
     }
     throw error;
@@ -199,7 +234,11 @@ function scheduleInitialCycle(shopId: string): void {
 }
 
 export function startSyncEngine(shopId: string): void {
-  if (useSessionStore.getState().session?.cloudShopConfirmed === false) {
+  const session = useSessionStore.getState().session;
+  if (
+    session?.cloudShopConfirmed === false
+    || session?.cloudActorConfirmed === false
+  ) {
     stopSyncEngine();
     return;
   }

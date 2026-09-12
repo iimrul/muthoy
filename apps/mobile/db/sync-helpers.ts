@@ -1,6 +1,6 @@
-import { and, asc, count, eq, isNull, max } from "drizzle-orm";
+import { and, asc, count, eq, isNull, max, or } from "drizzle-orm";
 import { canonicalizeExpenseCategory } from "@muthoy/validation";
-import { db } from "./client";
+import { db, sqliteConnection } from "./client";
 import {
   auditLogs,
   batchPromotions,
@@ -508,6 +508,9 @@ function toSyncPayload(
     delete payload.pinLookupPinSetAt;
     delete payload.planSuspendedAt;
     delete payload.planSuspensionReason;
+    // H-7. Device-local revocation marker. The server has no such column, and
+    // one device's lock must never become another device's.
+    delete payload.accessLockedAt;
   }
   if (tableName === "sale_attachments") {
     delete payload.localUri;
@@ -706,6 +709,24 @@ function applyToTable<T extends SyncTableName>(
       timestampMs(row.updatedAt, "Remote")
   ) {
     return "skipped_stale";
+  }
+
+  if (tableName === "users") {
+    // H-7. `access_locked_at` is this DEVICE's revocation decision. The server
+    // has no such column, so a remote row never carries one — but relying on
+    // that absence is exactly the mistake this fixes. The lock used to BE
+    // `is_active`, which the server does own: revoking a plan-suspended or
+    // permission-churned staff member never flips the server's `is_active`, so
+    // the next newer `users` row wrote `true` back over the lock and silently
+    // returned offline access. On a shared till the owner's own login did it.
+    //
+    // Preserved explicitly, like `batches.stock` below, so the guarantee is
+    // stated rather than inherited from a column that happens not to exist.
+    upsertRemoteRow(tx, tableName, {
+      ...row,
+      accessLockedAt: local ? local.accessLockedAt : null,
+    });
+    return "applied";
   }
 
   if (tableName === "batches") {
@@ -1103,6 +1124,315 @@ export function applyRemoteRows(
     }
   });
   return results;
+}
+
+/**
+ * Tables this device DROPS once the server stops sending them.
+ *
+ * H-7 H-1 narrowed the Edge pull so it sends only what the caller's permissions
+ * cover. That fixes new devices, but it cannot un-send what is already on disk:
+ * a cashier who once held `cash_management` keeps every expense row they were
+ * ever given, and a pull that simply stops mentioning the table leaves them
+ * there forever. `sync_readable_tables` tells the device what it may still
+ * hold, and this is the other half of that contract.
+ *
+ * DELIBERATELY NOT THE WHOLE MIRROR. `medicines`, `batches`,
+ * `inventory_movements`, `customers`, `sales` and `sale_items` are excluded:
+ * losing read access to those means the app cannot function at all, so the
+ * correct recovery is a full re-hydration on the next login, not a partial wipe
+ * that leaves a half-empty catalogue behind. What remains here is the set whose
+ * absence is a permission change rather than a broken session, and whose rows
+ * are pure server mirrors with no local-only meaning.
+ */
+const PURGEABLE_ON_REVOKE = [
+  "expenses",
+  "payments",
+  "purchases",
+  "purchase_items",
+  "purchase_returns",
+  "suppliers",
+  "credits",
+  "credit_payment_allocations",
+  "credit_reconciliation_states",
+  "cash_drawer",
+  "batch_promotions",
+  "sale_drafts",
+  "sale_draft_items",
+  "inventory_imports",
+  "audit_logs",
+] as const satisfies readonly SyncTableName[];
+type PurgeableTableName = (typeof PURGEABLE_ON_REVOKE)[number];
+
+const PURGEABLE_TABLE_REGISTRY = {
+  expenses,
+  payments,
+  purchases,
+  purchase_items: purchaseItems,
+  purchase_returns: purchaseReturns,
+  suppliers,
+  credits,
+  credit_payment_allocations: creditPaymentAllocations,
+  credit_reconciliation_states: creditReconciliationStates,
+  cash_drawer: cashDrawer,
+  batch_promotions: batchPromotions,
+  sale_drafts: saleDrafts,
+  sale_draft_items: saleDraftItems,
+  inventory_imports: inventoryImports,
+  audit_logs: auditLogs,
+} as const satisfies Record<PurgeableTableName, (typeof TABLE_REGISTRY)[PurgeableTableName]>;
+
+export interface PurgeResult {
+  /** Tables that had at least one row removed. */
+  purged: SyncTableName[];
+  /** Rows left in place because pending/failed outbox work depends on them. */
+  retainedPending: number;
+}
+
+export interface AccessReconciliation {
+  shopId: string;
+  actorUserId: string;
+  readableTables: readonly string[];
+  saleHistoryScope: "all" | "own";
+}
+
+interface ForeignKeyDescription {
+  table: string;
+  from: string;
+  to: string;
+}
+
+interface ProtectedQueueRow {
+  tableName: string;
+  rowId: string;
+  payload: string;
+}
+
+const isKnownSyncTable = (value: string): value is SyncTableName =>
+  Object.prototype.hasOwnProperty.call(TABLE_REGISTRY, value);
+
+function quotedIdentifier(value: string): string {
+  // All callers pass schema-owned names. Quoting is still kept here so a
+  // future column/table name cannot accidentally become SQL syntax.
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function parseProtectedPayload(payload: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(payload);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Computes the transitive parent closure for pending AND failed outbox rows.
+ * A retained purchase_item therefore retains its purchase and supplier; a
+ * retained refund_tender retains its refund and sale. This runs before any
+ * delete, so ON DELETE CASCADE/RESTRICT can never consume queued local work.
+ */
+function protectedOutboxGraph(shopId: string): Map<SyncTableName, Set<string>> {
+  const queued = db
+    .select({
+      tableName: syncQueue.tableName,
+      rowId: syncQueue.rowId,
+      payload: syncQueue.payload,
+    })
+    .from(syncQueue)
+    .where(
+      and(
+        eq(syncQueue.shopId, shopId),
+        or(eq(syncQueue.status, "pending"), eq(syncQueue.status, "failed")),
+      ),
+    )
+    .all() as ProtectedQueueRow[];
+
+  const protectedIds = new Map<SyncTableName, Set<string>>();
+  const payloads = new Map<string, Record<string, unknown>>();
+  const work: { tableName: SyncTableName; rowId: string }[] = [];
+
+  const protect = (tableName: SyncTableName, rowId: string): void => {
+    const ids = protectedIds.get(tableName) ?? new Set<string>();
+    if (ids.has(rowId)) return;
+    ids.add(rowId);
+    protectedIds.set(tableName, ids);
+    work.push({ tableName, rowId });
+  };
+
+  for (const row of queued) {
+    if (!isKnownSyncTable(row.tableName)) continue;
+    protect(row.tableName, row.rowId);
+    payloads.set(`${row.tableName}\u0000${row.rowId}`, parseProtectedPayload(row.payload));
+  }
+
+  for (let index = 0; index < work.length; index += 1) {
+    const current = work[index];
+    if (!current) continue;
+    const foreignKeys = sqliteConnection.getAllSync<ForeignKeyDescription>(
+      `PRAGMA foreign_key_list(${quotedIdentifier(current.tableName)})`,
+    );
+    const local = sqliteConnection.getFirstSync<Record<string, unknown>>(
+      `SELECT * FROM ${quotedIdentifier(current.tableName)} WHERE id = $rowId LIMIT 1`,
+      { $rowId: current.rowId },
+    );
+    const source = local ?? payloads.get(`${current.tableName}\u0000${current.rowId}`) ?? {};
+
+    for (const foreignKey of foreignKeys) {
+      if (foreignKey.to !== "id" || !isKnownSyncTable(foreignKey.table)) continue;
+      const parentId = source[foreignKey.from];
+      if (typeof parentId === "string" && parentId.length > 0) {
+        protect(foreignKey.table, parentId);
+      }
+    }
+  }
+
+  return protectedIds;
+}
+
+function protectedIdsFor(
+  graph: Map<SyncTableName, Set<string>>,
+  tableName: SyncTableName,
+): ReadonlySet<string> {
+  return graph.get(tableName) ?? new Set<string>();
+}
+
+/**
+ * Removes locally-held rows for tables the server will no longer send.
+ *
+ * Three guards, because the blast radius of getting this wrong is a device that
+ * silently loses a pharmacy's records:
+ *
+ *  1. `readableTables` must look like a real answer. An empty array is what a
+ *     revoked or cross-shop caller gets, and acting on it would wipe the device
+ *     on any transient authorization hiccup — so an array that does not contain
+ *     `shops` (which every live caller can read) is treated as no answer at all.
+ *  2. Pending/failed outbox rows and their complete FK-parent closure are never
+ *     deleted. Dropping a parent could otherwise cascade away retained work.
+ *  3. Deletion runs child-before-parent in reverse hydration order, inside ONE
+ *     transaction, with foreign keys ON. A constraint we did not anticipate
+ *     rolls the whole purge back rather than leaving a partial mirror.
+ */
+export function purgeUnreadableTables(
+  access: AccessReconciliation,
+): PurgeResult {
+  const { shopId, actorUserId, readableTables, saleHistoryScope } = access;
+  const readable = new Set(readableTables);
+  if (!shopId || !actorUserId || !readable.has("shops")) {
+    return { purged: [], retainedPending: 0 };
+  }
+  const targets = new Set<PurgeableTableName>(
+    PURGEABLE_ON_REVOKE.filter((table) => !readable.has(table)),
+  );
+  if (targets.size === 0 && saleHistoryScope === "all") {
+    return { purged: [], retainedPending: 0 };
+  }
+  // Reverse hydration order is exactly child-before-parent, which is what the
+  // apply path already relies on in the other direction.
+  const ordered = [...HYDRATION_TABLE_ORDER]
+    .reverse()
+    .filter((table): table is PurgeableTableName =>
+      (PURGEABLE_ON_REVOKE as readonly SyncTableName[]).includes(table)
+      && targets.has(table as PurgeableTableName));
+
+  const purged: SyncTableName[] = [];
+  let retainedPending = 0;
+  const protectedGraph = protectedOutboxGraph(shopId);
+
+  db.transaction((tx) => {
+    for (const tableName of ordered) {
+      const pendingIds = protectedIdsFor(protectedGraph, tableName);
+
+      const table = PURGEABLE_TABLE_REGISTRY[tableName];
+      const removable = tx
+        .select({ id: table.id, shopId: table.shopId })
+        .from(table)
+        .where(eq(table.shopId, shopId))
+        .all()
+        .filter((row) => {
+          if (!pendingIds.has(row.id)) return true;
+          retainedPending += 1;
+          return false;
+        })
+        .map((row) => row.id);
+      if (removable.length === 0) {
+        continue;
+      }
+      for (const id of removable) {
+        tx.delete(table).where(and(eq(table.id, id), eq(table.shopId, shopId))).run();
+      }
+      purged.push(tableName);
+    }
+
+    if (saleHistoryScope === "own") {
+      const protectedSales = protectedIdsFor(protectedGraph, "sales");
+      const removableSales = tx
+        .select({ id: sales.id, staffId: sales.staffId })
+        .from(sales)
+        .where(eq(sales.shopId, shopId))
+        .all()
+        .filter((sale) => sale.staffId !== actorUserId)
+        .filter((sale) => {
+          if (!protectedSales.has(sale.id)) return true;
+          retainedPending += 1;
+          return false;
+        });
+
+      for (const sale of removableSales) {
+        const completedDrafts = tx
+          .select({ id: saleDrafts.id })
+          .from(saleDrafts)
+          .where(and(eq(saleDrafts.shopId, shopId), eq(saleDrafts.completedSaleId, sale.id)))
+          .all();
+        for (const draft of completedDrafts) {
+          tx.delete(saleDraftItems).where(and(
+            eq(saleDraftItems.shopId, shopId),
+            eq(saleDraftItems.draftId, draft.id),
+          )).run();
+          tx.delete(saleDrafts).where(and(
+            eq(saleDrafts.shopId, shopId),
+            eq(saleDrafts.id, draft.id),
+          )).run();
+        }
+        tx.delete(salesReturns).where(and(
+          eq(salesReturns.shopId, shopId),
+          eq(salesReturns.saleId, sale.id),
+        )).run();
+        const refunds = tx.select({ id: saleRefunds.id }).from(saleRefunds)
+          .where(and(eq(saleRefunds.shopId, shopId), eq(saleRefunds.saleId, sale.id))).all();
+        for (const refund of refunds) {
+          tx.delete(refundTenders).where(and(
+            eq(refundTenders.shopId, shopId),
+            eq(refundTenders.refundId, refund.id),
+          )).run();
+        }
+        tx.delete(saleRefunds).where(and(
+          eq(saleRefunds.shopId, shopId),
+          eq(saleRefunds.saleId, sale.id),
+        )).run();
+        tx.delete(saleAttachments).where(and(
+          eq(saleAttachments.shopId, shopId),
+          eq(saleAttachments.saleId, sale.id),
+        )).run();
+        tx.delete(saleItems).where(and(
+          eq(saleItems.shopId, shopId),
+          eq(saleItems.saleId, sale.id),
+        )).run();
+        tx.delete(sales).where(and(eq(sales.shopId, shopId), eq(sales.id, sale.id))).run();
+      }
+      if (removableSales.length > 0) {
+        for (const tableName of [
+          "sale_draft_items", "sale_drafts", "refund_tenders", "sales_returns",
+          "sale_refunds", "sale_attachments", "sale_items", "sales",
+        ] as const satisfies readonly SyncTableName[]) {
+          if (!purged.includes(tableName)) purged.push(tableName);
+        }
+      }
+    }
+  });
+
+  return { purged, retainedPending };
 }
 
 export function listPendingSyncRows(

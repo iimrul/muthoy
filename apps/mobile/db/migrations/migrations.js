@@ -28,6 +28,9 @@ import m0023 from './0023_purchase_invoice_metadata.sql';
 import m0024 from './0024_b3_report_indexes.sql';
 import m0025 from './0025_b3_sale_tax_snapshot.sql';
 import m0026 from './0026_b4_commercial_cache.sql';
+import m0027 from './0027_h7_local_access_lock.sql';
+import m0028 from './0028_shop_scoped_pin_lookup.sql';
+import m0029 from './0029_pin_reserved_while_inactive.sql';
 
 export default {
   journal,
@@ -59,5 +62,8 @@ export default {
     m0024,
     m0025,
     m0026,
+    m0027,
+    m0028,
+    m0029,
   },
 };

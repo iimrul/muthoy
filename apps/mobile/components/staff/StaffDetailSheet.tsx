@@ -13,7 +13,6 @@ import { ZERO_PAISA } from "@muthoy/types";
 import { PinPad, useConfirmedPinEntry } from "../ui/PinPad";
 import { PermissionMatrix } from "./PermissionMatrix";
 import {
-  activateStaff,
   deactivateStaff,
   removeStaff,
   resetStaffPin,
@@ -35,6 +34,7 @@ import { captureSessionFor } from "../../state/sessionGuard";
 import { useI18n } from "../../state/localeStore";
 import type { Session } from "../../state/sessionStore";
 import { triggerSyncNow } from "../../sync";
+import { reactivateStaffOnServer } from '../../sync/staffReactivation';
 
 function effective(staff: StaffMember): PermissionOverrides {
   return Object.fromEntries(
@@ -237,7 +237,7 @@ export function StaffDetailSheet({
                       void mutate((live) =>
                         staff.isActive
                           ? deactivateStaff(staff.id, session.userId, live)
-                          : activateStaff(staff.id, session.userId, live),
+                          : reactivateStaffOnServer(session.shopId, staff.id, live),
                       ),
                   )
                 }

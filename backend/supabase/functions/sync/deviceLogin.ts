@@ -1,9 +1,15 @@
 import * as bcrypt from "npm:bcryptjs@3";
-import { HttpError } from "./_shared/auth.ts";
+import { assertCallerCurrent, HttpError, verifyCallerJwt } from "./_shared/auth.ts";
 import type { ServerAuthTiming } from "./_shared/authTiming.ts";
 import { mintSessionForAppUser, resolveOrCreateAuthUserId } from "./_shared/identity.ts";
 import { normalizeBdPhone } from "./_shared/phone.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
+import {
+  deviceLoginAppMetadata,
+  mintedSessionMatchesActor,
+  resolveDeviceLoginActor,
+  type DeviceLoginCandidate,
+} from "./deviceLoginPolicy.ts";
 
 // deviceLogin.ts — phone + PIN, on a device whose SQLite is still empty.
 //
@@ -102,36 +108,29 @@ async function registerFailure(key: string, budget: number): Promise<void> {
   }
 }
 
-interface ResolvedUser {
-  id: string;
-  shopId: string;
-  pinHash: string;
-  roleName: string;
-}
-
-async function findUserByPhone(phone: string): Promise<ResolvedUser | null> {
+async function findUserByPhone(phone: string) {
   const { data, error } = await supabaseAdmin
     .from("users")
-    .select("id, shop_id, pin_hash, pin_set_at, roles!inner(name)")
+    .select(
+      "id, shop_id, pin_hash, pin_set_at, is_active, is_deleted, plan_suspended_at, roles!inner(name,is_deleted), shops!inner(archived_at,is_deleted)",
+    )
     .eq("phone", phone)
     .eq("is_active", true)
     .eq("is_deleted", false)
+    .is("plan_suspended_at", null)
+    .eq("roles.is_deleted", false)
+    .eq("shops.is_deleted", false)
+    .is("shops.archived_at", null)
     .maybeSingle();
 
   if (error) {
     throw new HttpError(500, "Could not verify credentials");
   }
   // pin_set_at null means registration never finished, so pin_hash is still the
-  // random placeholder createShopAndOwner wrote. Treated as no account rather
-  // than as a wrong PIN, so the placeholder can never be probed.
-  if (!data || !data.pin_hash || !data.pin_set_at) {
-    return null;
-  }
-  const roleName = (data.roles as unknown as { name: string } | null)?.name;
-  if (roleName !== "owner" && roleName !== "manager" && roleName !== "staff") {
-    return null;
-  }
-  return { id: data.id, shopId: data.shop_id, pinHash: data.pin_hash, roleName };
+  // random placeholder createShopAndOwner wrote. Every other eligibility field
+  // is checked again after the query filters as defence against a future query
+  // refactor accidentally widening this unauthenticated endpoint.
+  return resolveDeviceLoginActor(data as unknown as DeviceLoginCandidate | null);
 }
 
 export async function deviceLogin(
@@ -191,15 +190,16 @@ export async function deviceLogin(
 
   const authUserId = await resolveOrCreateAuthUserId(user.id, timing);
 
-  // shop_id is written to app_metadata BEFORE the token is minted, not after:
-  // every pre-existing RLS policy reads this claim, and the hook preserves an
-  // existing shop_id rather than replacing it. Writing it afterwards would mint
-  // one token without it.
+  // Both shop selectors are overwritten BEFORE minting. The access-token hook
+  // gives active_shop_id priority for Multi-Shop, so leaving an older value
+  // there can mint another shop's actor even though this login resolved user.
+  // user.shopId came from the unique server phone lookup; no request shop id is
+  // accepted or copied into auth metadata.
   const { error: metadataError } = await timed(
     timing,
     "session_metadata_update",
     () => supabaseAdmin.auth.admin.updateUserById(authUserId, {
-      app_metadata: { shop_id: user.shopId },
+      app_metadata: deviceLoginAppMetadata(user.shopId),
     }),
   );
   if (metadataError) {
@@ -207,6 +207,36 @@ export async function deviceLogin(
   }
 
   const session = await mintSessionForAppUser(user.id, timing);
+
+  // Verify the exact token being returned. This is a fail-closed consistency
+  // check, not a source of authority: verifyCallerJwt first asks GoTrue to
+  // verify the signature and account, then reads the claims minted by the hook.
+  const mintedCaller = await timed(timing, "session_claim_verification", () =>
+    verifyCallerJwt(
+      new Request("https://sync.internal/device-login", {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      }),
+    ),
+  );
+  if (
+    !mintedSessionMatchesActor(mintedCaller, {
+      authUserId,
+      appUserId: user.id,
+      shopId: user.shopId,
+    })
+  ) {
+    throw new HttpError(500, "Could not start session");
+  }
+  // Re-read all downstream liveness and binding gates after minting, closing
+  // the race between the initial credential lookup and issuing the response.
+  const current = await timed(
+    timing,
+    "session_authorization_verification",
+    () => assertCallerCurrent(mintedCaller),
+  );
+  if (current.appUserId !== user.id || current.shopId !== user.shopId) {
+    throw new HttpError(500, "Could not start session");
+  }
 
   return {
     shopId: user.shopId,

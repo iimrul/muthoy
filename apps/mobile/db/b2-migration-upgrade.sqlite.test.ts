@@ -54,6 +54,10 @@ beforeAll(() => {
     'SELECT credit_max_days AS value FROM shop_b2_settings WHERE shop_id = ?',
   ).get('shop-b2') as { value: number }).value;
   applyMigration('0014_owner_dashboard_credit_period_guard.sql');
+  // H-7: users.access_locked_at, the device-local revocation marker.
+  applyMigration('0027_h7_local_access_lock.sql');
+  applyMigration('0028_shop_scoped_pin_lookup.sql');
+  applyMigration('0029_pin_reserved_while_inactive.sql');
 });
 
 describe('B2 legacy upgrade', () => {

@@ -51,6 +51,10 @@ beforeAll(() => {
   applyMigration("0008_native_pin_lookup.sql");
   applyMigration("0009_strong_gargoyle.sql");
   applyMigration("0010_known_ares.sql");
+  // H-7: users.access_locked_at, the device-local revocation marker.
+  applyMigration("0027_h7_local_access_lock.sql");
+  applyMigration("0028_shop_scoped_pin_lookup.sql");
+  applyMigration("0029_pin_reserved_while_inactive.sql");
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: USER_ID, name: "Test Shop", phone: "01700000000", createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: "owner", isSystem: true, createdAt: NOW, updatedAt: NOW }).run();

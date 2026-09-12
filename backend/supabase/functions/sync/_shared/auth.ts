@@ -87,6 +87,30 @@ export async function verifyCallerJwt(request: Request): Promise<Caller> {
   const { data, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !data.user) throw new HttpError(401, "Invalid or expired token");
 
+  // H-7 H-2. An anonymous session is refused HERE, by the server, for every
+  // authenticated action — not left to the hosted "Anonymous sign-ins" toggle.
+  //
+  // It was already closed indirectly: an anonymous account has no auth_bindings
+  // row, so the access-token hook decorates nothing and assertCallerCurrent
+  // answers 503 `hook_not_configured`. But that is three accidents in a row
+  // reporting an infrastructure fault, and it leans on a project setting that
+  // lives outside this repository. RLS keys on app_metadata.shop_id and never
+  // inspects is_anonymous, so once such a session were linked it would be
+  // indistinguishable from a real one — which is why the client lost the
+  // ability to create one (DECISIONS.md, H-2) and why the server now says so
+  // explicitly instead of inferring it.
+  //
+  // The DEV harness is unaffected: it authenticates as a real, re-signinable
+  // email identity, and _shared/devOnboarding.ts refuses an anonymous caller on
+  // both of its routes regardless.
+  if (data.user.is_anonymous === true) {
+    throw new HttpError(
+      403,
+      "Anonymous sessions cannot access this shop",
+      "anonymous_session_rejected",
+    );
+  }
+
   const claims = decodeVerifiedClaims(token);
   const rawMetadata = claims.app_metadata;
   const metadata: Record<string, unknown> =
@@ -183,15 +207,27 @@ export async function assertCallerCurrent(caller: Caller): Promise<CallerRecord>
   if (error) {
     throw new HttpError(500, "Could not verify caller");
   }
-  if (!data || data.is_deleted || !data.is_active || data.plan_suspended_at) {
-    throw new HttpError(403, "Account is no longer active");
+  if (!data || data.is_deleted) {
+    throw new HttpError(403, "Account is no longer active", "account_deleted");
+  }
+  if (!data.is_active) {
+    throw new HttpError(403, "Account is no longer active", "account_inactive");
+  }
+  if (data.plan_suspended_at) {
+    throw new HttpError(403, "Account is suspended by the current plan", "account_plan_suspended");
   }
   const { data: withinLimit, error: limitError } = await supabaseAdmin.rpc(
     "b4_user_within_current_staff_limit",
     { p_app_user_id: appUserId },
   );
   if (limitError) throw new HttpError(500, "Could not verify plan access");
-  if (!withinLimit) throw new HttpError(403, "Account is suspended by the current plan");
+  if (!withinLimit) {
+    throw new HttpError(
+      403,
+      "Account is suspended by the current plan",
+      "account_plan_suspended",
+    );
+  }
 
   // The PRINCIPAL owns the binding — under Multi-Shop, app_user_id is a
   // per-shop actor while principal_user_id is the one stable auth identity.
@@ -214,13 +250,13 @@ export async function assertCallerCurrent(caller: Caller): Promise<CallerRecord>
     throw new HttpError(500, "Could not verify caller");
   }
   if (!binding || binding.auth_user_id !== caller.authUserId) {
-    throw new HttpError(403, "Account is no longer active");
+    throw new HttpError(403, "Account is no longer active", "access_invalidated");
   }
   // The shop on the token must still be the shop on the row. Without this a
   // token whose stored shop_id was written by an older flow could outlive a
   // change, and every downstream check keys off that claim.
   if (caller.shopId && caller.shopId !== data.shop_id) {
-    throw new HttpError(403, "Account is no longer active");
+    throw new HttpError(403, "Account is no longer active", "access_invalidated");
   }
   if (caller.permissionVersion !== data.permission_version) {
     throw new HttpError(
@@ -237,7 +273,9 @@ export async function assertCallerCurrent(caller: Caller): Promise<CallerRecord>
     archived_at: string | null;
     is_deleted: boolean;
   };
-  if (shop.archived_at || shop.is_deleted) throw new HttpError(403, "Shop is archived");
+  if (shop.archived_at || shop.is_deleted) {
+    throw new HttpError(403, "Shop is archived", "shop_inactive");
+  }
   return {
     appUserId,
     shopId: data.shop_id,

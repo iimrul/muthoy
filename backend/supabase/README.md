@@ -19,14 +19,38 @@ Supabase cloud mirror and Edge Functions.
 SQLite remains the mobile source of truth. Notifications and the local sync/conflict
 queues are intentionally not mirrored.
 
-## Current rollout status — 2026-09-05
+## Current rollout status — 2026-09-07
 
-The B1-B4 schema is remotely applied and verified. Local and remote migration
-ledgers match through `20260905000000_b4_canonical_onboarding.sql`; B4 database
-parity, RLS, the ledger invariant, and valid shop/Owner preservation passed.
-`sync` is v10 ACTIVE. B4 commercial/trial/Multi-Shop passed physical Android
-verification. This supersedes older text that calls the B1-B4 remote rollout
-pending.
+The B1-B4 schema is remotely applied and verified through
+`20260905000000_b4_canonical_onboarding.sql`; B4 database parity, RLS, the
+ledger invariant, and valid shop/Owner preservation passed. B4
+commercial/trial/Multi-Shop passed physical Android verification. This
+supersedes older text that calls the B1-B4 remote rollout pending.
+
+**H-7 Fix Pass B is DEPLOYED to Dev/Test.** The hosted ledger is **25/25**
+through `20260907020000_h7_fix_pass_b.sql`, and deployed `sync` is **v14
+ACTIVE**. `payment-webhook` remains undeployed.
+
+The physical blocker follow-up is local and **NOT deployed**. Additive migration
+`20260909000000_h7_actor_binding_staff_reactivation.sql` adds the narrow
+Owner-authorized reactivation RPC and replay ledger. Matching `sync` source
+binds any revocation to the server-verified JWT actor and blocks cloud/local
+actor or shop mismatches. SQLite migrations are registered through `0028`;
+`access_locked_at` remains local-only. Until this follow-up rollout, remote
+remains 25/25 and v14.
+
+The older warning that deployed `sync` was v10 and might predate the H-2/H-5
+onboarding gate is **withdrawn**: the pre-deploy function source was downloaded
+on 2026-09-07 and v12 already contained the two-condition DEV gate in
+`_shared/devOnboarding.ts`. Production `link-device` was never accepting an
+arbitrary authenticated JWT for Owner onboarding.
+
+M-5 remains accepted on a narrow boundary: Edge requests pass through
+`assertCallerCurrent`, and hosted API roles have no direct table data grants.
+Do not describe `auth_is_owner` or `b2_user_is_owner` as carrying every
+commercial-liveness predicate; they do not. See `migrations/README.md`.
+
+H-7 physical Android validation is still pending.
 
 ## Auth hook and canonical Owner onboarding
 

@@ -108,6 +108,20 @@ export default defineConfig({
       // downstream Supplier Credit effect on the canonical position.
       "apps/mobile/db/purchase-returns.sqlite.test.ts",
       "apps/mobile/db/sync-helpers.order.test.ts",
+      // H-7 H-1, client half: the device drops rows for tables the server has
+      // stopped sending, without touching unpushed outbox work.
+      "apps/mobile/db/access-purge.sqlite.test.ts",
+      "apps/mobile/db/h7-revocation.sqlite.test.ts",
+      // H-7 H-B1. The device revocation lock must outlive any hydration that
+      // re-sends the locked user's server row.
+      "apps/mobile/db/h7-access-lock.sqlite.test.ts",
+      "apps/mobile/db/h7-pin-reservation.sqlite.test.ts",
+      // Receiving-device sale-graph hydration: A rings it up, B pulls it, and
+      // B's own history/report/cash/credit read models have to agree.
+      "apps/mobile/db/sale-graph-hydration.sqlite.test.ts",
+      // Multi-Shop physical defects: cloud-link persistence across a shop
+      // switch/cold restart, and shop-scoped PIN uniqueness.
+      "apps/mobile/db/multi-shop-restart-pin.sqlite.test.ts",
       "apps/mobile/db/sync-helpers.sqlite.test.ts",
       "apps/mobile/db/user-switch.sqlite.test.ts",
       // Every actor-attributed db/ mutation, table-driven: stale is refused,
@@ -207,7 +221,27 @@ export default defineConfig({
       // multi-device convergence, and retry/idempotency without touching
       // the (already-correct) dispatcher itself.
       "backend/supabase/pgtest/credit-convergence.pgtest.ts",
+      // H-7 (2026-09-07). Executes the cross-shop insert guard on BOTH
+      // sync_apply_row overloads, and asserts per-table that what the Edge pull
+      // sends equals what direct RLS would show — the two paths had drifted on
+      // expenses and payments, and only a parity matrix keeps them together.
+      // Also covers revoked-user reads, the bounded null-billing window, and
+      // multi-billing-account isolation against a real database rather than
+      // the mocks multiShop.test.ts uses.
+      "backend/supabase/pgtest/h7-security.pgtest.ts",
+      "backend/supabase/pgtest/h7-fix-pass-b-nonvacuity.pgtest.ts",
+      "backend/supabase/pgtest/h7-actor-reactivation.pgtest.ts",
       "backend/supabase/functions/sync/grants.test.ts",
+      // H-7: anonymous callers are refused by verifyCallerJwt itself, not by
+      // the hosted Auth provider toggle alone.
+      "backend/supabase/functions/sync/anonymous.test.ts",
+      "backend/supabase/functions/sync/auth-current.test.ts",
+      "backend/supabase/functions/sync/errorResponse.test.ts",
+      "backend/supabase/functions/sync/staffLifecycle.test.ts",
+      "backend/supabase/functions/sync/pull.test.ts",
+      // Pure, executable device-login authority checks. The adjacent source
+      // contract suite cannot import Deno's npm: bcrypt specifier under Node.
+      "backend/supabase/functions/sync/deviceLoginPolicy.test.ts",
       // Same text-reading technique again, for the separate-device login: that
       // the lockout precedes bcrypt, that every credential failure is
       // indistinguishable, that permission_version cannot be pushed by a

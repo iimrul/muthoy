@@ -100,6 +100,10 @@ beforeAll(() => {
   applyMigration('0013_owner_dashboard_credit_period.sql');
   applyMigration('0014_owner_dashboard_credit_period_guard.sql');
   applyMigration('0015_b3_shop_settings.sql');
+  // H-7: users.access_locked_at, the device-local revocation marker.
+  applyMigration('0027_h7_local_access_lock.sql');
+  applyMigration('0028_shop_scoped_pin_lookup.sql');
+  applyMigration('0029_pin_reserved_while_inactive.sql');
 });
 
 beforeEach(async () => {

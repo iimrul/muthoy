@@ -144,7 +144,12 @@ function triggerHydration(run: HydrationGeneration): Promise<void> {
 
 /** Starts (or nudges) resilient entitlement hydration for one session/shop. */
 export function startBillingHydration(shopId: string): void {
-  const sessionEpoch = useSessionStore.getState().epoch;
+  const current = useSessionStore.getState();
+  if (current.session?.cloudActorConfirmed === false) {
+    stopBillingHydration();
+    return;
+  }
+  const sessionEpoch = current.epoch;
   if (
     activeGeneration?.shopId === shopId
     && activeGeneration.sessionEpoch === sessionEpoch

@@ -177,6 +177,10 @@ beforeAll(async () => {
   applyMigration('0023_purchase_invoice_metadata.sql');
   applyMigration('0024_b3_report_indexes.sql');
   applyMigration('0025_b3_sale_tax_snapshot.sql');
+  // H-7: users.access_locked_at, the device-local revocation marker.
+  applyMigration('0027_h7_local_access_lock.sql');
+  applyMigration('0028_shop_scoped_pin_lookup.sql');
+  applyMigration('0029_pin_reserved_while_inactive.sql');
 
   // Day 4: the owner registers, sets a PIN, and the device gets linked.
   const registration = await createShopAndOwner({

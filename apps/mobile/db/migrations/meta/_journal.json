@@ -190,6 +190,27 @@
       "when": 1788134400000,
       "tag": "0026_b4_commercial_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1788307200000,
+      "tag": "0027_h7_local_access_lock",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1788310800000,
+      "tag": "0028_shop_scoped_pin_lookup",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1788314400000,
+      "tag": "0029_pin_reserved_while_inactive",
+      "breakpoints": true
     }
   ]
 }

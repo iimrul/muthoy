@@ -14,7 +14,11 @@ import {
 import { assertSessionLive, DuplicatePhoneError, isUniqueConstraintViolation } from './errors';
 import { permissionForDataGate } from './dataAccessGates';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
-import { getEffectiveEntitlementForShop, requireStaffSlot } from './commercial';
+import {
+  getEffectiveEntitlementForShop,
+  isUserWithinStaffLimit,
+  requireStaffSlot,
+} from './commercial';
 import { planLimits } from '../domain/entitlements';
 import {
   CASHIER_DEFAULT_PERMISSIONS,
@@ -460,24 +464,25 @@ export async function deactivateStaff(
   });
 }
 
-export async function activateStaff(
+/** Read-only postcondition used after the server-only reactivation RPC pulls. */
+export async function isStaffAuthoritativelyActive(
+  shopId: string,
   staffId: string,
-  performedByUserId: string,
-  isStillActive: () => boolean,
-): Promise<void> {
-  const staff = await getManageableStaffTarget(staffId);
-  await requireOwner(staff.shopId, performedByUserId);
-  await requireStaffSlot(staff.shopId);
-  await db.transaction(async (tx) => {
-    assertSessionLive(isStillActive);
-    updateStaffSecurityFields(tx, { shopId: staff.shopId, staffId, extraValues: { isActive: true } });
-    const auditId = generateId();
-    const now = new Date().toISOString();
-    const auditValues = { id: auditId, shopId: staff.shopId, actorId: performedByUserId, action: 'staff_activated', target: staffId, meta: null, createdAt: now, updatedAt: now };
-    await tx.insert(auditLogs).values(auditValues);
-    recordChange(tx, { shopId: staff.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
-    assertSessionLive(isStillActive);
-  });
+): Promise<boolean> {
+  const row = await db.select({
+    isActive: users.isActive,
+    isDeleted: users.isDeleted,
+    role: roles.name,
+  }).from(users).innerJoin(
+    roles,
+    and(eq(roles.id, users.roleId), eq(roles.shopId, users.shopId), eq(roles.isDeleted, false)),
+  ).where(and(eq(users.id, staffId), eq(users.shopId, shopId))).get();
+  return Boolean(
+    row
+    && row.isActive
+    && !row.isDeleted
+    && (row.role === 'staff' || row.role === 'manager'),
+  ) && await isUserWithinStaffLimit(shopId, staffId);
 }
 
 export async function removeStaff(

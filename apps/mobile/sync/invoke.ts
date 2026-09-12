@@ -1,14 +1,29 @@
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 
-type SyncControlCode =
+export type SyncControlCode =
   | 'permissions_changed'
+  | 'account_inactive'
+  | 'account_deleted'
+  | 'account_plan_suspended'
+  | 'access_invalidated'
+  | 'shop_inactive'
   | 'hook_not_configured'
   | 'request_failed_after_refresh';
+
+const AUTHORITATIVE_SERVER_CODES = new Set<SyncControlCode>([
+  'account_inactive',
+  'account_deleted',
+  'account_plan_suspended',
+  'access_invalidated',
+  'shop_inactive',
+]);
 
 interface FunctionErrorBody {
   code?: unknown;
   error?: unknown;
+  actorUserId?: unknown;
+  shopId?: unknown;
 }
 
 export class SyncHaltedError extends Error {
@@ -16,6 +31,8 @@ export class SyncHaltedError extends Error {
     message: string,
     public readonly code: SyncControlCode,
     public readonly cause?: unknown,
+    public readonly actorUserId?: string,
+    public readonly shopId?: string,
   ) {
     super(message);
     this.name = 'SyncHaltedError';
@@ -60,6 +77,18 @@ export async function invokeSyncWithClaimRefresh(
     }
 
     const details = await readFunctionsHttpErrorBody(error);
+    if (
+      typeof details?.code === 'string'
+      && AUTHORITATIVE_SERVER_CODES.has(details.code as SyncControlCode)
+    ) {
+      throw new SyncHaltedError(
+        typeof details.error === 'string' ? details.error : 'Account access was revoked',
+        details.code as SyncControlCode,
+        error,
+        typeof details.actorUserId === 'string' ? details.actorUserId : undefined,
+        typeof details.shopId === 'string' ? details.shopId : undefined,
+      );
+    }
     if (details?.code === 'hook_not_configured') {
       throw new SyncHaltedError(
         typeof details.error === 'string'
@@ -71,6 +100,8 @@ export async function invokeSyncWithClaimRefresh(
     }
 
     if (details?.code === 'permissions_changed') {
+      const actorUserId = typeof details.actorUserId === 'string' ? details.actorUserId : undefined;
+      const shopId = typeof details.shopId === 'string' ? details.shopId : undefined;
       if (!refreshed) {
         refreshed = true;
         const { error: refreshError } = await supabase.auth.refreshSession();
@@ -79,6 +110,8 @@ export async function invokeSyncWithClaimRefresh(
             refreshError.message,
             'permissions_changed',
             refreshError,
+            actorUserId,
+            shopId,
           );
         }
         continue;
@@ -89,6 +122,8 @@ export async function invokeSyncWithClaimRefresh(
           : 'Permissions changed; refresh the session',
         'permissions_changed',
         error,
+        actorUserId,
+        shopId,
       );
     }
 

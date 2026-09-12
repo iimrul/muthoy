@@ -29,6 +29,7 @@ const MIGRATION_SQL = readFileSync(
   'utf8',
 );
 const DEVICE_LOGIN = readFileSync(resolve(FUNCTIONS, 'deviceLogin.ts'), 'utf8');
+const DEVICE_LOGIN_POLICY = readFileSync(resolve(FUNCTIONS, 'deviceLoginPolicy.ts'), 'utf8');
 const RECOVER_PIN = readFileSync(resolve(FUNCTIONS, 'recoverPin.ts'), 'utf8');
 const IDENTITY = readFileSync(resolve(FUNCTIONS, '_shared/identity.ts'), 'utf8');
 const INDEX = readFileSync(resolve(FUNCTIONS, 'index.ts'), 'utf8');
@@ -84,8 +85,8 @@ describe('brute-force and enumeration defences', () => {
     // Without a dummy hash, response time alone reveals which numbers are
     // registered — the enumeration the generic error exists to withhold.
     const body = code(DEVICE_LOGIN);
-    expect(body).toMatch(/const DUMMY_HASH = "\$2[aby]\$/);
-    expect(body).toMatch(/bcrypt\.compare\(pin, user\?\.pinHash \?\? DUMMY_HASH\)/);
+    expect(body).toMatch(/const DUMMY_HASH\s*=\s*"\$2[aby]\$/);
+    expect(body).toMatch(/bcrypt\.compare\(\s*pin,\s*user\?\.pinHash \?\? DUMMY_HASH\s*\)/);
   });
 
   test('a failed attempt is recorded, and a failure to record refuses the request', () => {
@@ -109,7 +110,12 @@ describe('brute-force and enumeration defences', () => {
     // may speak plainly, because it identifies a network rather than an
     // account — so the plain reply must be a 429 and must not appear on any
     // path that took a phone-shaped decision.
-    expect(body).toMatch(/keys\.ip && await timed[\s\S]{0,200}?isLocked\(keys\.ip![\s\S]{0,200}?HttpError\(429/);
+    const ipGuardAt = body.indexOf('keys.ip &&');
+    const ipLockAt = body.indexOf('isLocked(keys.ip!)', ipGuardAt);
+    const ipRefusalAt = body.indexOf('HttpError(429', ipLockAt);
+    expect(ipGuardAt).toBeGreaterThan(-1);
+    expect(ipLockAt).toBeGreaterThan(ipGuardAt);
+    expect(ipRefusalAt).toBeGreaterThan(ipLockAt);
     expect(body).toMatch(/timed[\s\S]{0,200}?isLocked\(keys\.phone\)[\s\S]{0,400}?GENERIC_FAILURE/);
   });
 
@@ -123,7 +129,7 @@ describe('brute-force and enumeration defences', () => {
 
   test('an incomplete registration cannot be probed through its placeholder hash', () => {
     // createShopAndOwner writes a random placeholder hash before PIN Setup runs.
-    expect(code(DEVICE_LOGIN)).toMatch(/!data\.pin_set_at/);
+    expect(code(DEVICE_LOGIN_POLICY)).toMatch(/!candidate\.pin_set_at/);
   });
 });
 
@@ -207,6 +213,46 @@ describe('owner PIN recovery is the only surviving OTP path', () => {
 });
 
 describe('JWT claims and revocation', () => {
+  test('device-login overwrites both shop selectors from its server-resolved actor before minting', () => {
+    const body = code(DEVICE_LOGIN);
+    const metadataAt = body.indexOf('deviceLoginAppMetadata(user.shopId)');
+    const mintAt = body.indexOf('mintSessionForAppUser(user.id');
+
+    expect(metadataAt).toBeGreaterThan(-1);
+    expect(mintAt).toBeGreaterThan(metadataAt);
+    expect(code(DEVICE_LOGIN_POLICY)).toMatch(/return \{ shop_id: shopId, active_shop_id: shopId \}/);
+    // Supplying a forged shopId in the unauthenticated body has no authority:
+    // parseBody returns only the server lookup credentials and deviceLogin never
+    // reads body.shopId.
+    expect(body).not.toMatch(/body\.shopId/);
+    expect(body).not.toMatch(/active_shop_id:\s*body/);
+  });
+
+  test('device-login verifies minted actor/shop equality before returning or hydrating', () => {
+    const body = code(DEVICE_LOGIN);
+    const mintAt = body.indexOf('mintSessionForAppUser(user.id');
+    const verifyAt = body.indexOf('verifyCallerJwt(');
+    const equalityAt = body.indexOf('mintedSessionMatchesActor(mintedCaller');
+    const authorizeAt = body.indexOf('assertCallerCurrent(mintedCaller)');
+    const responseAt = body.lastIndexOf('return {');
+
+    expect(mintAt).toBeGreaterThan(-1);
+    expect(verifyAt).toBeGreaterThan(mintAt);
+    expect(equalityAt).toBeGreaterThan(verifyAt);
+    expect(authorizeAt).toBeGreaterThan(equalityAt);
+    expect(responseAt).toBeGreaterThan(authorizeAt);
+  });
+
+  test('device-login excludes every non-live actor, role, and shop before minting', () => {
+    const body = code(DEVICE_LOGIN);
+    expect(body).toMatch(/\.eq\("is_active", true\)/);
+    expect(body).toMatch(/\.eq\("is_deleted", false\)/);
+    expect(body).toMatch(/\.is\("plan_suspended_at", null\)/);
+    expect(body).toMatch(/\.eq\("roles\.is_deleted", false\)/);
+    expect(body).toMatch(/\.eq\("shops\.is_deleted", false\)/);
+    expect(body).toMatch(/\.is\("shops\.archived_at", null\)/);
+  });
+
   test('the access-token hook injects identity, role and permission_version', () => {
     expect(MIGRATION_SQL).toMatch(/create or replace function custom_access_token_hook/);
     for (const claim of ['shop_id', 'app_user_id', 'role', 'permission_version', 'is_active']) {
@@ -244,7 +290,7 @@ describe('JWT claims and revocation', () => {
     expect(MIGRATION_SQL).toMatch(/jsonb_build_object\('permission_version', 0\)/);
   });
 
-  test('a stale or deactivated caller is refused on both push and pull', () => {
+  test('a stale, deleted, deactivated, or plan-suspended caller is refused on push and pull', () => {
     expect(code(PUSH)).toMatch(/assertCallerCurrent\(caller\)/);
     // A pull hands over the shop's entire history, so it is gated as hard as a
     // write — otherwise a revoked staff member keeps downloading prices and
@@ -259,7 +305,9 @@ describe('JWT claims and revocation', () => {
     // check built on it was inert while appearing to run.
     expect(auth).toMatch(/decodeVerifiedClaims\(token\)/);
     expect(auth).not.toMatch(/data\.user\.app_metadata\?\.app_user_id/);
-    expect(auth).toMatch(/data\.is_deleted \|\| !data\.is_active/);
+    expect(auth).toMatch(/if \(!data \|\| data\.is_deleted\)/);
+    expect(auth).toMatch(/if \(!data\.is_active\)/);
+    expect(auth).toMatch(/if \(data\.plan_suspended_at\)/);
   });
 
   test('missing hook claims are distinct from stale permission claims', () => {

@@ -1,8 +1,23 @@
 import { assertCallerCurrent, type Caller, HttpError } from "./_shared/auth.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
 
+/**
+ * The stable auth identity, with NO fallback.
+ *
+ * Falling back to appUserId contradicted _shared/auth.ts's own contract: under
+ * Multi-Shop app_user_id is a per-shop ACTOR while principal_user_id is the one
+ * identity shop_memberships and every multi-shop RLS policy key on, so the
+ * fallback could only ever have keyed the wrong row for a caller acting in a
+ * secondary shop. It was unreachable — every caller here runs
+ * assertCallerCurrent first, which raises 503 on a null principal — and an
+ * unreachable fallback for a security-critical identity is worth deleting
+ * rather than leaving for someone to rely on later.
+ */
 function principal(caller: Caller): string {
-  return caller.principalUserId ?? caller.appUserId ?? "";
+  if (!caller.principalUserId) {
+    throw new HttpError(503, "Authentication hook is not configured", "hook_not_configured");
+  }
+  return caller.principalUserId;
 }
 
 /**

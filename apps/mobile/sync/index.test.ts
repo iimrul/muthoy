@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   uploadAttachments: vi.fn(),
   notify: vi.fn(),
   notifyHalted: vi.fn(),
+  enforceRevocation: vi.fn(),
   addEventListener: vi.fn(),
   subscribeToReconnect: vi.fn(),
   startForegroundScheduler: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
     operation();
     return { cancel: vi.fn() };
   }),
+  inspectBinding: vi.fn(),
 }));
 
 vi.mock("react-native", () => ({
@@ -48,7 +50,11 @@ vi.mock("./stuckNotification", () => ({
   notifyIfSyncIsStuck: mocks.notify,
   notifySyncHalted: mocks.notifyHalted,
 }));
+vi.mock("./revocation", () => ({
+  enforceAuthoritativeRevocation: mocks.enforceRevocation,
+}));
 vi.mock("./supabaseClient", () => ({ isSupabaseConfigured: true }));
+vi.mock('./authActorBinding', () => ({ inspectCloudActorBinding: mocks.inspectBinding }));
 // The realtime subscription is a pull SIGNAL, not part of the cycle these
 // tests cover; stubbed so the engine's start/stop contract stays the subject.
 vi.mock("./realtime", () => ({
@@ -73,7 +79,15 @@ import { getLastSuccessfulSyncAt } from "./statusStore";
 
 /** Puts a real logged-in session on `shopId`, as PIN Login would. */
 function loginTo(shopId: string): void {
-  useSessionStore.getState().login({ shopId, userId: "user-1", role: "owner" });
+  mocks.inspectBinding.mockResolvedValue({
+    status: 'matched', actorUserId: 'user-1', shopId,
+  });
+  useSessionStore.getState().login({
+    shopId,
+    userId: "user-1",
+    role: "owner",
+    cloudActorConfirmed: true,
+  });
 }
 
 /** Lets every already-scheduled microtask and the cycle's .finally() run. */
@@ -98,6 +112,7 @@ function resetEngine(): void {
   mocks.online.mockResolvedValue(true);
   mocks.notify.mockResolvedValue(undefined);
   mocks.notifyHalted.mockResolvedValue(undefined);
+  mocks.enforceRevocation.mockResolvedValue(false);
   mocks.pull.mockResolvedValue(undefined);
   mocks.uploadAttachments.mockResolvedValue(undefined);
   mocks.push.mockResolvedValue(true);
@@ -278,6 +293,55 @@ describe("sync cycle orchestration", () => {
     ));
 
     expect(mocks.pull).not.toHaveBeenCalled();
+    expect(mocks.enforceRevocation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "account_inactive",
+    "account_deleted",
+    "account_plan_suspended",
+    "access_invalidated",
+    "shop_inactive",
+    "permissions_changed",
+  ] as const)("enforces local lockdown for authoritative %s", async (code) => {
+    mocks.pull.mockRejectedValue(new SyncHaltedError(
+      "Access revoked",
+      code,
+      undefined,
+      'user-1',
+      'shop-revoked',
+    ));
+    loginTo("shop-revoked");
+
+    startSyncEngine("shop-revoked");
+    await vi.waitFor(() => expect(mocks.enforceRevocation).toHaveBeenCalledWith(
+      "shop-revoked",
+      code,
+      'user-1',
+    ));
+
+    expect(mocks.notifyHalted).toHaveBeenCalledWith("shop-revoked", "Access revoked");
+  });
+
+  it('blocks stale Staff JWT sync after Owner PIN handover without revoking Owner', async () => {
+    loginTo('shop-shared');
+    mocks.inspectBinding.mockResolvedValueOnce({
+      status: 'mismatched',
+      actorUserId: 'revoked-staff',
+      shopId: 'shop-shared',
+    });
+
+    startSyncEngine('shop-shared');
+    await settle();
+
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.pull).not.toHaveBeenCalled();
+    expect(mocks.enforceRevocation).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().session).toMatchObject({
+      userId: 'user-1',
+      shopId: 'shop-shared',
+      cloudActorConfirmed: false,
+    });
   });
 });
 

@@ -11,6 +11,7 @@ import {
 import { toRole } from '../../domain/permissions';
 import { authenticatedHome } from '../../navigation/routes';
 import { useSessionStore } from '../../state/sessionStore';
+import { inspectCloudActorBinding } from '../../sync/authActorBinding';
 
 // PIN Login — Volume 4 AUTHENTICATION, Volume 0 Day 5. Checks the bcrypt
 // hash OFFLINE — no network call required to succeed.
@@ -39,27 +40,37 @@ export default function PinLoginScreen() {
       }
 
       setError(false);
+      // PIN login remains offline-capable. This reads the locally persisted
+      // cloud token only; a mismatch does not reject local login, but it keeps
+      // every sync path stopped until this exact actor re-authenticates.
+      const binding = await inspectCloudActorBinding(result);
+      const boundResult = {
+        ...result,
+        cloudActorConfirmed: binding.status === 'matched'
+          && binding.actorUserId === result.userId
+          && binding.shopId === result.shopId,
+      };
       markRuntimeDiagnosticStep(
         'authentication_completed',
-        sessionDiagnosticContext(result, '/pin-login'),
+        sessionDiagnosticContext(boundResult, '/pin-login'),
       );
-      await recordSuccessfulLogin(result);
-      login(result);
+      await recordSuccessfulLogin(boundResult);
+      login(boundResult);
       timing?.mark('session_store_login');
       markRuntimeDiagnosticStep(
         'auth_session_hydrated',
-        sessionDiagnosticContext(result, '/pin-login'),
+        sessionDiagnosticContext(boundResult, '/pin-login'),
       );
       markRuntimeDiagnosticStep('role_resolved', {
-        ...sessionDiagnosticContext(result, '/pin-login'),
-        resolvedRole: toRole(result.role) ?? 'unknown',
+        ...sessionDiagnosticContext(boundResult, '/pin-login'),
+        resolvedRole: toRole(boundResult.role) ?? 'unknown',
       });
       handoffAuthTiming(timing);
-      router.replace(authenticatedHome(result));
+      router.replace(authenticatedHome(boundResult));
       timing?.mark('navigation_requested');
       markRuntimeDiagnosticStep(
         'router_replace_requested',
-        sessionDiagnosticContext(result, '/pin-login'),
+        sessionDiagnosticContext(boundResult, '/pin-login'),
       );
     },
     [login],

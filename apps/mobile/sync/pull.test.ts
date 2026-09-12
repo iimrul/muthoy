@@ -10,9 +10,25 @@ const mocks = vi.hoisted(() => ({
   // Returns the per-row outcome array the real helper returns; an empty
   // array reads as "nothing deferred", which is the ordinary case.
   applyRemoteRows: vi.fn(() => []),
+  purgeUnreadableTables: vi.fn(),
   getLastPulledCursor: vi.fn(),
   setLastPulledCursor: vi.fn(),
+  tableNames: [
+    'shops', 'subscriptions', 'roles', 'permissions', 'users', 'user_permissions',
+    'shop_b2_settings', 'medicines', 'batches', 'batch_promotions',
+    'inventory_movements', 'customers', 'sales', 'sale_items', 'sale_drafts',
+    'sale_draft_items', 'sale_attachments', 'sale_refunds', 'sales_returns',
+    'refund_tenders', 'suppliers', 'purchases', 'purchase_items', 'purchase_returns',
+    'credits', 'credit_payment_allocations', 'credit_reconciliation_states',
+    'expenses', 'payments', 'cash_drawer', 'inventory_imports', 'audit_logs',
+  ],
 }));
+
+const CORE_TABLES = [
+  'shops', 'subscriptions', 'roles', 'permissions', 'users', 'user_permissions',
+  'shop_b2_settings', 'sales', 'sale_items', 'sale_attachments', 'sale_refunds',
+  'sales_returns', 'refund_tenders',
+];
 
 vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
@@ -20,13 +36,14 @@ vi.mock('./supabaseClient', () => ({
 }));
 vi.mock('../db/sync-helpers', () => ({
   applyRemoteRows: mocks.applyRemoteRows,
-  HYDRATION_TABLE_ORDER: ['medicines', 'sales'],
+  purgeUnreadableTables: mocks.purgeUnreadableTables,
+  HYDRATION_TABLE_ORDER: mocks.tableNames,
 }));
 vi.mock('./cursorStore', () => ({
   getLastPulledCursor: mocks.getLastPulledCursor,
   setLastPulledCursor: mocks.setLastPulledCursor,
   clearLastPulledCursor: vi.fn(),
-  HYDRATION_TABLE_ORDER: ['medicines', 'sales'],
+  HYDRATION_TABLE_ORDER: mocks.tableNames,
 }));
 
 // Vitest mocks must be registered before importing the module under test.
@@ -36,13 +53,20 @@ import { pullChanges } from './pull';
 const SHOP = 'shop-1';
 const START_CURSOR = { updatedAt: '2026-01-01T00:00:00Z', tableName: 'sales', rowId: 'r0' };
 
-function page(rowId: string, hasMore: boolean) {
+function page(
+  rowId: string,
+  hasMore: boolean,
+  accessVersion = 1,
+  access: Record<string, unknown> = {},
+) {
   const cursor = { updatedAt: `2026-01-0${rowId.slice(1)}T00:00:00Z`, tableName: 'sales', rowId };
   return {
     data: {
       changes: [{ ...cursor, payload: { id: rowId } }],
       hasMore,
       nextCursor: cursor,
+      accessVersion,
+      ...access,
     },
     error: null,
   };
@@ -125,5 +149,82 @@ describe('pullChanges honours the device-handover kill switch', () => {
     expect(mocks.invoke).toHaveBeenCalledTimes(2);
     expect(mocks.applyRemoteRows).toHaveBeenCalledTimes(2);
     expect(mocks.setLastPulledCursor).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [['shops']],
+    [['shops', null]],
+    [['shops', 7]],
+    [['shops', 'shops']],
+    [['shops', 'unknown_table']],
+  ])('treats malformed readableTables %j as no reconciliation answer', async (readableTables) => {
+    mocks.invoke.mockResolvedValue(page('r1', false, 1, {
+      readableTables,
+      accessUserId: 'user-1',
+      saleHistoryScope: 'own',
+    }));
+
+    await pullChanges(SHOP);
+
+    expect(mocks.purgeUnreadableTables).not.toHaveBeenCalled();
+  });
+
+  it('passes a complete valid access answer to shop-scoped reconciliation', async () => {
+    mocks.invoke.mockResolvedValue(page('r1', false, 1, {
+      readableTables: CORE_TABLES,
+      accessUserId: 'user-1',
+      saleHistoryScope: 'own',
+    }));
+
+    await pullChanges(SHOP);
+
+    expect(mocks.purgeUnreadableTables).toHaveBeenCalledWith({
+      shopId: SHOP,
+      actorUserId: 'user-1',
+      readableTables: CORE_TABLES,
+      saleHistoryScope: 'own',
+    });
+  });
+
+  it('restarts from page one when access changes during pagination', async () => {
+    const accessV1 = {
+      readableTables: CORE_TABLES, accessUserId: 'user-1', saleHistoryScope: 'all',
+    };
+    const accessV2 = {
+      readableTables: CORE_TABLES, accessUserId: 'user-1', saleHistoryScope: 'own',
+    };
+    mocks.invoke
+      .mockResolvedValueOnce(page('r1', true, 1, accessV1))
+      .mockResolvedValueOnce(page('r2', false, 2))
+      .mockResolvedValueOnce(page('r1', true, 2, accessV2))
+      .mockResolvedValueOnce(page('r2', false, 2));
+
+    await pullChanges(SHOP);
+
+    expect(mocks.invoke).toHaveBeenCalledTimes(4);
+    expect(mocks.invoke.mock.calls[0]?.[1]?.body).toMatchObject({
+      since: START_CURSOR, includeAccess: true,
+    });
+    expect(mocks.invoke.mock.calls[2]?.[1]?.body).toMatchObject({
+      since: START_CURSOR, includeAccess: true,
+    });
+    expect(mocks.purgeUnreadableTables).toHaveBeenCalledTimes(1);
+    expect(mocks.purgeUnreadableTables).toHaveBeenCalledWith(expect.objectContaining({
+      saleHistoryScope: 'own',
+    }));
+  });
+
+  it('bounds repeated access-change restarts and halts for revalidation', async () => {
+    mocks.invoke
+      .mockResolvedValueOnce(page('r1', true, 1))
+      .mockResolvedValueOnce(page('r2', false, 2))
+      .mockResolvedValueOnce(page('r1', true, 2))
+      .mockResolvedValueOnce(page('r2', false, 3));
+
+    await expect(pullChanges(SHOP)).rejects.toMatchObject({
+      name: 'SyncHaltedError', code: 'permissions_changed',
+    });
+    expect(mocks.invoke).toHaveBeenCalledTimes(4);
+    expect(mocks.purgeUnreadableTables).not.toHaveBeenCalled();
   });
 });

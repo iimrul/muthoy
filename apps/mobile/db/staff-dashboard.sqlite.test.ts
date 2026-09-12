@@ -29,6 +29,10 @@ beforeAll(() => {
     '0008_native_pin_lookup.sql',
     '0009_strong_gargoyle.sql',
     '0010_known_ares.sql',
+    // H-7: users.access_locked_at, the device-local revocation marker.
+    '0027_h7_local_access_lock.sql',
+    '0028_shop_scoped_pin_lookup.sql',
+    '0029_pin_reserved_while_inactive.sql'
   ]) migrate(name);
 });
 

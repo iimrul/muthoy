@@ -30,10 +30,10 @@ const MIGRATIONS_DIR = resolve('backend/supabase/migrations');
  *   them by name.
  * - service_role carries BYPASSRLS on the platform. Without it here, RLS would
  *   apply to the sync path too and the tests would prove the wrong thing.
- * - Supabase grants the API roles blanket table privileges via default
- *   privileges. The migrations' own REVOKEs run afterwards and still win, which
- *   is the real ordering — and is why `authenticated` can reach a table at all
- *   for the RLS tests to then deny it.
+ * - The API roles hold blanket table privileges here so that `authenticated`
+ *   can reach a table at all and the RLS tests have a policy to deny them. The
+ *   migrations' own REVOKEs run afterwards and still win, which is the real
+ *   ordering. Hosted is narrower than this; see the measured note below.
  *
  * service_role is DELIBERATELY excluded from those default privileges.
  *
@@ -44,7 +44,9 @@ const MIGRATIONS_DIR = resolve('backend/supabase/migrations');
  * count. Granting more here made this harness more permissive than production
  * in the one direction that matters, and is how a direct INSERT on shops
  * shipped in the DEV bootstrap and failed on every physical attempt while the
- * suite stayed green.
+ * suite stayed green. The 2026-09-07 hosted reading confirms it: service_role
+ * has SELECT on exactly roles, sales, shops and users — the four tables a
+ * migration explicitly granted — and on nothing else.
  */
 const PLATFORM_BOOTSTRAP = `
 create schema if not exists auth;
@@ -80,10 +82,61 @@ $roles$;
 grant usage on schema public to anon, authenticated, service_role;
 grant usage on schema auth to anon, authenticated, service_role, supabase_auth_admin;
 
+-- Measured against the hosted DEV project on 2026-09-07 by reading
+-- pg_default_acl, rather than assumed. For schema public, owner postgres:
+--   tables    anon=Dxtm  authenticated=Dxtm  service_role=Dxtm
+--   sequences postgres=rwU only
+--   functions postgres=X   only
+-- (D=TRUNCATE x=REFERENCES t=TRIGGER m=MAINTAIN.) Supabase's familiar blanket
+-- "grant all" sits on the supabase_admin default ACL, which governs tables the
+-- platform itself creates — never the ones these migrations create as postgres.
+-- So in production the API roles receive no DML and no function EXECUTE for
+-- free; every call that works is carried by an explicit GRANT in a migration.
+--
+-- The harness models the two halves differently, on purpose:
+--
+-- 1. FUNCTIONS are modelled exactly, but AFTER the migrations run — see
+--    HOSTED_FUNCTION_EXECUTE_MODEL below. Granting EXECUTE for free is the one
+--    mismatch that hides a real defect: a migration that forgets
+--    "grant execute ... to service_role" stays green locally and dies with
+--    42501 on the first physical call. That is how the DEV bootstrap's direct
+--    INSERT on shops shipped with a passing suite.
+--
+-- 2. TABLES stay DELIBERATELY wider than production. Modelling hosted exactly
+--    would mean authenticated cannot reach any table at all, so every RLS
+--    isolation test would pass on a privilege error and prove nothing about the
+--    policy it claims to test. Keeping the blanket grant lets the row reach the
+--    policy and forces the policy to be the thing that denies it.
+--
+-- service_role is likewise excluded from table default privileges — narrower
+-- than hosted, where it holds Dxtm. Kept narrow deliberately: it is BYPASSRLS,
+-- so only a migration's explicit GRANT should decide what the sync path reaches.
 alter default privileges in schema public grant all on tables to anon, authenticated;
 alter default privileges in schema public grant all on sequences to anon, authenticated;
-alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
 `;
+
+/**
+ * Hosted's function ACL, applied AFTER the migrations.
+ *
+ * The natural spelling of this is a default privilege in the bootstrap:
+ *
+ *   alter default privileges in schema public revoke execute on functions from public;
+ *
+ * That spelling silently does nothing. PostgreSQL records a default ACL only
+ * where one has been granted, so revoking the built-in PUBLIC EXECUTE leaves
+ * pg_default_acl empty and every later function still carries it — verified in
+ * PGlite 0.5.5 / PG 18.3, where an ungranted function stayed executable by
+ * `authenticated` with that line in place. Written that way the model would
+ * have looked applied and enforced nothing.
+ *
+ * Revoking from the finished schema does work: PUBLIC loses EXECUTE on every
+ * function the migrations created, while each explicit
+ * `grant execute ... to service_role` survives. That is hosted's shape — where
+ * pg_default_acl for functions in public reads `postgres=X/postgres` — so a
+ * function nobody granted is a function nobody outside the owner can call.
+ */
+const HOSTED_FUNCTION_EXECUTE_MODEL =
+  'revoke execute on all functions in schema public from public;';
 
 export interface Harness {
   db: PGlite;
@@ -147,6 +200,7 @@ export async function createHarness(): Promise<Harness> {
   for (const name of migrationFiles()) {
     await db.exec(migrationSql(name));
   }
+  await db.exec(HOSTED_FUNCTION_EXECUTE_MODEL);
   return wrap(db);
 }
 

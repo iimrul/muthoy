@@ -25,6 +25,10 @@ const migrations = [
   '0019_supplier_archive.sql', '0020_purchase_item_status.sql', '0021_purchase_void.sql',
   '0022_supplier_profile_fields.sql', '0023_purchase_invoice_metadata.sql',
   '0024_b3_report_indexes.sql', '0025_b3_sale_tax_snapshot.sql',
+    // H-7: users.access_locked_at, the device-local revocation marker.
+    '0027_h7_local_access_lock.sql',
+    '0028_shop_scoped_pin_lookup.sql',
+    '0029_pin_reserved_while_inactive.sql'
 ];
 
 const now = '2026-01-05T20:00:00.000Z'; // Jan 6 in Dhaka.

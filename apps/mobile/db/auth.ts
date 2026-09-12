@@ -185,29 +185,51 @@ export async function getOwnerOnboardingPayload(
   };
 }
 
-/** Resolves local owner-registration completion from SQLite, never MMKV. */
+/**
+ * Resolves local owner-registration completion from SQLite, never MMKV.
+ *
+ * Multi-Shop made "the owner row on this device" ambiguous. A device that owns
+ * two shops holds an owner row per shop, and this used to answer with whichever
+ * was created LAST — so hydrating a second shop pointed the root gate at that
+ * shop regardless of which one the device was actually using. Combined with a
+ * shop whose `cloud_linked_at` had not been written, a cold restart reported
+ * `link_pending`, cleared the session and sent an already-linked owner back to
+ * OTP.
+ *
+ * The active shop decides. `lastShopId` is written on every login and is
+ * deliberately preserved by `clearActiveUser`, so it survives a user handover
+ * and a cold restart; a device with no last shop has only one shop to find.
+ * Falling back to newest-first keeps first-run registration exactly as it was.
+ */
 export async function getRegistrationStatus(): Promise<RegistrationStatus> {
-  const [owner] = await db
-    .select({
-      shopId: users.shopId,
-      userId: users.id,
-      phone: shops.phone,
-      pinSetAt: users.pinSetAt,
-      cloudLinkedAt: shops.cloudLinkedAt,
-    })
-    .from(users)
-    .innerJoin(shops, eq(shops.id, users.shopId))
-    .innerJoin(roles, eq(roles.id, users.roleId))
-    .where(
-      and(
-        eq(users.isDeleted, false),
-        eq(shops.isDeleted, false),
-        eq(roles.isDeleted, false),
-        eq(roles.name, 'owner'),
-      ),
-    )
-    .orderBy(desc(users.createdAt), desc(users.id))
-    .limit(1);
+  const ownerFor = async (shopId?: string) => {
+    const [row] = await db
+      .select({
+        shopId: users.shopId,
+        userId: users.id,
+        phone: shops.phone,
+        pinSetAt: users.pinSetAt,
+        cloudLinkedAt: shops.cloudLinkedAt,
+      })
+      .from(users)
+      .innerJoin(shops, eq(shops.id, users.shopId))
+      .innerJoin(roles, eq(roles.id, users.roleId))
+      .where(
+        and(
+          eq(users.isDeleted, false),
+          eq(shops.isDeleted, false),
+          eq(roles.isDeleted, false),
+          eq(roles.name, 'owner'),
+          shopId ? eq(users.shopId, shopId) : undefined,
+        ),
+      )
+      .orderBy(desc(users.createdAt), desc(users.id))
+      .limit(1);
+    return row;
+  };
+
+  const lastShopId = readLastShopIdSync();
+  const owner = (lastShopId ? await ownerFor(lastShopId) : undefined) ?? await ownerFor();
 
   if (!owner) {
     return { status: 'none' };
@@ -249,6 +271,10 @@ export async function getActiveSessionRole(
         eq(users.shopId, shopId),
         eq(users.isActive, true),
         eq(users.isDeleted, false),
+        // H-7. A device-local revocation outranks whatever the mirrored row
+        // says: the server's `is_active` stays true for a plan-suspended or
+        // permission-churned actor, which is exactly who this locks out.
+        isNull(users.accessLockedAt),
       ),
     )
     .limit(1);
@@ -326,6 +352,10 @@ export async function getActiveSessionContext(
         eq(users.shopId, shopId),
         eq(users.isActive, true),
         eq(users.isDeleted, false),
+        // H-7. A device-local revocation outranks whatever the mirrored row
+        // says: the server's `is_active` stays true for a plan-suspended or
+        // permission-churned actor, which is exactly who this locks out.
+        isNull(users.accessLockedAt),
       ),
     )
     .limit(1);
@@ -353,6 +383,66 @@ export async function markShopCloudLinked(shopId: string): Promise<void> {
   if (result.changes !== 1) {
     throw new Error(`No shop found with id ${shopId}`);
   }
+}
+
+/**
+ * Fail-closed local marker for an authoritative server revocation. It changes
+ * neither updated_at nor the outbox: this is device access state, not a domain
+ * mutation, and must never be pushed back over the server's user row.
+ *
+ * Writes `access_locked_at`, NOT `is_active`. `is_active` is a server-owned
+ * column: for a plan-suspended, shop-archived or permission-churned actor the
+ * server's copy stays `true`, so the next pull carrying a newer `users` row
+ * wrote it straight back and released the lock with nobody re-authenticating.
+ * On a shared till the owner's own login was enough to do it. `access_locked_at`
+ * is stripped outbound and preserved inbound, so no pull can reach it.
+ */
+export async function lockLocalUserAccess(shopId: string, userId: string): Promise<void> {
+  await db.update(users).set({ accessLockedAt: new Date().toISOString() }).where(and(
+    eq(users.id, userId),
+    eq(users.shopId, shopId),
+  )).run();
+}
+
+/**
+ * Clears the device marker only after the server has re-authenticated this
+ * exact actor AND a full hydration completed — both the caller's
+ * responsibility — and only if the row that hydration produced actually says
+ * the actor is live.
+ *
+ * That last check is the point: hydration is what makes the local row
+ * authoritative, so the lock is released against the SERVER's answer rather
+ * than against the mere fact that a login happened. It deliberately does not
+ * touch `is_active` — asserting a value the server never sent is the class of
+ * bug this whole change exists to remove. Returns false when the lock stays on.
+ */
+export async function clearLocalUserAccessLock(
+  shopId: string,
+  userId: string,
+): Promise<boolean> {
+  const hydrated = await db
+    .select({ isActive: users.isActive, isDeleted: users.isDeleted })
+    .from(users)
+    .innerJoin(shops, and(eq(shops.id, users.shopId), eq(shops.isDeleted, false)))
+    .where(and(eq(users.id, userId), eq(users.shopId, shopId)))
+    .get();
+
+  if (!hydrated || !hydrated.isActive || hydrated.isDeleted) {
+    return false;
+  }
+  // Plan suspension shows up locally as falling outside the shop's staff
+  // limit, so this is the same authority every session gate consults. It is
+  // deliberately lock-agnostic (see commercial.ts), which is what makes it
+  // safe to ask while the lock is still on.
+  if (!await isUserWithinStaffLimit(shopId, userId)) {
+    return false;
+  }
+
+  await db.update(users).set({ accessLockedAt: null }).where(and(
+    eq(users.id, userId),
+    eq(users.shopId, shopId),
+  )).run();
+  return true;
 }
 /**
  * The action-level permission gate (Volume 0 Day 11). Re-derives the actor's
@@ -513,6 +603,7 @@ export interface LocalPinSession {
   principalUserId?: string;
   billingAccountId?: string;
   cloudShopConfirmed?: boolean;
+  cloudActorConfirmed?: boolean;
 }
 
 /** Records an authenticated login without storing credential material. */
@@ -557,9 +648,38 @@ interface LoginUserRow {
   roleId: string;
 }
 
-const livePinWhere = () => and(
-  eq(users.isActive, true), eq(users.isDeleted, false),
+/**
+ * Which PINs are SPOKEN FOR. Deliberately the widest of the two predicates:
+ * every non-deleted row that has a PIN, whatever its current sign-in standing.
+ *
+ * H-7. This used to also require `is_active = 1`, which was the bug. Deactivate
+ * a staff member and their PIN vanished from the uniqueness scan, so a manager
+ * could hand the same PIN to somebody else — and `reactivateStaffOnServer`
+ * flips `is_active` back to true without re-checking, producing two live rows
+ * in one shop sharing a PIN. `verifyPin` then refuses BOTH of them (it fails
+ * closed on `verified.length !== 1`), so reactivation locked out the very
+ * person it restored. A locked row is covered for the same reason: the lock is
+ * temporary, and the collision would surface the moment it cleared.
+ *
+ * Deleted rows are the one deliberate exclusion — see `assertPinUnique`.
+ */
+const pinReservedWhere = () => and(
+  eq(users.isDeleted, false),
   isNotNull(users.pinSetAt),
+);
+
+/**
+ * Who may SIGN IN. Strictly narrower than `pinReservedWhere`: a deactivated or
+ * device-locked user keeps their PIN reserved but cannot use it.
+ *
+ * Kept as a separate predicate on purpose. Collapsing the two is what caused
+ * H-7 — eligibility and reservation answer different questions, and every time
+ * they share a WHERE clause one of them silently inherits the other's rules.
+ */
+const liveLoginWhere = () => and(
+  pinReservedWhere(),
+  eq(users.isActive, true),
+  isNull(users.accessLockedAt),
 );
 
 async function toLocalPinSession(user: LoginUserRow): Promise<LocalPinSession | null> {
@@ -590,6 +710,9 @@ async function toLocalPinSession(user: LoginUserRow): Promise<LocalPinSession | 
     principalUserId: membership?.principalUserId ?? user.id,
     billingAccountId: membership?.billingAccountId,
     cloudShopConfirmed: true,
+    // Offline PIN selection cannot prove which actor owns the separately
+    // persisted cloud JWT. The login screen performs that comparison.
+    cloudActorConfirmed: false,
   } : baseSession;
 }
 
@@ -636,7 +759,7 @@ export async function verifyPin(
     const tag = await createPinLookupTag(rawPin);
     const matches = await selectLoginUsers().where(
       and(
-        livePinWhere(),
+        liveLoginWhere(),
         eq(users.pinLookupTag, tag),
         sql`${users.pinLookupPinSetAt} = ${users.pinSetAt}`,
         lastShopId ? eq(users.shopId, lastShopId) : undefined,
@@ -652,7 +775,7 @@ export async function verifyPin(
   // steady-state path. They are native-verified once, then tagged.
   const legacyUsers = await selectLoginUsers().where(
     and(
-      livePinWhere(),
+      liveLoginWhere(),
       or(
         isNull(users.pinLookupTag),
         isNull(users.pinLookupPinSetAt),
@@ -695,7 +818,7 @@ export async function verifyPinForUser(
   timing?: AuthTimingTrace,
 ): Promise<LocalPinSession | null> {
   const user = await selectLoginUsers().where(
-    and(livePinWhere(), eq(users.shopId, shopId), eq(users.id, userId)),
+    and(liveLoginWhere(), eq(users.shopId, shopId), eq(users.id, userId)),
   ).get();
   if (!user) return null;
   const matches = timing
@@ -708,7 +831,7 @@ export async function verifyPinForUser(
 }
 
 /**
- * Refuses a PIN that another live user on this device already has.
+ * Refuses a PIN that another non-deleted user in this shop already holds.
  *
  * PIN Login has no "who are you" step, so two users sharing a PIN is not a
  * cosmetic clash: identity would be ambiguous, and an Owner collision would
@@ -719,18 +842,38 @@ export async function verifyPinForUser(
  * self-service change) rather than at login, because at login it is far too
  * late: one of the two is already locked out of their own account.
  *
+ * Scope is `pinReservedWhere`, NOT the login predicate — deactivated and
+ * device-locked users keep their PIN, because both states are reversible and
+ * the clash would only appear once the account came back.
+ *
+ * DELETED users are the deliberate exception: their PIN is released. Deletion
+ * is terminal here — `removeStaff` sets `is_deleted` and nothing un-sets it
+ * (`reactivateStaffOnServer` only flips `is_active`, and
+ * `isStaffAuthoritativelyActive` still requires `!is_deleted`), so no returning
+ * account can collide with the reissued PIN. Holding them would burn a 4-digit
+ * space permanently as staff turn over. This matches `users_phone_unique`,
+ * which releases a departed staff member's phone the same way.
+ *
  * `exceptUserId` lets somebody re-set their own PIN to what it already was.
  */
 export async function assertPinUnique(
   rawPin: string,
-  _targetShopId: string,
+  targetShopId: string,
   exceptUserId?: string,
   timing?: AuthTimingTrace,
 ): Promise<string> {
+  // Scoped to the shop since migration 0028. This argument used to be
+  // deliberately ignored, which made the check device-global and matched the
+  // old global index. Under Multi-Shop that rejected an Owner reusing their own
+  // PIN in their own second shop — those two rows are the same person. The rule
+  // that actually matters is unambiguous login, and the PIN pad always resolves
+  // within one shop (see verifyPin's lastShopId filter), so one shop is the
+  // right scope. Two live staff in ONE shop are still refused.
   const targetTag = await createPinLookupTag(rawPin);
   const indexedMatch = await db.select({ id: users.id }).from(users).where(
     and(
-      livePinWhere(),
+      pinReservedWhere(),
+      eq(users.shopId, targetShopId),
       eq(users.pinLookupTag, targetTag),
       sql`${users.pinLookupPinSetAt} = ${users.pinSetAt}`,
       exceptUserId ? ne(users.id, exceptUserId) : undefined,
@@ -743,7 +886,8 @@ export async function assertPinUnique(
     .from(users)
     .where(
       and(
-        livePinWhere(),
+        pinReservedWhere(),
+        eq(users.shopId, targetShopId),
         exceptUserId ? ne(users.id, exceptUserId) : undefined,
         or(
           isNull(users.pinLookupTag),

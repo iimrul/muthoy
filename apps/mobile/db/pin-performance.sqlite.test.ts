@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import { db, sqliteConnection } from './test/client';
 import { syncQueue, users } from './schema';
-import { createShopAndOwner, setOwnerPin, verifyPin } from './auth';
+import { createShopAndOwner, lockLocalUserAccess, setOwnerPin, verifyPin } from './auth';
 import { createStaff } from './staff';
 import { ALWAYS_LIVE, DuplicatePinError } from './errors';
 import {
@@ -34,6 +34,10 @@ beforeAll(() => {
     '0013_owner_dashboard_credit_period.sql',
     '0014_owner_dashboard_credit_period_guard.sql',
     '0015_b3_shop_settings.sql',
+    // H-7: users.access_locked_at, the device-local revocation marker.
+    '0027_h7_local_access_lock.sql',
+    '0028_shop_scoped_pin_lookup.sql',
+    '0029_pin_reserved_while_inactive.sql'
   ]) migrate(name);
 });
 
@@ -117,7 +121,15 @@ describe('indexed local PIN paths', () => {
     expect(getNativeCryptoTestCounters()).toEqual({ hash: 0, verify: 0, lookupTag: 1 });
   });
 
-  it('enforces device-wide uniqueness with one lookup even across shops', async () => {
+  it('scopes uniqueness to the shop, still with one lookup', async () => {
+    // Was 'enforces device-wide uniqueness ... even across shops'. Migration
+    // 0028 narrowed the invariant deliberately: under Multi-Shop one Owner has
+    // a separate actor row per owned shop, so device-wide uniqueness refused
+    // that Owner their own PIN in their own second shop. The rule that matters
+    // is an unambiguous PIN pad, and the pad always resolves within one shop
+    // (verifyPin filters on lastShopId), so the shop is the right scope.
+    //
+    // Same-shop collisions are still refused — that is the test above this one.
     const first = await ownerFixture();
     const second = await createShopAndOwner({
       shopName: 'Second Shop',
@@ -126,10 +138,37 @@ describe('indexed local PIN paths', () => {
     await setOwnerPin(second.userId, '9999');
     resetNativeCryptoTestCounters();
 
-    await expect(createStaff(
+    const staff = await createStaff(
       first.shopId,
       first.userId,
       { name: 'Arif', phone: '01712000002', rawPin: '9999', permissions: {} },
+      ALWAYS_LIVE,
+    );
+
+    expect(
+      db.select({ shopId: users.shopId }).from(users).where(eq(users.id, staff.id)).get(),
+    ).toEqual({ shopId: first.shopId });
+    // Still ONE tag derivation for the uniqueness probe, and no bcrypt scan:
+    // the check narrowed its WHERE clause, it did not start reading more rows.
+    expect(getNativeCryptoTestCounters().lookupTag).toBe(1);
+    expect(getNativeCryptoTestCounters().verify).toBe(0);
+  });
+
+  it("keeps a locked user's PIN reserved", async () => {
+    const owner = await ownerFixture();
+    const locked = await createStaff(
+      owner.shopId,
+      owner.userId,
+      { name: 'Locked Staff', phone: '01712000002', rawPin: '5678', permissions: {} },
+      ALWAYS_LIVE,
+    );
+    await lockLocalUserAccess(owner.shopId, locked.id);
+    resetNativeCryptoTestCounters();
+
+    await expect(createStaff(
+      owner.shopId,
+      owner.userId,
+      { name: 'New Staff', phone: '01712000003', rawPin: '5678', permissions: {} },
       ALWAYS_LIVE,
     )).rejects.toBeInstanceOf(DuplicatePinError);
     expect(getNativeCryptoTestCounters()).toEqual({ hash: 0, verify: 0, lookupTag: 1 });

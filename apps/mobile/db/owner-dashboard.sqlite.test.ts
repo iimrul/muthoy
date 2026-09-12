@@ -47,6 +47,10 @@ const MIGRATIONS = [
   "0023_purchase_invoice_metadata.sql",
   "0024_b3_report_indexes.sql",
   "0025_b3_sale_tax_snapshot.sql",
+    // H-7: users.access_locked_at, the device-local revocation marker.
+    "0027_h7_local_access_lock.sql",
+    "0028_shop_scoped_pin_lookup.sql",
+    "0029_pin_reserved_while_inactive.sql"
 ];
 
 const SHOP = "shop-owner-dashboard";

@@ -46,6 +46,8 @@ export interface Session {
   principalUserId?: string;
   billingAccountId?: string;
   cloudShopConfirmed?: boolean;
+  /** False until the stored cloud JWT is proven to name this actor + shop. */
+  cloudActorConfirmed?: boolean;
 }
 
 /** Headless-context read only; components must use useSessionStore. */

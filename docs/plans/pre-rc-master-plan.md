@@ -19,8 +19,9 @@
 |---|---|
 | B1-B4 product code complete and committed | `8d4c503`, `d6a6d54` |
 | B4 physical Android verification PASS (Trial + Multi-Shop) | `DECISIONS.md` 2026-09-05 |
-| SQLite migrations `0000`-`0026` registered in order | `apps/mobile/db/migrations/` |
-| PG ledger matches remote through `20260905000000_b4_canonical_onboarding.sql`; `sync` v10 ACTIVE | `backend/supabase/migrations/README.md` |
+| SQLite migrations `0000`-`0028` registered in runtime order | `apps/mobile/db/migrations/` |
+| Hosted ledger 25/25 through `20260907020000_h7_fix_pass_b.sql`; `sync` v14 ACTIVE | `backend/supabase/migrations/README.md` |
+| H-7 Fix B deployed; actor-binding/reactivation follow-up migration + Edge source local; physical retest pending | `backend/supabase/migrations/README.md`, `DECISIONS.md` 2026-09-09 |
 | Recorded suite: 146 files / 1,537 tests + typecheck + lint PASS | `DECISIONS.md` 2026-09-05 |
 | Payment abstraction exists and fails closed; no live provider | `backend/supabase/functions/payment-webhook/index.ts`, `apps/mobile/app/settings/plan-payment.tsx` |
 | Local DB is unencrypted | `apps/mobile/db/client.ts` — plain `openDatabaseSync`, no key PRAGMA |
@@ -232,16 +233,15 @@ in the parity sign-off rather than "fixed":
 | H-4 | PIN timing / security hardening | NOT DONE | HIGH — timing oracle on PIN verify; open latency gate | `db/auth.ts`, `native/crypto.ts`, `dev/authTiming.ts`, `db/pin-performance.sqlite.test.ts` | possible native rebuild | Constant-time compare proven; enrolled PIN login ≤ 2s on low-end Android (§16) |
 | H-5 | Production OTP provider **+ delete the temporary DEV registration harness** | NOT DONE | CRITICAL — registration/recovery cannot run in production | `sync/otp.ts`, Supabase phone-auth provider config, rate limits, anonymous-auth hardening in `verifyCallerJwt()`; removal of `dev/devRegistrationHarness*`, `dev/devOwnerOnboarding.ts`, `dev/devOnlyResolver.cjs`, the `metro.config.js` swap and `RegisterShopInput.ownerPhone` (checklist in `apps/mobile/dev/README.md`) | hosted config + deploy | Real SMS delivered end-to-end; resend cooldown, retry cap and abuse limits verified against the live provider; harness gone and the full suite green without it |
 | H-6 | `conflict_queue` wiring + resolution UI | NOT DONE | MEDIUM — true row conflicts are invisible (ledger stock and grouped ops already supersede the old stock-LWW rationale) | `db/schema.ts:1301`, `sync/pull.ts`, new writer + Owner-facing surface | local migration only if the table shape changes | A forced two-device conflict is queued, surfaced, resolved, and never silently loses a row |
-| H-7 | Final RLS / cross-shop isolation audit | NOT DONE | CRITICAL — cross-shop leakage | `backend/supabase/migrations/*`, PG test harness | none (audit) | Negative RLS tests per table for wrong shop, wrong role, stale claims, revoked staff, suspended shop |
+| H-7 | Final RLS / cross-shop isolation audit | FIX B DEPLOYED · PHYSICAL BLOCKER FIX BUILT, REVIEW/DEPLOY/RETEST PENDING | CRITICAL — cross-shop leakage | H-7 migrations through `20260909000000_h7_actor_binding_staff_reactivation.sql`, `functions/sync/`, `apps/mobile/sync/` | **new reactivation migration + matching `sync` redeploy pending** | stale-JWT shared-device repro; Owner-only reactivation; then full physical H-7 matrix |
 | H-8 | Observability | NOT DONE | HIGH — a production crash/sync/payment failure is invisible | new `apps/mobile` Sentry (or equivalent) init, `sync/*`, `db/init.ts`, `payment-webhook` | deploy + DSN as EAS env | Forced crash, migration failure, sync failure, payment failure, and auth failure each appear with **no** PIN/OTP/token/phone/money payload |
 | H-9 | Secrets / env / EAS production config | PARTIAL | HIGH — `EXPO_PUBLIC_*` is transform-time inlined, not secret storage | `apps/mobile/.env.example`, `eas.json` (`production` profile exists), EAS Environment Variables, Vercel admin env | deploy | Startup fails fast on missing required config; store build contains no service-role key or provider secret |
 | H-10 | Auth / device-link / session hardening | PARTIAL | HIGH | `sync/deviceAuth.ts`, `sync/linkDevice.ts`, `sync/authClaims.ts`, `state/sessionGuard.ts` | none | Stale token, revoked device, deactivated staff, logout, and shop switch all fail closed on a real device |
 | H-11 | Migration / rollback / recovery readiness | PARTIAL | CRITICAL — no rehearsed recovery | `backend/supabase/migrations/README.md`, `apps/mobile/db/migrations/` | rehearsal only | Documented rollback per pending migration; a restore-from-backup drill completes with no irreversible loss |
 | H-12 | Admin access hardening | NOT DONE | HIGH — shared Basic Auth publishes every pharmacy's name/phone to anyone holding one credential | `apps/admin/middleware.ts`, `apps/admin/lib/basicAuth.ts` | deploy | Individual admin accounts, RBAC, session handling, and admin-access audit logging |
 
-Also unclosed from `DECISIONS.md`: `20260817000000_admin_read_grants.sql` is
-written but **not deployed**, `public.custom_access_token_hook` is a manual hosted
-setting that must be re-checked after any auth change, and the expense-category /
+Also unclosed from `DECISIONS.md`: `public.custom_access_token_hook` is a manual
+hosted setting that must be re-checked after any auth change, and the expense-category /
 Asia-Dhaka business-date backfills need real-data pre/postchecks.
 
 ---

@@ -19,7 +19,7 @@ const TRIAL_END = '2026-09-15T06:00:00.000Z';
 beforeAll(() => {
   sqlite.exec('PRAGMA foreign_keys=ON');
   const migrationDir = resolve('apps/mobile/db/migrations');
-  for (const file of readdirSync(migrationDir).filter((name) => /^00(?:0\d|1\d|2[0-6])_.*\.sql$/.test(name)).sort()) {
+  for (const file of readdirSync(migrationDir).filter((name) => /^00(?:0\d|1\d|2[0-9])_.*\.sql$/.test(name)).sort()) {
     sqlite.exec(readFileSync(resolve(migrationDir, file), 'utf8'));
   }
   db.insert(shops).values({ id: SHOP_ID, ownerId: OWNER_ID, name: 'Trial Shop', phone: '01700000011', createdAt: GRANTED_AT, updatedAt: GRANTED_AT }).run();

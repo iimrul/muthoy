@@ -1,4 +1,4 @@
-import { HttpError, verifyCallerJwt } from "./_shared/auth.ts";
+import { HttpError, verifyCallerJwt, type Caller } from "./_shared/auth.ts";
 import { createServerAuthTiming, type ServerAuthTiming } from "./_shared/authTiming.ts";
 import { deviceLogin } from "./deviceLogin.ts";
 import { linkDevice } from "./linkDevice.ts";
@@ -9,6 +9,8 @@ import { recoverPin } from "./recoverPin.ts";
 import { refundClaim } from "./refundClaim.ts";
 import { billingStatus, finalizeBillingAttempt, initiateBilling } from "./billing.ts";
 import { createOwnedShop, mutateOwnedShop, shopSummaries, switchShop } from "./multiShop.ts";
+import { reactivateStaff } from './staffLifecycle.ts';
+import { httpErrorBody } from './errorResponse.ts';
 
 const headers = { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, x-client-info, apikey, content-type" };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers });
@@ -32,6 +34,7 @@ Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers });
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   let authTiming: ServerAuthTiming | undefined;
+  let verifiedCaller: Caller | undefined;
   try {
     const rawBody: unknown = await request.json();
     if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) throw new HttpError(400, "Invalid request body");
@@ -55,6 +58,7 @@ Deno.serve(async (request) => {
     const caller = authTiming
       ? await authTiming.measure("claims_session_validation", () => verifyCallerJwt(request))
       : await verifyCallerJwt(request);
+    verifiedCaller = caller;
     if (body.action === "push") return json(await push(caller, body));
     if (body.action === "push-group") return json(await pushGroup(caller, body));
     if (body.action === "refund-claim") return json(await refundClaim(caller, body));
@@ -65,6 +69,7 @@ Deno.serve(async (request) => {
     if (body.action === "shop-create") return json(await createOwnedShop(caller, body));
     if (body.action === "shop-mutate") return json(await mutateOwnedShop(caller, body));
     if (body.action === "shop-summaries") return json(await shopSummaries(caller, body));
+    if (body.action === 'staff-reactivate') return json(await reactivateStaff(caller, body));
     if (body.action === "pull") {
       const result = authTiming
         ? await authTiming.measure("pull_server_processing", () => pull(caller, body))
@@ -81,7 +86,7 @@ Deno.serve(async (request) => {
     authTiming?.mark("request_failed", "error");
     if (error instanceof HttpError) {
       return json(
-        error.code ? { error: error.message, code: error.code } : { error: error.message },
+        httpErrorBody(error, verifiedCaller),
         error.status,
       );
     }

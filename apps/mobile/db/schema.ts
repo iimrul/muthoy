@@ -161,13 +161,37 @@ export const users = sqliteTable(
     isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
     /** Read-only mirror of Postgres's server-derived revocation counter. */
     permissionVersion: integer("permission_version").notNull().default(0),
+    /**
+     * H-7. Device-local revocation marker (migration 0027). NEVER synced in
+     * either direction: `toSyncPayload` strips it on the way out, and
+     * `applyToTable` preserves the local value on the way in.
+     *
+     * This exists because the lock used to be `is_active = false`, a column the
+     * SERVER owns. Locking a plan-suspended or permission-churned staff member
+     * never changed the server's `is_active` — it stays true — so the next pull
+     * carrying a newer `users` row wrote `true` straight back over the lock. On
+     * a shared till the owner's own login was enough to do it, and the revoked
+     * cashier silently regained offline access. A local decision needs a local
+     * column.
+     */
+    accessLockedAt: text("access_locked_at"),
   },
   (t) => ({
     shopIdx: index("users_shop_idx").on(t.shopId),
+    // Shop-scoped since migration 0028. Globally unique was correct only while
+    // a device held one shop; under Multi-Shop one Owner has a separate actor
+    // row per owned shop, so a global tag index refused their own PIN in the
+    // second shop. Two live staff in the SAME shop still cannot share a PIN.
+    // H-7 (0029): `is_active` is deliberately NOT in this predicate. A PIN is
+    // reserved by every non-deleted row that holds it, because deactivation and
+    // the device lock are both reversible. Indexing only active rows let a
+    // colleague take a deactivated staff member's PIN, and reactivation then
+    // produced two live rows sharing one. Deleted rows still drop out —
+    // deletion is terminal, so the PIN is safe to reissue.
     livePinLookupUnique: uniqueIndex("users_live_pin_lookup_unique")
-      .on(t.pinLookupTag)
+      .on(t.shopId, t.pinLookupTag)
       .where(
-        sql`${t.pinLookupTag} IS NOT NULL AND ${t.pinLookupPinSetAt} = ${t.pinSetAt} AND ${t.isActive} = 1 AND ${t.isDeleted} = 0`,
+        sql`${t.pinLookupTag} IS NOT NULL AND ${t.pinLookupPinSetAt} = ${t.pinSetAt} AND ${t.isDeleted} = 0`,
       ),
     shopActiveIdx: index("users_shop_active_idx").on(t.shopId, t.isActive),
     // Partial: soft-deleted rows keep their phone (history stays readable) but

@@ -73,6 +73,10 @@ describe('notification DB queries on real SQLite', () => {
     applyMigration('0008_native_pin_lookup.sql');
   applyMigration('0009_strong_gargoyle.sql');
   applyMigration('0010_known_ares.sql');
+  // H-7: users.access_locked_at, the device-local revocation marker.
+  applyMigration('0027_h7_local_access_lock.sql');
+  applyMigration('0028_shop_scoped_pin_lookup.sql');
+  applyMigration('0029_pin_reserved_while_inactive.sql');
     sqlite.prepare('INSERT INTO shops (id, owner_id, name, phone) VALUES (?, ?, ?, ?)').run('shop-1', 'owner-1', 'Shop One', '01700000001');
     sqlite.prepare('INSERT INTO shops (id, owner_id, name, phone) VALUES (?, ?, ?, ?)').run('shop-2', 'owner-2', 'Shop Two', '01700000002');
     sqlite.prepare("INSERT INTO roles (id, shop_id, name, is_system) VALUES ('role-owner-1', 'shop-1', 'owner', 1)").run();

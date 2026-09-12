@@ -1249,9 +1249,10 @@ lint. It covers migrations, canonical onboarding, hosted ACL/grants, principal
 roles, shop isolation, commercial/trial limits, multi-shop, stock, money,
 grouped replay, reports, tax, export, and printer contracts.
 
-Founder-reported B3 and B4 physical-device acceptance: **PASS**. Controlled
-remote rollout completed; local/remote migration ledgers match through the
-2026-09-05 canonical onboarding migration and `sync` v10 is ACTIVE.
+Founder-reported B3 and B4 physical-device acceptance: **PASS**. At B4 close,
+local/remote migration ledgers matched through the 2026-09-05 canonical
+onboarding migration and `sync` v10 was ACTIVE. Current deployed H-7 baseline
+is 25/25 and `sync` v14 ACTIVE; see the 2026-09-09 entry.
 
 ### Deferred items and rollout risks
 
@@ -1298,7 +1299,8 @@ Commit `8d4c503` (`feat: complete B4 commercial flows and canonical onboarding`)
 is the completed B4 baseline. Physical Android verification passed. Local and
 remote PostgreSQL migration ledgers match through
 `20260905000000_b4_canonical_onboarding.sql`; B4 migration/DB parity is clean and
-the deployed `sync` Edge Function is v10 ACTIVE. The recorded completion suite
+the deployed `sync` Edge Function was v10 ACTIVE at that historical checkpoint
+(superseded by v13 on 2026-09-07). The recorded completion suite
 passed 146 files/1,537 tests, plus typecheck and lint.
 
 ### Commercial and entitlement contract
@@ -1527,3 +1529,330 @@ navigate/await/return a decision/call Supabase/render UI, and no file under
 Registration renders no Skip-OTP, resume, repair, or dev-banner affordance while
 still sending a real OTP. Release-bundle grep and native rebuild verification
 remain a physical gate, not a claim made here.
+
+## 2026-09-07 — H-7 fix pass A: the database owns cross-shop, and the pull owns nothing RLS would refuse
+
+The H-7 audit ran read-only against a real Postgres (PGlite, the whole migration
+ledger) and found two things worth stopping for. Both are fixed here by one
+additive migration, `20260907000000_h7_security_hardening.sql`, plus a `sync`
+function change. At implementation time neither was deployed; both Pass A and
+the later TRUNCATE follow-up are now deployed (see the rollout entries below).
+
+**C-1 — the cross-shop boundary lived in TypeScript, not in the database.**
+`sync_apply_row_base`'s insert arm carries its `p_caller_shop_id` predicate only
+on the `on conflict do update` branch, and `sync_existing_row_owned_or_missing`
+returns true for a missing row by definition. So for any row id the server had
+not seen, there was no ownership check at all. Executed as a Shop A caller: a
+medicine and a customer both landed in Shop B returning `applied`, and an
+invented `shops` row was created outright. Nothing shipped could reach it —
+`push.ts`'s `authorizeRow` rejects a foreign `shop_id`, and every
+grouped-operation branch re-checks — so this was a latent primitive rather than
+a live breach. It is still the wrong place for the boundary: the SECURITY
+DEFINER function is what this codebase documents as authoritative, and the B2
+dispatcher has always checked it correctly. `h7_row_shop_matches_caller` now
+runs before dispatch. `permissions` is exempt because it has no `shop_id`
+column; its owning shop is proved through `assert_fk_same_shop('roles', ...)`,
+and a test pins that a cross-shop `role_id` is still refused.
+
+**H-1 — the Edge pull was more permissive than RLS.** `sync_pull_changes_b2`
+filtered eight tables by permission and gated the other fifteen on nothing but
+"is the caller a live user of this shop". Measured on one caller: a default
+Staff member's direct read of `expenses` and `payments` returns zero rows, while
+the pull handed them every row in the shop, into the device's SQLite. The
+migration's own comment claimed the pull "applies the same predicates"; it did
+not. Read eligibility now has ONE definition, `sync_table_readable`, and both
+the pull and `sync_readable_tables` are expressed through it, so they cannot
+drift. `pgtest/h7-security.pgtest.ts` asserts set equality per table for an
+Owner, a default Staff member, and a deliberately odd grant mix.
+
+**The client half.** Narrowing the pull cannot un-send what a device already
+holds: a cashier who once had `cash_management` keeps every expense row they
+were ever given. `sync/pull.ts` now asks for `readableTables` on the first page
+of a cycle and `purgeUnreadableTables` drops the rest. Three guards, because
+this function deletes a pharmacy's local records: an answer without `shops` is
+treated as no answer (an empty array is what a revoked caller gets, and acting
+on it would wipe a device on any transient hiccup); a row still in the outbox is
+never deleted; deletion runs child-before-parent in one transaction with foreign
+keys on. `medicines`, `batches`, `inventory_movements`, `customers`, `sales` and
+`sale_items` are deliberately NOT purgeable — losing those means the app cannot
+function, and full re-hydration is the right recovery, not a half-empty
+catalogue.
+
+**Also closed.** M-1: liveness on the six bare `b2_shop_read` policies, so a
+deactivated staff member stops reading `sale_drafts`, `batch_promotions` and the
+credit ledger the moment they are revoked rather than when their access token
+expires. M-2: the `staff_id = <claim>` branch of the six sale-history policies
+was a bare column comparison with no liveness check; the other branch got one
+for free from `auth_has_permission`. M-4: the unconditional `return true` for a
+null `billing_account_id` is now a bounded onboarding window, and an archived
+shop — which previously reached that same `return true` — answers false.
+Defence in depth: `DELETE` revoked from the API roles on every tombstone-only
+table, the unfiltered legacy `sync_pull_changes(...)` dropped, explicit revokes
+on `auth_bindings` and `login_attempts`, and `multiShop.ts`'s unreachable
+principal fallback deleted.
+
+**H-2 — anonymous callers are refused by name.** `verifyCallerJwt` now raises
+403 `anonymous_session_rejected` before any claim is read. It was already closed
+indirectly — no binding means no `app_user_id` claim means 503 — but that is
+three accidents reporting an infrastructure fault, and it leaned on a hosted
+provider toggle that lives outside this repository. Keep the toggle off anyway.
+
+**M-5 was implemented and then REVERTED, on evidence.** The audit was right that
+the token hook's fallback applies a weaker liveness bar than its primary lookup.
+Adding the missing checks broke revocation reporting: with no `app_user_id` the
+server answers 503 `hook_not_configured`, `sync/requestFailure.ts` classifies
+that as `config`, and `isRetriableFailure()` returns false — so a deactivated
+cashier would be told the server is misconfigured and sync would halt, instead
+of getting 401 `permissions_changed` then 403 "Account is no longer active". The
+existing test "carries the CURRENT permission_version, so a refresh picks up a
+revocation" caught it. The claims do not authorize the Edge path:
+`assertCallerCurrent` re-reads the live user, binding, shop and plan, and hosted
+API roles have no direct table data grants. This is not a claim that every SQL
+predicate carries every commercial-liveness condition: `auth_is_owner` and
+`b2_user_is_owner` are narrower. The behaviour is now
+pinned as deliberate by `h7_token_hook_decorates_revoked_principal`, which also
+asserts the same caller resolves to `auth_is_live_user() = false`.
+
+**M-3 is NOT DONE and cannot be done from here.** The Supabase CLI in this
+environment holds no access token, so the hosted `information_schema` was never
+queried. `pgtest/harness.ts` deliberately withholds default privileges from
+`service_role`, which is NARROWER than a stock Supabase project — the safe
+direction, but unverified. The exact query to run against DEV, and the
+instruction to reconcile the harness to whatever it reports rather than widening
+production to match the tests, are recorded in `migrations/README.md`.
+
+**Not touched:** SQLCipher (H-3), observability (H-8), `conflict_queue` (H-6),
+UI parity, admin, payments.
+
+**Verification.** `h7-security.pgtest.ts` 80/80; `anonymous.test.ts` 5/5;
+`access-purge.sqlite.test.ts` 10/10; typecheck and lint clean across all seven
+packages. Physical verification after deploy is still required and is listed in
+`migrations/README.md`: a Staff device must hold no `expenses`/`payments` rows,
+a deactivated Staff member must lose protected reads while their token is still
+alive, and Owner/Manager/Staff plus Multi-Shop flows must be re-walked.
+
+## 2026-09-07 — H-7 rollout: the ACL was never what the harness thought, and M-5 stands
+
+H-7 fix pass A is applied to Dev/Test. `20260907000000_h7_security_hardening.sql`
+pushed once (ledger now zero-pending, 23/23), `sync` redeployed as v13 ACTIVE.
+Nothing else was deployed; `payment-webhook` remains undeployed.
+
+**M-3 is closed, and it did not say what we assumed.** The DEV project's real
+`pg_default_acl` shows Supabase's blanket `grant all` living on the
+**supabase_admin** default ACL — which governs tables the platform creates, never
+the ones our migrations create as `postgres`. Our tables get `anon=Dxtm`,
+`authenticated=Dxtm`, `service_role=Dxtm`: TRUNCATE, REFERENCES, TRIGGER,
+MAINTAIN. No SELECT, INSERT, UPDATE or DELETE for the API roles anywhere in
+`public`. RLS has been a second lock on a door that was already bolted.
+
+The consequential half was **functions**: hosted default is `postgres=X` only, so
+every RPC that works in production is carried by an explicit
+`grant execute ... to service_role` in a migration. The harness granted EXECUTE
+for free, which is the one mismatch that can ship a real defect — a migration
+that forgets the grant stays green locally and dies with 42501 on the first
+physical call, exactly how the DEV bootstrap's direct INSERT on `shops` shipped
+with a passing suite. The harness now models it.
+
+Writing that model taught something worth keeping: the natural spelling,
+`alter default privileges ... revoke execute on functions from public`, is a
+**silent no-op**. PostgreSQL records a default ACL only where one was granted, so
+revoking the built-in PUBLIC EXECUTE leaves `pg_default_acl` empty and every
+later function still carries it — verified in PGlite 0.5.5 / PG 18.3, where an
+ungranted function stayed executable by `authenticated` with that line in place.
+It looked applied and enforced nothing. `revoke execute on all functions in
+schema public from public`, run after the migrations, does work. The suite passed
+12/12 and 263/263 with it, which is the real evidence that no migration — H-7's
+new functions included — was relying on the free grant.
+
+The table half was left deliberately wider than hosted. Modelling production
+exactly would mean `authenticated` cannot reach a table at all, so every RLS
+isolation test would pass on a privilege error and prove nothing about the policy
+it names. Being wider there makes tests harder to pass, not easier.
+
+**M-5: ACCEPTED, on stronger evidence than the original revert.** The audit was
+right that the hook's fallback branch decorates a revoked principal. It confers
+no Edge authority: the API roles have no direct table data grants (measured
+above), and `assertCallerCurrent` re-selects the user/binding/shop/plan on every
+request. Permission-backed RLS uses table state too. This boundary is precise:
+`auth_is_owner` and `b2_user_is_owner` check active/deleted role state but do not
+carry every plan/shop predicate, so they are not evidence for a universal
+liveness claim. They remain non-exploitable under the measured hosted ACL and
+the Edge caller gate. Nothing authorizes from a decorated token by itself.
+
+The operational argument is also better than previously recorded. Reading
+`_shared/auth.ts` again: the liveness branch fires at line 210, *before* the
+`permission_version` comparison at line 253. So a deactivated cashier gets 403
+"Account is no longer active" on the very first request — not a refresh cycle
+first, as the migration's block comment and the test comment both said. Withhold
+the claims and that becomes 503 `hook_not_configured`, which
+`sync/requestFailure.ts` classifies `config` and `isRetriableFailure()` treats as
+non-retriable: the till stops and blames the server. It would also destroy the
+one signal that error code exists to carry, making a genuinely unregistered hook
+indistinguishable from a routine deactivation. The correction is recorded in
+`h7-security.pgtest.ts`; the migration is applied and therefore immutable.
+
+**New finding, not fixed here.** `anon` and `authenticated` hold TRUNCATE on 32
+tables, inherited from the platform default ACL and never revoked. TRUNCATE
+ignores RLS. It is not reachable today — PostgREST exposes no TRUNCATE verb and
+no function in `public` issues one — so this is defence-in-depth, not an open
+door. It was left out of this deploy deliberately: the instruction was to deploy
+the reviewed migration and nothing else, and widening the change set at push time
+would have shipped something the green suite never covered. One line in a
+follow-up migration closes it.
+
+**Live verification, on the deployed database rather than PGlite.** A Shop A
+caller pushing a new `medicines` row stamped with Shop B is refused with MU003,
+as is an invented shop id, while the same caller's own-shop insert still returns
+`applied` — run inside a transaction and rolled back, so DEV data was untouched.
+`sync_readable_tables` on a real shop gives its Owner 32 tables including
+`expenses` and `payments`, and a synthetic default Staff member 27 tables with
+both absent, `medicines` and `sales` present. The legacy unfiltered
+`sync_pull_changes` is gone, `sync_pull_changes_b2` joins the readable set, and
+`anon`/`authenticated` hold zero DELETE.
+
+**Still unverified: everything physical.** No Android device is attached to this
+machine (`adb devices` is empty; only a `Pixel_7` AVD exists), so none of the
+device-level checks were run — Staff-holds-no-expenses, revoke-mid-token,
+role-flow re-walk, Multi-Shop, two-device convergence, post-reconciliation purge.
+The server-side halves of those are proven above; the client halves are not.
+
+## 2026-09-07 — TRUNCATE was the last thing RLS could not see
+
+`20260907010000_h7_revoke_api_role_truncate.sql` is applied to Dev/Test. Ledger
+24/24, zero pending. Privilege-only: it creates nothing, drops nothing, and
+touches no policy.
+
+`anon` and `authenticated` held TRUNCATE on 32 tables. They never had SELECT,
+INSERT, UPDATE or DELETE — the platform default ACL for tables our migrations
+create as `postgres` is `Dxtm`, and only the D ever mattered. TRUNCATE is the one
+verb row level security does not filter: policies simply do not run, so every
+guarantee the rest of H-7 spent a migration establishing about who may touch
+which shop's rows would have been walked past. It also leaves no tombstone,
+which is the whole basis of this system's delete model — a truncated table empties
+in the cloud and survives on every device, with nothing to propagate the loss.
+
+It was never reachable, and calling it a breach would have been wrong: PostgREST
+exposes no TRUNCATE verb, and no function in `public` issues one, so nothing
+could be persuaded to spend the privilege. A loaded primitive with no trigger
+attached. Removed anyway, because the argument for leaving it rests on the
+absence of a caller rather than the absence of permission, and that is the kind
+of reasoning that expires quietly.
+
+The migration is catalog-driven rather than a hand-written table list. A literal
+array is exactly how this was missed the first time: a table can acquire the
+privilege without anyone writing it down, and the list would have to be right
+forever. It also revokes TRUNCATE from the schema's **default privileges**,
+because section 1 alone is a one-time sweep — the default still said `anon=Dxtm`,
+so the next migration to create a table would have handed it straight back and
+the next audit would have found it again. Hosted now reads `anon=xtm,
+authenticated=xtm, service_role=Dxtm`.
+
+`service_role` keeps everything, including its own TRUNCATE. It is BYPASSRLS,
+held only by the Edge Functions, and disarming the sync path was not the finding.
+
+**A test that failed taught more than the four that passed.** The obvious
+assertion — "service_role still holds TRUNCATE" — failed, because the harness
+deliberately withholds table default privileges from `service_role` while hosted
+grants them. That assertion would have been testing the harness, not the
+migration, and TRUNCATE is not a privilege the backend needs in the first place.
+It was replaced with what must actually survive: the explicit SELECT grants on
+`roles`/`sales`/`shops`, EXECUTE on the three sync entry points, and a real
+same-shop write returning `applied`.
+
+Withholding the migration fails exactly the three TRUNCATE assertions and leaves
+the three regression controls passing — which is the correct split, since
+service_role's grants, the sync write path, and RLS-still-denies-by-policy must
+hold both before and after. That last control is the one worth keeping: if a
+future privilege revoke went too wide and `authenticated` lost SELECT, every
+isolation test in the suite would still pass — on a 42501 — while proving nothing
+about the policy it names.
+
+REFERENCES, TRIGGER and MAINTAIN remain with the API roles from the same default
+ACL, recorded as known residue rather than fixed. Each deserves its own
+reachability argument, and widening this change past the finding would have
+shipped privilege edits no test in this pass covers.
+
+Live after the push: API-role TRUNCATE grants 0, API-role DML grants 0,
+`service_role` SELECT unchanged at 26 tables, 195 policies and the access-token
+hook untouched, cross-shop insert still refused with MU003 while the same
+caller's own-shop insert still returns `applied`, and the readable-set split
+still gives an Owner 32 tables and a default Staff member 27 without `expenses`
+or `payments`.
+
+## 2026-09-07 — H-7 Fix Pass B closes client revocation and the mutable bootstrap clock
+
+Baseline before this fix: hosted migrations **24/24**, zero pending, and `sync`
+**v13 ACTIVE**. Pass A plus TRUNCATE hardening are deployed. Fix Pass B is local,
+uncommitted, and not deployed pending full H-7 review; `payment-webhook` remains
+undeployed. Physical H-7 validation remains pending.
+
+Client reconciliation is now shop-scoped. It preserves the transitive SQLite
+FK-parent graph of every pending or failed outbox row before deleting anything,
+then purges child-before-parent. Loss of `sale_history` keeps the actor's own
+receipts while deleting other staff's cached sale graphs in that shop; other
+shops on a shared device are untouched. A malformed, mixed, duplicate, or
+unknown `readableTables` answer is treated as no reconciliation answer.
+
+Every pull page now carries the authoritative permission version. A version
+change restarts from the cycle's original cursor/page one; a second change
+halts after one bounded restart. Stable first-page access metadata carries the
+exact actor and `all`/`own` sale-history scope.
+
+Authoritative inactive/deleted/plan-suspended/binding/shop failures, plus a
+permission version that cannot be revalidated, synchronously clear the local
+session/cart and set the exact user's device-only `access_locked_at` marker
+without changing `is_active`, timestamps, or the outbox. Remote user hydration
+preserves that local marker, including when another Owner hydrates the shared
+device. Protected offline actions then fail through their existing live SQLite
+gates. The marker clears only after phone+PIN server authentication and a
+successful full hydration for that exact actor; real SQLite/client integration
+coverage pins the ordering and every denial path. Data is retained for safe
+recovery. SQLite migration `0027_h7_local_access_lock.sql` adds the marker and is
+registered in the runtime journal and migration bundle.
+
+`20260907020000_h7_fix_pass_b.sql` creates an RLS-enabled, API-unreachable
+server timestamp anchor for each shop. The 24-hour null-billing window no longer
+reads client-writable `shops.created_at`; future dates cannot extend it, stale
+unbilled shops fail, missing pre-creation shops still allow canonical onboarding,
+and archived/deleted shops fail. Direct `service_role` EXECUTE on
+`sync_apply_row_pre_h7(...)` is revoked; the guarded wrapper remains functional.
+
+M-5 remains **ACCEPTED**, on the narrow authoritative boundary: decorated claims
+do not pass `assertCallerCurrent`, and hosted API roles have no direct table data
+grants. Do not generalize this to every SQL predicate. `auth_is_owner` and
+`b2_user_is_owner` are narrower than the complete user/binding/shop/plan check.
+
+Mandatory Android checks before Wave 1 sign-off: Staff SQLite excludes
+expenses/payments; deactivated Staff loses protected data/actions; normal
+Owner/Manager/Staff flow; Multi-Shop/shared-device flow; two-device sync
+convergence.
+
+## 2026-09-09 — H-7 physical blockers: bind sync to its JWT actor; reactivate only on the server
+
+Fix Pass B is deployed to DEV: hosted migrations **25/25**, zero pending before
+this fix, and `sync` **v14 ACTIVE**. Physical validation reproduced two blockers.
+A revoked Staff JWT survived a local device handover and the old revocation
+fallback locked the active Owner. Separately, the generic users sync path
+correctly kept `is_active=false` monotonic, so the client-side Activate action
+could never restore the server row.
+
+The client now compares the persisted cloud token's actor/shop with the active
+local actor/shop before any sync work. A mismatch blocks sync but does not block
+offline PIN login and never locks either identity from unverified decoded
+claims. Locking requires actor/shop metadata attached by the Edge function only
+after JWT verification; the active session/cart clear only when that verified
+actor is the active local actor. Fresh server authentication, exact claim
+matching, full hydration, and the existing live-row postcondition repair the
+session.
+
+Staff reactivation is now server-first through additive migration
+`20260909000000_h7_actor_binding_staff_reactivation.sql`. The SECURITY DEFINER
+RPC is executable only by `service_role`; it revalidates a live same-shop Owner,
+rejects deleted/non-staff/plan-unsafe targets, serializes the staff-slot check,
+bumps the existing permission version through the users trigger, writes an
+audit row, and uses an operation ledger for replay safety. The client changes no
+local activation state until RPC success and a full authoritative hydration.
+
+This 26th migration and matching Edge source are local, uncommitted, and **not
+deployed**. SQLite migrations are registered through `0028`. Physical retest
+and Wave 1 sign-off remain pending. `payment-webhook` remains undeployed.

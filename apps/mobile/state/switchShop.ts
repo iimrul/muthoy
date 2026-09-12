@@ -1,4 +1,4 @@
-import { getUserPermissionOverrides } from '../db/auth';
+import { getUserPermissionOverrides, markShopCloudLinked } from '../db/auth';
 import { membershipForSwitch, requireShopSwitchAccess } from '../db/commercial';
 import { startSyncEngine, stopSyncEngine } from '../sync';
 import { refreshBillingStatus } from '../sync/billing';
@@ -6,6 +6,7 @@ import { invokeSyncWithClaimRefresh } from '../sync/invoke';
 import { pullChanges } from '../sync/pull';
 import { isSupabaseConfigured, supabase } from '../sync/supabaseClient';
 import { hasNetworkConnection } from '../sync/connectivity';
+import { assertCloudActorBinding, inspectCloudActorBinding } from '../sync/authActorBinding';
 import { useCartStore } from './cartStore';
 import { useSessionStore, type Session } from './sessionStore';
 
@@ -36,6 +37,7 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
       billingAccountId: localMembership.billingAccountId,
       permissions,
       cloudShopConfirmed: false,
+      cloudActorConfirmed: false,
     });
     return;
   }
@@ -45,6 +47,10 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
   if (authSession.error || !authSession.data.session?.access_token) {
     throw authSession.error ?? new Error('Cloud session is unavailable.');
   }
+  assertCloudActorBinding(
+    await inspectCloudActorBinding(current),
+    { userId: current.userId, shopId: current.shopId },
+  );
   if (useSessionStore.getState().epoch !== initialState.epoch) throw new Error('The active user changed.');
   const rollbackToken = authSession.data.session.access_token;
   useCartStore.getState().clear();
@@ -64,7 +70,21 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     const refreshed = await supabase.auth.refreshSession();
     if (refreshed.error) throw refreshed.error;
     if (!ownsTransition()) throw new Error('The active user changed.');
+    assertCloudActorBinding(
+      await inspectCloudActorBinding({ userId: response.actor_user_id, shopId }),
+      { userId: response.actor_user_id, shopId },
+    );
+    if (!ownsTransition()) throw new Error('The active user changed.');
     await pullChanges(shopId, null);
+    if (!ownsTransition()) throw new Error('The active user changed.');
+    // The shop is linked at exactly this point, not one step earlier: the
+    // server confirmed this owner may act in it, the claims were refreshed, and
+    // a FULL hydration then completed. Recording it here is the same fact
+    // deviceAuth records after its own hydration — not a client-side guess.
+    // Without it the shop keeps `cloud_linked_at = NULL`, which the root gate
+    // reads on the next cold start as an unfinished registration and answers
+    // with OTP for a shop that is already linked.
+    await markShopCloudLinked(shopId);
     if (!ownsTransition()) throw new Error('The active user changed.');
     await refreshBillingStatus(shopId, undefined, { isCurrent: ownsTransition });
     if (!ownsTransition()) throw new Error('The active user changed.');
@@ -78,6 +98,7 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
       billingAccountId: response.billing_account_id,
       permissions,
       cloudShopConfirmed: true,
+      cloudActorConfirmed: true,
     };
     useSessionStore.getState().login(next);
     startSyncEngine(shopId);
@@ -99,7 +120,11 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
       await supabase.auth.refreshSession();
     } catch {
       // Keep sync stopped when the server identity could not be restored.
-      useSessionStore.getState().login({ ...current, cloudShopConfirmed: false });
+      useSessionStore.getState().login({
+        ...current,
+        cloudShopConfirmed: false,
+        cloudActorConfirmed: false,
+      });
       throw error;
     }
     useSessionStore.getState().login(current);
