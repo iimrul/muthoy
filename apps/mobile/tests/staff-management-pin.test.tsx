@@ -69,7 +69,6 @@ vi.mock("../components/ui/AccessDenied", () => ({
 
 const deps = vi.hoisted(() => ({
   createStaff: vi.fn(),
-  activateStaff: vi.fn(),
   deactivateStaff: vi.fn(),
   listStaff: vi.fn(),
   removeStaff: vi.fn(),
@@ -87,7 +86,6 @@ const deps = vi.hoisted(() => ({
 
 vi.mock("../db/staff", () => ({
   createStaff: deps.createStaff,
-  activateStaff: deps.activateStaff,
   deactivateStaff: deps.deactivateStaff,
   listStaff: deps.listStaff,
   removeStaff: deps.removeStaff,
