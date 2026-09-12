@@ -27,17 +27,23 @@ ledger invariant, and valid shop/Owner preservation passed. B4
 commercial/trial/Multi-Shop passed physical Android verification. This
 supersedes older text that calls the B1-B4 remote rollout pending.
 
-**H-7 Fix Pass B is DEPLOYED to Dev/Test.** The hosted ledger is **25/25**
-through `20260907020000_h7_fix_pass_b.sql`, and deployed `sync` is **v14
-ACTIVE**. `payment-webhook` remains undeployed.
+**H-7 Fix Pass B shipped to Dev/Test on 2026-09-07** at hosted ledger **25/25**
+through `20260907020000_h7_fix_pass_b.sql`, with `sync` **v14 ACTIVE** at the
+time. `payment-webhook` remains undeployed.
 
-The physical blocker follow-up is local and **NOT deployed**. Additive migration
+**The physical-blocker follow-up is now DEPLOYED.** Additive migration
 `20260909000000_h7_actor_binding_staff_reactivation.sql` adds the narrow
 Owner-authorized reactivation RPC and replay ledger. Matching `sync` source
 binds any revocation to the server-verified JWT actor and blocks cloud/local
 actor or shop mismatches. SQLite migrations are registered through `0029`;
-`access_locked_at` remains local-only. Until this follow-up rollout, remote
-remains 25/25 and v14.
+`access_locked_at` remains local-only. Confirmed by direct hosted verification
+on 2026-09-12 (`supabase migration list --linked` + `supabase functions
+list`): the hosted ledger is **26/26** through `20260909000000`, and deployed
+`sync` is **v16 ACTIVE** (function updated 2026-09-10 07:28:21 UTC). This
+corrects this file's own 2026-09-12 wording, which called the follow-up
+"local and NOT deployed" — that was written from local documentation without
+independently checking the hosted project, and the redeploy had in fact
+already happened two days earlier.
 
 The older warning that deployed `sync` was v10 and might predate the H-2/H-5
 onboarding gate is **withdrawn**: the pre-deploy function source was downloaded

@@ -1926,3 +1926,35 @@ One non-blocking follow-up: `apps/mobile/tests/staff-management-pin.test.tsx`
 still stubs `activateStaff`, which production no longer exports now that
 reactivation is server-first. The mock is inert and the suite is green; it is
 dead scaffolding to remove separately.
+
+## 2026-09-12 — Correction: the actor-binding follow-up was already deployed when the entry above said it wasn't
+
+The deploy-state paragraph in the entry above ("Deploy state is unchanged by
+this pass: the hosted ledger remains 25/25 with sync v14 ACTIVE... still local
+and not deployed") was wrong at the moment it was written. It was produced by
+reading this repo's own status docs, which were themselves stale, instead of
+independently querying the hosted project.
+
+Direct hosted verification — `supabase migration list --linked` and
+`supabase functions list` against project `btfprhticjgeihcngpif` — shows:
+
+- Remote migration ledger: **26/26**, through
+  `20260909000000_h7_actor_binding_staff_reactivation.sql`. Matches the local
+  migration file count and tip exactly; no drift.
+- Deployed `sync`: **v16 ACTIVE**, function last updated **2026-09-10 07:28:21
+  UTC**.
+
+So the actor-binding/reactivation follow-up — the Owner-authorized
+reactivation RPC, replay ledger, and JWT-actor-bound revocation — was deployed
+**2026-09-10**, two days before the entry above claimed it was still local.
+`payment-webhook` is unaffected and remains undeployed.
+
+Not independently re-verified here: that the deployed `sync` v16 source
+matches the local `functions/sync/` implementation byte-for-byte. The version
+number and update timestamp are consistent with it, but no function-body diff
+was pulled.
+
+`backend/supabase/README.md` and `backend/supabase/migrations/README.md` are
+corrected in place to match (26/26, v16); `docs/plans/pre-rc-master-plan.md`'s
+baseline table is corrected too. This entry does not rewrite the one above —
+DECISIONS.md is append-only — it stands as the correction of record.

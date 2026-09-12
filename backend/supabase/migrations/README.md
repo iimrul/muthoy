@@ -90,15 +90,17 @@ are not routine column-only changes.
 
 ## Current status — 2026-09-12
 
-- The hosted ledger is applied **25/25** through
-  `20260907020000_h7_fix_pass_b.sql`, with zero remote pending before the
-  physical-blocker follow-up, and covered by real SQLite/PGlite
-  migration tests, including fresh order, legacy upgrade/backfill, repeated
-  application where supported, RLS/shop isolation, grouped operation replay,
-  inventory ledger, `inventory_add`, reporting, and tax constraints.
-- `20260909000000_h7_actor_binding_staff_reactivation.sql` is additive, local,
-  and intentionally **not deployed pending review**. Remote therefore remains
-  at the measured 25/25 baseline.
+- The hosted ledger is applied **26/26** through
+  `20260909000000_h7_actor_binding_staff_reactivation.sql` (confirmed by
+  direct hosted verification, 2026-09-12: `supabase migration list
+  --linked`), covered by real SQLite/PGlite migration tests, including fresh
+  order, legacy upgrade/backfill, repeated application where supported,
+  RLS/shop isolation, grouped operation replay, inventory ledger,
+  `inventory_add`, reporting, and tax constraints.
+- `20260909000000_h7_actor_binding_staff_reactivation.sql` is deployed. It
+  shipped 2026-09-10 — two days before an earlier revision of this file
+  called it "not deployed pending review" from stale local docs instead of
+  checking the hosted project directly. That line is corrected here.
 - SQLite is registered through `0029`. H-7 automated/security validation,
   single-device physical validation, and the `0027`-`0029` on-device upgrade are
   all **PASS** (2026-09-12); full suite 170 files / 2,058 tests PASS with
@@ -107,9 +109,9 @@ are not routine column-only changes.
   see the Fix Pass B sign-off checklist below.
 - B4 DB/migration parity, RLS, Auth hook configuration, ledger invariants, and
   valid production-row preservation were verified during controlled rollout.
-- Deployed `sync` is **v14 ACTIVE**; the actor-binding/reactivation Edge source
-  is ahead of it and requires a matching redeploy. `payment-webhook` is still undeployed and
-  not production-ready while
+- Deployed `sync` is **v16 ACTIVE** (updated 2026-09-10 07:28:21 UTC),
+  carrying the actor-binding/reactivation Edge source. `payment-webhook` is
+  still undeployed and not production-ready while
   SSLCommerz credentials/live validation remain absent.
 - Recorded B4 completion suite: **PASS** — 146 files, 1,537 tests; typecheck and
   lint PASS. Coverage includes canonical onboarding, hosted ACL/grants,
@@ -242,8 +244,10 @@ reconciliation answers never purge.
 
 Fix Pass B is deployed as migration 25 with `sync` v14. Physical Android
 validation found the shared-device stale-JWT and Staff-reactivation blockers;
-their additive migration 26 and matching Edge/client source are **still not
-deployed** — that rollout is unchanged by this validation pass.
+their additive migration 26 and matching Edge/client source **were deployed
+2026-09-10**, bringing the hosted ledger to 26/26 and `sync` to v16 —
+confirmed by direct hosted verification on 2026-09-12 (see "Current status"
+above).
 
 Single-device physical validation is **PASS** as of 2026-09-12, and no known
 H-7 application defect remains. Wave 1 sign-off checklist:
@@ -269,11 +273,12 @@ simultaneous push.
 
 ## Known rollout risks
 
-- Confirm the linked project and ledger before every future rollout; the remote
-  verified cutoff is `20260907020000_h7_fix_pass_b.sql` (25/25).
-- H-7 Fix Pass B is applied to Dev/Test; the remote ledger is 25/25 and `sync`
-  v14 is ACTIVE. Migration `20260909000000...` plus matching Edge/client source
-  are ahead of that deployed baseline.
+- Confirm the linked project and ledger before every future rollout; the
+  remote verified cutoff is
+  `20260909000000_h7_actor_binding_staff_reactivation.sql` (26/26, confirmed
+  2026-09-12).
+- H-7 Fix Pass B and the actor-binding/reactivation follow-up are both applied
+  to Dev/Test; the remote ledger is 26/26 and `sync` v16 is ACTIVE.
 - `M-3` (hosted ACL parity) is now VERIFIED against the DEV project. Findings:
   - `anon` and `authenticated` hold **no** SELECT/INSERT/UPDATE/DELETE on any
     table in `public`. Direct PostgREST data access is impossible before RLS is
