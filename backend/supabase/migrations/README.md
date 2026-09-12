@@ -73,12 +73,14 @@ The mobile runner and Drizzle journal register this exact numeric order:
 0026_b4_commercial_cache.sql
 0027_h7_local_access_lock.sql
 0028_shop_scoped_pin_lookup.sql
+0029_pin_reserved_while_inactive.sql
 ```
 
 B1 starts at `0009`; B2 sales/inventory occupies `0010`-`0012`, followed by
 dashboard credit-period migrations `0013`-`0014`; B3 occupies `0015`-`0025`.
 B4 local commercial membership/entitlement/payment caching is `0026`; H-7's
-device-only access lock and shop-scoped PIN lookup are `0027`-`0028`.
+device-only access lock, shop-scoped PIN lookup, and PIN reservation across
+inactive/locked users are `0027`-`0029`.
 
 `0018` backfills the old expense categories to
 Rent/Salary/Utilities/Conveyance/Other. `0024` backfills missing sale business
@@ -86,7 +88,7 @@ dates using Asia/Dhaka. `0025` adds immutable MRP-inclusive integer-paisa tax
 snapshots. These data-shape steps need production backups and postchecks; they
 are not routine column-only changes.
 
-## Current status — 2026-09-09
+## Current status — 2026-09-12
 
 - The hosted ledger is applied **25/25** through
   `20260907020000_h7_fix_pass_b.sql`, with zero remote pending before the
@@ -97,6 +99,12 @@ are not routine column-only changes.
 - `20260909000000_h7_actor_binding_staff_reactivation.sql` is additive, local,
   and intentionally **not deployed pending review**. Remote therefore remains
   at the measured 25/25 baseline.
+- SQLite is registered through `0029`. H-7 automated/security validation,
+  single-device physical validation, and the `0027`-`0029` on-device upgrade are
+  all **PASS** (2026-09-12); full suite 170 files / 2,058 tests PASS with
+  typecheck and lint clean. No known H-7 application defect remains. Physical
+  two-device convergence is **NOT RUN** (no second device) and is deferred —
+  see the Fix Pass B sign-off checklist below.
 - B4 DB/migration parity, RLS, Auth hook configuration, ledger invariants, and
   valid production-row preservation were verified during controlled rollout.
 - Deployed `sync` is **v14 ACTIVE**; the actor-binding/reactivation Edge source
@@ -209,7 +217,7 @@ asymmetry is pinned as intentional by
 
 Pass A's matching Edge changes are deployed in `sync` v13.
 
-## H-7 Fix Pass B — 2026-09-07, DEPLOYED / PHYSICAL RETEST PENDING
+## H-7 Fix Pass B — 2026-09-07, DEPLOYED / PHYSICAL RETEST PASS
 
 `20260907020000_h7_fix_pass_b.sql` adds a server-owned bootstrap-window table
 and insert trigger. `h7_shop_billing_bootstrap_allowed` now reads that immutable
@@ -234,14 +242,30 @@ reconciliation answers never purge.
 
 Fix Pass B is deployed as migration 25 with `sync` v14. Physical Android
 validation found the shared-device stale-JWT and Staff-reactivation blockers;
-their additive migration 26 and matching Edge/client source are not deployed.
-Physical validation remains pending. Mandatory before Wave 1 sign-off:
+their additive migration 26 and matching Edge/client source are **still not
+deployed** — that rollout is unchanged by this validation pass.
 
-- Staff local SQLite excludes `expenses` and `payments` after reconciliation.
-- A deactivated Staff member immediately loses protected local data/actions.
-- Owner, Manager, and Staff normal flows still work.
-- Multi-Shop/shared-device switching stays isolated.
-- Two devices converge after writes and permission changes.
+Single-device physical validation is **PASS** as of 2026-09-12, and no known
+H-7 application defect remains. Wave 1 sign-off checklist:
+
+- Staff local SQLite excludes `expenses` and `payments` after reconciliation — PASS.
+- A deactivated Staff member immediately loses protected local data/actions — PASS.
+- Owner, Manager, and Staff normal flows still work — PASS.
+- Multi-Shop/shared-device switching stays isolated — PASS.
+- SQLite `0027`-`0029` apply on a real upgraded device database — PASS.
+- Two devices converge after writes and permission changes — **NOT RUN.** Only
+  one Android device exists and the emulator cannot run Muthoy. Deferred to
+  post-RC/pilot field validation; it must not be recorded as verified.
+
+The deferred row is covered in automation wherever convergence is decidable
+without a second handset: `inventory-ledger.sqlite.test.ts` (both directions,
+order-independent, redelivery and offline-queue merge), `hydration-ledger`
+(replay, interruption, page splits), `sale-graph-hydration.sqlite.test.ts`
+(receiving-device sale/report/cash/credit read models plus idempotency),
+`credit-convergence.pgtest.ts` (two devices against one server balance), and
+`h7-security.pgtest.ts` (cross-shop isolation). What stays unexercised is real
+transport, hosted RLS round-trip, clock skew between handsets, and genuinely
+simultaneous push.
 
 ## Known rollout risks
 
@@ -289,7 +313,9 @@ Physical validation remains pending. Mandatory before Wave 1 sign-off:
 - The access-token hook is currently enabled, remains a manual hosted setting,
   and fails closed when absent.
 - Live two-device convergence, refund authority, and revocation must be checked
-  after deploy even though PGlite coverage passes.
+  after deploy even though PGlite coverage passes. Two-device convergence has
+  **never been run on hardware** — one device only — so it carries no physical
+  evidence at all and is deferred to post-RC/pilot field validation.
 - SQLCipher, production OTP/provider hardening, and broader BLE printer-model
   rollout remain separate release gates.
 - Client DEV bypass removal is done (H-2, 2026-09-06). Anonymous sign-ins must

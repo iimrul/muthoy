@@ -1856,3 +1856,73 @@ local activation state until RPC success and a full authoritative hydration.
 This 26th migration and matching Edge source are local, uncommitted, and **not
 deployed**. SQLite migrations are registered through `0028`. Physical retest
 and Wave 1 sign-off remain pending. `payment-webhook` remains undeployed.
+
+## 2026-09-12 — H-7 final state: everything decidable without a second phone is now decided
+
+H-7 is code complete and validated to the limit of the hardware available.
+
+Automated and security validation is **PASS**. The full suite is **170 files /
+2,058 tests PASS**, with `pnpm typecheck`, `pnpm lint`, and `git diff --check`
+all clean. That includes the H-7 security pgtests (cross-shop insert guard on
+both `sync_apply_row` overloads, Edge-pull vs direct-RLS parity, revoked-user
+reads, the bounded null-billing window, TRUNCATE removal from the API roles),
+the device-lock suites, and the actor-binding/reactivation coverage.
+
+Single-device physical validation on Android is **PASS**: the SQLite
+`0027`-`0029` upgrade applied on the real, already-populated device database;
+Multi-Shop cold restart restored the correct shop without falling into
+OTP/link-repair; and the Owner/Manager/Staff PIN and role flows behaved. The
+earlier "0028 will not apply on device" observation is resolved — `0028` and
+`0029` are validated on hardware. **No known H-7 application defect remains.**
+
+Two client-side defects found during that physical pass were fixed and pinned.
+`0028_shop_scoped_pin_lookup.sql` moved PIN uniqueness from device-global to
+`(shop_id, pin_lookup_tag)`, because B4 Multi-Shop gives one Owner a separate
+actor row per shop and the global index refused them their own PIN in their own
+second shop. `0029_pin_reserved_while_inactive.sql` then removed `is_active`
+from both the application check and the index predicate: deactivating a staff
+member had been releasing their PIN, so a colleague could take it, and
+`reactivateStaffOnServer` — which only flips `is_active` and never re-checks —
+would produce two live rows sharing one PIN. `verifyPin` fails closed on an
+ambiguous match, so reactivation locked out both people. Reservation and login
+eligibility are now separate predicates on purpose; deletion is the only state
+that releases a PIN, and `0029` deduplicates legacy collisions before creating
+the widened index so it cannot abort on an already-affected device.
+
+A convergence coverage audit found one real gap and it is now closed. The stock
+effect of another device's sale was already covered; the sale RECORD was not.
+`sale-graph-hydration.sqlite.test.ts` hydrates a complete remote graph — two
+sales, three sale items, a customer, two credits, a collection payment — through
+the real `applyRemoteRows` on real SQLite with every trigger live, in deliberately
+hostile wire order (children ahead of parents, which is the true server page
+order, since `sale_items` sorts before `sales` under
+`order by updated_at, table_name, row_id`). It then reads the figures back
+through the production read models: sale history, sale detail, EOD and monthly
+report totals, the cash drawer inputs, and the customer's credit balance. Replay
+is idempotent (`skipped_stale`, unchanged totals) and a newer-timestamp
+redelivery overwrites in place without duplicating. Removing the
+`HYDRATION_TABLE_RANK` re-ranking fails 10 of its 11 tests, so the coverage is
+not vacuous.
+
+**Physical two-device convergence was NOT RUN.** Only one Android device is
+available and the emulator cannot run Muthoy. It is deferred to post-RC/pilot
+field validation and **must not be described as verified anywhere.** Automated
+coverage substitutes only where convergence is decidable offline — both
+directions and order-independence in `inventory-ledger.sqlite.test.ts`, replay
+and page-split behaviour in `hydration-ledger`, the receiving-device read models
+above, two devices against one server balance in `credit-convergence.pgtest.ts`,
+and cross-shop isolation in `h7-security.pgtest.ts`. Real transport, the hosted
+RLS round-trip, clock skew between handsets, and genuinely simultaneous push
+remain unexercised, and accepting Wave 1 means accepting that.
+
+Deploy state is unchanged by this pass: the hosted ledger remains **25/25** with
+`sync` **v14 ACTIVE**. Migration `20260909000000_h7_actor_binding_staff_reactivation.sql`
+and its matching Edge source are still local and **not deployed**;
+`payment-webhook` remains undeployed. Redeploying `sync` is a precondition for
+any later field convergence check, since a client/function version skew would
+measure the skew rather than convergence.
+
+One non-blocking follow-up: `apps/mobile/tests/staff-management-pin.test.tsx`
+still stubs `activateStaff`, which production no longer exports now that
+reactivation is server-first. The mock is inert and the suite is green; it is
+dead scaffolding to remove separately.

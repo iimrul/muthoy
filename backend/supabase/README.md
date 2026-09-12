@@ -35,7 +35,7 @@ The physical blocker follow-up is local and **NOT deployed**. Additive migration
 `20260909000000_h7_actor_binding_staff_reactivation.sql` adds the narrow
 Owner-authorized reactivation RPC and replay ledger. Matching `sync` source
 binds any revocation to the server-verified JWT actor and blocks cloud/local
-actor or shop mismatches. SQLite migrations are registered through `0028`;
+actor or shop mismatches. SQLite migrations are registered through `0029`;
 `access_locked_at` remains local-only. Until this follow-up rollout, remote
 remains 25/25 and v14.
 
@@ -50,7 +50,17 @@ M-5 remains accepted on a narrow boundary: Edge requests pass through
 Do not describe `auth_is_owner` or `b2_user_is_owner` as carrying every
 commercial-liveness predicate; they do not. See `migrations/README.md`.
 
-H-7 physical Android validation is still pending.
+H-7 physical Android validation is **PASS** on a single device (2026-09-12),
+covering the SQLite `0027`-`0029` upgrade on a real database, Multi-Shop cold
+restart, and the Owner/Manager/Staff PIN and role flows. No known H-7
+application defect remains.
+
+Physical **two-device convergence was NOT RUN** — only one Android device is
+available and the emulator cannot run Muthoy. It is deferred to post-RC/pilot
+field validation and must not be described as verified. Automated coverage
+stands in for it at every layer where convergence is decidable offline (see
+`migrations/README.md`), but real transport, hosted RLS round-trip and truly
+simultaneous push remain unexercised.
 
 ## Auth hook and canonical Owner onboarding
 
