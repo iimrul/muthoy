@@ -235,3 +235,109 @@ export function isUniqueConstraintViolation(err: unknown, table: string, columns
   }
   return columns.every((column) => err.message.includes(`${table}.${column}`));
 }
+
+// ── H-3: local database encryption ──────────────────────────────────────
+
+/**
+ * The device key protecting the local SQLite database is gone or unusable
+ * while an ENCRYPTED database is still on disk.
+ *
+ * This is the one failure that must never be "recovered" by opening a fresh
+ * database: doing so presents an empty shop to an owner whose real data is
+ * sitting right there, still encrypted, and the first sync would then push
+ * that emptiness. The database files are left untouched; recovery is a
+ * server-side re-hydration (H-11), not a local repair.
+ */
+export class DatabaseKeyUnrecoverableError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string, options?: { cause?: unknown }) {
+    super(
+      'The local database is encrypted but this device can no longer unlock it. ' +
+        'Your data has not been deleted. Sign in again to restore this shop from the server.',
+    );
+    this.name = 'DatabaseKeyUnrecoverableError';
+    this.reason = reason;
+    if (options?.cause !== undefined) {
+      this.cause = options.cause;
+    }
+  }
+}
+
+/**
+ * The key store itself could not answer — no key was minted, and nothing was
+ * encrypted or migrated. Distinct from DatabaseKeyUnrecoverableError: that one
+ * means data exists and is locked, this one means we never got far enough to
+ * know. Both fail closed; only this one is worth retrying.
+ */
+export class DatabaseKeyUnavailableError extends Error {
+  constructor(detail: string, options?: { cause?: unknown }) {
+    super(`The secure key store is unavailable: ${detail}`);
+    this.name = 'DatabaseKeyUnavailableError';
+    if (options?.cause !== undefined) {
+      this.cause = options.cause;
+    }
+  }
+}
+
+/** A server-authenticated restore started but did not finish. */
+export class DatabaseRecoveryPendingError extends Error {
+  constructor() {
+    super(
+      'Database recovery is incomplete. Sign in again to safely finish restoring this device.',
+    );
+    this.name = 'DatabaseRecoveryPendingError';
+  }
+}
+
+/** Retryable live connection/setup failure with no SQL or key-bearing cause. */
+export class DatabaseInitializationError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string) {
+    super('The encrypted local database could not be initialized. Retry secure storage.');
+    this.name = 'DatabaseInitializationError';
+    this.reason = reason;
+  }
+}
+
+/**
+ * The one-time plaintext → SQLCipher migration could not be completed safely.
+ *
+ * Always thrown BEFORE the original database is renamed: the encrypted
+ * candidate is only ever promoted after every verification passes, so this
+ * error means the original plaintext database is still intact and still the
+ * live file.
+ */
+export class DatabaseEncryptionMigrationError extends Error {
+  readonly step: string;
+
+  constructor(step: string, detail: string, options?: { cause?: unknown }) {
+    super(`Database encryption failed during ${step}: ${detail}`);
+    this.name = 'DatabaseEncryptionMigrationError';
+    this.step = step;
+    if (options?.cause !== undefined) {
+      this.cause = options.cause;
+    }
+  }
+}
+
+/**
+ * Something reached `db` or `sqliteConnection` before
+ * `ensureDatabaseReady()` resolved.
+ *
+ * Since H-3 the connection cannot be built at module-import time — the
+ * SQLCipher key arrives asynchronously from the Keystore — so the handles
+ * db/ exports are lazy. Hitting this is a wiring bug (a new entry point that
+ * does not await readiness), never a user-facing condition, which is why it
+ * reads like a developer message.
+ */
+export class DatabaseNotReadyError extends Error {
+  constructor() {
+    super(
+      'The local database was used before ensureDatabaseReady() completed. ' +
+        'Every entry point — app boot and headless tasks — must await it first.',
+    );
+    this.name = 'DatabaseNotReadyError';
+  }
+}

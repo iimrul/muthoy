@@ -38,6 +38,8 @@ import '../global.css';
 import { AppNavigationShell } from '../components/navigation/AppNavigationShell';
 import { AuthenticatedRuntimeErrorBoundary } from '../components/navigation/AuthenticatedRuntimeErrorBoundary';
 import { NavigationBoundary } from '../components/navigation/NavigationBoundary';
+import { DatabaseRecoveryScreen } from '../components/database/DatabaseRecoveryScreen';
+import { DatabaseKeyUnrecoverableError, DatabaseRecoveryPendingError } from '../db/errors';
 
 const FOREGROUND_CHECK_DEBOUNCE_MS = 60_000;
 let lastForegroundCheckAt = 0;
@@ -63,7 +65,11 @@ export default function RootLayout() {
   });
 
   // Runs pending SQLite migrations once per app start; a no-op if already applied.
-  const { isReady: isDatabaseReady, error: databaseError } = useDatabaseMigrations();
+  const {
+    isReady: isDatabaseReady,
+    error: databaseError,
+    retry: retryDatabase,
+  } = useDatabaseMigrations();
 
   const isBootComplete = (fontsLoaded || fontError) && (isDatabaseReady || databaseError);
 
@@ -170,14 +176,15 @@ export default function RootLayout() {
   // into a silently broken app (Volume 4's "no empty catch blocks that
   // swallow failures").
   if (databaseError) {
+    const canRestore =
+      databaseError instanceof DatabaseKeyUnrecoverableError ||
+      databaseError instanceof DatabaseRecoveryPendingError;
     return (
-      <View className="flex-1 items-center justify-center gap-3 bg-errorBg p-6">
-        <Text className="font-sans-bold text-lg text-error">Database setup failed</Text>
-        <Text className="font-sans text-center text-sm text-richBlack">
-          The app cannot start safely. Please report this message:
-        </Text>
-        <Text className="font-mono text-center text-xs text-richBlack">{databaseError.message}</Text>
-      </View>
+      <DatabaseRecoveryScreen
+        canRestore={canRestore && isSupabaseConfigured}
+        onRetry={retryDatabase}
+        onRestored={retryDatabase}
+      />
     );
   }
 

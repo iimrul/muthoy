@@ -35,6 +35,11 @@ const mmkv = vi.hoisted(() => {
 vi.mock('react-native-mmkv', () => ({ createMMKV: mmkv.createMMKV }));
 
 const config = vi.hoisted(() => ({ isSupabaseConfigured: true }));
+const databaseGate = vi.hoisted(() => ({
+  isReady: true,
+  error: undefined as Error | undefined,
+  retry: vi.fn(),
+}));
 
 const native = vi.hoisted(() => ({
   addEventListener: vi.fn(),
@@ -86,7 +91,11 @@ vi.mock('../sync/connectivity', () => ({ subscribeToReconnect: native.subscribeT
 vi.mock('../state/switchShop', () => ({ revalidateOfflineSelectedShop: native.revalidateOfflineSelectedShop }));
 
 vi.mock('../db', () => ({
-  useDatabaseMigrations: () => ({ isReady: true, error: null }),
+  useDatabaseMigrations: () => databaseGate,
+}));
+vi.mock('../components/database/DatabaseRecoveryScreen', () => ({
+  DatabaseRecoveryScreen: ({ canRestore }: { canRestore: boolean }) =>
+    createElement('div', null, canRestore ? 'server-restore-ready' : 'secure-storage-retry'),
 }));
 vi.mock('../native/notifications', () => ({
   registerNotificationBackgroundTaskAsync: native.registerNotificationBackgroundTaskAsync,
@@ -115,6 +124,7 @@ vi.mock('../sync/billingHydration', () => ({
 }));
 
 const { useSessionStore } = await import('../state/sessionStore');
+const { DatabaseKeyUnrecoverableError, DatabaseKeyUnavailableError } = await import('../db/errors');
 type Session = import('../state/sessionStore').Session;
 const RootLayout = (await import('../app/_layout')).default;
 
@@ -126,11 +136,34 @@ beforeEach(() => {
   mmkv.stores.forEach((store) => store.clear());
   useSessionStore.setState({ session: null });
   config.isSupabaseConfigured = true;
+  databaseGate.isReady = true;
+  databaseGate.error = undefined;
   native.addEventListener.mockReturnValue({ remove: vi.fn() });
   native.registerNotificationBackgroundTaskAsync.mockResolvedValue(undefined);
   native.requestNotificationPermissionsAsync.mockResolvedValue(undefined);
   native.revalidateOfflineSelectedShop.mockResolvedValue(undefined);
   native.runNotificationChecks.mockResolvedValue(undefined);
+});
+
+describe('database boot recovery gate', () => {
+  it('offers authenticated server restore for a missing/wrong key', () => {
+    databaseGate.isReady = false;
+    databaseGate.error = new DatabaseKeyUnrecoverableError('missing-key');
+
+    const view = render(createElement(RootLayout));
+
+    expect(view.container.textContent).toContain('server-restore-ready');
+    expect(native.startSyncEngine).not.toHaveBeenCalled();
+  });
+
+  it('offers retry, not key rotation, for a transient Keystore failure', () => {
+    databaseGate.isReady = false;
+    databaseGate.error = new DatabaseKeyUnavailableError('temporarily unavailable');
+
+    const view = render(createElement(RootLayout));
+
+    expect(view.container.textContent).toContain('secure-storage-retry');
+  });
 });
 
 afterEach(() => {

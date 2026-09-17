@@ -48,7 +48,15 @@
           "imageWidth": 76
         }
       ],
-      "expo-sqlite",
+      [
+        "expo-sqlite",
+        {
+          "android": {
+            "useSQLCipher": true
+          }
+        }
+      ],
+      "./plugins/withAndroidBackupProtection",
       "expo-notifications",
       [
         "expo-camera",

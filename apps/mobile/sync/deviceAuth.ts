@@ -44,7 +44,7 @@ export class DeviceLoginError extends Error {
 // the server withheld.
 const GENERIC_FAILURE = 'Incorrect phone number or PIN';
 
-interface DeviceLoginResponse {
+export interface DeviceLoginResponse {
   shopId: string;
   userId: string;
   role: string;
@@ -92,6 +92,17 @@ export async function loginOnNewDevice(
   pin: string,
   timing?: AuthTimingTrace,
 ): Promise<void> {
+  const response = await authenticateNewDeviceCredentials(phone, pin, timing);
+  const local = await hydrateAuthenticatedDevice(response, pin, timing);
+  await activateHydratedDevice(local, timing);
+}
+
+/** DB-independent. Recovery must complete this before rotating any local key. */
+export async function authenticateNewDeviceCredentials(
+  phone: string,
+  pin: string,
+  timing?: AuthTimingTrace,
+): Promise<DeviceLoginResponse> {
   requireSupabaseConfiguration();
 
   // Canonical on the wire. The server keys its lockout on this string, so
@@ -136,6 +147,16 @@ export async function loginOnNewDevice(
     await inspectCloudActorBinding({ userId: response.userId, shopId: response.shopId }),
     { userId: response.userId, shopId: response.shopId },
   );
+
+  return response;
+}
+
+/** Full server hydration into whichever isolated database db/ currently owns. */
+export async function hydrateAuthenticatedDevice(
+  response: DeviceLoginResponse,
+  pin: string,
+  timing?: AuthTimingTrace,
+) {
 
   // `null` forces FULL hydration rather than an incremental pull from a cursor
   // this device has never had. The same call app/(auth)/otp-verify.tsx already
@@ -187,6 +208,14 @@ export async function loginOnNewDevice(
     throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false);
   }
 
+  return local;
+}
+
+/** Activates only a database that already passed hydration verification. */
+export async function activateHydratedDevice(
+  local: NonNullable<Awaited<ReturnType<typeof verifyPinForUser>>>,
+  timing?: AuthTimingTrace,
+): Promise<void> {
   await recordSuccessfulLogin(local);
   // The same login() every other entry point calls, so the epoch bumps and
   // state/sessionGuard.ts, app/_layout.tsx's sync start and the cart cleanup all

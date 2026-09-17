@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.muthoy.dbkey'
+version = '0.1.0'
+
+android {
+  namespace 'com.muthoy.dbkey'
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+// No third-party dependency: the wrapping key is an AndroidKeyStore AES-256-GCM
+// key and the DB key is raw bytes from SecureRandom. Both are platform APIs.
+dependencies {
+}

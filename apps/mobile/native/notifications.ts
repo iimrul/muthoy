@@ -19,6 +19,7 @@ import {
   isStockRecovered,
 } from "../domain/notificationRules";
 import { getActiveSessionContext, getActiveSessionRole } from "../db/auth";
+import { ensureDatabaseInitialized } from "../db/init";
 import { resolvePermission } from "../domain/permissions";
 import { getCashSummary } from "../db/cash";
 import { shopHasOverdueCredit } from "../db/customers";
@@ -88,8 +89,8 @@ async function presentLocalNotification(
       trigger:
         Platform.OS === "android" ? { channelId: ANDROID_CHANNEL_ID } : null,
     });
-  } catch (error) {
-    console.warn("Local notification delivery failed", error);
+  } catch {
+    console.warn("notification-delivery-failed");
   }
 }
 
@@ -278,26 +279,43 @@ export function runNotificationChecks(shopId: string): Promise<void> {
     if (!session || session.shopId !== shopId) {
       return;
     }
+    // H-3: this runs headless too, and a background wake can beat the app's
+    // own boot to the database. Since the local database is encrypted, the
+    // key has to be fetched and any pending upgrade completed before a single
+    // read below — the db/ handles throw until it is. Awaiting a completed
+    // initialization is free, so foreground callers pay nothing.
+    //
+    // Swallowed like every other check in this function, and for the same
+    // reason: notifications are best-effort and this promise is consumed with
+    // a bare `void` at app/_layout.tsx. A locked database is a real problem,
+    // but the boot gate is where it gets reported — not from a background
+    // wake that would only turn it into an unhandled rejection.
+    try {
+      await ensureDatabaseInitialized();
+    } catch {
+      console.warn("notification-check-failed:database-init");
+      return;
+    }
     const now = new Date();
     try {
       await runLowStockCheck(shopId);
-    } catch (error) {
-      console.warn("Low-stock notification check failed", error);
+    } catch {
+      console.warn("notification-check-failed:low-stock");
     }
     try {
       await runExpiryCheck(shopId, now);
-    } catch (error) {
-      console.warn("Expiry notification check failed", error);
+    } catch {
+      console.warn("notification-check-failed:expiry");
     }
     try {
       await runDailySummaryCheck(shopId, now);
-    } catch (error) {
-      console.warn("Daily-summary notification check failed", error);
+    } catch {
+      console.warn("notification-check-failed:daily-summary");
     }
     try {
       await runOverdueCreditCheck(shopId, now);
-    } catch (error) {
-      console.warn("Overdue-credit notification check failed", error);
+    } catch {
+      console.warn("notification-check-failed:overdue-credit");
     }
   })().finally(() => {
     activeCheck = null;
@@ -406,15 +424,15 @@ export async function syncClosingTimeScheduleAsync(shopId: string): Promise<void
         channelId: Platform.OS === "android" ? ANDROID_CHANNEL_ID : undefined,
       },
     });
-  } catch (error) {
-    console.warn("Closing-time schedule failed", error);
+  } catch {
+    console.warn("notification-schedule-failed");
   }
 }
 
 async function cancelClosingTimeScheduleAsync(): Promise<void> {
   try {
     await Notifications.cancelScheduledNotificationAsync(CLOSING_TIME_NOTIFICATION_ID);
-  } catch (error) {
-    console.warn("Closing-time schedule cancellation failed", error);
+  } catch {
+    console.warn("notification-cancel-failed");
   }
 }

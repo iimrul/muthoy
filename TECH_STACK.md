@@ -20,9 +20,15 @@
 ## Local Database (Offline-First) — SQLite
 - SQLite (WAL Mode)
 - SQLite FTS5 (Day One — instant search across 20k+ medicines)
-- SQLCipher (encryption) — **still required; not yet enabled.** Deferred on
-  Day 2 because it is a native-build + key-management task. MUST be in place
-  before any real pharmacy/pilot data is stored — see DECISIONS.md.
+- SQLCipher (encryption at rest) — **ENABLED and signed off 2026-09-17 (H-3).**
+  Turned on by `app.json`'s `expo-sqlite` plugin prop `android.useSQLCipher:
+  true`, which is what makes expo-sqlite compile `vendor/sqlcipher`. The key is
+  32 bytes of `SecureRandom`, wrapped AES-256-GCM by a non-exportable
+  AndroidKeyStore key (`modules/muthoy-db-key`), and applied as SQLCipher's raw
+  `PRAGMA key = "x'<64 hex>'"` — no KDF, no salt. `PRAGMA key` is always the
+  FIRST statement on a connection; `journal_mode` and `foreign_keys` follow it.
+  Scope is SQLite only. MMKV, exports/reports and attachments are NOT covered
+  by H-3 and remain separate work.
 - Drizzle ORM
 
 > Money representation: every money value is an INTEGER number of paisa

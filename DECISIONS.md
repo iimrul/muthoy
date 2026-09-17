@@ -1958,3 +1958,105 @@ was pulled.
 corrected in place to match (26/26, v16); `docs/plans/pre-rc-master-plan.md`'s
 baseline table is corrected too. This entry does not rewrite the one above —
 DECISIONS.md is append-only — it stands as the correction of record.
+
+## 2026-09-17 — H-3 SQLCipher: SIGNED OFF
+
+The local SQLite database is encrypted at rest. `app.json` sets the
+`expo-sqlite` plugin prop `android.useSQLCipher: true`, which is the single
+line that makes the build compile `vendor/sqlcipher`; delete it and every test
+in this repo still passes while the database is silently plaintext again, which
+is why `tests/h3-sqlcipher-config.test.ts` asserts it as text.
+
+**Key handling.** 32 bytes from `SecureRandom`, wrapped AES-256-GCM by a
+non-exportable AndroidKeyStore key (`modules/muthoy-db-key`), persisted with
+`commit()` so the key is durable before anything is encrypted with it. Applied
+as SQLCipher's raw-key form `PRAGMA key = "x'<64 hex>'"` — no KDF, no salt to
+keep in sync — always as the FIRST statement on a connection, followed by a
+forced `sqlite_master` read so a wrong key fails at open rather than deep in a
+screen. The key is deliberately independent of every PIN: PINs change and are
+per-user, so deriving from one would force a re-key on every PIN change for no
+security gain. `setUserAuthenticationRequired(false)` is deliberate — the
+headless notification task must reach SQLite with the screen locked.
+
+**Device evidence** (Samsung Galaxy A04s / SM-A047F, scratch package
+`com.muthoy.pos.h3scratch`, a populated clone of Device A's database; Device A
+itself was never touched and its hashes were re-verified unchanged throughout):
+
+- Populated-clone migration: **PASS**, end to end, repeated on the final code.
+- **Independent 0-diff verification.** The migrated database was decrypted via
+  `sqlcipher_export` to a plaintext copy and fingerprinted by a standalone
+  script — not by the migration's own verification code. Against the
+  pre-migration baseline: 249 rows / 43 tables, `allPayloadsHash`
+  `faf69ff0f96bcea0`, `schemaHash` `85c8993551ece391`, 73 indexes / 44 tables /
+  25 triggers, Drizzle journal 30 migrations hash `247ebbb7ba5df4a6`, integrity
+  ok, 0 FK violations — **all exact, 0 diffs**.
+- Stock/ledger: batch total 9 = movement total 9, 0 ledger mismatches. Money:
+  sales 3/4200, sale_items 2/4000, payments 1/200, purchases 1/10000 — exact.
+  FTS: `MATCH` proven on the encrypted file itself, not only the decrypted copy.
+- Crash/restart: SIGKILL with a hot 28,872-byte WAL, then restart — WAL
+  replayed, integrity ok, 249 rows, no re-migration, no leftover artifacts.
+- Key failure, both modes **fail closed with the file byte-identical**: missing
+  key (key blob deleted) and a genuine wrong key (database encrypted under a
+  previous key, opened with a newly minted one). Both reach
+  `startup-action: fail-unrecoverable` and the "Local database is locked" screen
+  offering a server restore. Restoring the key blob reopened normally — the
+  locked state is fully reversible and destroys nothing.
+- Ciphertext: random header, `-rw-------`, zero plaintext matches in the main
+  file **and the WAL** for `SQLite format 3`, `medicines`, `sqlite_master`,
+  `CREATE TABLE`, `__drizzle`.
+- Timing: migration 4.3–5.0 s for 249 rows / 811 KB; steady-state DB open
+  281–408 ms; Drizzle no-op migrate 11–16 ms. **PIN login max 319 ms** across 15
+  samples on three boots — well inside the §16 2 s budget.
+
+**`finalizeUnusedStatementsBeforeClosing: false` — scope and reason.** Closing a
+written, encrypted, checkpointed candidate never returned on-device: first as a
+permanent 100%-CPU spin, then, once the close was made async, as an
+uninterruptible block that ART aborted the process over. Two earlier diagnoses
+recorded during the investigation — "redundant re-verification" and a
+"JS-GC livelock" — were both **wrong**, and the async-close refactor they
+motivated did not fix it. The actual cause is inside expo-sqlite:
+`closeDatabase` runs `sqlite3_finalize_all_statement()` across every statement
+still registered on the connection BEFORE `sqlite3_close()`, and that walk was
+what hung. Setting the option skips the walk and close returns in 3 ms.
+
+It is applied ONLY to the short-lived migration/recovery connections, via
+`MIGRATION_OPEN_OPTIONS` in `db/encryptionEnvironment.ts`, alongside
+`useNewConnection: true` so expo can never hand one of them back as the app's
+live connection. The **live connection keeps expo's defaults** and still runs
+the walk. That boundary is what makes skipping it safe: `MigrationConnection`
+exposes only `execSync`/`getAllSync`/`getFirstSync`, each of which finalizes its
+statement in a `finally` inside expo-sqlite, so nothing is left for the walk to
+sweep — whereas Drizzle sits on the live connection and may hold prepared
+statements. Nothing at runtime would report that boundary being crossed: a
+leaked statement surfaces only as `sqlite3_close()` returning `SQLITE_BUSY`,
+which `closeQuietly` deliberately swallows so the original error stays
+authoritative. `tests/h3-sqlcipher-config.test.ts` therefore pins the scope in
+both directions, and the guard was mutation-checked — adding the option to
+`openKeyedDatabase()` makes it fail.
+
+Backup/device-transfer are closed off by `plugins/withAndroidBackupProtection.js`:
+`allowBackup="false"` plus both rule files (Android 12+ `data-extraction-rules`
+and ≤11 `full-backup-content`), excluding the `SQLite` directory, `mmkv/`, and
+`muthoy_db_key_v1.xml`. Without this, Android would upload the app-private
+directory to Google Drive — and after H-3 a restored device would receive
+ciphertext it can never open, because the AndroidKeyStore wrapping key does not
+travel. That is silent, total, unrecoverable loss that looks like a successful
+restore.
+
+**Scope boundary.** H-3 covers SQLite at rest and nothing else. MMKV, generated
+exports/reports, and attachments are separate scope and remain unencrypted.
+
+**Carried forward, not closed by this sign-off:**
+
+- Post-migration sales/report **UI** smoke test remains **pre-RC**. The data
+  layer beneath those screens is proven exactly equal, but no screen was
+  exercised against an encrypted connection — DEV onboarding/Metro is still
+  unavailable on the scratch build.
+- **Large-database migration timing** remains pre-wide-rollout validation. The
+  4.3–5.0 s figure is for 249 rows / 811 KB on one device; migration cost scales
+  with database size and a shop with a year of history has not been measured.
+- The Vitest **worker RPC timeout** (`Timeout calling "onTaskUpdate"`) is a
+  separate CI-hygiene issue, not an H-3 defect: 167/167 files and 1984/1984
+  tests pass with zero assertion failures, and the identical error appears in
+  full-suite logs predating this work. It does make the process exit 1, so any
+  pipeline gating on exit code will fail until it is addressed.

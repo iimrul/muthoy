@@ -3,6 +3,52 @@
 The ONLY code in this app that imports Drizzle or touches SQLite directly.
 SQLite is the app's single source of truth (CLAUDE.md rule 1).
 
+## Encryption at rest (H-3 — SIGNED OFF 2026-09-17)
+
+The database file is SQLCipher-encrypted. Nothing in `db/` may be used before
+`ensureDatabaseReady()` resolves: `db` and `sqliteConnection` are lazy proxies
+that throw `DatabaseNotReadyError` until then, because the key comes from the
+Android Keystore and that is asynchronous.
+
+**Files.** `encryptionPlan.ts` is pure and decides the ONE action startup may
+take from what is on disk. `encryptionMigration.ts` executes it.
+`encryptionVerify.ts` holds every check. `encryptionEnvironment.ts` is the only
+place that touches the real filesystem and the real SQLCipher build.
+`databaseKey.ts` + `modules/muthoy-db-key` own the key.
+
+**The invariant.** At no point in any sequence is there zero readable copy of
+the shop's data. The plaintext original is never renamed until an encrypted
+copy has been independently opened, verified and compared row-for-row, and it
+is kept as `muthoy.db.plainbak` until the encrypted database has been reopened
+as the live connection. Promotion is `Os.rename` (POSIX `rename(2)`) plus a
+directory `fsync`, never copy-then-delete.
+
+**The key.** 32 bytes of `SecureRandom`, wrapped AES-256-GCM by a
+non-exportable AndroidKeyStore key, applied as `PRAGMA key = "x'<64 hex>'"` as
+the FIRST statement on every connection — `journal_mode` and `foreign_keys`
+come after it, because on a SQLCipher build any page read before the key fails.
+A forced `sqlite_master` read follows, which is what makes a wrong key fail at
+open instead of somewhere deep in a screen. Never logged, never synced.
+
+**Fail closed.** A missing or wrong key never mints a replacement and never
+writes: startup reports `fail-unrecoverable` and the boot gate offers an
+authenticated server restore. Recovery never deletes a plaintext original it
+supersedes — `preserveUnsyncedPlaintextBackup` re-exports it encrypted first,
+because rows this device never pushed exist only there.
+
+**`finalizeUnusedStatementsBeforeClosing: false`.** Set in
+`MIGRATION_OPEN_OPTIONS` and applied ONLY to the short-lived
+migration/recovery connections. expo-sqlite's `closeDatabase` runs
+`sqlite3_finalize_all_statement()` before `sqlite3_close()`, and on-device that
+walk never returned for the written, encrypted, checkpointed candidate.
+Skipping it is safe here and only here: `MigrationConnection` exposes just
+`execSync`/`getAllSync`/`getFirstSync`, each of which finalizes its statement
+in a `finally`, so nothing is left to sweep. The LIVE connection keeps expo's
+defaults — Drizzle sits on it and may hold prepared statements. Do not widen
+this; `tests/h3-sqlcipher-config.test.ts` pins the scope in both directions.
+
+**Scope.** SQLite only. MMKV, exports/reports and attachments are not covered.
+
 ## Current schema (Day 2 foundation through B3)
 
 - `schema.ts` — the current local schema, 36 tables. The original `0000`
@@ -338,7 +384,8 @@ write-off workflow remains deferred.
   adjustment and physical-count reconciliation exist.
 - BLE printing is Android-only in Beta and needs rollout validation against
   each supported printer model/firmware combination.
-- SQLCipher, production OTP hardening, DEV OTP bypass removal, final RC
+- SQLCipher is DONE — H-3, signed off 2026-09-17 (see "Encryption at rest"
+  below). Production OTP hardening, DEV OTP bypass removal, final RC
   multi-device coverage, and real SSLCommerz validation remain release gates.
   The custom access-token hook is currently enabled but must be rechecked after
   future auth rollout changes.

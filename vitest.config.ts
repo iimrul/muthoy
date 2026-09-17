@@ -28,6 +28,30 @@ export default defineConfig({
         process.cwd(),
         "apps/mobile/db/test/muthoy-pin-crypto.ts",
       ),
+      // H-3. Same treatment as the PIN module: the Keystore-backed SQLCipher
+      // key provider is Android-only, so Node gets a double that models its
+      // contract (mint once, same key after, distinguishable unwrap failure).
+      "muthoy-db-key": resolve(process.cwd(), "apps/mobile/db/test/muthoy-db-key.ts"),
+      // db/migrations/migrations.js imports raw .sql, which only parses under
+      // Metro's babel-plugin-inline-import. Rollup reads it as JavaScript and
+      // dies on `CREATE TABLE`. Reachable from ordinary tests since H-3 gave
+      // the headless notification task a db/init.ts gate. The stub loads the
+      // real journal and SQL from disk, so it is faithful, not hollow.
+      "./migrations/migrations": resolve(
+        process.cwd(),
+        "apps/mobile/db/test/migrations.ts",
+      ),
+      // db/init.ts runs Drizzle's migrator; the SQLite suites have already
+      // exec'd the migration files into the shared in-memory database
+      // themselves, so a second pass re-issues CREATE TABLE and fails. Same
+      // reason "./client" is aliased. Both specifiers: db/index.ts imports
+      // "./init", native/notifications.ts imports "../db/init".
+      "./init": resolve(process.cwd(), "apps/mobile/db/test/init.ts"),
+      "../db/init": resolve(process.cwd(), "apps/mobile/db/test/init.ts"),
+      "../modules/muthoy-db-key": resolve(
+        process.cwd(),
+        "apps/mobile/db/test/muthoy-db-key.ts",
+      ),
       "react-native-mmkv": resolve(
         process.cwd(),
         "apps/mobile/db/test/react-native-mmkv.ts",
@@ -70,6 +94,23 @@ export default defineConfig({
       "apps/mobile/db/expense-category-migration.sqlite.test.ts",
       "apps/mobile/db/closed-day-guard.sqlite.test.ts",
       "apps/mobile/db/errors.test.ts",
+      // H-3. Three layers, none of which needs an Android device:
+      // the key provider's contract, the startup state machine across every
+      // crash/restart shape, and the copy->verify->swap migration driven
+      // against REAL SQLite files in a temp directory. Actual ciphertext is
+      // the one thing Node cannot prove; that is the separate on-device gate.
+      "apps/mobile/db/database-key.test.ts",
+      "apps/mobile/db/encryption-plan.test.ts",
+      "apps/mobile/db/encryption-migration.sqlite.test.ts",
+      "apps/mobile/db/encryption-hardening.sqlite.test.ts",
+      "apps/mobile/db/encryption-verify.sqlite.test.ts",
+      "apps/mobile/db/production-client.test.ts",
+      "apps/mobile/db/production-init.test.ts",
+      "apps/mobile/db/database-recovery.test.ts",
+      // Static assertion that app.json really enables SQLCipher and disables
+      // Android backup — the config is the whole mechanism, so a silent
+      // revert there would un-encrypt the build with no other symptom.
+      "apps/mobile/tests/h3-sqlcipher-config.test.ts",
       "apps/mobile/db/inventory-expiry.sqlite.test.ts",
       "apps/mobile/db/notifications.sqlite.test.ts",
       "apps/mobile/db/permissions.sqlite.test.ts",

@@ -231,7 +231,7 @@ in the parity sign-off rather than "fixed":
 |---:|---|---|---|---|---|---|
 | H-1 | Export service-level Owner guard | NOT DONE | CRITICAL — non-Owner financial export | `services/reportExport.ts` | none | Negative test: `reports`-only Manager/Staff calling the service is denied for every dataset |
 | H-2 | DEV bypass / diagnostics cleanup | **DONE in code 2026-09-06**; release-bundle grep + native rebuild PENDING | was HIGH — parallel auth path or host/config leakage in a store build | Removed: `dev/DevSkipOtpButton.tsx`, `dev/devAnonAuth.ts` (+ 2 test files), owner-link repair, `db/auth.ts` `clearUnverifiedOwnerPhone`, the `app/(auth)/register.tsx` render, the `app/index.tsx` placeholder-phone branch, `sync/supabaseClient.ts` `runtimeConfigDiagnostics`. Hardened: `dev/runtimeDiagnostics.ts`, `sync/linkDevice.ts` log | native rebuild to verify | `tests/dev-production-safety.test.ts` (static import-graph + `__DEV__` capability guard) and `tests/dev-production-safety.render.test.tsx` (production-mode Registration) PASS. Release-bundle grep on a native rebuild is still owed |
-| H-3 | SQLCipher | NOT DONE | CRITICAL — real pharmacy money/stock at rest unencrypted; blocks pilot per `DECISIONS.md` 2026-08-09 | `db/client.ts`, key storage via `expo-secure-store`, `db/init.ts` | **native rebuild + on-device data migration** | Fresh install encrypted; upgrade migrates existing `muthoy.db` with zero row loss; wrong key fails closed; restore path proven |
+| H-3 | SQLCipher | **SIGNED OFF 2026-09-17** | was CRITICAL — real pharmacy money/stock at rest unencrypted | `app.json` (`android.useSQLCipher`), `db/encryptionPlan.ts`, `db/encryptionMigration.ts`, `db/encryptionVerify.ts`, `db/encryptionEnvironment.ts`, `db/databaseKey.ts`, `db/databaseRecovery.ts`, `sync/databaseRecovery.ts`, `db/client.ts`, `db/init.ts`, `modules/muthoy-db-key` (AndroidKeyStore), `plugins/withAndroidBackupProtection.js` | native rebuild DONE; on-device migration rehearsed on a populated Device A clone | **PASS.** Populated-clone migration complete; **independent 0-diff** verification against the pre-migration baseline (249 rows / 43 tables, payload+schema+Drizzle-journal hashes exact); stock/ledger, money and FTS `MATCH` exact; ciphertext confirmed in main **and** WAL; SIGKILL crash/restart replayed the WAL with no loss; missing-key AND wrong-key both fail closed byte-identical; first/second/third boot PASS; PIN login max **319 ms**. Migration 4.3–5.0 s for 249 rows / 811 KB |
 | H-4 | PIN timing / security hardening | NOT DONE | HIGH — timing oracle on PIN verify; open latency gate | `db/auth.ts`, `native/crypto.ts`, `dev/authTiming.ts`, `db/pin-performance.sqlite.test.ts` | possible native rebuild | Constant-time compare proven; enrolled PIN login ≤ 2s on low-end Android (§16) |
 | H-5 | Production OTP provider **+ delete the temporary DEV registration harness** | NOT DONE | CRITICAL — registration/recovery cannot run in production | `sync/otp.ts`, Supabase phone-auth provider config, rate limits, anonymous-auth hardening in `verifyCallerJwt()`; removal of `dev/devRegistrationHarness*`, `dev/devOwnerOnboarding.ts`, `dev/devOnlyResolver.cjs`, the `metro.config.js` swap and `RegisterShopInput.ownerPhone` (checklist in `apps/mobile/dev/README.md`) | hosted config + deploy | Real SMS delivered end-to-end; resend cooldown, retry cap and abuse limits verified against the live provider; harness gone and the full suite green without it |
 | H-6 | `conflict_queue` wiring + resolution UI | NOT DONE | MEDIUM — true row conflicts are invisible (ledger stock and grouped ops already supersede the old stock-LWW rationale) | `db/schema.ts:1301`, `sync/pull.ts`, new writer + Owner-facing surface | local migration only if the table shape changes | A forced two-device conflict is queued, surfaced, resolved, and never silently loses a row |
@@ -245,6 +245,24 @@ in the parity sign-off rather than "fixed":
 Also unclosed from `DECISIONS.md`: `public.custom_access_token_hook` is a manual
 hosted setting that must be re-checked after any auth change, and the expense-category /
 Asia-Dhaka business-date backfills need real-data pre/postchecks.
+
+**Carried forward from H-3's sign-off** (none of these reopen H-3; the encryption
+itself is closed — see `DECISIONS.md` 2026-09-17):
+
+- **Pre-RC:** post-migration sales/report **UI** smoke test against an encrypted
+  connection. The data layer beneath those screens is proven exactly equal, but
+  no screen was exercised — DEV onboarding/Metro is unavailable on the scratch
+  build, which ties this to H-5.
+- **Pre-wide-rollout:** large-database migration timing. The measured 4.3–5.0 s
+  is for 249 rows / 811 KB on one low-end device; cost scales with database size
+  and a shop with a year of history has not been measured. Belongs with H-11's
+  migration/recovery rehearsal.
+- **CI hygiene, not a release gate:** `npx vitest run` exits 1 on a pre-existing
+  Vitest worker RPC timeout (`Timeout calling "onTaskUpdate"`) despite 167/167
+  files and 1984/1984 tests passing with zero assertion failures. It predates
+  H-3. Any pipeline gating on exit code will fail until it is fixed.
+- **Scope note:** H-3 encrypts SQLite only. MMKV, generated exports/reports and
+  attachments are separate scope and remain unencrypted at rest.
 
 ---
 
@@ -368,7 +386,8 @@ Only after every CRITICAL RC gate passes.
 
 - Scope: 2-3 real pharmacies, one device each, Owner + one staff, real stock and
   real money, founder reachable daily.
-- Entry: RC build installed from EAS; SQLCipher active; observability live;
+- Entry: RC build installed from EAS; SQLCipher active (H-3, signed off
+  2026-09-17); observability live;
   backup/restore drill passed; a written rollback path for the pilot data.
 - Monitoring: daily crash, sync-failure, and payment-failure review; a daily
   ledger reconciliation (movements vs `batches.stock`, expected vs counted cash).
@@ -423,7 +442,7 @@ Accounting recorded in `DECISIONS.md`: **39/39 functionally accounted for**.
 Four screens remain PARTIAL; this does not close remaining Wave 1 or physical gates.
 
 **Wave 2 — local data protection and auth hardening** (native rebuild)
-5. H-3 SQLCipher (key management, upgrade migration, recovery).
+5. H-3 SQLCipher (key management, upgrade migration, recovery) — **SIGNED OFF 2026-09-17**.
 6. H-4 PIN timing/security hardening + close the latency gate.
 7. H-5 production OTP provider + anonymous-auth hardening, then delete the
    temporary DEV registration harness (`apps/mobile/dev/README.md` checklist).
