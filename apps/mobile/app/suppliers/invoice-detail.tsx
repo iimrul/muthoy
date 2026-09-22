@@ -4,6 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { ZERO_PAISA } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
 import { AccessDenied } from '../../components/ui/AccessDenied';
+import { showToast } from '../../components/ui/Toast';
 import { StandardHeader } from '../../components/ui/StandardHeader';
 import { PurchaseReturnSheet } from '../../components/suppliers/PurchaseReturnSheet';
 import {
@@ -20,7 +21,6 @@ import { useI18n } from '../../state/localeStore';
 import { useOwnerAccess } from '../../state/usePermission';
 import { triggerSyncNow } from '../../sync';
 
-const TOAST_DURATION_MS = 1800;
 
 // screens/SupplierInvoiceDetail.tsx parity (plan §1.13): voided badge,
 // header card (supplier/date/total/items/source), per-line status pill +
@@ -39,7 +39,6 @@ export default function InvoiceDetailScreen() {
   const [isVoiding, setIsVoiding] = useState(false);
   const [returnTarget, setReturnTarget] = useState<PurchaseDetailLine | null>(null);
   const [isReturning, setIsReturning] = useState(false);
-  const [isToastVisible, setIsToastVisible] = useState(false);
 
   const reload = useCallback(async () => {
     if (!session || !isAllowed || !purchaseId) return;
@@ -85,8 +84,7 @@ export default function InvoiceDetailScreen() {
       void triggerSyncNow(session.shopId);
       if (!guard.isStale()) {
         await reload();
-        setIsToastVisible(true);
-        setTimeout(() => setIsToastVisible(false), TOAST_DURATION_MS);
+        showToast({ message: t('returnRecordedLabel') });
       }
     } finally {
       setIsReturning(false);
@@ -277,13 +275,6 @@ export default function InvoiceDetailScreen() {
         />
       ) : null}
 
-      {isToastVisible ? (
-        <View className="absolute bottom-8 left-0 right-0 items-center">
-          <View className="flex-row items-center gap-2 rounded-full bg-richBlack px-4 py-2">
-            <Text className="font-sans-semibold text-sm text-white">✓ {t('returnRecordedLabel')}</Text>
-          </View>
-        </View>
-      ) : null}
     </View>
   );
 }

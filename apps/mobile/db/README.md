@@ -418,3 +418,27 @@ purchase-return, credit-collection, and `inventory_add_purchase` retries
 idempotent. Refunds additionally derive deterministic operation/child IDs.
 Incremental/full pull applies the same ordered SQLite hydration path; realtime
 only triggers that pull.
+
+## Migration recovery on the device (H-11)
+
+There is no down-migration mechanism here, and that is deliberate: a pharmacy
+phone has no operator, no backup window and no second attempt. Migrations only
+ever run forward, in the Drizzle journal's order.
+
+The recovery path when a device database is unusable is re-hydration, not
+reversal: clear app data, relaunch, sign in with phone + PIN, and
+`sync/databaseRecovery.ts`'s `recoverDatabaseFromServer` runs a full
+`pullChanges(shopId, null)`. Everything the server holds comes back.
+
+What it cannot return is whatever is still unpushed in `sync_queue` — offline
+work since the last successful push. Measuring that loss, rather than estimating
+it, is part of the drill.
+
+<!-- rollback-classification:start -->
+Generated rollback references: migration-time data writes `0001` · `0002` · `0006` · `0007` · `0009` · `0010` · `0011` · `0012` · `0018` · `0024` · `0029`. Table drops `0006` · `0011` · `0012`. Source: [rollback-classification.json](../../../backend/supabase/migrations/rollback-classification.json).
+<!-- rollback-classification:end -->
+
+Those are the steps where a half-applied upgrade costs the most. The procedure
+itself is `backend/supabase/checks/restore_drill.md`,
+and `scripts/generate-history-fixture.mjs` builds the year-of-history database it
+needs to be run against. Neither has been executed yet.

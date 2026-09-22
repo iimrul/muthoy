@@ -17,6 +17,8 @@ export interface SessionClaims {
   role: string | null;
   permissionVersion: number | null;
   billingAccountId: string | null;
+  isActive: boolean | null;
+  issuedAt: number | null;
 }
 
 const EMPTY: SessionClaims = {
@@ -26,6 +28,8 @@ const EMPTY: SessionClaims = {
   role: null,
   permissionVersion: null,
   billingAccountId: null,
+  isActive: null,
+  issuedAt: null,
 };
 
 function decodeSegment(segment: string): Record<string, unknown> | null {
@@ -60,6 +64,8 @@ export function readAccessTokenClaims(accessToken: string | null | undefined): S
   const metadata: Record<string, unknown> =
     raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   const version = metadata.permission_version;
+  const active = metadata.is_active;
+  const issuedAt = claims.iat;
 
   return {
     appUserId: text(metadata, 'app_user_id'),
@@ -71,6 +77,10 @@ export function readAccessTokenClaims(accessToken: string | null | undefined): S
     role: text(metadata, 'role'),
     permissionVersion: typeof version === 'number' ? version : null,
     billingAccountId: text(metadata, 'billing_account_id'),
+    isActive: typeof active === 'boolean' ? active : null,
+    issuedAt: typeof issuedAt === 'number' && Number.isSafeInteger(issuedAt) && issuedAt >= 0
+      ? issuedAt
+      : null,
   };
 }
 
@@ -91,6 +101,8 @@ export function missingIdentityClaims(claims: SessionClaims): readonly string[] 
     ...(claims.role ? [] : ['role']),
     ...(claims.permissionVersion === null ? ['permission_version'] : []),
     ...(claims.billingAccountId ? [] : ['billing_account_id']),
+    ...(claims.isActive === null ? ['is_active'] : []),
+    ...(claims.issuedAt === null ? ['iat'] : []),
   ];
 }
 

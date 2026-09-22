@@ -18,6 +18,10 @@ module.exports = function createNativePreset({ colors, fonts, spacing }) {
           brand: { green: colors.brandGreen, deepGreen: colors.deepGreen, softGreen: colors.softGreen },
           richBlack: colors.richBlack,
           midGray: colors.midGray,
+          // The form field border. It was never a token, so every form
+          // pasted the raw hex instead — which is how a design system
+          // quietly stops being one.
+          fieldBorder: colors.fieldBorder,
           success: colors.success,
           error: colors.error,
           warning: colors.warning,

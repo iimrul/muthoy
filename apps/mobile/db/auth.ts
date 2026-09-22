@@ -13,7 +13,13 @@ import {
   type Role,
 } from '../domain/permissions';
 import { normalizeBdPhone } from '@muthoy/validation';
-import { DuplicatePinError, NotAuthorizedError } from './errors';
+import { DuplicatePinError, NotAuthorizedError, PinLockedOutError } from './errors';
+import {
+  pinAttemptScope,
+  pinAttemptStatus,
+  recordPinAttemptFailure,
+} from './pinAttemptLock';
+import { withQuantizedPinTiming } from './pinTiming';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
 import { readLastShopIdSync } from '../state/sessionStore';
 import { commercialSchemaInstalled, isUserWithinStaffLimit } from './commercial';
@@ -606,6 +612,85 @@ export interface LocalPinSession {
   cloudActorConfirmed?: boolean;
 }
 
+/**
+ * The device-local authoritative facts about one actor, for H-10's session
+ * reconciliation (sync/sessionAuthority.ts).
+ *
+ * SQLite is the source of truth (CLAUDE.md rule 1), so a token claim is only
+ * ever checked AGAINST this — never the other way round, and never in place of
+ * it. Returns null when the row is absent, which the caller must treat as
+ * revoked rather than as unknown: a session pointing at a row this device no
+ * longer holds is exactly what an access purge leaves behind.
+ */
+export interface LocalActorAuthority {
+  userId: string;
+  shopId: string;
+  roleName: string | null;
+  permissionVersion: number;
+  isActive: boolean;
+  isDeleted: boolean;
+  isAccessLocked: boolean;
+  principalUserId: string | null;
+  billingAccountId: string | null;
+}
+
+export async function readLocalActorAuthority(
+  shopId: string,
+  userId: string,
+): Promise<LocalActorAuthority | null> {
+  const row = await db
+    .select({
+      id: users.id,
+      shopId: users.shopId,
+      roleId: users.roleId,
+      permissionVersion: users.permissionVersion,
+      isActive: users.isActive,
+      isDeleted: users.isDeleted,
+      accessLockedAt: users.accessLockedAt,
+    })
+    .from(users)
+    .innerJoin(shops, and(eq(shops.id, users.shopId), eq(shops.isDeleted, false)))
+    .where(and(eq(users.shopId, shopId), eq(users.id, userId)))
+    .get();
+  if (!row) return null;
+
+  const roleRow = await db
+    .select({ name: roles.name })
+    .from(roles)
+    .where(and(eq(roles.id, row.roleId), eq(roles.shopId, shopId), eq(roles.isDeleted, false)))
+    .get();
+
+  // Membership only exists once B4's commercial schema is installed; its
+  // absence is a schema state, not a revocation, so it reads as null rather
+  // than failing the whole lookup.
+  const membership = commercialSchemaInstalled()
+    ? await db
+      .select({
+        principalUserId: shopMemberships.principalUserId,
+        billingAccountId: shopMemberships.billingAccountId,
+        role: shopMemberships.role,
+        isActive: shopMemberships.isActive,
+      })
+      .from(shopMemberships)
+      .where(and(
+        eq(shopMemberships.actorUserId, userId),
+        eq(shopMemberships.shopId, shopId),
+      ))
+      .get()
+    : undefined;
+
+  return {
+    userId: row.id,
+    shopId: row.shopId,
+    roleName: roleRow && membership?.role === roleRow.name ? roleRow.name : null,
+    permissionVersion: row.permissionVersion,
+    isActive: row.isActive && membership?.isActive === true,
+    isDeleted: row.isDeleted,
+    isAccessLocked: row.accessLockedAt !== null,
+    principalUserId: membership?.principalUserId ?? null,
+    billingAccountId: membership?.billingAccountId ?? null,
+  };
+}
 /** Records an authenticated login without storing credential material. */
 export async function recordSuccessfulLogin(session: LocalPinSession): Promise<void> {
   const id = generateId();
@@ -745,16 +830,102 @@ function selectLoginUsers() {
 }
 
 /**
+ * A real bcrypt hash of a value no 4-digit PIN can equal, compared against
+ * whenever the Keystore lookup matches nobody so a miss costs the same single
+ * bcrypt as a hit. sync/deviceLogin.ts carries the server-side equivalent for
+ * the same reason; this is the offline half, which had none. It hashes a random
+ * UUID, is nobody's credential, and grants nothing to anyone who reads it out
+ * of the bundle.
+ */
+const DUMMY_PIN_HASH = '$2b$10$orrIQmGHjWZq8S.W0sHN/OtwZonfF.hpvxleIR9TlFHSBxIaFcByO';
+
+/** One bcrypt comparison, traced under `stage` while DEV timing is running. */
+function comparePin(
+  rawPin: string,
+  pinHash: string,
+  stage: string,
+  timing?: AuthTimingTrace,
+): Promise<boolean> {
+  return timing
+    ? timing.measure(stage, () => verifyPinHash(rawPin, pinHash))
+    : verifyPinHash(rawPin, pinHash);
+}
+
+/**
  * PIN-only local login. Current rows use Keystore-HMAC lookup followed by one
  * bcrypt comparison. Rows upgraded from 0007 are scanned only while their tag
  * is absent/stale, then lazily indexed after a successful compatible bcrypt
  * verification.
+ *
+ * H-4. This is the only door that opens with no network and no account name,
+ * so three things hold its response shape constant:
+ *
+ *   1. The attempt budget (db/pinAttemptLock.ts) is spent BEFORE any work —
+ *      the same order sync/deviceLogin uses, where the lockout is checked
+ *      before a single server bcrypt runs.
+ *   2. A lookup matching nobody still performs one comparison, against
+ *      DUMMY_PIN_HASH. Without it the miss returned in single-digit
+ *      milliseconds and the hit in ~320 ms: the PIN, read off a stopwatch,
+ *      with no login ever completing.
+ *   3. Whatever variation survives is quantised (db/pinTiming.ts) before the
+ *      caller observes it.
+ *
+ * The legacy-row loop stays variable on purpose. How many rows still carry an
+ * absent or stale tag depends on this device's migration state and never on
+ * the PIN typed, so its cost cannot answer a question about the PIN.
+ *
+ * A spent budget throws PinLockedOutError; a merely wrong PIN is still `null`.
+ * The two must stay distinguishable, because only one of them is fixed by
+ * waiting and the screen has to say so.
  */
 export async function verifyPin(
   rawPin: string,
   timing?: AuthTimingTrace,
 ): Promise<LocalPinSession | null> {
-  const lastShopId = readLastShopIdSync();
+  return withQuantizedPinTiming(async () => {
+    // The timing boundary starts before ANY observable local work. This keeps
+    // MMKV/session read faults and the deliberate lockout exception on the same
+    // floor as lookup, bcrypt, SQLite and normal hit/miss answers.
+    const lastShopId = readLastShopIdSync();
+    const scope = pinAttemptScope(lastShopId);
+    const lock = pinAttemptStatus(scope);
+    if (lock.isLocked) {
+      timing?.mark('pin_attempt_locked', 'error');
+      throw new PinLockedOutError(lock.retryAfterMs);
+    }
+
+    const { matched, session } = await resolveLocalPinSession(rawPin, lastShopId, timing);
+    // Counted on the CREDENTIAL, not on the outcome. A correct PIN belonging to
+    // a row that cannot open a session — role deleted, over the plan's staff
+    // limit — is a commercial refusal, not a guess, and must not spend budget
+    // the real owner needs.
+    //
+    // Success clears NOTHING. The counter is shop-wide, and it has to be: the
+    // pad has no "who are you" step, so a failed attempt cannot be attributed
+    // to anyone. Clearing it on success therefore handed a full reset to
+    // whoever held ANY valid PIN in the shop — spend four guesses at the
+    // owner's, sign in with your own, repeat. The budget refills only by
+    // waiting out PIN_FAILURE_DECAY_MS, or through owner PIN recovery, which
+    // proves a phone number the server verified.
+    if (!matched) {
+      recordPinAttemptFailure(scope);
+    }
+    return session;
+  });
+}
+
+/**
+ * The lookup itself, split out so verifyPin above reads as what it is: a budget
+ * check, the work, and the accounting.
+ *
+ * `matched` answers only "did a live row's hash verify, unambiguously". The
+ * session may still be null after that — see toLocalPinSession.
+ */
+async function resolveLocalPinSession(
+  rawPin: string,
+  lastShopId: string | null,
+  timing?: AuthTimingTrace,
+): Promise<{ matched: boolean; session: LocalPinSession | null }> {
   const lookup = async () => {
     const tag = await createPinLookupTag(rawPin);
     const matches = await selectLoginUsers().where(
@@ -787,47 +958,63 @@ export async function verifyPin(
 
   const verified: { user: LoginUserRow; tag: string }[] = [];
   for (const candidate of candidates) {
-    const matches = timing
-      ? await timing.measure('bcrypt_compare', () => verifyPinHash(rawPin, candidate.user.pinHash))
-      : await verifyPinHash(rawPin, candidate.user.pinHash);
+    // No early exit. Stopping at the first match would make a PIN held by the
+    // first row cheaper than one held by the second.
+    const matches = await comparePin(rawPin, candidate.user.pinHash, 'bcrypt_compare', timing);
     if (matches) verified.push(candidate);
   }
+  if (candidates.length === 0) {
+    // The equal-work miss. Its result is discarded by construction: what it
+    // buys is that "no row carries this tag" costs exactly what a hit costs.
+    await comparePin(rawPin, DUMMY_PIN_HASH, 'bcrypt_compare', timing);
+  }
   for (const user of legacyUsers) {
-    const matches = timing
-      ? await timing.measure('legacy_bcrypt_compare', () => verifyPinHash(rawPin, user.pinHash))
-      : await verifyPinHash(rawPin, user.pinHash);
+    const matches = await comparePin(rawPin, user.pinHash, 'legacy_bcrypt_compare', timing);
     if (matches) {
       verified.push({ user, tag: lookupTag });
     }
   }
 
   // Corrupted/old duplicate PINs must never choose an identity by row order.
-  if (verified.length !== 1) return null;
+  if (verified.length !== 1) return { matched: false, session: null };
   const match = verified[0];
-  if (!match) return null;
+  if (!match) return { matched: false, session: null };
   const { user, tag } = match;
   await storeCurrentPinLookup(user, tag);
-  return toLocalPinSession(user);
+  return { matched: true, session: await toLocalPinSession(user) };
 }
 
-/** Exact post-hydration check for the identity already verified by the server. */
+/**
+ * Exact post-hydration check for the identity already verified by the server.
+ *
+ * H-4. Fixed work like verifyPin, for a narrower reason: this runs on a device
+ * whose hydration may or may not have produced the row, and "no such row" has
+ * to cost the same as "row, wrong PIN". The attempt budget is deliberately NOT
+ * spent here — the server already charged one against its own per-phone
+ * lockout for this same login, and charging twice would let a flaky hydration
+ * lock a legitimate device out of a shop it just proved it owns.
+ */
 export async function verifyPinForUser(
   rawPin: string,
   shopId: string,
   userId: string,
   timing?: AuthTimingTrace,
 ): Promise<LocalPinSession | null> {
-  const user = await selectLoginUsers().where(
-    and(liveLoginWhere(), eq(users.shopId, shopId), eq(users.id, userId)),
-  ).get();
-  if (!user) return null;
-  const matches = timing
-    ? await timing.measure('bcrypt_compare', () => verifyPinHash(rawPin, user.pinHash))
-    : await verifyPinHash(rawPin, user.pinHash);
-  if (!matches) return null;
-  const tag = await createPinLookupTag(rawPin);
-  await storeCurrentPinLookup(user, tag);
-  return toLocalPinSession(user);
+  return withQuantizedPinTiming(async () => {
+    const user = await selectLoginUsers().where(
+      and(liveLoginWhere(), eq(users.shopId, shopId), eq(users.id, userId)),
+    ).get();
+    const matches = await comparePin(
+      rawPin,
+      user?.pinHash ?? DUMMY_PIN_HASH,
+      'bcrypt_compare',
+      timing,
+    );
+    if (!user || !matches) return null;
+    const tag = await createPinLookupTag(rawPin);
+    await storeCurrentPinLookup(user, tag);
+    return toLocalPinSession(user);
+  });
 }
 
 /**
@@ -879,7 +1066,11 @@ export async function assertPinUnique(
       exceptUserId ? ne(users.id, exceptUserId) : undefined,
     ),
   ).get();
-  if (indexedMatch) throw new DuplicatePinError();
+  // H-4. The duplicate verdict is withheld until the legacy scan below has run
+  // its fixed amount of work. Returning here used to make "already taken" the
+  // one answer that cost no bcrypt at all, which turns the owner's own PIN-set
+  // screen into a probe for which PINs the shop's staff already hold.
+  let isDuplicate = Boolean(indexedMatch);
 
   const legacyUsers = await db
     .select({ id: users.id, pinHash: users.pinHash })
@@ -897,11 +1088,22 @@ export async function assertPinUnique(
       ),
     );
   for (const user of legacyUsers) {
-    const matches = timing
-      ? await timing.measure('legacy_uniqueness_bcrypt_compare', () => verifyPinHash(rawPin, user.pinHash))
-      : await verifyPinHash(rawPin, user.pinHash);
-    if (matches) throw new DuplicatePinError();
+    // Drained, never short-circuited, for the same reason as verifyPin's loop.
+    const matches = await comparePin(
+      rawPin,
+      user.pinHash,
+      'legacy_uniqueness_bcrypt_compare',
+      timing,
+    );
+    if (matches) isDuplicate = true;
   }
+  // No equal-work padding here, unlike verifyPin. Both verdicts already run
+  // the same `legacyUsers.length` comparisons, and the verdict itself is
+  // disclosed to the caller either way — DuplicatePinError is the whole point
+  // of the function — so a dummy compare would buy nothing and would put ~300 ms
+  // of bcrypt on every staff creation and every PIN change (§16 allows 2-3 s
+  // for staff creation; there is no reason to spend a tenth of it on nothing).
+  if (isDuplicate) throw new DuplicatePinError();
   return targetTag;
 }
 

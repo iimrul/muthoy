@@ -2060,3 +2060,80 @@ exports/reports, and attachments are separate scope and remain unencrypted.
   tests pass with zero assertion failures, and the identical error appears in
   full-suite logs predating this work. It does make the process exit 1, so any
   pipeline gating on exit code will fail until it is addressed.
+
+## 2026-09-22 — Wave 2 Batch 1 (H-4, H-10 A2.1/A2.2/A2.4, H-11 docs + tooling, UI Pass 1): SIGNED OFF
+
+Verified on a physical Samsung SM-A047F (Android 14), scratch package
+`com.muthoy.pos.h3scratch`, against the DEV/Test Supabase project. No production
+package, no real pharmacy data: every shop used was a throwaway DEV Test Shop
+created through the DEV OTP skip.
+
+**H-4 — PIN timing and offline brute-force guard.** Lock fires on the fifth
+consecutive wrong PIN with canonical state (`lastFailureAt == lockedAt`,
+`lockedUntil - lockedAt == 30000`); the failure count survives cooldown expiry so
+the next miss escalates instead of buying five fresh attempts; the lockout
+survives force-stop on disk with the process dead. The headline fix holds: a
+valid **Staff** PIN login leaves the shop-wide budget untouched
+(`failures:5`, identical `lastFailureAt`), closing the cross-role reset bypass.
+Owner recovery is reachable from the pad **during an active lock**. Response
+shaping verified: offline PIN login min 827 ms / median 1176 ms / max 1676 ms
+across four samples — inside the §16 two-second gate.
+
+**H-10 — auth/device/session.** Fresh online authority validation gates app
+entry; the pre-navigation gate renders and holds the authenticated tree closed
+until the lease confirms. Deactivating a staff account server-side quarantines
+that actor on reconnect (`actor_inactive`) and clears the session; the
+quarantine survives force-stop; a correct local PIN **cannot** bypass it.
+Recovery is deliberately two-stage — re-enabling the account server-side is not
+enough on its own; only the authoritative device login (credential proof) clears
+the quarantine. Quarantine is per-actor, not per-device. A deliberate network
+drop wrote **no** quarantine (`confirmedAtMs` unchanged, offline high-water
+advanced) and reconnect produced a fresh confirmation.
+
+**H-11 — rollback documentation and restore tooling.** Classification corrected
+to **A 6 · B 13 · C 7 of 26** from `rollback-classification.json`, generated into
+three documents and drift-guarded by test. Restore fingerprint covers 16 tables
+with ordered `md5` digests plus summed paisa, and its corrupt → detect → restore
+cycle executes for real in PGlite. That is automated SQL validation only and is
+**not** the C5 rehearsal.
+
+**UI Pass 1 + sale/stock/cash.** One end-to-end sale on a fresh owner-only shop:
+starting stock 100 → **99** exact, amount discount ৳10.00 − ৳2.00 = **৳8.00**,
+change ৳2.00, today's sales ৳8.00 / 1 transaction, expected drawer **৳1,008.00**
+= ৳1,000 opening + ৳8 cash. Opening cash prompted and defaulted to 0 (rule 5).
+Toast, Discount UI, BaseSheet dismissal (X and Android Back) and Bangla/English
+all verified on device.
+
+**Carried forward, not closed by this sign-off:**
+
+- **D8 / D9 — two screens are hardcoded English.** The sale-complete screen and
+  Sales History render English under `locale=bn` (proven by toggling and
+  diffing: only the tab bar changed). Both sit **outside** the UI Pass 1 file
+  set, so they were deliberately not fixed here. A Bangla-first POS showing
+  English after every sale is a real product issue — schedule into the next UI
+  pass.
+- **D10 — inventory list does not refresh after adding a medicine.** It still
+  read "ইনভেন্টরি খালি" until navigating away and back. Data was correct
+  throughout; presentation only.
+- **D11 — the বাং/ENG toggle hit area sits under the status bar.** Taps at
+  y ≤ 45 px are swallowed by system UI.
+- **D4 — one unexplained native crash.** `SIGSEGV (SEGV_ACCERR)` in
+  `libreactnative.so` at `MountingCoordinator::pullTransaction`, Fabric thread,
+  ~42 s after JS start on a clean data dir. Never reproduced across many
+  subsequent launches. No diagnosis; recorded so it is not lost.
+- **H-11 C5 remains owed.** The operational restore drill has still not been
+  executed against a real backup provider, and every result row in
+  `backend/supabase/checks/restore_drill.md` still reads `_not run_`. PGlite
+  execution does not discharge it.
+- **DEV-harness limits (die with H-5).** The harness Owner has no phone, so once
+  a Staff device-logs-in on the same handset the Owner cannot re-link and is
+  locked out of that device; and the harness persists its identity before the
+  account exists, so a network failure mid-onboarding wedges it until app data
+  is cleared.
+- The Vitest **worker RPC timeout** still makes the process exit 1 while
+  180/180 files and 2333/2333 tests pass. Unchanged CI-hygiene issue, not a
+  Batch 1 defect.
+
+**Next Wave 2 sub-batch: A2.3 device registry** — deliberately deferred out of
+Batch 1 and unstarted. It is the remaining piece of H-10; H-10 is not fully
+closed until it ships.

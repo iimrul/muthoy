@@ -44,8 +44,12 @@ const deps = vi.hoisted(() => ({
   verifyPin: vi.fn(),
   recordSuccessfulLogin: vi.fn(),
   setOwnerPin: vi.fn(),
+  verifyPinForUser: vi.fn(),
+  refreshBillingStatus: vi.fn(),
   loginOnNewDevice: vi.fn(),
   login: vi.fn(),
+  inspectCloudActorBinding: vi.fn(),
+  networkReachability: vi.fn(),
 }));
 
 vi.mock('expo-router', () => ({
@@ -57,6 +61,15 @@ vi.mock('../db/auth', () => ({
   verifyPin: deps.verifyPin,
   recordSuccessfulLogin: deps.recordSuccessfulLogin,
   setOwnerPin: deps.setOwnerPin,
+  verifyPinForUser: deps.verifyPinForUser,
+}));
+
+vi.mock('../sync/billing', () => ({ refreshBillingStatus: deps.refreshBillingStatus }));
+vi.mock('../sync/authActorBinding', () => ({
+  inspectCloudActorBinding: deps.inspectCloudActorBinding,
+}));
+vi.mock('../sync/connectivity', () => ({
+  networkReachability: deps.networkReachability,
 }));
 
 vi.mock('../sync/deviceAuth', async () => {
@@ -65,13 +78,20 @@ vi.mock('../sync/deviceAuth', async () => {
 });
 
 vi.mock('../state/sessionStore', () => ({
-  useSessionStore: (selector: (state: { login: typeof deps.login }) => unknown) =>
-    selector({ login: deps.login }),
+  useSessionStore: Object.assign(
+    (selector: (state: { login: typeof deps.login }) => unknown) => selector({ login: deps.login }),
+    { getState: () => ({ epoch: 0, session: null }) },
+  ),
+  // H-4: PIN Login reads the last shop to scope its offline attempt budget.
+  // The real db/pinAttemptLock runs against the MMKV double, so the budget
+  // behaves here exactly as it does on device — only the shop id is stubbed.
+  readLastShopIdSync: () => null,
 }));
 
 const { default: DeviceLoginScreen } = await import('../app/(auth)/device-login');
 const { default: PinLoginScreen } = await import('../app/(auth)/pin-login');
 const { default: PinSetupScreen } = await import('../app/(auth)/pin-setup');
+const { useLocaleStore } = await import('../state/localeStore');
 
 let frameQueue: FrameRequestCallback[];
 
@@ -113,8 +133,26 @@ beforeEach(() => {
   deps.recordSuccessfulLogin.mockReset();
   deps.recordSuccessfulLogin.mockResolvedValue(undefined);
   deps.setOwnerPin.mockReset();
+  deps.verifyPinForUser.mockReset();
+  deps.verifyPinForUser.mockResolvedValue({
+    shopId: SHOP_ID,
+    userId: USER_ID,
+    role: 'owner',
+    permissions: {},
+    principalUserId: USER_ID,
+    billingAccountId: 'account-1',
+  });
+  deps.refreshBillingStatus.mockReset();
+  deps.refreshBillingStatus.mockResolvedValue(undefined);
   deps.loginOnNewDevice.mockReset();
   deps.login.mockReset();
+  deps.inspectCloudActorBinding.mockReset();
+  deps.inspectCloudActorBinding.mockResolvedValue({
+    status: 'matched', actorUserId: USER_ID, shopId: SHOP_ID,
+  });
+  deps.networkReachability.mockReset();
+  deps.networkReachability.mockResolvedValue('online');
+  useLocaleStore.setState({ locale: 'en' });
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
 });
 
@@ -190,6 +228,50 @@ describe('PIN authentication loading state', () => {
     await waitFor(() => expect(deps.replace).toHaveBeenCalledWith(destination));
   });
 
+  it('routes an online shared-device actor mismatch to authoritative re-link before login', async () => {
+    deps.verifyPin.mockResolvedValueOnce({
+      shopId: SHOP_ID,
+      userId: USER_ID,
+      role: 'staff',
+      permissions: {},
+    });
+    deps.inspectCloudActorBinding.mockResolvedValueOnce({
+      status: 'mismatched', actorUserId: 'outgoing-owner', shopId: SHOP_ID,
+    });
+    render(createElement(PinLoginScreen));
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    await waitFor(() => expect(deps.replace).toHaveBeenCalledWith({
+      pathname: '/device-login', params: { role: 'staff' },
+    }));
+    expect(deps.recordSuccessfulLogin).not.toHaveBeenCalled();
+    expect(deps.login).not.toHaveBeenCalled();
+  });
+
+  it('keeps a mismatched actor offline-capable without claiming cloud confirmation', async () => {
+    deps.verifyPin.mockResolvedValueOnce({
+      shopId: SHOP_ID,
+      userId: USER_ID,
+      role: 'staff',
+      permissions: {},
+    });
+    deps.inspectCloudActorBinding.mockResolvedValueOnce({
+      status: 'missing', actorUserId: null, shopId: null,
+    });
+    deps.networkReachability.mockResolvedValueOnce('offline');
+    render(createElement(PinLoginScreen));
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    await waitFor(() => expect(deps.login).toHaveBeenCalledWith(
+      expect.objectContaining({ cloudActorConfirmed: false }),
+    ));
+    expect(deps.replace).toHaveBeenCalledWith('/staff-home');
+  });
+
   it('keeps Confirm PIN visible while Owner setup hashes, then navigates', async () => {
     const setup = deferred<void>();
     deps.setOwnerPin.mockReturnValueOnce(setup.promise);
@@ -209,6 +291,22 @@ describe('PIN authentication loading state', () => {
 
     setup.resolve();
     await waitFor(() => expect(deps.replace).toHaveBeenCalledWith('/dashboard'));
+    expect(deps.refreshBillingStatus).toHaveBeenCalledWith(
+      SHOP_ID,
+      undefined,
+      { isCurrent: expect.any(Function) },
+    );
+    expect(deps.verifyPinForUser).toHaveBeenCalledWith(
+      '4321',
+      SHOP_ID,
+      USER_ID,
+      expect.any(Object),
+    );
+    expect(deps.login).toHaveBeenCalledWith(expect.objectContaining({
+      userId: USER_ID,
+      principalUserId: USER_ID,
+      billingAccountId: 'account-1',
+    }));
   });
 
   it('shows fresh-device loading for Staff, prevents duplicates, and recovers from failure', async () => {
@@ -235,5 +333,67 @@ describe('PIN authentication loading state', () => {
     expect(await screen.findByText('Something went wrong. Please try again.')).toBeTruthy();
     expect(screen.queryByText('Setting up account…')).toBeNull();
     expect((screen.getByLabelText('Digit 2') as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe('owner recovery is reachable from the PIN pad (H-4 #3)', () => {
+  it('offers a visible recovery affordance', () => {
+    render(createElement(PinLoginScreen));
+    // Not decorative. A successful PIN no longer refills the attempt budget,
+    // so an owner who has forgotten theirs can lock the pad — and without
+    // this, waiting out the cooldown would be their only way forward.
+    expect(screen.getByLabelText('Forgot your PIN? Recover access')).toBeTruthy();
+  });
+
+  it('routes to the existing OTP recovery flow', () => {
+    render(createElement(PinLoginScreen));
+    fireEvent.click(screen.getByLabelText('Forgot your PIN? Recover access'));
+    // The existing screen, with no phone param: this pad never asked for one.
+    expect(deps.push).toHaveBeenCalledWith('/forgot-pin');
+  });
+
+  it('tells staff what to do instead, since the pad cannot know who is holding it', () => {
+    render(createElement(PinLoginScreen));
+    expect(screen.getByText(/Staff: ask the shop\s+owner to reset your PIN/)).toBeTruthy();
+  });
+
+  it('uses the Bangla catalog for visible recovery copy and its accessibility name', () => {
+    useLocaleStore.setState({ locale: 'bn' });
+    render(createElement(PinLoginScreen));
+
+    expect(screen.getByLabelText('পিন ভুলে গেছেন? অ্যাক্সেস পুনরুদ্ধার করুন')).toBeTruthy();
+    expect(screen.getByText(
+      'মালিক ফোন নম্বর দিয়ে অনলাইনে পুনরুদ্ধার করুন। কর্মী: পিন রিসেট করতে দোকানের মালিককে বলুন।',
+    )).toBeTruthy();
+    expect(screen.queryByText('Forgot your PIN? Recover access')).toBeNull();
+  });
+
+  it('stays reachable while the pad is locked out', async () => {
+    const { PinLockedOutError } = await import('../db/errors');
+    deps.verifyPin.mockRejectedValueOnce(new PinLockedOutError(30_000));
+    render(createElement(PinLoginScreen));
+
+    pressPin('9999');
+    await paintAndSubmit();
+
+    expect(await screen.findByText(/Too many incorrect attempts/)).toBeTruthy();
+    // The lock is on GUESSING, not on recovering. Disabling recovery here
+    // would be the one moment it is most needed.
+    const recover = screen.getByLabelText('Forgot your PIN? Recover access') as HTMLButtonElement;
+    expect(recover.disabled).toBeFalsy();
+    fireEvent.click(recover);
+    expect(deps.push).toHaveBeenCalledWith('/forgot-pin');
+  });
+
+  it('disables the keypad while locked, but not the way out', async () => {
+    const { PinLockedOutError } = await import('../db/errors');
+    deps.verifyPin.mockRejectedValueOnce(new PinLockedOutError(30_000));
+    render(createElement(PinLoginScreen));
+
+    pressPin('9999');
+    await paintAndSubmit();
+
+    expect((screen.getByLabelText('Digit 1') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText('Incorrect PIN — try again')).toBeNull();
   });
 });

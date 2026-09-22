@@ -4,6 +4,7 @@
   "softGreen": "#ECFDF5",
   "richBlack": "#111827",
   "midGray": "#6B7280",
+  "fieldBorder": "#D1D5DB",
   "white": "#FFFFFF",
   "success": "#059669",
   "error": "#DC2626",

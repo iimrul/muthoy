@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, Switch, Text, TextInput, View } from "react-native";
+import { Pressable, Switch, Text, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
 import { Controller, useForm } from "react-hook-form";
@@ -28,6 +28,7 @@ import type { MedicineSearchResult } from "../../domain/medicineSearchProvider";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useI18n } from "../../state/localeStore";
 import { localizeValidationMessage, userFacingError } from "../../i18n/display";
+import { ManufacturerPicker } from "./ManufacturerPicker";
 import type { Session } from "../../state/sessionStore";
 import { triggerSyncNow } from "../../sync";
 import { SupplierPickerField } from "./SupplierPickerField";
@@ -288,48 +289,19 @@ export function ManualEntryForm({
             field: { value, onChange, onBlur },
             fieldState: { error },
           }) => (
-            <>
-              <TextInput
-                value={value ?? ""}
-                onBlur={onBlur}
-                onFocus={() =>
-                  void listManufacturerSuggestions(session.shopId).then(
-                    setManufacturerSuggestions,
-                  )
-                }
-                onChangeText={(text) => {
-                  onChange(text);
-                  void listManufacturerSuggestions(session.shopId, text).then(
-                    setManufacturerSuggestions,
-                  );
-                }}
-                placeholder={t("manufacturerPlaceholder")}
-                placeholderTextColor="#6B7280"
-                accessibilityLabel={t("manufacturerLabel")}
-                className="h-12 rounded-xl border border-[#D1D5DB] bg-white px-4 font-sans text-base text-richBlack"
-              />
-              {manufacturerSuggestions.length ? (
-                <View className="flex-row flex-wrap gap-2">
-                  {manufacturerSuggestions.map((name) => (
-                    <Pressable
-                      key={name}
-                      onPress={() => {
-                        onChange(name);
-                        setManufacturerSuggestions([]);
-                      }}
-                      className="rounded-full bg-white px-3 py-2"
-                    >
-                      <Text className="text-xs text-brand-green">{name}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
-              {error ? (
-                <Text className="font-sans text-sm text-error">
-                  {localizeValidationMessage(error.message, t)}
-                </Text>
-              ) : null}
-            </>
+            <ManufacturerPicker
+              value={value ?? ""}
+              onChange={onChange}
+              onBlur={onBlur}
+              suggestions={manufacturerSuggestions}
+              onRequestSuggestions={(query) =>
+                void listManufacturerSuggestions(session.shopId, query).then(
+                  setManufacturerSuggestions,
+                )
+              }
+              onDismissSuggestions={() => setManufacturerSuggestions([])}
+              errorMessage={error ? localizeValidationMessage(error.message, t) : null}
+            />
           )}
         />
       </View>

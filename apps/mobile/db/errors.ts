@@ -70,6 +70,30 @@ export class DuplicatePinError extends Error {
   }
 }
 
+/**
+ * Thrown by db/auth.ts's verifyPin when the offline attempt budget is spent.
+ *
+ * PIN Login needs no network, so the server's per-phone lockout in
+ * sync/deviceLogin never sees these attempts — on a stolen handset that left
+ * 10,000 values open to unlimited guessing. db/pinAttemptLock.ts counts them;
+ * this is how the refusal reaches the screen.
+ *
+ * Distinct from "wrong PIN" (which stays a `null` return) because the user has
+ * to be told something different: waiting is the only thing that helps, and
+ * carrying on typing is not. Like DuplicatePinError it holds no digits —
+ * CLAUDE.md rule 8 — and the remaining time is the only detail it discloses,
+ * which the person holding the phone can measure anyway.
+ */
+export class PinLockedOutError extends Error {
+  readonly retryAfterMs: number;
+
+  constructor(retryAfterMs: number) {
+    super('Too many incorrect PIN attempts. Try again shortly.');
+    this.name = 'PinLockedOutError';
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
 // Thrown by db/auth.ts's requirePermission/requireOwner when the actor's role
 // — re-read from SQLite, never trusted from the session store — does not grant
 // the action. Screens render the same friendly denial text, so a blocked

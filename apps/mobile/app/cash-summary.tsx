@@ -5,6 +5,7 @@ import { asPaisa, fromTaka, ZERO_PAISA, type Paisa } from "@muthoy/types";
 import { formatMoney } from "@muthoy/utils";
 import { cashReconcileFormSchema } from "@muthoy/validation";
 import { AccessDenied } from "../components/ui/AccessDenied";
+import { showToast } from "../components/ui/Toast";
 import { StandardHeader } from "../components/ui/StandardHeader";
 import { CashSummarySheet } from "../components/cash/CashSummarySheet";
 import { OpeningCashModal } from "../components/cash/OpeningCashModal";
@@ -31,7 +32,6 @@ import { subscribeToSyncCompletion, triggerSyncNow } from "../sync";
 // is NOT re-derived here. CLAUDE.md rule 5: opening cash defaults to 0, is
 // set by the user, and is written against today's business date only.
 
-const TOAST_DURATION_MS = 1800;
 
 // CH-2: compact formula terms, localized with the rest of the app. Terms only
 // appear when nonzero.
@@ -74,7 +74,6 @@ export default function CashSummaryScreen() {
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [countedText, setCountedText] = useState("");
   const [isReconciling, setIsReconciling] = useState(false);
-  const [isToastVisible, setIsToastVisible] = useState(false);
 
   const businessDate = currentBusinessDate();
 
@@ -194,15 +193,14 @@ export default function CashSummaryScreen() {
       void triggerSyncNow(session.shopId);
       if (guard.isStale()) return;
       await reload();
-      setIsToastVisible(true);
-      setTimeout(() => setIsToastVisible(false), TOAST_DURATION_MS);
+      showToast({ message: t("savedToast") });
     } catch (caught) {
       if (guard.isStale()) return;
       setError(caught instanceof Error ? caught.message : "Reconcile failed.");
     } finally {
       setIsReconciling(false);
     }
-  }, [businessDate, countedParsed, reload, session]);
+  }, [businessDate, countedParsed, reload, session, t]);
 
   if (!session) {
     return <AccessDenied message="Active session required." />;
@@ -369,15 +367,6 @@ export default function CashSummaryScreen() {
         onSubmit={handleWithdraw}
       />
 
-      {isToastVisible ? (
-        <View className="absolute bottom-8 left-0 right-0 items-center">
-          <View className="flex-row items-center gap-2 rounded-full bg-richBlack px-4 py-2">
-            <Text className="font-sans-semibold text-sm text-white">
-              ✓ {t("savedToast")}
-            </Text>
-          </View>
-        </View>
-      ) : null}
     </View>
   );
 }

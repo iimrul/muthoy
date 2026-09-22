@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   FlatList,
   Modal,
@@ -12,6 +12,7 @@ import Feather from "@expo/vector-icons/Feather";
 import { asPaisa } from "@muthoy/types";
 import { daysUntilExpiry } from "@muthoy/utils";
 import { MedicineTextScanner } from "../../components/scanner/MedicineTextScanner";
+import { showToast } from "../../components/ui/Toast";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { StandardHeader } from "../../components/ui/StandardHeader";
 import {
@@ -58,13 +59,11 @@ export default function SaleEntryScreen() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
-  const [addedToCartName, setAddedToCartName] = useState<string | null>(null);
   const [isScannerVisible, setIsScannerVisible] = useState(false);
   const [barcodeCandidates, setBarcodeCandidates] = useState<
     BarcodeCandidate[]
   >([]);
   const [searchGuard] = useState(() => createLatestRequestGuard());
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!session || query.trim()) return;
@@ -88,28 +87,16 @@ export default function SaleEntryScreen() {
     };
   }, [mode, query, session, t]);
 
-  useEffect(() => {
-    return () => {
-      if (toastTimer.current) clearTimeout(toastTimer.current);
-    };
-  }, []);
-
   if (!session) {
     return null;
   }
-
-  const showAddedToCartToast = (name: string) => {
-    setAddedToCartName(name);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setAddedToCartName(null), 1800);
-  };
 
   const addLineAndReport = (line: Parameters<typeof addItem>[0]): boolean => {
     if (!addItem(line)) {
       setScanFeedback(t("cartQuantityAtStockLimitLabel"));
       return false;
     }
-    showAddedToCartToast(line.medicineName);
+    showToast({ variant: 'card', label: t('addedToCartLabel'), message: line.medicineName });
     return true;
   };
 
@@ -475,26 +462,6 @@ export default function SaleEntryScreen() {
             {formatMoney(useCartStore.getState().total())}
           </Text>
         </Pressable>
-      ) : null}
-      {addedToCartName ? (
-        <View
-          pointerEvents="none"
-          className="absolute left-0 right-0 top-20 items-center px-4"
-        >
-          <View className="w-full max-w-md flex-row items-center gap-3 rounded-2xl bg-brand-green px-5 py-4">
-            <View className="h-9 w-9 items-center justify-center rounded-full bg-white/20">
-              <Feather name="check-circle" size={20} color="#FFFFFF" />
-            </View>
-            <View>
-              <Text className="font-sans text-xs text-white/90">
-                {t("addedToCartLabel")}
-              </Text>
-              <Text className="font-sans-bold text-sm text-white">
-                {addedToCartName}
-              </Text>
-            </View>
-          </View>
-        </View>
       ) : null}
       <MedicineTextScanner
         visible={isScannerVisible}

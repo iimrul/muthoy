@@ -25,11 +25,12 @@ const FULL = {
   role: 'owner',
   permission_version: 1,
   billing_account_id: 'billing-1',
+  is_active: true,
 };
 
 function token(appMetadata: Record<string, unknown>): string {
   const encode = (value: unknown) => Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
-  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ app_metadata: appMetadata })}.sig`;
+  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ iat: 1_800_000_000, app_metadata: appMetadata })}.sig`;
 }
 
 function refreshed(
@@ -120,6 +121,7 @@ describe('linkDeviceToShop Owner token postcondition', () => {
     ['principal_user_id', { ...FULL, principal_user_id: undefined }, /principal_user_id/],
     ['billing_account_id', { ...FULL, billing_account_id: undefined }, /billing_account_id/],
     ['permission_version', { ...FULL, permission_version: undefined }, /permission_version/],
+    ['is_active', { ...FULL, is_active: undefined }, /is_active/],
     ['Owner role', { ...FULL, role: 'staff' }, /role_not_owner/],
     ['matching shop_id', { ...FULL, shop_id: 'other-shop' }, /shop_id_mismatch/],
     ['matching app_user_id', { ...FULL, app_user_id: 'other-owner' }, /app_user_id_mismatch/],

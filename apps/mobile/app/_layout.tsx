@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
@@ -34,21 +34,39 @@ import { startSyncEngine, stopSyncEngine } from '../sync';
 import { startBillingHydration, stopBillingHydration } from '../sync/billingHydration';
 import { subscribeToReconnect } from '../sync/connectivity';
 import { revalidateOfflineSelectedShop } from '../state/switchShop';
+import {
+  CredentialCleanupError,
+  enforceSessionAuthority,
+  readSessionAuthorityDeadlineMs,
+} from '../state/signOutDevice';
 import '../global.css';
 import { AppNavigationShell } from '../components/navigation/AppNavigationShell';
 import { AuthenticatedRuntimeErrorBoundary } from '../components/navigation/AuthenticatedRuntimeErrorBoundary';
 import { NavigationBoundary } from '../components/navigation/NavigationBoundary';
+import { ToastHost } from '../components/ui/Toast';
 import { DatabaseRecoveryScreen } from '../components/database/DatabaseRecoveryScreen';
 import { DatabaseKeyUnrecoverableError, DatabaseRecoveryPendingError } from '../db/errors';
+import { DevAuthorityRecovery } from '../dev/devAuthorityRecovery';
 
 const FOREGROUND_CHECK_DEBOUNCE_MS = 60_000;
+const AUTHORITY_RETRY_DELAY_MS = 5_000;
 let lastForegroundCheckAt = 0;
+type AuthorityGate = { epoch: number; status: 'checking' | 'allowed' };
 // Keep the splash screen visible while brand fonts load — CLAUDE.md rule 6
 // requires the correct font family from first paint, never a system-font flash.
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const session = useSessionStore((state) => state.session);
+  const sessionEpoch = useSessionStore((state) => state.epoch);
+  const authorityTransitioning = useSessionStore((state) => state.authorityTransitioning);
+  // H-10 A2.1/A2.2, the gate half. Holds the epoch whose authority has been
+  // settled; anything else means reconciliation has not finished for the
+  // session currently in the store.
+  const [authorityGate, setAuthorityGate] = useState<AuthorityGate | null>(null);
+  // A cloud credential that would not clear is reported, never swallowed.
+  const [credentialCleanupFailed, setCredentialCleanupFailed] = useState(false);
+  const [authorityRecoveryNonce, setAuthorityRecoveryNonce] = useState(0);
   const [fontsLoaded, fontError] = useFonts({
     PlusJakartaSans_300Light,
     PlusJakartaSans_400Regular,
@@ -90,72 +108,143 @@ export default function RootLayout() {
   }, [isDatabaseReady]);
 
   useEffect(() => {
-    // An unconfigured build renders the error screen below, but effects still
-    // run for whatever was rendered — so the guard belongs here too. No sync,
-    // no billing refresh, no background work on a build that cannot verify
-    // anything.
-    if (!isDatabaseReady || !isSupabaseConfigured) {
-      return;
-    }
+    if (!isDatabaseReady || !isSupabaseConfigured) return;
     handleAppStateChangeForAuthRefresh(AppState.currentState);
-    if (session) {
-      startSyncEngine(session.shopId);
-      // Hydrate the server-owned entitlement on every session start, so a
-      // relogin shows the existing trial immediately instead of waiting for
-      // the first full sync cycle — and keep retrying on its own (backoff,
-      // then reconnect/foreground) if that first attempt fails, independent
-      // of push/pull. Never a one-shot swallowed failure: that used to leave
-      // the device reading "unverified" until a manual Sync, which is the
-      // exact confusion B4 was reported for.
-      //
-      // Deliberately NOT gated on cloudShopConfirmed. An unconfirmed session
-      // is the one that most needs verifying, and gating it created a trap: a
-      // shop switch that believed itself offline sets that flag false, and the
-      // only path that clears it (revalidateOfflineSelectedShop) is itself
-      // behind a connectivity check — so a single wrong "offline" reading
-      // could strand an owner as unverified forever. billing-status is
-      // read-only, server-authoritative and fail-closed: always safe to ask.
-      startBillingHydration(session.shopId);
-    }
-    let revalidating = false;
-    const revalidateOfflineShop = () => {
-      if (!session || session.cloudShopConfirmed !== false || revalidating) return;
-      revalidating = true;
-      void revalidateOfflineSelectedShop().catch(() => undefined).finally(() => { revalidating = false; });
+    let checking = false;
+    let rerunRequested = false;
+    let disposed = false;
+    let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearExpiryTimer = () => {
+      if (expiryTimer !== null) clearTimeout(expiryTimer);
+      expiryTimer = null;
     };
-    const unsubscribeReconnect = subscribeToReconnect(revalidateOfflineShop);
-    revalidateOfflineShop();
-    const checkIfDue = () => {
-      if (!session || AppState.currentState !== 'active') {
+
+    const clearRetryTimer = () => {
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      retryTimer = null;
+    };
+
+    const checkAuthority = () => {
+      if (!session) return;
+      clearExpiryTimer();
+      clearRetryTimer();
+      const checkedEpoch = useSessionStore.getState().epoch;
+      // Close the complete authenticated runtime synchronously on every
+      // foreground/reconnect, including same-epoch rechecks.
+      setAuthorityGate({ epoch: checkedEpoch, status: 'checking' });
+      stopSyncEngine();
+      stopBillingHydration();
+      if (checking) {
+        rerunRequested = true;
         return;
       }
-      const now = Date.now();
-      if (now - lastForegroundCheckAt < FOREGROUND_CHECK_DEBOUNCE_MS) {
-        return;
-      }
-      lastForegroundCheckAt = now;
-      // In-app alerts do not require OS permission. The explicit Settings
-      // switch owns the system permission prompt; local delivery is best effort.
-      void runNotificationChecks(session.shopId);
+      checking = true;
+      void (async () => {
+        // An offline shop selection deliberately leaves the cloud JWT on the
+        // previously confirmed shop. On reconnect, complete that explicit
+        // server re-link while the gate is closed; comparing the stale
+        // old-shop JWT first would quarantine the legitimate target and make
+        // the recovery path unreachable.
+        if (session.cloudShopConfirmed === false) {
+          await revalidateOfflineSelectedShop();
+          const afterRelink = useSessionStore.getState();
+          if (afterRelink.epoch !== checkedEpoch || afterRelink.session === null) return null;
+        }
+        return enforceSessionAuthority();
+      })()
+        .then((outcome) => {
+          const current = useSessionStore.getState();
+          if (
+            !disposed
+            && !rerunRequested
+            && outcome !== null
+            && (
+              outcome.status === 'confirmed'
+              || (outcome.status === 'unverified' && outcome.reason === 'offline_window_open')
+            )
+            && current.session !== null
+            && current.epoch === checkedEpoch
+          ) {
+            setCredentialCleanupFailed(false);
+            setAuthorityGate({ epoch: checkedEpoch, status: 'allowed' });
+            const deadline = readSessionAuthorityDeadlineMs(current.session);
+            if (deadline !== null) {
+              // Seven days fits safely inside the platform timeout limit. The
+              // exact persisted deadline closes a continuously foreground,
+              // continuously offline app even when no reconnect/AppState
+              // event arrives to trigger another check.
+              expiryTimer = setTimeout(checkAuthority, Math.max(0, deadline - Date.now()));
+            }
+          } else if (
+            !disposed
+            && !rerunRequested
+            && outcome?.status === 'unverified'
+            && outcome.reason === 'authority_refresh_unavailable'
+            && current.session !== null
+            && current.epoch === checkedEpoch
+          ) {
+            // A temporary/unknown provider failure is neither offline
+            // authority nor revocation. Keep the gate closed and retry without
+            // requiring the user to manufacture a reconnect/AppState event.
+            retryTimer = setTimeout(checkAuthority, AUTHORITY_RETRY_DELAY_MS);
+          }
+        })
+        .catch((error: unknown) => {
+          if (!disposed && error instanceof CredentialCleanupError) {
+            setCredentialCleanupFailed(true);
+          }
+          // Any other failure leaves the gate closed.
+        })
+        .finally(() => {
+          checking = false;
+          if (!disposed && rerunRequested) {
+            rerunRequested = false;
+            checkAuthority();
+          }
+        });
     };
-    checkIfDue();
+
+    checkAuthority();
+    const unsubscribeReconnect = subscribeToReconnect(checkAuthority);
     const subscription = AppState.addEventListener('change', (state) => {
       handleAppStateChangeForAuthRefresh(state);
-      if (state === 'active') {
-        checkIfDue();
-        revalidateOfflineShop();
-      }
+      if (state === 'active') checkAuthority();
     });
     return () => {
+      disposed = true;
+      clearExpiryTimer();
+      clearRetryTimer();
       subscription.remove();
       unsubscribeReconnect();
       stopSyncEngine();
       stopBillingHydration();
     };
-  }, [isDatabaseReady, session]);
+  }, [authorityRecoveryNonce, authorityTransitioning, isDatabaseReady, session, sessionEpoch]);
+
+  const authorityAllowed = !session
+    || (authorityGate?.epoch === sessionEpoch && authorityGate.status === 'allowed');
 
   useEffect(() => {
-    if (!isDatabaseReady || !isSupabaseConfigured || !session) {
+    if (!isDatabaseReady || !isSupabaseConfigured || !session || !authorityAllowed) return;
+    startSyncEngine(session.shopId);
+    startBillingHydration(session.shopId);
+    if (AppState.currentState === 'active') {
+      const now = Date.now();
+      if (now - lastForegroundCheckAt >= FOREGROUND_CHECK_DEBOUNCE_MS) {
+        lastForegroundCheckAt = now;
+        void runNotificationChecks(session.shopId);
+      }
+    }
+    return () => {
+      stopSyncEngine();
+      stopBillingHydration();
+    };
+  }, [authorityAllowed, isDatabaseReady, session]);
+
+  useEffect(() => {
+    if (!isDatabaseReady || !isSupabaseConfigured || !session || !authorityAllowed) {
       return;
     }
     // D-11: (re)establish the OS-scheduled closing-time trigger once per
@@ -165,7 +254,7 @@ export default function RootLayout() {
     // closing-hour or notification-preference change; this covers everything
     // else (a cold boot into an already-live session).
     void syncClosingTimeScheduleAsync(session.shopId);
-  }, [isDatabaseReady, session]);
+  }, [authorityAllowed, isDatabaseReady, session]);
 
   if (!isBootComplete) {
     return null;
@@ -214,6 +303,52 @@ export default function RootLayout() {
     );
   }
 
+  // H-10 #6. NOTHING authenticated renders until this session's authority has
+  // been reconciled for THIS epoch.
+  //
+  // Previously the navigator mounted immediately and reconciliation ran
+  // alongside it, so a revoked or expired session got a window of real
+  // authenticated screens — a dashboard with real figures, a till that would
+  // take a sale — before being signed out. The window was short, which is not
+  // the same as closed.
+  //
+  // It is a blocking view rather than a spinner over the app on purpose: an
+  // overlay still has the authenticated tree mounted underneath it, running
+  // effects and reads.
+  if (authorityTransitioning || (session && !authorityAllowed)) {
+    return (
+      <View className="flex-1 items-center justify-center gap-3 bg-brand-softGreen p-6">
+        <Text className="font-sans-semibold text-base text-richBlack">Checking your access…</Text>
+        <Text className="font-sans text-center text-sm text-midGray">
+          Confirming this device is still signed in as you.
+        </Text>
+        {session?.role === 'owner' ? (
+          <DevAuthorityRecovery
+            shopId={session.shopId}
+            ownerUserId={session.userId}
+            onRecovered={() => setAuthorityRecoveryNonce((value) => value + 1)}
+          />
+        ) : null}
+      </View>
+    );
+  }
+
+  // Access is already denied by this point — the local session was cleared —
+  // but the device may still hold a refresh token that would not go away, and
+  // that is worth telling someone about rather than hiding.
+  if (credentialCleanupFailed && !session) {
+    return (
+      <View className="flex-1 items-center justify-center gap-3 bg-errorBg p-6">
+        <Text className="font-sans-bold text-lg text-error">Signed out of this device</Text>
+        <Text className="font-sans text-center text-sm text-richBlack">
+          Your access was withdrawn, but the saved cloud login could not be
+          removed from this phone. Connect to the internet and sign in again so
+          it can be cleared. Please report this message.
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <AuthenticatedRuntimeErrorBoundary>
       <AppNavigationShell>
@@ -221,6 +356,10 @@ export default function RootLayout() {
           <Stack screenOptions={{ headerShown: false }} />
         </NavigationBoundary>
       </AppNavigationShell>
+      {/* Phase C Pass 1. Mounted ONCE, and outside the navigator on purpose: a
+          confirmation raised just before a route change used to be unmounted by
+          the screen that raised it, because the toast lived in that screen. */}
+      <ToastHost />
     </AuthenticatedRuntimeErrorBoundary>
   );
 }

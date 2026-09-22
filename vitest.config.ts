@@ -72,6 +72,10 @@ export default defineConfig({
       "apps/mobile/navigation/**/*.test.ts",
       "apps/mobile/components/scanner/*.test.tsx",
       "apps/mobile/components/ui/PinPad.test.tsx",
+      // Phase C Pass 1 (D1, D2). The toast and skeleton primitives that three
+      // screens previously each re-implemented, tested on the behaviour those
+      // copies disagreed about rather than on their markup.
+      "apps/mobile/components/ui/ui-primitives.test.tsx",
       "apps/mobile/components/expenses/*.test.ts",
       "apps/mobile/components/expenses/*.test.tsx",
       "apps/mobile/components/suppliers/*.test.tsx",
@@ -115,6 +119,14 @@ export default defineConfig({
       "apps/mobile/db/notifications.sqlite.test.ts",
       "apps/mobile/db/permissions.sqlite.test.ts",
       "apps/mobile/db/pin-performance.sqlite.test.ts",
+      // H-4. The offline PIN pad had no attempt budget and answered a miss
+      // without any bcrypt at all, so response time alone named the PIN.
+      // Three layers: the pure quantiser, the attempt counter (including
+      // clock rollback and a corrupt record), and both of them driven
+      // through the real verifyPin on real SQLite.
+      "apps/mobile/db/pin-timing.test.ts",
+      "apps/mobile/db/pin-attempt-lock.test.ts",
+      "apps/mobile/db/pin-hardening.sqlite.test.ts",
       "apps/mobile/db/staff-dashboard.sqlite.test.ts",
       // The Owner Dashboard composite read: authorization, the local-midnight
       // day boundary, the all-payment-types staff fix, truthful "+N more"
@@ -192,6 +204,10 @@ export default defineConfig({
       // unaffected.
       "apps/mobile/state/switchUser.test.tsx",
       "apps/mobile/state/switchShop.test.ts",
+      // H-10 A2.4. "Sign out" has to be exact about which of the nine MMKV
+      // stores it clears: leaving a credential behind and wiping the H-4
+      // attempt budget are opposite mistakes, and this enumerates both.
+      "apps/mobile/state/signOutDevice.test.ts",
       // Staff/Manager must trigger zero owner-wide shop/primary-shop SQLite
       // reads — the role check gates the hook's effect itself.
       "apps/mobile/state/useMultiShopAccess.test.tsx",
@@ -213,6 +229,19 @@ export default defineConfig({
       // bypass/repair affordance while the real OTP path still runs.
       "apps/mobile/tests/dev-production-safety.test.ts",
       "apps/mobile/tests/dev-production-safety.render.test.tsx",
+      // Phase C Pass 1 (D6). CLAUDE.md rule 6 is absolute and invisible when
+      // broken — a wrong font renders perfectly. Read as source, the way the
+      // DEV-safety suite above reads its own invariant.
+      "apps/mobile/tests/font-tokens.test.ts",
+      // H-11 C1. The rollback classification is generated from the SQL by
+      // scripts/classify-migrations.mjs; this fails if ROLLBACK.md drifts
+      // from it, which is how the first audit went wrong by seven rows.
+      "apps/mobile/tests/migration-rollback-classification.test.ts",
+      // H-11 C2/C3. The fixture must satisfy every money, credit, cash and
+      // stock invariant before a drill is run against it, and the restore
+      // baseline must fingerprint the VALUES the drill corrupts.
+      "apps/mobile/tests/history-fixture.test.ts",
+      "apps/mobile/tests/restore-drill.test.ts",
       "apps/mobile/tests/reports-final-fixes.test.tsx",
       "apps/mobile/tests/app-layout.test.tsx",
       "apps/mobile/tests/authenticated-routing.test.tsx",
@@ -272,6 +301,7 @@ export default defineConfig({
       "backend/supabase/pgtest/h7-security.pgtest.ts",
       "backend/supabase/pgtest/h7-fix-pass-b-nonvacuity.pgtest.ts",
       "backend/supabase/pgtest/h7-actor-reactivation.pgtest.ts",
+      "backend/supabase/pgtest/restore-baseline.pgtest.ts",
       "backend/supabase/functions/sync/grants.test.ts",
       // H-7: anonymous callers are refused by verifyCallerJwt itself, not by
       // the hosted Auth provider toggle alone.

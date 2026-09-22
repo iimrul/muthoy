@@ -26,6 +26,10 @@ import {
   createCancelledSaleDraft,
   holdSaleDraft,
 } from "../../db/saleDrafts";
+import {
+  DiscountFields,
+  type CheckoutDiscountType,
+} from "../../components/sale/DiscountFields";
 import { applyDiscount } from "../../domain/discounts";
 import {
   checkoutDiscountAmount,
@@ -49,7 +53,9 @@ import { getTaxSettings, type TaxSettings } from "../../db/settings";
 import { extractInclusiveTax } from "../../domain/tax";
 
 type PaymentType = "cash" | "credit" | "split";
-type DiscountType = "none" | "amount" | "percentage";
+// The shared control owns this shape now; aliased rather than re-declared so
+// the two cannot drift apart (Phase C Pass 1).
+type DiscountType = CheckoutDiscountType;
 
 const QUICK_CASH_AMOUNTS = [10, 20, 50, 100, 200, 500, 1000, 2000];
 
@@ -524,45 +530,19 @@ export default function CheckoutScreen() {
         {canDiscount ? (
           <View className="gap-3 rounded-lg bg-white p-4">
             <Text className="font-sans-semibold text-richBlack">{t("checkoutDiscountLabel")}</Text>
-            <View className="flex-row gap-2">
-              {(["none", "amount", "percentage"] as const).map((type) => (
-                <Pressable
-                  key={type}
-                  onPress={() => {
-                    setDiscountType(type);
-                    resetQuote();
-                  }}
-                  className={`flex-1 items-center rounded-lg border py-2 ${discountType === type ? "border-brand-green bg-brand-softGreen" : "border-midGray bg-white"}`}
-                >
-                  <Text className={`font-sans-medium text-sm ${discountType === type ? "text-brand-green" : "text-richBlack"}`}>
-                    {type === "amount"
-                      ? t("amountTypeLabel")
-                      : type === "percentage"
-                        ? t("percentageTypeLabel")
-                        : t("noneLabel")}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-            {discountType !== "none" ? (
-              <TextInput
-                value={discountText}
-                onChangeText={(value) => {
-                  setDiscountText(value);
-                  resetQuote();
-                }}
-                keyboardType="decimal-pad"
-                placeholder={
-                  discountType === "amount"
-                    ? t("discountAmountPlaceholder")
-                    : t("discountPercentPlaceholder")
-                }
-                className={`rounded-lg border border-midGray p-3 ${discountType === "amount" ? "font-mono" : "font-sans"}`}
-              />
-            ) : null}
-            {discountError ? (
-              <Text className="font-sans text-sm text-error">{discountError}</Text>
-            ) : null}
+            <DiscountFields
+              type={discountType}
+              text={discountText}
+              onChange={(next) => {
+                setDiscountType(next.type);
+                setDiscountText(next.text);
+                // Unchanged: ANY discount edit invalidates the stale quote. The
+                // single callback exists so this stays one call, not two that
+                // can drift apart.
+                resetQuote();
+              }}
+              errorMessage={discountError}
+            />
           </View>
         ) : null}
         <View className="flex-row gap-2">

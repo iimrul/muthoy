@@ -269,3 +269,41 @@ export async function registerDevOwner(): Promise<{ shopId: string; ownerUserId:
   await markShopCloudLinked(target.shopId);
   return { shopId: target.shopId, ownerUserId: target.userId };
 }
+
+/**
+ * Restores the cloud credential for the one complete shop this DEV harness
+ * created. It cannot select or adopt another shop: both ids must match the
+ * identity-bound registration remembered before onboarding began.
+ */
+export async function recoverDevOwnerSession(
+  expectedShopId: string,
+  expectedOwnerUserId: string,
+): Promise<void> {
+  assertDevBuild();
+  requireSupabaseConfiguration();
+
+  const remembered = readHarnessRegistration();
+  if (
+    !remembered
+    || remembered.shopId !== expectedShopId
+    || remembered.ownerUserId !== expectedOwnerUserId
+  ) {
+    throw new DevHarnessError('This DEV identity does not own the requested test shop.');
+  }
+
+  const registration = await getRegistrationStatus();
+  if (
+    registration.status !== 'complete'
+    || registration.shopId !== expectedShopId
+    || registration.userId !== expectedOwnerUserId
+  ) {
+    throw new DevHarnessError('The requested DEV Owner registration is not complete.');
+  }
+
+  await ensureDevSession();
+  const onboarding = await getOwnerOnboardingPayload(expectedShopId, expectedOwnerUserId);
+  await linkDeviceToShop(expectedShopId, expectedOwnerUserId, { onboarding });
+  const { data: bound } = await supabase.auth.getUser();
+  captureBoundEmail(bound?.user?.email);
+  await markShopCloudLinked(expectedShopId);
+}

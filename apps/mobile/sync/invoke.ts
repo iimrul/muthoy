@@ -1,5 +1,6 @@
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
+import { withAuthMutation } from './authMutation';
 
 export type SyncControlCode =
   | 'permissions_changed'
@@ -104,7 +105,9 @@ export async function invokeSyncWithClaimRefresh(
       const shopId = typeof details.shopId === 'string' ? details.shopId : undefined;
       if (!refreshed) {
         refreshed = true;
-        const { error: refreshError } = await supabase.auth.refreshSession();
+        const { error: refreshError } = await withAuthMutation(
+          () => supabase.auth.refreshSession(),
+        );
         if (refreshError) {
           throw new SyncHaltedError(
             refreshError.message,

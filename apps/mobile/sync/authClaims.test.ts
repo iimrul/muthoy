@@ -21,7 +21,7 @@ import {
 function token(appMetadata: Record<string, unknown>): string {
   const encode = (value: unknown) =>
     Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
-  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: 'auth-1', app_metadata: appMetadata })}.sig`;
+  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: 'auth-1', iat: 1_800_000_000, app_metadata: appMetadata })}.sig`;
 }
 
 const FULL = {
@@ -31,6 +31,7 @@ const FULL = {
   role: 'owner',
   permission_version: 3,
   billing_account_id: 'account-1',
+  is_active: true,
 };
 
 describe('reading B4 identity from a minted access token', () => {
@@ -42,6 +43,8 @@ describe('reading B4 identity from a minted access token', () => {
       role: 'owner',
       permissionVersion: 3,
       billingAccountId: 'account-1',
+      isActive: true,
+      issuedAt: 1_800_000_000,
     });
   });
 
@@ -63,7 +66,7 @@ describe('reading B4 identity from a minted access token', () => {
     expect(claims.role).toBeNull();
     expect(hasResolvedIdentity(claims)).toBe(false);
     expect(missingIdentityClaims(claims)).toEqual([
-      'app_user_id', 'principal_user_id', 'role', 'permission_version', 'billing_account_id',
+      'app_user_id', 'principal_user_id', 'role', 'permission_version', 'billing_account_id', 'is_active',
     ]);
   });
 
@@ -77,6 +80,7 @@ describe('reading B4 identity from a minted access token', () => {
     ['principal_user_id', { ...FULL, principal_user_id: undefined }],
     ['billing_account_id', { ...FULL, billing_account_id: undefined }],
     ['permission_version', { ...FULL, permission_version: undefined }],
+    ['is_active', { ...FULL, is_active: undefined }],
   ])('rejects an owner identity missing %s', (_claim, metadata) => {
     expect(hasResolvedIdentity(readAccessTokenClaims(token(metadata)))).toBe(false);
   });
@@ -101,6 +105,11 @@ describe('reading B4 identity from a minted access token', () => {
     const claims = readAccessTokenClaims(token({ ...FULL, permission_version: 0 }));
     expect(claims.permissionVersion).toBe(0);
     expect(missingIdentityClaims(claims)).toEqual([]);
+  });
+
+  it('parses active and issued-at strictly', () => {
+    expect(readAccessTokenClaims(token({ ...FULL, is_active: false })).isActive).toBe(false);
+    expect(readAccessTokenClaims(token({ ...FULL, is_active: 'true' })).isActive).toBeNull();
   });
 
   it.each([

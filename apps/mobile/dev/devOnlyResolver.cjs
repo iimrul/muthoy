@@ -21,6 +21,7 @@ const path = require('path');
  */
 const DEV_ONLY_MODULES = Object.freeze({
   'dev/devRegistrationHarness': 'dev/devRegistrationHarness.prod.tsx',
+  'dev/devAuthorityRecovery': 'dev/devAuthorityRecovery.prod.tsx',
 });
 
 /**

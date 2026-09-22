@@ -135,7 +135,12 @@ describe('H-2 · the DEV OTP bypass is gone, not merely guarded', () => {
   // keep this exception from widening on its own.
   it('no production source imports anything from dev/ outside the allowlist', () => {
     const devImport = /from\s+['"][^'"]*\/dev\/([A-Za-z0-9_-]+)['"]/g;
-    const allowed = new Set(['authTiming', 'runtimeDiagnostics', 'devRegistrationHarness']);
+    const allowed = new Set([
+      'authTiming',
+      'runtimeDiagnostics',
+      'devRegistrationHarness',
+      'devAuthorityRecovery',
+    ]);
     const offenders: string[] = [];
     for (const file of PRODUCTION_SOURCES) {
       for (const match of file.text.matchAll(devImport)) {
@@ -168,13 +173,26 @@ describe('H-2 · the DEV OTP bypass is gone, not merely guarded', () => {
     const harnessImporters = collectSources('dev')
       .filter((file) => /from\s+['"]\.\/devOwnerOnboarding['"]/.test(file.text))
       .map((file) => file.path);
-    expect(harnessImporters).toEqual(['dev/devRegistrationHarness.tsx']);
+    expect(harnessImporters).toEqual([
+      'dev/devAuthorityRecovery.tsx',
+      'dev/devRegistrationHarness.tsx',
+    ]);
   });
 
   it('the DEV harness is covered by the bundler boundary', () => {
     const resolver = readFileSync(join(MOBILE_ROOT, 'dev/devOnlyResolver.cjs'), 'utf8');
     expect(resolver).toContain("'dev/devRegistrationHarness': 'dev/devRegistrationHarness.prod.tsx'");
     expect(fileExists('dev/devRegistrationHarness.prod.tsx')).toBe(true);
+  });
+
+  it('the DEV authority recovery control is covered by its own inert bundler boundary', () => {
+    const resolver = readFileSync(join(MOBILE_ROOT, 'dev/devOnlyResolver.cjs'), 'utf8');
+    expect(resolver).toContain("'dev/devAuthorityRecovery': 'dev/devAuthorityRecovery.prod.tsx'");
+    expect(fileExists('dev/devAuthorityRecovery.prod.tsx')).toBe(true);
+    const importers = PRODUCTION_SOURCES.filter((file) =>
+      /devAuthorityRecovery/.test(file.text),
+    ).map((file) => file.path);
+    expect(importers).toEqual(['app/_layout.tsx']);
   });
 });
 

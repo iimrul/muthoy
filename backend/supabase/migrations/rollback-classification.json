@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "postgres": {
+    "20260813000000_initial_schema.sql": "C",
+    "20260817000000_admin_read_grants.sql": "A",
+    "20260817000100_sync_roles_read_grant.sql": "A",
+    "20260818000000_inventory_movement_ledger.sql": "B",
+    "20260818000100_sync_batches_stock_server_derived.sql": "B",
+    "20260819000000_staff_device_login.sql": "C",
+    "20260821000000_phase_b1_navigation_roles.sql": "B",
+    "20260821010000_phase_b2_sales_inventory_sync.sql": "C",
+    "20260822000000_owner_dashboard_credit_period.sql": "A",
+    "20260822010000_b3_group1_shop_settings.sql": "B",
+    "20260823000000_b3_group2_payment_note.sql": "A",
+    "20260823010000_b3_group2_cash_reconcile.sql": "A",
+    "20260823020000_b3_group2_sync_completion.sql": "B",
+    "20260823030000_b3_group3_expense_category_taxonomy.sql": "C",
+    "20260823040000_b3_groups456_schema_additions.sql": "B",
+    "20260823050000_b3_groups456_sync_completion.sql": "B",
+    "20260824000000_b3_group7_purchase_return_sync.sql": "B",
+    "20260825000000_inventory_add_purchase_sync.sql": "B",
+    "20260827000000_b3_group8_report_indexes.sql": "C",
+    "20260827010000_b3_group9_sale_tax_snapshot.sql": "B",
+    "20260831000000_b4_commercial_platform.sql": "C",
+    "20260905000000_b4_canonical_onboarding.sql": "B",
+    "20260907000000_h7_security_hardening.sql": "B",
+    "20260907010000_h7_revoke_api_role_truncate.sql": "A",
+    "20260907020000_h7_fix_pass_b.sql": "C",
+    "20260909000000_h7_actor_binding_staff_reactivation.sql": "B"
+  },
+  "postgresDeclaredOverrides": [
+    "20260813000000_initial_schema.sql"
+  ],
+  "sqliteDataWrites": [
+    "0001", "0002", "0006", "0007", "0009", "0010", "0011", "0012", "0018", "0024", "0029"
+  ],
+  "sqliteDropsTables": ["0006", "0011", "0012"]
+}

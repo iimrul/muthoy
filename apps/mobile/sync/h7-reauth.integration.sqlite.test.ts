@@ -25,9 +25,15 @@ vi.mock("./supabaseClient", () => ({
   },
 }));
 
+vi.mock("./connectivity", () => ({
+  networkReachability: vi.fn(async () => "online"),
+}));
+
+vi.mock("./billing", () => ({ refreshBillingStatus: vi.fn(async () => undefined) }));
+
 const { db, sqliteConnection } = await import("../db/test/client");
 const { getActiveSessionContext, lockLocalUserAccess } = await import("../db/auth");
-const { roles, shops, users } = await import("../db/schema");
+const { billingAccounts, roles, shopMemberships, shops, users } = await import("../db/schema");
 const { applyRemoteRow, HYDRATION_TABLE_ORDER } = await import("../db/sync-helpers");
 const { hashPin } = await import("../native/crypto");
 const { useSessionStore } = await import("../state/sessionStore");
@@ -38,6 +44,8 @@ const { eq } = await import("drizzle-orm");
 const SHOP = "73000000-0000-4000-8000-000000000001";
 const ROLE = "73000000-0000-4000-8000-000000000002";
 const USER = "73000000-0000-4000-8000-000000000003";
+const BILLING_ACCOUNT = "73000000-0000-4000-8000-000000000004";
+const MEMBERSHIP = "73000000-0000-4000-8000-000000000005";
 const PHONE = "01700000073";
 const PIN = "7381";
 const T0 = "2026-09-07T00:00:00.000Z";
@@ -48,7 +56,16 @@ let pinHash = "";
 
 function accessToken(): string {
   const payload = Buffer.from(JSON.stringify({
-    app_metadata: { app_user_id: USER, shop_id: SHOP },
+    iat: 1_800_000_000,
+    app_metadata: {
+      app_user_id: USER,
+      principal_user_id: USER,
+      shop_id: SHOP,
+      role: "owner",
+      permission_version: 0,
+      billing_account_id: BILLING_ACCOUNT,
+      is_active: true,
+    },
   })).toString('base64url');
   return `header.${payload}.signature`;
 }
@@ -154,11 +171,23 @@ beforeEach(async () => {
     data: { session: transport.accessToken ? { access_token: transport.accessToken } : null },
     error: null,
   }));
-  transport.refreshSession.mockResolvedValue({ error: null });
+  transport.refreshSession.mockResolvedValue({
+    data: { session: { access_token: accessToken() } },
+    error: null,
+  });
   installServerTransport();
 
   sqliteConnection.execSync("PRAGMA foreign_keys=OFF");
-  for (const table of ["sync_queue", "audit_logs", "user_permissions", "users", "roles", "shops"]) {
+  for (const table of [
+    "sync_queue",
+    "audit_logs",
+    "user_permissions",
+    "shop_memberships",
+    "users",
+    "roles",
+    "billing_accounts",
+    "shops",
+  ]) {
     sqliteConnection.execSync(`DELETE FROM ${table}`);
   }
   sqliteConnection.execSync("PRAGMA foreign_keys=ON");
@@ -189,6 +218,24 @@ beforeEach(async () => {
     phone: PHONE,
     pinHash,
     pinSetAt: T0,
+    createdAt: T0,
+    updatedAt: T0,
+  }).run();
+  db.insert(billingAccounts).values({
+    id: BILLING_ACCOUNT,
+    principalOwnerUserId: USER,
+    primaryShopId: SHOP,
+    createdAt: T0,
+    updatedAt: T0,
+  }).run();
+  db.insert(shopMemberships).values({
+    id: MEMBERSHIP,
+    billingAccountId: BILLING_ACCOUNT,
+    principalUserId: USER,
+    shopId: SHOP,
+    actorUserId: USER,
+    role: "owner",
+    isActive: true,
     createdAt: T0,
     updatedAt: T0,
   }).run();

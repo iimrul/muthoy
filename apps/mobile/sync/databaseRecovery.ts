@@ -19,24 +19,32 @@ import {
   DeviceLoginError,
   hydrateAuthenticatedDevice,
 } from './deviceAuth';
+import { captureSession } from '../state/sessionGuard';
 
 export async function recoverDatabaseFromServer(phone: string, pin: string): Promise<void> {
+  const guard = captureSession();
   // Mandatory first gate: no key or filesystem mutation before the server has
   // authenticated the operator and bound the returned cloud actor.
-  const response = await authenticateNewDeviceCredentials(phone, pin);
+  const response = await authenticateNewDeviceCredentials(phone, pin, undefined, guard);
+  guard.assertLive();
   const keyHex = await beginDatabaseKeyRecovery();
+  guard.assertLive();
   try {
     const state = await openDatabaseRecoveryTarget(keyHex);
+    guard.assertLive();
 
     if (state === 'needs-hydration') {
-      await hydrateAuthenticatedDevice(response, pin);
+      await hydrateAuthenticatedDevice(response, pin, undefined, guard);
+      guard.assertLive();
       verifyCurrentRecoveryDatabase();
       await promoteHydratedRecoveryDatabase(keyHex);
+      guard.assertLive();
     }
 
     // Re-derive the exact actor from the promoted main, never from the server
     // response or the now-closed recovery candidate.
     const local = await verifyPinForUser(pin, response.shopId, response.userId);
+    guard.assertLive();
     if (!local || local.userId !== response.userId || local.shopId !== response.shopId) {
       throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false);
     }
@@ -44,8 +52,10 @@ export async function recoverDatabaseFromServer(phone: string, pin: string): Pro
     // The new main is open, verified, and actor-bound. Activate the exact local
     // actor before marking key recovery complete; therefore pending=false also
     // proves activation succeeded if a crash strands locked cleanup.
-    await activateHydratedDevice(local);
+    await activateHydratedDevice(local, undefined, guard);
+    guard.assertLive();
     await completeDatabaseKeyRecovery();
+    guard.assertLive();
 
     // No operation after the durable completion marker may turn this into a
     // second key rotation. Normal startup repeats bounded artifact cleanup.

@@ -33,6 +33,7 @@ const { getUserPermissionOverrides, markShopCloudLinked } = await import('../db/
 const { pullChanges } = await import('../sync/pull');
 const { supabase } = await import('../sync/supabaseClient');
 const { inspectCloudActorBinding } = await import('../sync/authActorBinding');
+const { startSyncEngine } = await import('../sync');
 
 const OWNER_SESSION = {
   shopId: 'shop-1', userId: 'owner-1', principalUserId: 'owner-1',
@@ -42,7 +43,7 @@ const OWNER_SESSION = {
 describe('multi-shop switch entitlement', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useSessionStore.setState({ session: OWNER_SESSION, epoch: 0 });
+    useSessionStore.setState({ session: OWNER_SESSION, epoch: 0, authorityTransitioning: false });
     vi.mocked(inspectCloudActorBinding).mockResolvedValue({
       status: 'matched', actorUserId: 'owner-1', shopId: 'shop-1',
     });
@@ -78,7 +79,10 @@ describe('multi-shop switch entitlement', () => {
 });
 
 describe('offline multi-shop reconnect', () => {
-  beforeEach(() => useSessionStore.setState({ session: null, epoch: 0 }));
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useSessionStore.setState({ session: null, epoch: 0, authorityTransitioning: false });
+  });
 
   it('records the cloud link only after the server confirmed the switch and hydration finished', async () => {
     // The physical defect: a switched-to shop hydrated fine but kept
@@ -87,10 +91,18 @@ describe('offline multi-shop reconnect', () => {
     useSessionStore.setState({ session: OWNER_SESSION, epoch: 0 });
     commercial.requireShopSwitchAccess.mockResolvedValue(undefined);
     commercial.membershipForSwitch.mockResolvedValue(undefined);
-    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({
-      data: { actor_user_id: 'owner-2', role: 'owner', billing_account_id: 'account-1' },
-      error: null,
-    } as never);
+    vi.mocked(invokeSyncWithClaimRefresh).mockImplementation(async () => {
+      // The old session is gone and the root gate remains explicitly closed
+      // for the entire first network await.
+      expect(useSessionStore.getState()).toMatchObject({
+        session: null,
+        authorityTransitioning: true,
+      });
+      return {
+        data: { actor_user_id: 'owner-2', role: 'owner', billing_account_id: 'account-1' },
+        error: null,
+      } as never;
+    });
     vi.mocked(getUserPermissionOverrides).mockResolvedValue({} as never);
     Object.assign(supabase, {
       auth: {
@@ -112,6 +124,47 @@ describe('offline multi-shop reconnect', () => {
     expect(useSessionStore.getState().session).toMatchObject({
       shopId: 'shop-2', userId: 'owner-2', cloudShopConfirmed: true,
       cloudActorConfirmed: true,
+    });
+    expect(useSessionStore.getState().authorityTransitioning).toBe(false);
+    expect(vi.mocked(startSyncEngine)).not.toHaveBeenCalled();
+  });
+
+  it('re-links an offline-selected shop before comparing the refreshed target binding', async () => {
+    useSessionStore.setState({
+      session: { ...OWNER_SESSION, shopId: 'shop-2', userId: 'owner-2', cloudShopConfirmed: false },
+      epoch: 0,
+      authorityTransitioning: false,
+    });
+    commercial.requireShopSwitchAccess.mockResolvedValue(undefined);
+    commercial.membershipForSwitch.mockResolvedValue({
+      actorUserId: 'owner-2', role: 'owner', billingAccountId: 'account-1',
+    });
+    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({
+      data: { actor_user_id: 'owner-2', role: 'owner', billing_account_id: 'account-1' },
+      error: null,
+    } as never);
+    vi.mocked(getUserPermissionOverrides).mockResolvedValue({} as never);
+    Object.assign(supabase, {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({ data: { session: { access_token: 'old-shop-token' } }, error: null }),
+        refreshSession: vi.fn().mockResolvedValue({ error: null }),
+      },
+      functions: { invoke: vi.fn() },
+    });
+    vi.mocked(inspectCloudActorBinding).mockResolvedValueOnce({
+      status: 'matched', actorUserId: 'owner-2', shopId: 'shop-2',
+    });
+
+    await switchActiveShop('shop-2', true);
+
+    // Only the post-switch binding is inspected. The pre-switch JWT is known
+    // to name the previous cloud shop and is not misclassified as revocation.
+    expect(vi.mocked(inspectCloudActorBinding)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(inspectCloudActorBinding)).toHaveBeenCalledWith({
+      userId: 'owner-2', shopId: 'shop-2',
+    });
+    expect(useSessionStore.getState().session).toMatchObject({
+      shopId: 'shop-2', userId: 'owner-2', cloudShopConfirmed: true,
     });
   });
 

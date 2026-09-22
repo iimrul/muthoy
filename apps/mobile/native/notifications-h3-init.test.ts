@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   ensure: vi.fn(),
   readSession: vi.fn(),
   listMedicines: vi.fn(),
+  authority: vi.fn(),
   warn: vi.spyOn(console, 'warn').mockImplementation(() => undefined),
 }));
 
@@ -31,6 +32,7 @@ vi.mock('expo-task-manager', () => ({
 }));
 vi.mock('../db/init', () => ({ ensureDatabaseInitialized: mocks.ensure }));
 vi.mock('../state/sessionStore', () => ({ readPersistedSessionSync: mocks.readSession }));
+vi.mock('../sync/sessionAuthority', () => ({ inspectSessionAuthority: mocks.authority }));
 vi.mock('../state/notificationPreferencesStore', () => ({
   readNotificationPreferences: () => ({
     all: false,
@@ -49,7 +51,11 @@ const { runNotificationChecks } = await import('./notifications');
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.readSession.mockReturnValue({ shopId: 'shop-1', userId: 'user-1', role: 'owner' });
+  mocks.readSession.mockReturnValue({
+    shopId: 'shop-1', userId: 'user-1', role: 'owner',
+    principalUserId: 'user-1', billingAccountId: 'account-1',
+  });
+  mocks.authority.mockResolvedValue({ status: 'confirmed', reason: 'claims_match' });
   mocks.listMedicines.mockResolvedValue([]);
 });
 
@@ -73,5 +79,19 @@ describe('headless encrypted database initialization', () => {
     await runNotificationChecks('shop-1');
 
     expect(mocks.ensure).toHaveBeenCalledTimes(2);
+  });
+
+  test.each([
+    ['missing anchor', { status: 'unverified', reason: 'authority_absent' }],
+    ['expired lease', { status: 'unverified', reason: 'offline_window_expired' }],
+    ['corrupt lease', { status: 'unverified', reason: 'authority_corrupt' }],
+    ['quarantine', { status: 'revoked', reason: 'authority_quarantined' }],
+  ])('does no headless data work for %s', async (_label, outcome) => {
+    mocks.ensure.mockResolvedValue(undefined);
+    mocks.authority.mockResolvedValueOnce(outcome);
+
+    await runNotificationChecks('shop-1');
+
+    expect(mocks.listMedicines).not.toHaveBeenCalled();
   });
 });

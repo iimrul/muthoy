@@ -7,9 +7,10 @@ import {
   useConfirmedPinEntry,
   type PinCompletionMeta,
 } from '../../components/ui/PinPad';
-import { setOwnerPin } from '../../db/auth';
+import { setOwnerPin, verifyPinForUser } from '../../db/auth';
 import { handoffAuthTiming, startAuthTiming } from '../../dev/authTiming';
 import { useSessionStore } from '../../state/sessionStore';
+import { refreshBillingStatus } from '../../sync/billing';
 
 // PIN Setup — Volume 4 AUTHENTICATION, Volume 0 Day 4. Runs immediately
 // after Registration. Asks for the PIN twice (not specced in Volume 4 —
@@ -41,7 +42,22 @@ export default function PinSetupScreen() {
         } else {
           await setOwnerPin(userId, result.data.pin);
         }
-        login({ shopId, userId, role: 'owner' });
+        // Link completion creates the authoritative principal/membership on the
+        // server. Hydrate it before constructing the persisted session: the
+        // root authority gate must never guess principal or billing identity
+        // from an Owner actor id.
+        const setupEpoch = useSessionStore.getState().epoch;
+        const ownsSetup = () => {
+          const state = useSessionStore.getState();
+          return state.epoch === setupEpoch && state.session === null;
+        };
+        await refreshBillingStatus(shopId, undefined, { isCurrent: ownsSetup });
+        const local = await verifyPinForUser(result.data.pin, shopId, userId, timing);
+        if (!local || !local.principalUserId || !local.billingAccountId) {
+          throw new Error('Owner authority did not hydrate completely.');
+        }
+        if (!ownsSetup()) throw new Error('The active user changed.');
+        login(local);
         handoffAuthTiming(timing);
         router.replace('/dashboard');
       } catch {

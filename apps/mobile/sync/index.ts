@@ -187,8 +187,14 @@ export function triggerSyncNow(shopId: string): Promise<SyncCycleResult> {
   if (existingCycle) return existingCycle;
   const startedAt = generation;
   const authTimingId = startPendingAuthTimingStage('initial_sync');
+  if (__DEV__) console.info('[sync:cycle] started');
   const cycle = runCycle(shopId, startedAt)
     .then((result) => {
+      if (__DEV__) {
+        console.info(
+          `[sync:cycle] ${result.status}${result.status === 'skipped' ? `:${result.reason}` : ''}`,
+        );
+      }
       if (authTimingId) {
         completePendingAuthTimingStage(
           'initial_sync',

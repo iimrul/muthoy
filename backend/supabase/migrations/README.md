@@ -4,6 +4,18 @@ Apply timestamped files in lexical order. Committed migrations are immutable;
 schema changes require a new file. SQLite remains the mobile source of truth,
 and every PostgreSQL money column mirrors integer paisa.
 
+Recovery is a separate document: [ROLLBACK.md](ROLLBACK.md) classifies every
+migration below as reversible, redeployable, or forward-only, and carries the
+decision table for who calls a restore.
+
+<!-- rollback-classification:start -->
+Rollback classification: **A: 6 · B: 13 · C: 7 — of 26.** Source: [rollback-classification.json](rollback-classification.json).
+<!-- rollback-classification:end -->
+
+The data backup at step 2 of "Required sequence" is the only way back from a
+forward-only migration. The procedure that exercises it is
+[../checks/restore_drill.md](../checks/restore_drill.md); it has not been run yet.
+
 ## Exact PostgreSQL order
 
 ```text

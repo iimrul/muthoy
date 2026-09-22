@@ -1,12 +1,13 @@
 import { getUserPermissionOverrides, markShopCloudLinked } from '../db/auth';
 import { membershipForSwitch, requireShopSwitchAccess } from '../db/commercial';
-import { startSyncEngine, stopSyncEngine } from '../sync';
+import { stopSyncEngine } from '../sync';
 import { refreshBillingStatus } from '../sync/billing';
 import { invokeSyncWithClaimRefresh } from '../sync/invoke';
 import { pullChanges } from '../sync/pull';
 import { isSupabaseConfigured, supabase } from '../sync/supabaseClient';
 import { hasNetworkConnection } from '../sync/connectivity';
 import { assertCloudActorBinding, inspectCloudActorBinding } from '../sync/authActorBinding';
+import { withAuthMutation } from '../sync/authMutation';
 import { useCartStore } from './cartStore';
 import { useSessionStore, type Session } from './sessionStore';
 
@@ -14,12 +15,15 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
   const initialState = useSessionStore.getState();
   const current = initialState.session;
   if (!current || current.role !== 'owner') throw new Error('Owner access only.');
+  if (!current.principalUserId || !current.billingAccountId) {
+    throw new Error('Session authority is incomplete. Reconnect and sign in again.');
+  }
   if (current.shopId === shopId && (current.cloudShopConfirmed !== false || !online)) return;
   // Entitlement precedes membership, and precedes every network call. The
   // route overlay is presentation; this is the layer a Free or expired owner
   // actually cannot get past, online or off.
   await requireShopSwitchAccess(current.shopId, shopId);
-  const principalUserId = current.principalUserId ?? current.userId;
+  const principalUserId = current.principalUserId;
   const localMembership = await membershipForSwitch(principalUserId, shopId);
 
   if (!online) {
@@ -47,18 +51,27 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
   if (authSession.error || !authSession.data.session?.access_token) {
     throw authSession.error ?? new Error('Cloud session is unavailable.');
   }
-  assertCloudActorBinding(
-    await inspectCloudActorBinding(current),
-    { userId: current.userId, shopId: current.shopId },
-  );
+  if (current.cloudShopConfirmed !== false) {
+    assertCloudActorBinding(
+      await inspectCloudActorBinding(current),
+      { userId: current.userId, shopId: current.shopId },
+    );
+  }
   if (useSessionStore.getState().epoch !== initialState.epoch) throw new Error('The active user changed.');
   const rollbackToken = authSession.data.session.access_token;
   useCartStore.getState().clear();
   stopSyncEngine();
-  // Invalidate every old-screen continuation before the first network await.
-  useSessionStore.getState().login(current);
-  const transitionEpoch = useSessionStore.getState().epoch;
-  const ownsTransition = () => useSessionStore.getState().epoch === transitionEpoch;
+  // Invalidate every old-screen continuation before the first network await,
+  // while leaving neither the old navigator nor auth routes mounted. RootLayout
+  // renders its closed authority gate until this transition logs in either the
+  // reconciled target or the safely restored source shop.
+  const transitionEpoch = useSessionStore.getState()
+    .beginAuthorityTransitionIfEpoch(initialState.epoch);
+  if (transitionEpoch === null) throw new Error('The active user changed.');
+  const ownsTransition = () => {
+    const state = useSessionStore.getState();
+    return state.epoch === transitionEpoch && state.authorityTransitioning;
+  };
   try {
     const { data, error } = await invokeSyncWithClaimRefresh({ action: 'shop-switch', shopId });
     if (error) throw error;
@@ -67,7 +80,7 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
       throw new Error('Invalid shop switch response');
     }
     if (!ownsTransition()) throw new Error('The active user changed.');
-    const refreshed = await supabase.auth.refreshSession();
+    const refreshed = await withAuthMutation(() => supabase.auth.refreshSession());
     if (refreshed.error) throw refreshed.error;
     if (!ownsTransition()) throw new Error('The active user changed.');
     assertCloudActorBinding(
@@ -101,7 +114,6 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
       cloudActorConfirmed: true,
     };
     useSessionStore.getState().login(next);
-    startSyncEngine(shopId);
   } catch (error) {
     if (!ownsTransition()) {
       // Use the captured owner token only to restore that owner's cloud shop;
@@ -117,7 +129,7 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     // otherwise the old shop would restart sync with a target-shop JWT.
     try {
       await invokeSyncWithClaimRefresh({ action: 'shop-switch', shopId: current.shopId });
-      await supabase.auth.refreshSession();
+      await withAuthMutation(() => supabase.auth.refreshSession());
     } catch {
       // Keep sync stopped when the server identity could not be restored.
       useSessionStore.getState().login({
@@ -128,7 +140,6 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
       throw error;
     }
     useSessionStore.getState().login(current);
-    startSyncEngine(current.shopId);
     throw error;
   }
 }

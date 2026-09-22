@@ -11,6 +11,7 @@ import {
   getNativeCryptoTestCounters,
   resetNativeCryptoTestCounters,
 } from './test/muthoy-pin-crypto';
+import { __resetMMKVStores } from './test/react-native-mmkv';
 
 const MIGRATIONS = resolve('apps/mobile/db/migrations');
 
@@ -47,6 +48,7 @@ beforeEach(() => {
     sqliteConnection.execSync(`DELETE FROM ${table}`);
   }
   sqliteConnection.execSync('PRAGMA foreign_keys = ON');
+  __resetMMKVStores();
   resetNativeCryptoTestCounters();
 });
 
@@ -75,7 +77,12 @@ describe('indexed local PIN paths', () => {
     expect(staff.id).toBeTruthy();
   });
 
-  it('uses one bcrypt compare for an indexed enrolled login and zero for a miss', async () => {
+  // H-4. This used to assert ZERO comparisons for a miss, which is exactly the
+  // oracle that made the offline PIN pad attackable: the Keystore tag decided
+  // the answer, so a wrong PIN came back without any bcrypt and a right one
+  // paid ~320 ms for it. The counts must now be IDENTICAL, and that equality is
+  // the assertion — not the number itself.
+  it('uses the same single bcrypt compare for an indexed hit and for a miss', async () => {
     const owner = await ownerFixture();
     await createStaff(
       owner.shopId,
@@ -86,11 +93,14 @@ describe('indexed local PIN paths', () => {
 
     resetNativeCryptoTestCounters();
     await expect(verifyPin('5678')).resolves.toMatchObject({ role: 'staff' });
-    expect(getNativeCryptoTestCounters()).toEqual({ hash: 0, verify: 1, lookupTag: 1 });
+    const hit = getNativeCryptoTestCounters();
 
     resetNativeCryptoTestCounters();
     await expect(verifyPin('9999')).resolves.toBeNull();
-    expect(getNativeCryptoTestCounters()).toEqual({ hash: 0, verify: 0, lookupTag: 1 });
+    const miss = getNativeCryptoTestCounters();
+
+    expect(hit).toEqual({ hash: 0, verify: 1, lookupTag: 1 });
+    expect(miss).toEqual(hit);
   });
 
   it('lazily indexes a standard legacy bcrypt hash and keeps it usable', async () => {
@@ -102,10 +112,62 @@ describe('indexed local PIN paths', () => {
 
     resetNativeCryptoTestCounters();
     await expect(verifyPin('1234')).resolves.toMatchObject({ userId: owner.userId });
-    expect(getNativeCryptoTestCounters().verify).toBe(1);
+    // Two, not one: the untagged row is verified by the legacy scan, and the
+    // indexed lookup that found nothing still spends its equal-work compare
+    // (H-4). A miss on this same device costs exactly the same two, which is
+    // the property that matters — see the hit/miss equality test above.
+    expect(getNativeCryptoTestCounters().verify).toBe(2);
     expect(
       db.select({ tag: users.pinLookupTag }).from(users).where(eq(users.id, owner.userId)).get()?.tag,
     ).toBeTruthy();
+  });
+
+  it('drains every legacy row for a miss and for every match position', {
+    timeout: 30_000,
+  }, async () => {
+    const owner = await ownerFixture();
+    const firstStaff = await createStaff(
+      owner.shopId,
+      owner.userId,
+      { name: 'First', phone: '01712000002', rawPin: '5678', permissions: {} },
+      ALWAYS_LIVE,
+    );
+    const lastStaff = await createStaff(
+      owner.shopId,
+      owner.userId,
+      { name: 'Last', phone: '01712000003', rawPin: '2468', permissions: {} },
+      ALWAYS_LIVE,
+    );
+
+    const makeAllRowsLegacy = () => {
+      db.update(users)
+        .set({ pinLookupTag: null, pinLookupPinSetAt: null })
+        .where(eq(users.shopId, owner.shopId))
+        .run();
+    };
+    const probe = async (pin: string) => {
+      makeAllRowsLegacy();
+      resetNativeCryptoTestCounters();
+      const result = await verifyPin(pin);
+      return { result, counters: getNativeCryptoTestCounters() };
+    };
+
+    const ownerHit = await probe('1234');
+    const firstHit = await probe('5678');
+    const lastHit = await probe('2468');
+    const miss = await probe('9999');
+
+    expect(ownerHit.result?.userId).toBe(owner.userId);
+    expect(firstHit.result?.userId).toBe(firstStaff.id);
+    expect(lastHit.result?.userId).toBe(lastStaff.id);
+    expect(miss.result).toBeNull();
+    // One dummy compare plus all three legacy rows, irrespective of whether
+    // and where one of those rows matches.
+    const fixed = { hash: 0, verify: 4, lookupTag: 1 };
+    expect(ownerHit.counters).toEqual(fixed);
+    expect(firstHit.counters).toEqual(fixed);
+    expect(lastHit.counters).toEqual(fixed);
+    expect(miss.counters).toEqual(fixed);
   });
 
   it('rejects an indexed duplicate without bcrypt scanning', async () => {

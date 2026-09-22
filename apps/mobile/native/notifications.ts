@@ -38,6 +38,7 @@ import { readPersistedSessionSync } from "../state/sessionStore";
 import { readNotificationPreferences } from "../state/notificationPreferencesStore";
 import { useLocaleStore } from "../state/localeStore";
 import { encodeLocalizedText, localizeStoredText } from "../i18n/localizedText";
+import { inspectSessionAuthority } from "../sync/sessionAuthority";
 
 // expo-background-task's SDK 57 iOS plugin schedules this fixed native
 // identifier; using the same task name keeps app.json and defineTask aligned.
@@ -294,6 +295,21 @@ export function runNotificationChecks(shopId: string): Promise<void> {
       await ensureDatabaseInitialized();
     } catch {
       console.warn("notification-check-failed:database-init");
+      return;
+    }
+    // RootLayout's React gate does not exist in an OS background task. Apply
+    // the same authority decision here before any stock, cash, credit, or
+    // notification row is read. No anchor, expiry, rollback, corruption, or
+    // quarantine therefore becomes a headless data-access bypass.
+    try {
+      const authority = await inspectSessionAuthority(session);
+      if (
+        authority.status !== "confirmed"
+        && !(authority.status === "unverified" && authority.reason === "offline_window_open")
+      ) {
+        return;
+      }
+    } catch {
       return;
     }
     const now = new Date();

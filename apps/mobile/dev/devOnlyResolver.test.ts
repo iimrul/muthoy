@@ -15,6 +15,7 @@ const PROJECT_ROOT = resolve(DEV_DIR, '..');
 /** The specifier app/(auth)/register.tsx actually writes. */
 const HARNESS_SPECIFIER = '../../dev/devRegistrationHarness';
 const STUB = join(PROJECT_ROOT, 'dev', 'devRegistrationHarness.prod.tsx');
+const RECOVERY_STUB = join(PROJECT_ROOT, 'dev', 'devAuthorityRecovery.prod.tsx');
 
 describe('the dev-only module boundary', () => {
   it('hands a release bundle the inert stub', () => {
@@ -35,6 +36,16 @@ describe('the dev-only module boundary', () => {
         projectRoot: PROJECT_ROOT,
       }),
     ).toBeNull();
+  });
+
+  it('also replaces the DEV authority recovery control with an inert stub', () => {
+    expect(
+      resolveDevOnlyModule({
+        isDev: false,
+        moduleName: '../dev/devAuthorityRecovery',
+        projectRoot: PROJECT_ROOT,
+      }),
+    ).toEqual({ type: 'sourceFile', filePath: RECOVERY_STUB });
   });
 
   // Unknown must mean production. If a future Metro stops passing `dev` on the
@@ -149,7 +160,10 @@ describe('the boundary is actually wired up', () => {
     expect(metro).toContain('upstreamResolveRequest ?? context.resolveRequest');
   });
 
-  it('the harness is the only module the boundary covers', () => {
-    expect(Object.keys(DEV_ONLY_MODULES)).toEqual(['dev/devRegistrationHarness']);
+  it('the boundary covers only the two explicit DEV auth controls', () => {
+    expect(Object.keys(DEV_ONLY_MODULES)).toEqual([
+      'dev/devRegistrationHarness',
+      'dev/devAuthorityRecovery',
+    ]);
   });
 });

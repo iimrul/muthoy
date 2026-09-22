@@ -73,7 +73,12 @@ describe('missing-key server recovery', () => {
   test('hydrates and verifies the isolated target before promotion', async () => {
     await recoverDatabaseFromServer('01712345678', '1234');
 
-    expect(mocks.hydrate).toHaveBeenCalledWith(response, '1234');
+    expect(mocks.hydrate).toHaveBeenCalledWith(
+      response,
+      '1234',
+      undefined,
+      expect.objectContaining({ assertLive: expect.any(Function) }),
+    );
     expect(mocks.hydrate).toHaveBeenCalledBefore(mocks.verifyRecovery);
     expect(mocks.verifyRecovery).toHaveBeenCalledBefore(mocks.promote);
     expect(mocks.promote).toHaveBeenCalledBefore(mocks.verifyPin);

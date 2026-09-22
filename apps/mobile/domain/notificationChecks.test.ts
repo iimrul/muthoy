@@ -14,11 +14,16 @@ const mocks = vi.hoisted(() => ({
     shopId: "shop-1",
     userId: "owner-1",
     role: "owner" as "owner" | "staff",
+    principalUserId: "owner-1",
+    billingAccountId: "account-1",
   } as {
     shopId: string;
     userId: string;
     role: "owner" | "staff";
+    principalUserId?: string;
+    billingAccountId?: string;
   } | null,
+  authority: vi.fn(async () => ({ status: "confirmed", reason: "claims_match" })),
   activeRole: "owner" as "owner" | "staff" | null,
   activePermissions: {} as Partial<Record<"credit_view", boolean>>,
   medicines: [] as {
@@ -91,6 +96,7 @@ vi.mock("expo-notifications", () => ({
 vi.mock("../state/sessionStore", () => ({
   readPersistedSessionSync: () => mocks.session,
 }));
+vi.mock("../sync/sessionAuthority", () => ({ inspectSessionAuthority: mocks.authority }));
 vi.mock("../db/auth", () => ({
   getActiveSessionRole: vi.fn(async () => mocks.activeRole),
   getActiveSessionContext: vi.fn(async () =>
@@ -229,7 +235,13 @@ describe("runNotificationChecks", () => {
     vi.useFakeTimers();
     // 20:30 Asia/Dhaka. Explicit UTC keeps this invariant under a non-Dhaka TZ.
     vi.setSystemTime(new Date("2026-08-12T14:30:00Z"));
-    mocks.session = { shopId: "shop-1", userId: "owner-1", role: "owner" };
+    mocks.session = {
+      shopId: "shop-1",
+      userId: "owner-1",
+      role: "owner",
+      principalUserId: "owner-1",
+      billingAccountId: "account-1",
+    };
     mocks.activeRole = "owner";
     mocks.activePermissions = {};
     mocks.medicines = [];

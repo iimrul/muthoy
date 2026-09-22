@@ -78,6 +78,8 @@ export function readLastShopIdSync(): string | null {
 
 interface SessionState {
   session: Session | null;
+  /** True only while an online shop switch owns the credential/session handoff. */
+  authorityTransitioning: boolean;
   /**
    * Monotonic counter identifying THIS login instance. Bumped by both login()
    * and clearActiveUser(), so it changes on every device handover.
@@ -91,6 +93,8 @@ interface SessionState {
   epoch: number;
   lastShopId: string | null;
   login: (session: Session) => void;
+  /** Invalidates the active epoch and hides all auth UI during a shop handoff. */
+  beginAuthorityTransitionIfEpoch: (expectedEpoch: number) => number | null;
   /**
    * Ends the ACTIVE LOCAL USER's session and nothing else.
    *
@@ -106,12 +110,15 @@ interface SessionState {
    * root gate when a persisted session no longer matches SQLite.
    */
   clearActiveUser: () => void;
+  /** Atomically clears only the login instance the caller inspected. */
+  clearActiveUserIfEpoch: (expectedEpoch: number) => boolean;
 }
 
 export const useSessionStore = create<SessionState>()(
   persist(
     (set) => ({
       session: null,
+      authorityTransitioning: false,
       epoch: 0,
       lastShopId: null,
       // Both transitions bump. clearActiveUser() alone is not enough: work
@@ -119,14 +126,45 @@ export const useSessionStore = create<SessionState>()(
       // logs back in before it finishes.
       login: (session) => set((state) => ({
         session: { ...session, startedAt: session.startedAt ?? new Date().toISOString() },
+        authorityTransitioning: false,
         epoch: state.epoch + 1,
         lastShopId: session.shopId,
       })),
-      clearActiveUser: () => set((state) => ({ session: null, epoch: state.epoch + 1 })),
+      beginAuthorityTransitionIfEpoch: (expectedEpoch) => {
+        let transitionEpoch: number | null = null;
+        set((state) => {
+          if (state.epoch !== expectedEpoch || state.session === null) return state;
+          transitionEpoch = state.epoch + 1;
+          return {
+            session: null,
+            authorityTransitioning: true,
+            epoch: transitionEpoch,
+          };
+        });
+        return transitionEpoch;
+      },
+      clearActiveUser: () => set((state) => ({
+        session: null,
+        authorityTransitioning: false,
+        epoch: state.epoch + 1,
+      })),
+      clearActiveUserIfEpoch: (expectedEpoch) => {
+        let cleared = false;
+        set((state) => {
+          if (state.epoch !== expectedEpoch || state.session === null) return state;
+          cleared = true;
+          return { session: null, authorityTransitioning: false, epoch: state.epoch + 1 };
+        });
+        return cleared;
+      },
     }),
     {
       name: 'session',
       storage: createJSONStorage(() => mmkvStorage),
+      // Epoch and in-flight transition state are process-local concurrency
+      // controls. Persisting either could strand a cold start in a transition
+      // that no longer has an owner.
+      partialize: (state) => ({ session: state.session, lastShopId: state.lastShopId }),
     },
   ),
 );
