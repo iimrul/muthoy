@@ -6,6 +6,16 @@ export class HttpError extends Error {
     public readonly status: number,
     message: string,
     public readonly code?: string,
+    /**
+     * Extra, non-secret fields merged into the error body.
+     *
+     * A2.3 needs exactly one thing here: the device authority snapshot that
+     * explains a refusal. A revoked installation has to be TOLD, and an error
+     * body is the only reply it gets — on the actor switch there is no session
+     * left to ask with, and on a gated sync route the request never reaches a
+     * handler that could return one. Never put a credential or a SQLSTATE here.
+     */
+    public readonly details?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -26,8 +36,9 @@ export class HttpError extends Error {
  *   undefined on every request, forever — and every check built on it (the
  *   permission gate, the revocation gate) was inert while appearing to run.
  *
- * `raw` is kept for the few fields that genuinely belong to the row rather than
- * the token, notably `phone_confirmed_at` for owner PIN recovery.
+ * `raw` is kept for fields that genuinely belong to the row. Historical
+ * `phone_confirmed_at` is deliberately NOT authentication evidence: enrollment
+ * and recovery use the signed AMR event on this token's current session.
  */
 export interface Caller {
   /** auth.uid() — the Supabase Auth account. */
@@ -40,8 +51,23 @@ export interface Caller {
   shopId: string | null;
   role: string | null;
   permissionVersion: number | null;
-  /** The phone Supabase itself verified, if this session came from an OTP. */
-  verifiedPhone: string | null;
+  /**
+   * A2.3. The `session_id` claim — the authoritative device identity.
+   *
+   * GoTrue mints one per session and every refreshed token carries the same
+   * value, so it survives token rotation and dies with the session. This is
+   * what auth_session_devices keys on, and it is why an authenticated request
+   * no longer needs (or is allowed) to say which installation it came from: a
+   * request body is written by the caller, a verified claim is not.
+   *
+   * Null for a token minted before GoTrue emitted the claim. That is the
+   * LEGACY case, and it is handled as an unbound session rather than as an
+   * error — refusing it outright would lock out every session in flight on the
+   * day this deploys.
+   */
+  authSessionId: string | null;
+  /** A recent phone-OTP event carried by this verified JWT's current session. */
+  freshPhoneOtp: { phone: string; authenticatedAt: number } | null;
   /** Row fields the onboarding gate needs; see _shared/devOnboarding.ts. */
   isAnonymous: boolean;
   email: string | null;
@@ -76,6 +102,51 @@ function decodeVerifiedClaims(token: string): Record<string, unknown> {
 function claimString(metadata: Record<string, unknown>, key: string): string | null {
   const value = metadata[key];
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/**
+ * OTP verification is useful as a step-up credential only briefly.
+ *
+ * Supabase signs `amr[{ method, timestamp }]`, `phone`, and `session_id` into
+ * the JWT. A refresh preserves the original AMR event, so its timestamp — not
+ * token issuance and never auth.users.phone_confirmed_at — is the age that
+ * matters. Five minutes is ample for the immediate registration/recovery call
+ * while making an old or replayed Owner session useless for enrollment.
+ */
+export const FRESH_PHONE_OTP_MAX_AGE_SECONDS = 5 * 60;
+const MAX_AUTH_CLOCK_SKEW_SECONDS = 30;
+
+function freshPhoneOtpFromClaims(
+  claims: Record<string, unknown>,
+  user: User,
+  nowSeconds: number,
+): Caller["freshPhoneOtp"] {
+  const sessionId = claimString(claims, "session_id");
+  const phone = claimString(claims, "phone");
+  if (!sessionId || !phone || user.phone !== phone || !Array.isArray(claims.amr)) {
+    return null;
+  }
+
+  let authenticatedAt: number | null = null;
+  for (const rawEntry of claims.amr) {
+    if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) continue;
+    const entry = rawEntry as Record<string, unknown>;
+    if (
+      entry.method === "otp"
+      && typeof entry.timestamp === "number"
+      && Number.isSafeInteger(entry.timestamp)
+      && entry.timestamp >= 0
+      && (authenticatedAt === null || entry.timestamp > authenticatedAt)
+    ) {
+      authenticatedAt = entry.timestamp;
+    }
+  }
+  if (authenticatedAt === null) return null;
+  const age = nowSeconds - authenticatedAt;
+  if (age < -MAX_AUTH_CLOCK_SKEW_SECONDS || age > FRESH_PHONE_OTP_MAX_AGE_SECONDS) {
+    return null;
+  }
+  return { phone, authenticatedAt };
 }
 
 export async function verifyCallerJwt(request: Request): Promise<Caller> {
@@ -139,7 +210,14 @@ export async function verifyCallerJwt(request: Request): Promise<Caller> {
       ?? (typeof data.user.app_metadata?.shop_id === "string" ? data.user.app_metadata.shop_id : null),
     role: claimString(metadata, "role"),
     permissionVersion: typeof version === "number" ? version : null,
-    verifiedPhone: data.user.phone_confirmed_at ? (data.user.phone ?? null) : null,
+    // Read from the TOP-LEVEL claims, not from app_metadata: session_id is
+    // minted by GoTrue itself, not by our access-token hook.
+    authSessionId: claimString(claims, "session_id"),
+    freshPhoneOtp: freshPhoneOtpFromClaims(
+      claims,
+      data.user,
+      Math.floor(Date.now() / 1000),
+    ),
     isAnonymous: data.user.is_anonymous === true,
     email: data.user.email ?? null,
     emailConfirmedAt: data.user.email_confirmed_at ?? null,
@@ -200,7 +278,21 @@ export async function assertCallerCurrent(caller: Caller): Promise<CallerRecord>
   const appUserId = requireCallerAppUserId(caller);
   const { data, error } = await supabaseAdmin
     .from("users")
-    .select("id, shop_id, permission_version, is_active, is_deleted, plan_suspended_at, roles!inner(name), shops!inner(billing_account_id, commercial_status, archived_at, is_deleted)")
+    // The `shops` embed is pinned to users.shop_id BY CONSTRAINT NAME, and it
+    // has to be. A2.3 added four tables that each carry a foreign key to both
+    // `users` and `shops` — shop_devices, shop_device_bindings,
+    // auth_session_devices and device_enrollment_holds. PostgREST reads any
+    // such table as a junction, so `users -> shops` stopped being one
+    // relationship and became five: the real many-to-one plus four
+    // many-to-many. An ambiguous embed is PGRST201, which this function
+    // reports as "Could not verify caller" — a 500 on EVERY authenticated
+    // action, for every user, the moment that migration lands.
+    //
+    // Revoking the API roles' access to those tables does not help: PostgREST
+    // resolves relationships from the schema, not from grants. Naming the
+    // constraint is what makes the embed mean one thing forever, whatever
+    // later migrations add alongside it.
+    .select("id, shop_id, permission_version, is_active, is_deleted, plan_suspended_at, roles!inner(name), shops!users_shop_id_fkey!inner(billing_account_id, commercial_status, archived_at, is_deleted)")
     .eq("id", appUserId)
     .maybeSingle();
 

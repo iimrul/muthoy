@@ -1,4 +1,5 @@
 import { FunctionsHttpError } from '@supabase/supabase-js';
+import { handleDeviceRevocation, type DeviceRevocationCode } from './deviceRevocation';
 import { supabase } from './supabaseClient';
 import { withAuthMutation } from './authMutation';
 
@@ -10,7 +11,17 @@ export type SyncControlCode =
   | 'access_invalidated'
   | 'shop_inactive'
   | 'hook_not_configured'
-  | 'request_failed_after_refresh';
+  | 'request_failed_after_refresh'
+  // A2.3. The server refused this INSTALLATION rather than this account.
+  // Revocations, which the device must persist and act on:
+  | 'device_revoked'
+  | 'binding_revoked'
+  // …and the one standing problem, meaning "sign in again on this device",
+  // never "you were cut off": the session is bound to no installation and the
+  // shop has started refusing those.
+  | 'device_session_unbound'
+  // The registry could not answer. Transient, retryable, never persisted.
+  | 'device_gate_unavailable';
 
 const AUTHORITATIVE_SERVER_CODES = new Set<SyncControlCode>([
   'account_inactive',
@@ -20,11 +31,35 @@ const AUTHORITATIVE_SERVER_CODES = new Set<SyncControlCode>([
   'shop_inactive',
 ]);
 
+/** Refusals the device must persist as authority and quarantine itself for. */
+export const DEVICE_REVOCATION_CODES = new Set<SyncControlCode>([
+  'device_revoked',
+  'binding_revoked',
+]);
+
+/**
+ * Refusals meaning this installation has to prove itself again.
+ *
+ * Kept strictly apart from the two above. A rotated secret and a revoked
+ * device look alike from here and mean opposite things: one is fixed by
+ * signing in, the other must NOT be, or a revocation would heal itself the
+ * next time somebody typed a PIN.
+ */
+export const DEVICE_REENROLMENT_CODES = new Set<SyncControlCode>([
+  'device_session_unbound',
+]);
+
+const DEVICE_CONTROL_CODES = new Set<SyncControlCode>([
+  ...DEVICE_REVOCATION_CODES,
+  ...DEVICE_REENROLMENT_CODES,
+]);
+
 interface FunctionErrorBody {
   code?: unknown;
   error?: unknown;
   actorUserId?: unknown;
   shopId?: unknown;
+  authority?: unknown;
 }
 
 export class SyncHaltedError extends Error {
@@ -34,6 +69,13 @@ export class SyncHaltedError extends Error {
     public readonly cause?: unknown,
     public readonly actorUserId?: string,
     public readonly shopId?: string,
+    /**
+     * A2.3. The device authority snapshot the server attached to a device
+     * refusal. This is the evidence the mirror is written from: a refusal
+     * without it would leave the device knowing it had been stopped but not
+     * why, and unable to persist the quarantine past this one request.
+     */
+    public readonly authority?: unknown,
   ) {
     super(message);
     this.name = 'SyncHaltedError';
@@ -69,6 +111,10 @@ export async function invokeSyncWithClaimRefresh(
   let refreshed = false;
 
   while (true) {
+    // No device identity is attached. The server derives this installation
+    // from the `session_id` claim of the token this call already carries, so
+    // sending one would amount to offering the caller's own opinion about its
+    // identity — which is exactly what the previous design got wrong.
     const { data, error } = await supabase.functions.invoke('sync', {
       body,
       signal: options.signal,
@@ -78,6 +124,41 @@ export async function invokeSyncWithClaimRefresh(
     }
 
     const details = await readFunctionsHttpErrorBody(error);
+    // A2.3. A device refusal halts immediately and carries its snapshot up.
+    // Before any retry or token refresh: refreshing a token cannot fix an
+    // installation the server has disowned, and re-sending the same request
+    // would only spend the budget proving that again.
+    if (
+      typeof details?.code === 'string'
+      && DEVICE_CONTROL_CODES.has(details.code as SyncControlCode)
+    ) {
+      const code = details.code as SyncControlCode;
+      const shopId = typeof details.shopId === 'string'
+        ? details.shopId
+        : typeof body.shopId === 'string' ? body.shopId : null;
+      const actorUserId = typeof details.actorUserId === 'string'
+        ? details.actorUserId
+        : null;
+      // THE CENTRAL POINT of routing this through one invoker: the revocation
+      // is persisted and the session closed HERE, for every guarded call,
+      // before the error is surfaced. It used to happen only in the sync
+      // engine's catch block — so an Owner revoking a handset mid-shift was
+      // acted on at the next sync cycle, and not at all if the person holding
+      // it was doing something the engine does not drive.
+      if (shopId && DEVICE_REVOCATION_CODES.has(code)) {
+        await handleDeviceRevocation(
+          shopId, actorUserId, code as DeviceRevocationCode, details.authority,
+        );
+      }
+      throw new SyncHaltedError(
+        typeof details.error === 'string' ? details.error : 'This device is not authorised',
+        code,
+        error,
+        actorUserId ?? undefined,
+        shopId ?? undefined,
+        details.authority,
+      );
+    }
     if (
       typeof details?.code === 'string'
       && AUTHORITATIVE_SERVER_CODES.has(details.code as SyncControlCode)

@@ -170,9 +170,10 @@ describe('owner PIN recovery is the only surviving OTP path', () => {
   test('it demands a verified phone on the caller token', () => {
     const body = code(RECOVER_PIN);
     // A session minted any other way — including one this endpoint just issued
-    // — carries no phone_confirmed_at, so Caller.verifiedPhone is null and it
-    // cannot be replayed.
-    expect(body).toMatch(/caller\.verifiedPhone/);
+    // — carries no recent OTP AMR event, so Caller.freshPhoneOtp is null and
+    // it cannot be replayed. Historical phone_confirmed_at is irrelevant.
+    expect(body).toMatch(/caller\.freshPhoneOtp/);
+    expect(code(SHARED_AUTH)).not.toMatch(/freshPhoneOtp:\s*data\.user\.phone_confirmed_at/);
   });
 
   test('it checks the token phone against the requested phone', () => {
@@ -181,7 +182,7 @@ describe('owner PIN recovery is the only surviving OTP path', () => {
     // attacker could OTP-verify their own foreign number and recover a
     // Bangladeshi owner's account with it.
     expect(code(RECOVER_PIN)).toMatch(
-      /!isSameBdPhone\(caller\.verifiedPhone, canonicalPhone\)/,
+      /!isSameBdPhone\(caller\.freshPhoneOtp\.phone, canonicalPhone\)/,
     );
     expect(code(RECOVER_PIN)).not.toMatch(/slice\(-10\)/);
   });

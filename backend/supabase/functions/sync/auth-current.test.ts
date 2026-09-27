@@ -12,7 +12,7 @@ import { assertCallerCurrent } from "./_shared/auth.ts";
 const caller = {
   authUserId: "auth-1", appUserId: "user-1", principalUserId: "principal-1",
   shopId: "shop-1", role: "staff", permissionVersion: 4,
-  billingAccountId: null, verifiedPhone: null, isAnonymous: false,
+  billingAccountId: null, freshPhoneOtp: null, isAnonymous: false,
   email: null, emailConfirmedAt: null, raw: {},
 } as unknown as Caller;
 

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   refreshSession: vi.fn(),
   requireConfiguration: vi.fn(),
+  recordBoundInstallation: vi.fn(),
 }));
 
 vi.mock('./supabaseClient', () => ({
@@ -15,6 +16,10 @@ vi.mock('./supabaseClient', () => ({
     auth: { refreshSession: mocks.refreshSession },
   },
 }));
+vi.mock('./deviceRegistry', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./deviceRegistry')>();
+  return { ...original, recordBoundInstallation: mocks.recordBoundInstallation };
+});
 
 const SHOP_ID = 'shop-1';
 const OWNER_ID = 'owner-1';
@@ -26,6 +31,19 @@ const FULL = {
   permission_version: 1,
   billing_account_id: 'billing-1',
   is_active: true,
+};
+const SECRET = 'a'.repeat(64);
+const LINK_RESPONSE = {
+  deviceSecret: SECRET,
+  deviceAuthority: {
+    shopId: SHOP_ID,
+    devicePublicId: 'installation-1',
+    known: true,
+    status: 'active',
+    registryVersion: 1,
+    enforced: false,
+    bindings: [{ actorUserId: OWNER_ID, status: 'active', bindingVersion: 1 }],
+  },
 };
 
 function token(appMetadata: Record<string, unknown>): string {
@@ -51,7 +69,8 @@ function refreshed(
 describe('linkDeviceToShop Owner token postcondition', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.invoke.mockResolvedValue({ data: {}, error: null });
+    mocks.invoke.mockResolvedValue({ data: LINK_RESPONSE, error: null });
+    mocks.recordBoundInstallation.mockResolvedValue(true);
     mocks.refreshSession.mockResolvedValue(refreshed(FULL));
   });
 
@@ -65,9 +84,35 @@ describe('linkDeviceToShop Owner token postcondition', () => {
       billingAccountId: 'billing-1',
     });
     expect(mocks.invoke).toHaveBeenCalledWith('sync', {
-      body: { action: 'link-device', shopId: SHOP_ID, ownerUserId: OWNER_ID },
+      body: {
+        action: 'link-device',
+        // A2.3. OTP registration is a credential proof, so it registers this
+        // installation and binds the session that completed it.
+        deviceRegistryVersion: 1,
+        devicePublicId: expect.any(String),
+        platform: expect.any(String),
+        model: expect.any(String),
+        osVersion: expect.any(String),
+        shopId: SHOP_ID,
+        ownerUserId: OWNER_ID,
+      },
     });
+    expect(mocks.recordBoundInstallation).toHaveBeenCalledWith(
+      SHOP_ID,
+      LINK_RESPONSE,
+      { required: true, expectedActorUserId: OWNER_ID },
+    );
+    expect(mocks.recordBoundInstallation.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.refreshSession.mock.invocationCallOrder[0]!);
     expect(mocks.refreshSession).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed before refresh when secure secret persistence fails', async () => {
+    mocks.recordBoundInstallation.mockRejectedValueOnce(new Error('secure storage unavailable'));
+
+    await expect(linkDeviceToShop(SHOP_ID, OWNER_ID))
+      .rejects.toThrow('secure storage unavailable');
+    expect(mocks.refreshSession).not.toHaveBeenCalled();
   });
 
   it('forwards the onboarding payload without changing normal calls', async () => {
@@ -82,6 +127,11 @@ describe('linkDeviceToShop Owner token postcondition', () => {
     expect(mocks.invoke).toHaveBeenCalledWith('sync', {
       body: {
         action: 'link-device',
+        deviceRegistryVersion: 1,
+        devicePublicId: expect.any(String),
+        platform: expect.any(String),
+        model: expect.any(String),
+        osVersion: expect.any(String),
         shopId: SHOP_ID,
         ownerUserId: OWNER_ID,
         onboarding,
@@ -109,6 +159,26 @@ describe('linkDeviceToShop Owner token postcondition', () => {
       'sync/link-device failed (HTTP 403): This account cannot be linked to that shop',
     );
     expect(mocks.refreshSession).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the safe administrator-approval instruction for an enrollment hold', async () => {
+    mocks.invoke.mockResolvedValue({
+      data: null,
+      error: new FunctionsHttpError(new Response(
+        JSON.stringify({
+          code: 'device_enrollment_held',
+          error: 'Another active Owner or Manager installation must approve this device',
+        }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      )),
+    });
+
+    const failure = await linkDeviceToShop(SHOP_ID, OWNER_ID).catch((error) => error);
+    expect(failure).toMatchObject({
+      status: 403,
+      code: 'device_enrollment_held',
+      serverMessage: 'Another active Owner or Manager installation must approve this device',
+    });
   });
 
   it('requires ownerUserId before invoking link-device', async () => {

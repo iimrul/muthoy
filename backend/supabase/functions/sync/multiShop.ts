@@ -1,5 +1,6 @@
 import { assertCallerCurrent, type Caller, HttpError } from "./_shared/auth.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
+import { assertShopNotBlocked, blockedShopsForSession } from "./deviceGuard.ts";
 
 /**
  * The stable auth identity, with NO fallback.
@@ -54,6 +55,10 @@ export async function switchShop(caller: Caller, body: Record<string, unknown>) 
   if (typeof shopId !== "string") throw new HttpError(400, "shopId is required");
   const current = await assertCallerCurrent(caller);
   if (!current.isOwner || !current.billingAccountId) throw new HttpError(403, "Owner access only");
+  // The router's shared guard covers the current shop. Switching also acts on
+  // a named TARGET shop, whose independent registration may be revoked even
+  // while this installation remains active in the current one.
+  await assertShopNotBlocked(caller, shopId);
   // Switching is the one multi-shop action a non-premium owner may still
   // perform, and only back onto the account's primary shop — the single shop
   // Free covers. Anything else would strand a downgraded owner outside their
@@ -64,7 +69,11 @@ export async function switchShop(caller: Caller, body: Record<string, unknown>) 
   if (account.primary_shop_id !== shopId) await assertPremiumAccount(current.billingAccountId);
   const principalUserId = principal(caller);
   const { data: membership, error } = await supabaseAdmin.from("shop_memberships")
-    .select("shop_id,actor_user_id,role,billing_account_id,shops!inner(archived_at,is_deleted)")
+    // Hinted defensively. This embed starts from shop_memberships, which no
+    // A2.3 table joins to, so it still resolves today — but the next table
+    // carrying keys to both sides would break it exactly as they broke the
+    // users -> shops embed, and silently.
+    .select("shop_id,actor_user_id,role,billing_account_id,shops!shop_memberships_shop_id_fkey!inner(archived_at,is_deleted)")
     .eq("principal_user_id", principalUserId).eq("shop_id", shopId).eq("is_active", true).maybeSingle();
   if (error) throw new HttpError(500, "Could not switch shop");
   const memberShop = membership?.shops as unknown as { archived_at: string | null; is_deleted: boolean } | undefined;
@@ -100,6 +109,12 @@ export async function mutateOwnedShop(caller: Caller, body: Record<string, unkno
   if (typeof shopId !== "string" || !["rename","archive","restore"].includes(String(operation))) {
     throw new HttpError(400, "Invalid shop operation");
   }
+  // A2.3. Against the TARGET shop, not the active one. Renaming and archiving
+  // are administration of a shop the caller is frequently not standing in, so
+  // the shared guard — which checks the caller's current shop — would validate
+  // the wrong thing entirely and let a handset revoked in the shop being
+  // archived do the archiving.
+  await assertShopNotBlocked(caller, shopId);
   const { data: account, error: accountError } = await supabaseAdmin.from("billing_accounts")
     .select("primary_shop_id").eq("id", billingAccountId).single();
   if (accountError) throw new HttpError(500, "Could not update shop");
@@ -154,5 +169,40 @@ export async function shopSummaries(caller: Caller, body: Record<string, unknown
     p_billing_account_id: billingAccountId, p_business_date: businessDate,
   });
   if (error) throw new HttpError(500, "Could not load shop summaries");
-  return { rows: data ?? [], verifiedAt: new Date().toISOString() };
+  if (!Array.isArray(data)) {
+    throw new HttpError(503, "Could not verify shop summaries", "shop_summary_unverified");
+  }
+  const rows = data as { shop_id?: unknown }[];
+  if (rows.some((row) => (
+    !row
+    || typeof row !== "object"
+    || Array.isArray(row)
+    || typeof row.shop_id !== "string"
+    || row.shop_id.length === 0
+  ))) {
+    // A row without its target shop cannot be sent through the per-shop device
+    // policy. Dropping it or coercing `undefined` would leak an unverified
+    // commercial aggregate, so the whole response fails closed.
+    throw new HttpError(503, "Could not verify shop summaries", "shop_summary_unverified");
+  }
+
+  // A2.3. Every row is one shop's takings for the day — cash counted, sales
+  // totalled. Treating this as exempt "navigation" was wrong: it is the most
+  // concentrated commercial data in the product, and it spans shops, so the
+  // shared guard cannot help. That guard keys on the caller's CURRENT shop,
+  // and a handset revoked in shop B would sail through it while standing in
+  // shop A.
+  //
+  // Each target shop is therefore judged on its own enforcement state, against
+  // this session's own installation as registered in THAT shop. A blocked shop
+  // is omitted and named, so the app can tell the owner which till needs
+  // signing in again rather than quietly under-reporting the day.
+  const shopIds = rows.map((row) => row.shop_id as string);
+  const blocked = await blockedShopsForSession(caller, shopIds);
+
+  return {
+    rows: rows.filter((row) => !blocked.has(String(row.shop_id))),
+    blockedShopIds: [...blocked],
+    verifiedAt: new Date().toISOString(),
+  };
 }

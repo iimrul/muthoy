@@ -20,7 +20,7 @@ import { type Caller, HttpError } from "./auth.ts";
 //      already permits it; it never enables anything on its own.
 //
 // Production satisfies neither, so production accepts exactly one thing: an
-// Owner whose phone Supabase itself verified by OTP.
+// Owner whose CURRENT session carries a recent signed OTP AMR event.
 
 export type EnvironmentReader = (name: string) => string | undefined;
 
@@ -93,7 +93,7 @@ export function isDevHarnessCaller(caller: Caller): boolean {
 /**
  * THE onboarding gate. Returns how the caller qualified, or throws 403.
  *
- * Order is deliberate: a verified phone is checked first and needs no project
+ * Order is deliberate: a fresh phone OTP is checked first and needs no project
  * exception, so the production path is never routed through DEV logic. The
  * project check then precedes the identity check, so a DEV-shaped identity on
  * a production project is refused before its marker is even examined.
@@ -105,7 +105,7 @@ export function assertOwnerOnboardingIdentity(
   caller: Caller,
   read: EnvironmentReader = defaultRead,
 ): OwnerOnboardingMode {
-  if (caller.verifiedPhone) return "otp";
+  if (caller.freshPhoneOtp) return "otp";
   if (devOnboardingEnabled(read) && isDevHarnessCaller(caller)) return "dev_harness";
   throw new HttpError(
     403,

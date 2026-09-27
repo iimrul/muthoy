@@ -23,9 +23,9 @@ Wave-2 state. Treat this as the plan it is until that rehearsal signs it off.
 > document stops matching it.
 
 <!-- rollback-classification:start -->
-**A: 6 · B: 13 · C: 7 — of 26.**
+**A: 6 · B: 15 · C: 7 — of 28.**
 
-PostgreSQL classifications: `20260813000000_initial_schema` (C) · `20260817000000_admin_read_grants` (A) · `20260817000100_sync_roles_read_grant` (A) · `20260818000000_inventory_movement_ledger` (B) · `20260818000100_sync_batches_stock_server_derived` (B) · `20260819000000_staff_device_login` (C) · `20260821000000_phase_b1_navigation_roles` (B) · `20260821010000_phase_b2_sales_inventory_sync` (C) · `20260822000000_owner_dashboard_credit_period` (A) · `20260822010000_b3_group1_shop_settings` (B) · `20260823000000_b3_group2_payment_note` (A) · `20260823010000_b3_group2_cash_reconcile` (A) · `20260823020000_b3_group2_sync_completion` (B) · `20260823030000_b3_group3_expense_category_taxonomy` (C) · `20260823040000_b3_groups456_schema_additions` (B) · `20260823050000_b3_groups456_sync_completion` (B) · `20260824000000_b3_group7_purchase_return_sync` (B) · `20260825000000_inventory_add_purchase_sync` (B) · `20260827000000_b3_group8_report_indexes` (C) · `20260827010000_b3_group9_sale_tax_snapshot` (B) · `20260831000000_b4_commercial_platform` (C) · `20260905000000_b4_canonical_onboarding` (B) · `20260907000000_h7_security_hardening` (B) · `20260907010000_h7_revoke_api_role_truncate` (A) · `20260907020000_h7_fix_pass_b` (C) · `20260909000000_h7_actor_binding_staff_reactivation` (B)
+PostgreSQL classifications: `20260813000000_initial_schema` (C) · `20260817000000_admin_read_grants` (A) · `20260817000100_sync_roles_read_grant` (A) · `20260818000000_inventory_movement_ledger` (B) · `20260818000100_sync_batches_stock_server_derived` (B) · `20260819000000_staff_device_login` (C) · `20260821000000_phase_b1_navigation_roles` (B) · `20260821010000_phase_b2_sales_inventory_sync` (C) · `20260822000000_owner_dashboard_credit_period` (A) · `20260822010000_b3_group1_shop_settings` (B) · `20260823000000_b3_group2_payment_note` (A) · `20260823010000_b3_group2_cash_reconcile` (A) · `20260823020000_b3_group2_sync_completion` (B) · `20260823030000_b3_group3_expense_category_taxonomy` (C) · `20260823040000_b3_groups456_schema_additions` (B) · `20260823050000_b3_groups456_sync_completion` (B) · `20260824000000_b3_group7_purchase_return_sync` (B) · `20260825000000_inventory_add_purchase_sync` (B) · `20260827000000_b3_group8_report_indexes` (C) · `20260827010000_b3_group9_sale_tax_snapshot` (B) · `20260831000000_b4_commercial_platform` (C) · `20260905000000_b4_canonical_onboarding` (B) · `20260907000000_h7_security_hardening` (B) · `20260907010000_h7_revoke_api_role_truncate` (A) · `20260907020000_h7_fix_pass_b` (C) · `20260909000000_h7_actor_binding_staff_reactivation` (B) · `20260923000000_a23_device_registry` (B) · `20260926000000_a23_persistent_enrollment_holds` (B)
 
 SQLite migration-time data writes: `0001` · `0002` · `0006` · `0007` · `0009` · `0010` · `0011` · `0012` · `0018` · `0024` · `0029`
 
@@ -69,7 +69,7 @@ Two rules sit above the table:
 - **C — Forward-only.** The migration wrote or destroyed DATA. Recovery is
   restore-from-backup ([../checks/restore_drill.md](../checks/restore_drill.md)).
 
-**A: 6 · B: 13 · C: 7 — of 26.**
+**A: 6 · B: 15 · C: 7 — of 28.**
 
 The "why" column is the migration's own migration-time statement counts, with
 function and trigger bodies excluded.
@@ -102,6 +102,8 @@ function and trigger bodies excluded.
 | `20260907010000_h7_revoke_api_role_truncate` | A | 1 REVOKE |
 | `20260907020000_h7_fix_pass_b` | **C** | 1 INSERT, 1 DROP TRIGGER, 2 function, 1 trigger, 1 table, 1 GRANT, 4 REVOKE |
 | `20260909000000_h7_actor_binding_staff_reactivation` | B | 1 function, 1 table, 1 GRANT, 2 REVOKE |
+| `20260923000000_a23_device_registry` | B | 20 function, 1 trigger, 5 table, 7 index, 1 ADD COLUMN, 1 GRANT, 6 REVOKE |
+| `20260926000000_a23_persistent_enrollment_holds` | B | 2 function, 1 GRANT, 2 REVOKE — persistent hold constraint + one-shot approval state machine |
 
 ### What changed from the first audit
 

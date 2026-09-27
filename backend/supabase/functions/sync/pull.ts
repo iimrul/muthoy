@@ -1,5 +1,10 @@
 import { assertCallerCurrent, type Caller, HttpError, requireCallerShop } from "./_shared/auth.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
+// From the POLICY module, not deviceRegistry.ts: that file has a runtime
+// `npm:bcryptjs` import, and pulling it into this graph broke pull.test.ts,
+// which imports this module for real. (_shared/auth.ts gets away with an npm:
+// specifier only because its import is type-only and is erased.)
+import { authorityRefusesActor } from "./deviceRegistryPolicy.ts";
 
 const PAGE_SIZE = 500;
 const SYNC_TABLE_NAMES = new Set([
@@ -24,6 +29,31 @@ function parseCursor(value: unknown): Cursor | null {
   return cursor as Cursor;
 }
 
+/**
+ * A2.3. This SESSION's registry snapshot, for the pull envelope.
+ *
+ * Keyed on the verified session id, never on a device id from the body — the
+ * previous version took one and would happily describe whichever installation
+ * the caller named.
+ *
+ * Returns null rather than throwing when the session is unbound or the lookup
+ * fails: a pull must not start failing because the registry had a bad moment,
+ * and an absent snapshot means "no answer", which the client treats as leaving
+ * its mirror exactly as it found it. Silence is never evidence of revocation.
+ */
+async function pullDeviceAuthority(
+  shopId: string,
+  authSessionId: string | null,
+): Promise<Record<string, unknown> | null> {
+  if (!authSessionId) return null;
+  const { data, error } = await supabaseAdmin.rpc("a23_session_authority", {
+    p_auth_session_id: authSessionId,
+    p_shop_id: shopId,
+  });
+  if (error || !data || typeof data !== "object") return null;
+  return data as Record<string, unknown>;
+}
+
 export async function pull(caller: Caller, body: Record<string, unknown>) {
   if (typeof body.shopId !== "string") throw new HttpError(400, "shopId is required");
   const shopId = requireCallerShop(caller, body.shopId);
@@ -32,6 +62,33 @@ export async function pull(caller: Caller, body: Record<string, unknown>) {
   // keep downloading sales, prices and customer balances after the owner has
   // revoked them.
   const actor = await assertCallerCurrent(caller);
+
+  // A2.3. The device snapshot rides along on the ordinary sync cycle, which is
+  // what makes an ordinary sync cycle the thing that teaches a device about
+  // changes to its own standing — no extra round trip, no separate schedule to
+  // get wrong.
+  //
+  // REFUSING is no longer this function's job. deviceGuard.ts now runs ahead
+  // of every handler and rejects a revoked installation outright, which is the
+  // only version of the rule a tampered client cannot decline to run. What
+  // remains here is the reporting half: a device still allowed through gets
+  // told the current version and binding list, so a revocation landing between
+  // two cycles is mirrored before it matters.
+  //
+  // The refusal below is kept as defence in depth. If it ever fires the guard
+  // was bypassed, and answering zero rows beats shipping a shop's history to
+  // an installation the registry has disowned.
+  const device = await pullDeviceAuthority(shopId, caller.authSessionId);
+  if (authorityRefusesActor(device, actor.appUserId)) {
+    return {
+      changes: [],
+      hasMore: false,
+      nextCursor: parseCursor(body.since),
+      accessVersion: actor.permissionVersion,
+      device,
+    };
+  }
+
   const since = parseCursor(body.since);
   const { data, error } = await supabaseAdmin.rpc("sync_pull_changes_b2", {
     p_shop_id: shopId, p_app_user_id: actor.appUserId,
@@ -66,6 +123,10 @@ export async function pull(caller: Caller, body: Record<string, unknown>) {
     // later page succeed under different permissions; the client detects this
     // change and restarts from page one instead of mixing access snapshots.
     accessVersion: actor.permissionVersion,
+    // Absent when the request carried no device id, or when the registry could
+    // not answer. The client treats an absent snapshot as "no answer" and
+    // leaves its mirror untouched — a lookup fault is not evidence of anything.
+    ...(device ? { device } : {}),
     ...(readableTables
       ? {
         readableTables,

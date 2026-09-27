@@ -13,7 +13,12 @@ import {
   type Role,
 } from '../domain/permissions';
 import { normalizeBdPhone } from '@muthoy/validation';
-import { DuplicatePinError, NotAuthorizedError, PinLockedOutError } from './errors';
+import {
+  DeviceAccessRevokedError,
+  DuplicatePinError,
+  NotAuthorizedError,
+  PinLockedOutError,
+} from './errors';
 import {
   pinAttemptScope,
   pinAttemptStatus,
@@ -23,6 +28,7 @@ import { withQuantizedPinTiming } from './pinTiming';
 import { recordChange, stampUpdatedAt } from './sync-helpers';
 import { readLastShopIdSync } from '../state/sessionStore';
 import { commercialSchemaInstalled, isUserWithinStaffLimit } from './commercial';
+import { readDeviceAccessObjection, type DeviceAccessObjection } from './deviceRegistry';
 
 // db/auth.ts — the ONLY file that will touch Drizzle/SQLite for auth
 // (DEVELOPMENT_RULES.md). Hashing itself never happens here — that's
@@ -768,6 +774,28 @@ const liveLoginWhere = () => and(
 );
 
 async function toLocalPinSession(user: LoginUserRow): Promise<LocalPinSession | null> {
+  // A2.3, and FIRST, before any other eligibility work.
+  //
+  // The credential has already verified by the time this runs — that is what
+  // makes this the right place. A revoked binding is a commercial refusal, not
+  // a guess, so it lands on the same `matched === true, session === null` path
+  // as a deleted role or an over-limit staff member and therefore spends NO
+  // H-4 attempt budget. Charging for it would let one revoked account burn the
+  // shop-wide budget its colleagues still need on the same handset.
+  //
+  // Reads the local mirror only. SQLite is the source of truth for what this
+  // device's own screens may do (CLAUDE.md rule 1), and this path must stay
+  // fully offline — the mirror already holds the last authoritative answer,
+  // and db/deviceRegistry.ts is the only thing allowed to update it.
+  //
+  // A mirror that will not answer reports `read_failed`, and that refuses the
+  // login too. These two tables are the only local record that a handset was
+  // cut off, so treating an unreadable one as "no objection" would make
+  // corrupting them the way to undo a revocation. A database predating
+  // migration 0030 is a separate, allowed case and yields null.
+  const objection = await readDeviceAccessObjection(user.shopId, user.id);
+  if (objection) return null;
+
   const b4 = commercialSchemaInstalled();
   const roleRow = await db
     .select({ name: roles.name })
@@ -894,7 +922,11 @@ export async function verifyPin(
       throw new PinLockedOutError(lock.retryAfterMs);
     }
 
-    const { matched, session } = await resolveLocalPinSession(rawPin, lastShopId, timing);
+    const { matched, session, objection } = await resolveLocalPinSession(
+      rawPin,
+      lastShopId,
+      timing,
+    );
     // Counted on the CREDENTIAL, not on the outcome. A correct PIN belonging to
     // a row that cannot open a session — role deleted, over the plan's staff
     // limit — is a commercial refusal, not a guess, and must not spend budget
@@ -910,6 +942,12 @@ export async function verifyPin(
     if (!matched) {
       recordPinAttemptFailure(scope);
     }
+    // A2.3, and strictly AFTER the accounting above, which it never reaches:
+    // an objection only exists when `matched` is true, so this throw can never
+    // follow a spent attempt. Reported as its own error rather than as a null
+    // session, because "your PIN is right and this device is cut off" is not
+    // something a person can act on if it reads as "Incorrect PIN".
+    if (objection) throw new DeviceAccessRevokedError(objection);
     return session;
   });
 }
@@ -925,7 +963,11 @@ async function resolveLocalPinSession(
   rawPin: string,
   lastShopId: string | null,
   timing?: AuthTimingTrace,
-): Promise<{ matched: boolean; session: LocalPinSession | null }> {
+): Promise<{
+  matched: boolean;
+  session: LocalPinSession | null;
+  objection: DeviceAccessObjection | null;
+}> {
   const lookup = async () => {
     const tag = await createPinLookupTag(rawPin);
     const matches = await selectLoginUsers().where(
@@ -976,12 +1018,16 @@ async function resolveLocalPinSession(
   }
 
   // Corrupted/old duplicate PINs must never choose an identity by row order.
-  if (verified.length !== 1) return { matched: false, session: null };
+  if (verified.length !== 1) return { matched: false, session: null, objection: null };
   const match = verified[0];
-  if (!match) return { matched: false, session: null };
+  if (!match) return { matched: false, session: null, objection: null };
   const { user, tag } = match;
   await storeCurrentPinLookup(user, tag);
-  return { matched: true, session: await toLocalPinSession(user) };
+  // A2.3. Read once here, where the identity IS known, so the refusal can name
+  // itself. toLocalPinSession re-checks it as a backstop for every other
+  // caller; this read exists purely so the screen can say something true.
+  const objection = await readDeviceAccessObjection(user.shopId, user.id);
+  return { matched: true, session: await toLocalPinSession(user), objection };
 }
 
 /**

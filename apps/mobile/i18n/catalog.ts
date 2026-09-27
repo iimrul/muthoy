@@ -139,6 +139,55 @@ export const catalog = {
     pinIncorrect: "Incorrect PIN — try again",
     pinSigningIn: "Signing in…",
     pinLockedRetryPrefix: "Too many incorrect attempts — try again in ",
+    // A2.3. Distinct from pinIncorrect on purpose: the PIN was right, and
+    // saying "Incorrect PIN" to somebody whose access was revoked is a refusal
+    // they can neither understand nor act on.
+    pinDeviceRevoked: "This device has been removed from the shop. Ask the shop owner to register it again.",
+    pinBindingRevoked: "Your access on this device has been removed. Ask the shop owner to restore it.",
+    pinDeviceAuthorityUnreadable:
+      "This device could not confirm its access. Sign in with your phone number to continue.",
+    devicesTitle: "Registered devices",
+    devicesSubtitle:
+      "Each row is one app installation. Reinstalling the app, or clearing its data, registers a new one — remove the old entry when that happens.",
+    devicesEmpty: "No devices are registered for this shop yet.",
+    devicesThisDevice: "This device",
+    devicesLoadFailed: "Could not load registered devices.",
+    devicesActionFailed: "Could not update device access.",
+    devicesStatusActive: "Active",
+    devicesStatusRevoked: "Removed",
+    devicesRevokeDevice: "Remove device",
+    devicesRestoreDevice: "Restore device",
+    devicesRevokeBinding: "Remove",
+    devicesRestoreBinding: "Restore",
+    devicesRevokeConfirmTitle: "Remove this device?",
+    devicesRevokeConfirmBody:
+      "Everyone signed in on it will be signed out and will need the shop owner to register it again.",
+    devicesRevokeBindingConfirmTitle: "Remove this person from this device?",
+    devicesRevokeBindingConfirmBody:
+      "They will not be able to sign in on this device. Their access on other devices is unchanged.",
+    devicesEnrolledPrefix: "Registered ",
+    devicesLastSeenPrefix: "Last used ",
+    devicesNeverSeen: "Not used yet",
+    devicesUnnamedInstallation: "Unnamed installation",
+    devicesEnforcementTitle: "Only registered devices",
+    devicesEnforcementOnBody:
+      "On. A device that is not registered here cannot sync this shop's data, even if someone signs in on it.",
+    devicesEnforcementOffBody:
+      "Off. Removing a device signs it out, but a device that has never registered can still sync. Turn this on once every till you use appears in the list above.",
+    devicesEnforcementEnable: "Turn on",
+    devicesEnforcementDisable: "Turn off",
+    devicesEnforcementConfirmTitle: "Only allow registered devices?",
+    devicesEnforcementConfirmBody:
+      "Any till not in the list above will stop syncing until it signs in with a phone number. Check the list first.",
+    devicesEnforcementFailed: "Could not change this setting.",
+    devicesPendingTitle: "Replacement installation requests",
+    devicesPendingBody:
+      "A removed account cannot register a replacement until another active Owner or Manager installation approves it.",
+    devicesApprovalRequested: "Waiting for approval",
+    devicesApprovalWaiting: "Approved — waiting for this person to retry",
+    devicesApprove: "Approve",
+    devicesApproved: "Approved",
+    devicesApprovalFailed: "Could not approve this installation.",
     dashboardLoadFailed: "Dashboard failed to load.",
     moreOptions: "More Options",
     switchUser: "Switch user",
@@ -873,6 +922,52 @@ export const catalog = {
     pinIncorrect: "ভুল পিন — আবার চেষ্টা করুন",
     pinSigningIn: "সাইন ইন হচ্ছে…",
     pinLockedRetryPrefix: "অনেকবার ভুল পিন — আবার চেষ্টা করুন ",
+    pinDeviceRevoked: "এই ডিভাইসটি দোকান থেকে সরানো হয়েছে। দোকানের মালিককে আবার নিবন্ধন করতে বলুন।",
+    pinBindingRevoked: "এই ডিভাইসে আপনার অ্যাক্সেস সরানো হয়েছে। দোকানের মালিককে ফিরিয়ে দিতে বলুন।",
+    pinDeviceAuthorityUnreadable:
+      "এই ডিভাইস তার অ্যাক্সেস নিশ্চিত করতে পারেনি। চালিয়ে যেতে ফোন নম্বর দিয়ে সাইন ইন করুন।",
+    devicesTitle: "নিবন্ধিত ডিভাইস",
+    devicesSubtitle:
+      "প্রতিটি সারি একটি অ্যাপ ইনস্টলেশন। অ্যাপ আবার ইনস্টল করলে বা ডেটা মুছলে নতুন একটি নিবন্ধিত হয় — তখন পুরোনোটি সরিয়ে দিন।",
+    devicesEmpty: "এই দোকানের জন্য এখনও কোনো ডিভাইস নিবন্ধিত নেই।",
+    devicesThisDevice: "এই ডিভাইস",
+    devicesLoadFailed: "নিবন্ধিত ডিভাইস লোড করা যায়নি।",
+    devicesActionFailed: "ডিভাইস অ্যাক্সেস পরিবর্তন করা যায়নি।",
+    devicesStatusActive: "সক্রিয়",
+    devicesStatusRevoked: "সরানো হয়েছে",
+    devicesRevokeDevice: "ডিভাইস সরান",
+    devicesRestoreDevice: "ডিভাইস ফেরান",
+    devicesRevokeBinding: "সরান",
+    devicesRestoreBinding: "ফেরান",
+    devicesRevokeConfirmTitle: "এই ডিভাইসটি সরাবেন?",
+    devicesRevokeConfirmBody:
+      "এতে সাইন ইন করা সবাই সাইন আউট হয়ে যাবেন এবং দোকানের মালিককে আবার নিবন্ধন করতে হবে।",
+    devicesRevokeBindingConfirmTitle: "এই ডিভাইস থেকে এই ব্যক্তিকে সরাবেন?",
+    devicesRevokeBindingConfirmBody:
+      "তিনি এই ডিভাইসে সাইন ইন করতে পারবেন না। অন্য ডিভাইসে তাঁর অ্যাক্সেস অপরিবর্তিত থাকবে।",
+    devicesEnrolledPrefix: "নিবন্ধিত ",
+    devicesLastSeenPrefix: "সর্বশেষ ব্যবহার ",
+    devicesNeverSeen: "এখনও ব্যবহার হয়নি",
+    devicesUnnamedInstallation: "নামহীন ইনস্টলেশন",
+    devicesEnforcementTitle: "শুধু নিবন্ধিত ডিভাইস",
+    devicesEnforcementOnBody:
+      "চালু আছে। এখানে নিবন্ধিত নয় এমন ডিভাইস এই দোকানের ডেটা সিঙ্ক করতে পারবে না, কেউ সাইন ইন করলেও নয়।",
+    devicesEnforcementOffBody:
+      "বন্ধ আছে। কোনো ডিভাইস সরালে সেটি সাইন আউট হয়, তবে কখনও নিবন্ধিত হয়নি এমন ডিভাইস এখনও সিঙ্ক করতে পারে। আপনার সব কাউন্টার উপরের তালিকায় এলে এটি চালু করুন।",
+    devicesEnforcementEnable: "চালু করুন",
+    devicesEnforcementDisable: "বন্ধ করুন",
+    devicesEnforcementConfirmTitle: "শুধু নিবন্ধিত ডিভাইস অনুমতি দেবেন?",
+    devicesEnforcementConfirmBody:
+      "উপরের তালিকায় নেই এমন কাউন্টার ফোন নম্বর দিয়ে সাইন ইন না করা পর্যন্ত সিঙ্ক বন্ধ থাকবে। আগে তালিকাটি দেখে নিন।",
+    devicesEnforcementFailed: "এই সেটিং পরিবর্তন করা যায়নি।",
+    devicesPendingTitle: "বিকল্প ইনস্টলেশনের অনুরোধ",
+    devicesPendingBody:
+      "সরানো অ্যাকাউন্ট অন্য একটি সক্রিয় মালিক বা ম্যানেজার ইনস্টলেশনের অনুমোদন ছাড়া বিকল্প ডিভাইস নিবন্ধন করতে পারবে না।",
+    devicesApprovalRequested: "অনুমোদনের অপেক্ষায়",
+    devicesApprovalWaiting: "অনুমোদিত — আবার চেষ্টা করার অপেক্ষায়",
+    devicesApprove: "অনুমোদন করুন",
+    devicesApproved: "অনুমোদিত",
+    devicesApprovalFailed: "এই ইনস্টলেশন অনুমোদন করা যায়নি।",
     dashboardLoadFailed: "ড্যাশবোর্ড লোড করা যায়নি।",
     moreOptions: "আরও বিকল্প",
     switchUser: "ব্যবহারকারী বদলান",

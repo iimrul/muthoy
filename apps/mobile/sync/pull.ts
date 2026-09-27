@@ -9,6 +9,7 @@ import {
   setLastPulledCursor,
   type PullCursor,
 } from "./cursorStore";
+import { applyPulledDeviceAuthority } from "./deviceRegistry";
 import { invokeSyncWithClaimRefresh, SyncHaltedError } from "./invoke";
 import { isSupabaseConfigured } from "./supabaseClient";
 import type { AuthTimingTrace } from "../dev/authTiming";
@@ -34,6 +35,14 @@ interface PullPage {
     actorUserId: string;
     saleHistoryScope: "all" | "own";
   };
+  /**
+   * A2.3. The server's view of THIS installation, volunteered on every page.
+   *
+   * Absent means the server had no answer — an older function, or a registry
+   * lookup that failed — and the device leaves its mirror exactly as it found
+   * it. Silence is never evidence of revocation.
+   */
+  device?: unknown;
 }
 
 const SYNC_TABLE_NAMES = new Set<string>(HYDRATION_TABLE_ORDER);
@@ -149,6 +158,7 @@ function parsePullPage(value: unknown): PullPage {
     };
   });
   const access = parseAccessAnswer(value as Record<string, unknown>);
+  const device = (value as Record<string, unknown>).device;
 
   return {
     changes,
@@ -156,7 +166,24 @@ function parsePullPage(value: unknown): PullPage {
     nextCursor: parseCursor(response.nextCursor),
     accessVersion: response.accessVersion as number,
     ...(access ? { access } : {}),
+    ...(device === undefined ? {} : { device }),
   };
+}
+
+/**
+ * A2.3. A revocation that arrives mid-cycle stops the cycle there and then.
+ *
+ * Distinct from SyncHaltedError because nothing has FAILED: the page was
+ * served, the snapshot was recorded, and what changed is that this actor may
+ * no longer act. The orchestrator catches it, quarantines the session and
+ * signs out — rather than letting the remaining pages land and the outbox
+ * drain under standing the server has just withdrawn.
+ */
+export class DeviceAccessRevokedDuringSyncError extends Error {
+  constructor(readonly objection: 'device_revoked' | 'binding_revoked') {
+    super('This device is no longer authorised for this shop');
+    this.name = 'DeviceAccessRevokedDuringSyncError';
+  }
 }
 
 async function fetchPullPage(
@@ -164,11 +191,17 @@ async function fetchPullPage(
   cursor: PullCursor | null,
   timing?: AuthTimingTrace,
   includeAccess = false,
+  actorUserId?: string,
 ): Promise<PullPage> {
   const { data, error } = await invokeSyncWithClaimRefresh({
     action: "pull",
     shopId,
     since: cursor,
+    // A2.3. The installation id and its proof are attached by
+    // invokeSyncWithClaimRefresh for every call naming a shop, so this body no
+    // longer carries them by hand. Pull used to send the id itself and push
+    // sent nothing at all, and that asymmetry is exactly what the shared
+    // attachment exists to remove.
     // Only the first page of a cycle asks. The answer costs a permission
     // resolution per table server-side. Every page still carries accessVersion;
     // a mid-cycle change makes this cycle restart from its original cursor.
@@ -178,7 +211,18 @@ async function fetchPullPage(
   if (error) {
     throw error;
   }
-  return parsePullPage(data);
+  const page = parsePullPage(data);
+  // Recorded BEFORE the rows are applied, so a revoked device persists its own
+  // quarantine even if applying the page then fails. sync/deviceRegistry.ts
+  // enforces the monotonic guard, so a stale page cannot lift a revocation.
+  const objection = await applyPulledDeviceAuthority(shopId, page.device, actorUserId);
+  // And acted on immediately. Waiting until the cycle finished would let the
+  // remaining pages apply, and the outbox drain behind them, under an
+  // authority the snapshot in hand has already withdrawn.
+  if (objection === 'device_revoked' || objection === 'binding_revoked') {
+    throw new DeviceAccessRevokedDuringSyncError(objection);
+  }
+  return page;
 }
 
 /**
@@ -252,6 +296,7 @@ async function pullFullHydration(
   shopId: string,
   isCancelled: () => boolean,
   timing?: AuthTimingTrace,
+  actorUserId?: string,
 ): Promise<void> {
   const discoveredChanges: PullChange[] = [];
   let cursor: PullCursor | null = null;
@@ -264,7 +309,7 @@ async function pullFullHydration(
     if (isCancelled()) {
       return;
     }
-    const page = await fetchPullPage(shopId, cursor, timing, first);
+    const page = await fetchPullPage(shopId, cursor, timing, first, actorUserId);
     accessVersion = requireStableAccessVersion(accessVersion, page);
     access = access ?? page.access;
     first = false;
@@ -316,6 +361,7 @@ async function pullIncremental(
   shopId: string,
   initialCursor: PullCursor,
   isCancelled: () => boolean,
+  actorUserId?: string,
 ): Promise<void> {
   let cursor = initialCursor;
   // Rows whose parent has not arrived yet ride along to the next page's apply.
@@ -331,7 +377,7 @@ async function pullIncremental(
     if (isCancelled()) {
       return;
     }
-    const page = await fetchPullPage(shopId, cursor, undefined, first);
+    const page = await fetchPullPage(shopId, cursor, undefined, first, actorUserId);
     accessVersion = requireStableAccessVersion(accessVersion, page);
     access = access ?? page.access;
     first = false;
@@ -370,6 +416,16 @@ export async function pullChanges(
   cursorOverride?: PullCursor | null,
   isCancelled: () => boolean = () => false,
   timing?: AuthTimingTrace,
+  /**
+   * A2.3. Whose standing this cycle runs under.
+   *
+   * Optional because the hydration paths (first login, shop switch, staff
+   * reactivation) run at a moment when the actor is being established rather
+   * than acting, and there is no session to close. Supplied by the background
+   * engine, which is the case that matters: that is where a revocation lands
+   * between cycles and must stop the one in flight.
+   */
+  actorUserId?: string,
 ): Promise<void> {
   if (!isSupabaseConfigured) {
     if (cursorOverride === null) {
@@ -383,9 +439,9 @@ export async function pullChanges(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       if (initialCursor === null) {
-        await pullFullHydration(shopId, isCancelled, timing);
+        await pullFullHydration(shopId, isCancelled, timing, actorUserId);
       } else {
-        await pullIncremental(shopId, initialCursor, isCancelled);
+        await pullIncremental(shopId, initialCursor, isCancelled, actorUserId);
       }
       return;
     } catch (error) {

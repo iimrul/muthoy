@@ -2,6 +2,7 @@ import * as bcrypt from "npm:bcryptjs@3";
 import { assertCallerCurrent, HttpError, verifyCallerJwt } from "./_shared/auth.ts";
 import type { ServerAuthTiming } from "./_shared/authTiming.ts";
 import { mintSessionForAppUser, resolveOrCreateAuthUserId } from "./_shared/identity.ts";
+import { prepareInstallationEnrollment, tryBindSession } from "./deviceBinding.ts";
 import { normalizeBdPhone } from "./_shared/phone.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
 import {
@@ -112,7 +113,10 @@ async function findUserByPhone(phone: string) {
   const { data, error } = await supabaseAdmin
     .from("users")
     .select(
-      "id, shop_id, pin_hash, pin_set_at, is_active, is_deleted, plan_suspended_at, roles!inner(name,is_deleted), shops!inner(archived_at,is_deleted)",
+      // Constraint-hinted for the same reason as assertCallerCurrent's embed:
+      // A2.3's four device tables each reference users AND shops, so an
+      // unqualified `shops` embed is PGRST201 and this sign-in would 500.
+      "id, shop_id, pin_hash, pin_set_at, is_active, is_deleted, plan_suspended_at, roles!inner(name,is_deleted), shops!users_shop_id_fkey!inner(archived_at,is_deleted)",
     )
     .eq("phone", phone)
     .eq("is_active", true)
@@ -188,6 +192,15 @@ export async function deviceLogin(
     },
   );
 
+  // Credential succeeded. Resolve the installation policy before minting a
+  // token: a held actor must not receive a usable unbound session, and this is
+  // also where the exact replacement id is recorded for administrator review.
+  const installation = await timed(
+    timing,
+    "device_enrollment_preflight",
+    () => prepareInstallationEnrollment(user.shopId, user.id, body),
+  );
+
   const authUserId = await resolveOrCreateAuthUserId(user.id, timing);
 
   // Both shop selectors are overwritten BEFORE minting. The access-token hook
@@ -238,11 +251,34 @@ export async function deviceLogin(
     throw new HttpError(500, "Could not start session");
   }
 
+  // A2.3. The credential is proved and the session exists, so THIS is the
+  // moment the installation is registered and the session bound to it.
+  //
+  // It happens here rather than on a route of its own because a separate
+  // `device-enroll` action was reachable by any live access token — a stolen
+  // token could mint itself a brand-new trusted installation. Binding is only
+  // ever a consequence of proving something, and phone + PIN is that proof.
+  //
+  // This is also the recovery path for an enforced shop: a fresh handset, or
+  // one whose session was cut, gets back in by proving a credential here. No
+  // guarded request has to succeed first, which is what stops enforcement from
+  // becoming a trap.
+  const bound = await tryBindSession(
+    mintedCaller.authSessionId,
+    user.shopId,
+    user.id,
+    body,
+    installation,
+  );
+
   return {
     shopId: user.shopId,
     userId: user.id,
     role: user.roleName,
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
+    ...(bound
+      ? { deviceSecret: bound.deviceSecret, deviceAuthority: bound.authority }
+      : {}),
   };
 }

@@ -5,6 +5,12 @@ import {
   needsDevHarnessStamp,
 } from "./_shared/devOnboarding.ts";
 import { assertBindingTarget, ensureAuthBinding } from "./_shared/identity.ts";
+import {
+  prepareInstallationEnrollment,
+  tryBindSession,
+  type InstallationDetails,
+} from "./deviceBinding.ts";
+import { assertSessionMayBindInstallation } from "./deviceGuard.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
 import { onboardOwner } from "./onboarding.ts";
 
@@ -19,6 +25,11 @@ export async function linkDevice(caller: Caller, body: Record<string, unknown>) 
   // Supabase-verified phone; the DEV harness is admitted solely by a
   // server-side project secret the client cannot influence.
   const mode = assertOwnerOnboardingIdentity(caller);
+  let installation: InstallationDetails | null | undefined;
+  if (caller.appUserId) {
+    await assertSessionMayBindInstallation(caller, shopId, caller.appUserId);
+    installation = await prepareInstallationEnrollment(shopId, caller.appUserId, body);
+  }
   // The owner's users.id, sent by the device because that row has not synced up
   // yet at this point in registration. Optional so an older client still links;
   // without it the owner simply has no binding until their first device-login,
@@ -110,6 +121,13 @@ export async function linkDevice(caller: Caller, body: Record<string, unknown>) 
       await onboardOwner(shopId, ownerUserId, body.onboarding);
     }
     await assertBindingTarget(ownerUserId, shopId, "owner");
+    // A recent OTP is necessary but a session already bound to a revoked
+    // installation is still revoked. Check that standing before this exempt
+    // recovery route can register an attacker-selected replacement id.
+    if (!caller.appUserId) {
+      await assertSessionMayBindInstallation(caller, shopId, ownerUserId);
+      installation = await prepareInstallationEnrollment(shopId, ownerUserId, body);
+    }
     await ensureAuthBinding(ownerUserId, caller.authUserId);
     const { error: billingError } = await supabaseAdmin.rpc("b4_ensure_owner_billing_account", {
       p_owner_user_id: ownerUserId,
@@ -118,5 +136,23 @@ export async function linkDevice(caller: Caller, body: Record<string, unknown>) 
     if (billingError) throw new HttpError(500, "Could not initialize owner billing");
   }
 
-  return { shopId };
+  // A2.3. OTP registration is a credential proof, so the session that
+  // completed it is bound to this installation here.
+  //
+  // The session is the CALLER'S own — Supabase verified the phone that created
+  // it — rather than one minted in this function. That makes registration the
+  // third strong-auth entry point alongside device-login and PIN recovery, and
+  // it is why no separate `device-enroll` route needs to exist: every way of
+  // registering an installation now sits immediately behind a proof.
+  const owner = ownerUserId ?? caller.appUserId;
+  const bound = owner
+    ? await tryBindSession(caller.authSessionId, shopId, owner, body, installation)
+    : null;
+
+  return {
+    shopId,
+    ...(bound
+      ? { deviceSecret: bound.deviceSecret, deviceAuthority: bound.authority }
+      : {}),
+  };
 }

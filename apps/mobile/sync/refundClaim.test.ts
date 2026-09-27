@@ -41,6 +41,10 @@ describe("online refund authority", () => {
       body: {
         action: "refund-claim",
         ...input,
+        // A2.3. `deviceId` is the separate, older refund-claim binding and
+        // stays. No device IDENTITY is attached: the server derives the
+        // installation from the session id inside the token, so a body field
+        // naming one would be the caller asserting its own authority.
         deviceId: "device-a",
       },
     });

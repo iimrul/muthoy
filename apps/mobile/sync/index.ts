@@ -1,10 +1,15 @@
 import { AppState, InteractionManager, type AppStateStatus } from 'react-native';
 import { subscribeToReconnect, hasNetworkConnection } from './connectivity';
-import { pullChanges } from './pull';
+import { DeviceAccessRevokedDuringSyncError, pullChanges } from './pull';
 import { pushPendingRows } from './push';
 import { nudgeBillingHydration } from './billingHydration';
-import { SyncHaltedError } from './invoke';
-import { enforceAuthoritativeRevocation } from './revocation';
+import { DEVICE_REVOCATION_CODES, SyncHaltedError } from './invoke';
+import { applyPulledDeviceAuthority } from './deviceRegistry';
+import {
+  enforceAuthoritativeRevocation,
+  enforceDeviceRevocation,
+  validateDeviceBeforePush,
+} from './revocation';
 import { startInventoryRealtime, stopInventoryRealtime } from './realtime';
 import { startForegroundScheduler } from './scheduler';
 import { notifyIfSyncIsStuck, notifySyncHalted } from './stuckNotification';
@@ -28,7 +33,14 @@ export type SyncSkipReason =
   | 'offline'
   | 'cancelled'
   | 'push_incomplete'
-  | 'auth_actor_mismatch';
+  | 'auth_actor_mismatch'
+  // A2.3. The registry refused this installation before anything was pushed.
+  | 'device_revoked'
+  // A2.3. No AUTHORITATIVE answer about this device — the registry could not
+  // be reached, or the local mirror would not answer. Standing is unknown, so
+  // the cycle fails closed rather than pushing on an assumption. Retryable,
+  // and nothing is persisted: an outage may not manufacture a revocation.
+  | 'device_authority_unverified';
 
 export type SyncCycleResult =
   | { status: 'completed'; completedAt: string }
@@ -73,6 +85,38 @@ async function notifySyncCompletion(
 // seconds the incoming user spends typing their PIN.
 let generation = 0;
 
+/**
+ * A2.3. Records the authority the server attached to a device refusal.
+ *
+ * The push path has no response body to carry a snapshot in, so without this a
+ * device revoked between two cycles would be refused on every push and never
+ * learn WHY — retrying forever against a door that is not going to open. The
+ * snapshot rides on the 403 instead, lands in the encrypted mirror here, and
+ * the quarantine that follows survives the restart.
+ *
+ * Returns true when this was a revocation the cycle should stop for. A
+ * re-enrolment code is not: it means the proof was wrong rather than
+ * withdrawn, so the next authoritative login re-enrols and nothing is
+ * quarantined on the strength of a rotated secret.
+ */
+async function applyServerDeviceRefusal(
+  shopId: string,
+  actorUserId: string,
+  error: SyncHaltedError,
+): Promise<boolean> {
+  if (!DEVICE_REVOCATION_CODES.has(error.code)) return false;
+  const objection = await applyPulledDeviceAuthority(shopId, error.authority, actorUserId);
+  await enforceDeviceRevocation(
+    shopId,
+    actorUserId,
+    // The shared invoker rejects a refusal with no valid snapshot before this
+    // point; the fallback only preserves the explicit server refusal if a
+    // newer snapshot contains no actor-specific objection.
+    objection ?? (error.code === 'device_revoked' ? 'device_revoked' : 'binding_revoked'),
+  );
+  return true;
+}
+
 async function runCycle(
   shopId: string,
   startedAt: number,
@@ -116,6 +160,33 @@ async function runCycle(
     useSessionStore.getState().login({ ...localActor, cloudActorConfirmed: false });
     return { status: 'skipped', reason: 'auth_actor_mismatch' };
   }
+  // A2.3. The device gate, BEFORE the outbox drains.
+  //
+  // This is the reconnect-ordering fix, and the order is the entire fix. A
+  // cycle used to push first and learn about its own standing from the pull
+  // that followed — so a handset revoked while it was offline would reconnect,
+  // upload every sale it had rung up in the meantime, and only then be told it
+  // had been cut off. By then the writes were committed and the revocation was
+  // retrospective.
+  //
+  // Now: fetch the authoritative answer, apply it to the encrypted mirror, run
+  // H-10's quarantine if it objects, and only a device that survives all three
+  // reaches pushPendingRows. An unreachable server writes nothing and changes
+  // nothing, so an outage cannot invent a revocation — or forget one.
+  const validation = await validateDeviceBeforePush(shopId, localActor.userId);
+  if (validation.kind === 'revoked') {
+    return { status: 'skipped', reason: 'device_revoked' };
+  }
+  if (validation.kind === 'unverified') {
+    // The registry did not answer, so this device's standing is unknown and
+    // NOTHING goes out: no push, no attachment upload, no pull, no billing.
+    // Retryable and unpersisted — the next cycle simply asks again.
+    return { status: 'skipped', reason: 'device_authority_unverified' };
+  }
+  if (isCancelled()) {
+    return { status: 'skipped', reason: 'cancelled' };
+  }
+
   try {
     // The token goes DOWN into push and pull. Checking it only out here would
     // leave their internal batch/page loops running after a handover — the
@@ -130,7 +201,7 @@ async function runCycle(
     const { uploadPendingPrescriptionAttachments } = await import('./attachments');
     await uploadPendingPrescriptionAttachments(shopId, isCancelled);
     if (isCancelled()) return { status: 'skipped', reason: 'cancelled' };
-    await pullChanges(shopId, undefined, isCancelled);
+    await pullChanges(shopId, undefined, isCancelled, undefined, localActor.userId);
     if (isCancelled()) return { status: 'skipped', reason: 'cancelled' };
     // A fresh Owner may become visible during this push. Signal the dedicated
     // hydration controller after pull; its per-session mutex owns the request,
@@ -143,7 +214,21 @@ async function runCycle(
     await notifySyncCompletion(shopId, completedAt);
     return { status: 'completed', completedAt };
   } catch (error) {
+    // A2.3. A revocation learned mid-cycle closes the session there and then,
+    // rather than letting the rest of the cycle run on withdrawn authority.
+    if (error instanceof DeviceAccessRevokedDuringSyncError && !isCancelled()) {
+      await enforceDeviceRevocation(shopId, localActor.userId, error.objection);
+      return { status: 'skipped', reason: 'device_revoked' };
+    }
     if (error instanceof SyncHaltedError && !isCancelled()) {
+      // A2.3. The server refused the INSTALLATION. The snapshot it attached is
+      // the only evidence the device gets, so it is recorded before anything
+      // else — including on the push path, where there is no pull response to
+      // carry it.
+      const deviceObjection = await applyServerDeviceRefusal(shopId, localActor.userId, error);
+      if (deviceObjection) {
+        return { status: 'skipped', reason: 'device_revoked' };
+      }
       if (error.shopId === shopId && error.actorUserId) {
         await enforceAuthoritativeRevocation(shopId, error.code, error.actorUserId);
       }

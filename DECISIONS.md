@@ -2137,3 +2137,580 @@ all verified on device.
 **Next Wave 2 sub-batch: A2.3 device registry** — deliberately deferred out of
 Batch 1 and unstarted. It is the remaining piece of H-10; H-10 is not fully
 closed until it ships.
+
+---
+
+## 2026-09-23 — A2.3: the server-side device registry
+
+**Implemented, tests green, NOT yet validated on a physical device.** H-10
+remains open until that validation is done.
+
+### What the server did not know
+
+Until this batch "device" meant nothing to the server. A random id in plain
+MMKV (`native/deviceId.ts`) tagged held sales and refund claims and was never
+transmitted; the only thing binding a handset to a shop was whichever Supabase
+session happened to be stored on it. Two things followed.
+
+**There was no way to revoke one handset.** A lost phone could only be answered
+by deactivating the people who used it — which also locks them out of every
+other device they own.
+
+**A shared till could not hold two identities.** Because the session *is* the
+binding and a session names one actor, handing the phone from Owner to Staff
+sent the incoming person to `/device-login` to retype a phone number, which per
+Volume 4 Staff are never given. That is the "DEV-harness limit" recorded at the
+end of the Batch 1 sign-off, and it was never really a harness limit: it was
+this.
+
+### What it now knows
+
+`shop_devices` (one row per installation per shop), `shop_device_bindings` (one
+per actor on it, independently revocable) and an append-only
+`device_registry_events`, all behind SECURITY DEFINER functions with RLS on and
+no permissive policy — no API role touches the tables in either direction.
+
+**A PIN-only handover.** On an installation already registered to the shop, the
+device secret issued at enrolment plus the target actor's PIN is enough for the
+server to mint that actor's session. Both are verified server-side; the secret
+constant-time, the PIN with bcrypt, behind a two-key rate limiter. A handover
+now costs four digits.
+
+### Decisions worth recording
+
+**Device identity is INSTALL-scoped, and every surface says so.** Clearing app
+data or reinstalling produces a new `device_public_id` and therefore a new row.
+Android offers no identifier both stable across a data clear and scoped to this
+app: `ANDROID_ID` resets on factory reset and is keyed to the signing key, and
+Keystore entries die with app data. Hardware attestation would close it and was
+explicitly deferred. The UI calls these *registered installations* and the
+Owner gets a list so orphans can be pruned. A later policy pass added an
+actor+shop enrolment hold, so a revoked actor cannot use a new install id to
+erase the meaning of revocation; the hold rule is recorded below.
+
+**Deny by revocation, never allow by enrolment.** An unknown installation for a
+non-held actor is adopted on credential-proven first contact. Existing legacy
+sessions do not become illegal until enforcement is explicitly enabled, so
+deploying the migration alone cannot lock a live shop out of its own till.
+
+**Revocation does not heal itself.** Re-enrolling a revoked device or binding
+is refused even with perfect credentials — whoever holds a lost phone usually
+also knows a PIN. Only an explicit, audited Owner/Manager restore brings it
+back, and restoring a device does *not* restore the people who were cut off
+with it; each account is restored on its own evidence.
+
+**The mirror is SQLite, not MMKV.** The locked design says the MMKV quarantine
+is not authoritative, so the newest security state does not go in the one store
+that is plaintext and trivially clearable. H-3 already encrypts SQLite with a
+Keystore-wrapped key. A monotonic version guard discards replayed snapshots, an
+"unknown device" answer never clears a revocation, and a failed request writes
+nothing at all — the D1 lesson: an outage is not a revocation.
+
+**A revoked binding spends no H-4 attempt budget.** The credential matched, so
+the refusal is commercial, not a guess. Charging for it would let one revoked
+account burn the shop-wide budget its colleagues still need on the same
+handset. It is reported as its own error rather than "Incorrect PIN", because a
+refusal nobody can act on reads as the app being broken.
+
+**SHA-256, not bcrypt, for the device secret.** bcrypt's work factor exists to
+slow guessing of low-entropy human input; against 32 CSPRNG bytes it buys
+nothing and costs ~300ms on the handover path. The PIN in the same request
+stays bcrypt, because a PIN is exactly what bcrypt is for.
+
+**Owner and Manager by ROLE, not by the `staff_manage` permission.** A Manager
+is usually the person standing in the shop when a handset goes missing. An
+Owner may grant `staff_management` to an individual Staff member, and that must
+not silently confer device revocation — the server enforces the role, and the
+screen checks the same thing so a permission-granted Staff member never sees a
+screen the server would then refuse.
+
+### Review pass, same day — ten blockers, all fixed
+
+The first cut of this batch recorded device standing and then told the DEVICE
+about it, trusting the app to act on what it had been told. Every guarantee
+above rested on the client choosing to cooperate, and a revoked handset holding
+a still-valid access token — the exact artefact a thief walks away with —
+cooperates only until somebody modifies the app. What follows is what changed.
+
+**The registry is now a server-side gate.** `deviceGuard.ts` runs once in
+`index.ts`, after JWT verification and before any handler, on every action that
+carries shop data. The JWT proves *who*; the device secret proves *where from*.
+One guard, one call site, and `deviceRegistryPolicy.ts` holds two lists —
+guarded and explicitly-exempt — that a test reads back against the router, so a
+route added later cannot arrive ungated. The exempt list is short and each
+entry carries its reason: they are the paths by which an installation
+establishes or repairs standing (`device-enroll` *issues* the proof;
+`device-authority` is how a refused device learns why), plus cross-shop
+navigation the gate cannot key correctly.
+
+**Enforcement became a switch somebody throws.** The first cut stamped
+`devices_enforced_at` on first enrolment. That reads as harmless and is not: in
+a three-till pharmacy the first handset to update would enforce the whole shop,
+and the two tills still on the previous build — which send no proof because
+they have none — would stop syncing mid-trading. Enrolment now only adds a
+registration. `a23_set_device_enforcement` is the sole writer of that column,
+demands a live Owner or Manager, and refuses unless the installation asking is
+itself registered and bound, so throwing the switch cannot be the act that
+locks you out of the screen holding it. Turning it *off* is deliberately not
+symmetric — that is how somebody undoes a mistake, and requiring a registered
+device to do it would make the mistake permanent.
+
+The two halves stay separate on purpose. Revocation bites always, enforced or
+not. Absence — no device id, an unknown one, a missing secret — bites only when
+enforced. In the unenforced state a tampered client can still dodge revocation
+by not naming its device, which is precisely the pre-A2.3 world; enforcement is
+what removes that move, and it is the shop's decision to make. Stated plainly
+because it is the one place where "server-side enforcement" is conditional.
+
+**The limiter reserves instead of recording.** The old shape asked "are you
+locked?", spent ~300ms of bcrypt, then recorded the failure — three statements
+with two windows in them. Twenty parallel requests all read the same
+pre-increment count and all passed, and because the lock armed only once the
+count *exceeded* the budget, a budget of five bought six guesses. Nothing
+counted attempts that rotated the device or actor id, both of which arrive in
+the request body, so an attacker who never reused a key spent unlimited server
+bcrypt. `a23_reserve_attempts` now charges every budget first, in one plpgsql
+function holding a row lock per key, locks at `>=` the limit, and adds an
+IP-or-global dimension the caller does not choose. Every lockout answers with
+the same refusal a wrong PIN gets — a 429 on one key and a 401 on another told
+an attacker which identifier they had guessed right.
+
+**Reconnect ordering.** A cycle used to push first and learn its own standing
+from the pull that followed, so a handset revoked while offline reconnected,
+uploaded every sale it had rung up, and was told afterwards. Now
+`validateDeviceBeforePush` fetches the authoritative answer, writes it to the
+encrypted mirror, runs H-10's quarantine if it objects, and only a device that
+survives all three reaches the outbox. A revocation arriving mid-pull raises
+`DeviceAccessRevokedDuringSyncError` and closes the session there rather than
+letting the remaining pages land.
+
+**A revocation learned with no session persists anyway.** The actor switch is
+unauthenticated by necessity, so its refusal body is the only channel there is.
+The server attaches the authority snapshot to `device_revoked` /
+`binding_revoked`, and the client writes it to SQLite before raising. It
+previously depended on a follow-up authenticated refresh — the one thing a
+device in that state cannot reliably do — so the quarantine lasted exactly as
+long as the screen did. The same snapshot rides the gate's 403, which is how
+the push path, with no response body of its own, learns the same thing.
+
+**One snapshot, one SQLite transaction.** Device row and every binding commit
+together. Written separately, a crash between them left `registry_version`
+already advanced while a binding the same snapshot revoked was still stored as
+active — and the monotonic guard would then reject the re-sent snapshot as
+stale, leaving the device permanently holding a revoked account as live.
+
+**An unreadable mirror no longer reads as permission.** `read_failed` is a
+third state, not null. These two tables are the only local evidence a handset
+was cut off, so returning "no objection" on a read fault made corrupting them
+the way to undo a revocation. Callers fail closed; nothing persists a
+quarantine on evidence that could not be read, which is the D1 lesson pointing
+the other way. A database predating migration 0030 stays a separate, allowed
+case.
+
+**Manager access, stated once.** The devices screen was gated on
+`staff_manage`, which an Owner can grant to an individual Staff member — so
+somebody could pass the route check and then be refused by the screen and by
+every server call behind it, and "can edit the rota" implied "can un-revoke a
+stolen phone". A `deviceAdmin` gate kind now expresses the same rule the server
+does, in `DATA_ACCESS_GATES`, `useDeviceAdminAccess` and
+`a23_assert_device_admin`.
+
+Two things the new tests found on their own: the binding-integrity trigger was
+not `SECURITY DEFINER`, so it depended on always being fired from inside
+another definer function — true today, and an integrity check that fails open
+the first time it is not. And `ROLLBACK.md` stated its headline twice, with
+only the generated copy checked; the hand-maintained one still read
+`A: 6 - B: 13 - C: 7 - of 26`. The drift test now checks every headline-shaped
+string in all three documents and every statement count in the hand-written
+per-migration table.
+
+### Second review pass — the trust model was wrong, and was replaced
+
+The first two passes hardened a design that asked the wrong question. The
+server read `devicePublicId` and `deviceSecret` out of the REQUEST BODY and
+checked them against the registry — which is to say, it asked the caller which
+device it was, then verified that answer against a credential stored in the
+same app storage the caller controlled. A revoked handset could send a
+different id, send none at all, or send the id of a device it had watched a
+colleague use. Everything built on top was sound; the foundation was not.
+
+**The session is now the device identity.** An auth session is bound to an
+installation at the moment it is minted, by the flow that proved the
+credential, and `auth_session_devices` records the mapping. A protected request
+derives its device and its binding from the `session_id` claim of its own
+verified JWT. There is no parameter a caller can supply —
+`assertDeviceAuthority` takes the caller and nothing else, and a test asserts
+it is never handed the body.
+
+Two consequences, and they are the whole design:
+
+**Revocation is immediate, always.** Revoke a device or a binding and every
+session bound to it is refused on the next request — no enforcement flag, no
+client cooperation, no waiting for a sync cycle.
+
+**Enforcement only decides the fate of the UNBOUND.** A session with no binding
+is legacy: minted before this shipped, or by a flow that proved nothing. It
+keeps working until the shop enforces and is refused afterwards.
+`devices_enforced_at` means exactly "unbound legacy sessions are no longer
+accepted" — never "revocation starts working". The previous pass had the two
+conflated, which is why revocation needed the flag in order to bite.
+
+**The JWT-only enrolment bypass is gone.** There was an authenticated
+`device-enroll` route: any live access token could call it and register a
+brand-new trusted installation, so a stolen token did not merely inherit a
+device — it could mint itself one. The route no longer exists.
+`a23_enroll_device` is granted to NOBODY and is reachable only through
+`a23_bind_auth_session`, which cannot run without binding the session that just
+proved a credential. Registration now happens inside device-login, OTP
+registration, OTP PIN recovery and the device-secret actor switch, and the
+installation travels with the credential rather than in a later call.
+
+**Recovery survives enforcement for non-revoked actors.** A fresh handset
+proves a PIN, which binds it, which admits it. A revoked actor is intentionally
+different: its hold requires approval from another active administrator
+installation or the future manual recovery path.
+
+**Cross-shop stopped checking the wrong shop.** `shop-summaries` returns every
+shop's takings and `shop-mutate` renames and archives shops the caller is not
+standing in, so validating either against the CURRENT shop was meaningless — a
+handset revoked in shop B sailed through while looking at shop A. Both now go
+through `a23_blocked_shops`, which resolves this session's installation and
+looks it up again under each target shop by its public id, because one handset
+in two shops is two independently revocable rows. A blocked shop is omitted
+from the summary and named, so the owner is told which till needs signing in
+again rather than quietly shown a smaller day.
+
+**Reconnect fails closed on silence.** `validateDeviceBeforePush` used to fall
+through to the local mirror when the refresh failed, so a device that could not
+reach the registry pushed anyway on whatever it last heard — exactly what a
+stolen handset would arrange to be stale. Fresh remote validation is now
+mandatory before push, attachments, pull or billing, and an unreachable
+registry yields `unverified`: nothing goes out, nothing is persisted, the next
+cycle retries. An outage may not manufacture a revocation any more than it may
+excuse one.
+
+**Revocation persistence moved to the shared invoker.** It lived in the sync
+engine's catch block, so it ran only for work the engine drove; a revocation
+arriving on a device-list, a billing check or a refund claim was surfaced as a
+generic failure and the mirror left untouched. `handleDeviceRevocation` now
+hangs off `invokeSyncWithClaimRefresh` and runs before the error escapes, so
+any guarded call is enough to close the session — and a caller that swallows
+the error is still safe.
+
+**The SQLite monotonic comparison moved inside the transaction.** It sat
+outside, with awaits between the read and the write, so two snapshots in flight
+— an ordinary overlap of a pull page and a refresh — could interleave: the
+stale one read version 1, lost the thread while the revocation committed
+version 9, then wrote ACTIVE back over it. Verified by regressing the
+implementation: the burst test ends on version 2 instead of 12.
+
+**Abuse controls stopped trusting a client header.** `x-forwarded-for` is a
+list whose first hop the client writes, so keying a rate limit on it let an
+attacker mint a fresh budget per request. `cf-connecting-ip` is what Cloudflare
+sets from the connection it accepted; when it is absent the fallback is a
+server-controlled global bucket, never a request field. And the abuse bucket is
+no longer cleared on success — it counts requests rather than failures, and
+resetting it would hand anybody holding one valid PIN an unlimited budget for
+guessing the rest. That last one was a real bug the new test caught: the edit
+meant to fix it in the previous pass had silently failed to apply.
+
+**Enforcement enablement verifies the session.** Owner or Manager, from a
+session that is bound, to an active installation, with an active binding, whose
+recorded secret digest still matches the device's current one. The last
+condition matters: a colleague signing in on the same handset rotates the
+secret, and a session left holding the old one could otherwise throw a switch
+that immediately locked it out.
+
+**Manager UX.** Managers never see `/settings`, so the devices screen existed
+for them in policy and nowhere in the UI. A `deviceAdminOnly` More-menu entry
+now shows it to Owner and Manager by ROLE — deliberately not hung off
+`staff_manage`, which an Owner can grant to a Staff member.
+
+One structural note: session binding lives in its own `deviceBinding.ts` rather
+than in `deviceRegistry.ts`, because that file imports `npm:bcryptjs` for the
+actor switch and a runtime npm: specifier cannot be loaded by the Node test
+runner even transitively. Importing it from the three login flows broke all
+three suites at collection. Same split, same reason, as `deviceLoginPolicy.ts`.
+
+### Final security pass — credential freshness is an event, not an account flag
+
+`phone_confirmed_at` says only that this account proved a phone sometime in its
+history. It grants no device authority. OTP enrolment and recovery now require
+the current verified JWT to carry a `session_id` plus a signed `amr` entry whose
+method is `otp`, whose timestamp is within five minutes (with a small clock-skew
+allowance), and whose signed phone matches the authoritative Auth user. Missing,
+stale, future, magic-link or mismatched evidence is refused before onboarding or
+binding. A bound session is also checked for device/binding revocation before
+the credential flow may rotate or reissue installation authority.
+
+The final pass also made the RPC boundary typed and fail-closed: null or malformed
+authority/gate/blocked-shop answers are `device_gate_unavailable`, while a legacy
+unbound session is represented explicitly. `shop-switch` and `shop-create` now
+run through the shared session-bound gate, and target-shop checks resolve known
+device and binding revocation before considering enforcement. Therefore
+`devices_enforced_at` controls only acceptance of an unknown legacy session.
+
+An unauthenticated actor-switch revocation now accepts only a complete,
+well-formed authoritative snapshot, commits its device and binding rows in one
+SQLite transaction under the monotonic version guards, and only then applies
+the H-10 quarantine. If the snapshot write fails, quarantine is not fabricated;
+if it succeeds, no later authenticated refresh is required.
+
+### Final enrolment policy — revocation survives reinstall
+
+Explicit device or binding revocation now creates an actor+shop enrolment hold.
+The hold survives a fresh `device_public_id`, OTP, PIN recovery and historical
+or current phone verification. Those prove the person, but do not overrule an
+administrator's explicit decision that the actor may no longer add an
+installation.
+
+The credential flow records the exact replacement installation being
+requested. Only another active, session-bound Owner or Manager installation
+may approve that exact id; the source installation cannot approve its own
+replacement. Enrolment consumes the approval. A changed id invalidates it.
+The sole-admin revoked-device case therefore remains blocked until the future
+dedicated/manual recovery path exists; A2.3 deliberately does not invent one.
+
+A2.3-capable clients always send `deviceRegistryVersion` and
+`devicePublicId`. Omission is a malformed current flow, not permission to mint
+an unbound session. Only an explicitly legacy client in an unenforced shop may
+retain the old unbound behavior; enforcement fails that case closed.
+
+Hard deletion of a device row is blocked by explicit RESTRICT references from
+session mappings, bindings, audit events and enrolment holds. A bound revoked
+session therefore cannot be transformed into a legacy unbound session by
+deleting the registry row.
+
+### Verified
+
+`backend/supabase/pgtest/a23-device-registry.pgtest.ts` (76) executes the real
+migration against real Postgres: the session gate across bound / unbound /
+revoked / mismatched, revocation biting with enforcement OFF, a revoked session
+unable to name a different device, legacy sessions before and after
+enforcement, the absence of any reachable enrolment entry point, fresh-device
+recovery into an enforced shop, cross-shop blocking per target shop, the
+enforcement switch refusing unbound and stale-secret sessions, the limiter's
+off-by-one and its behaviour under 20 parallel guesses, and the complete
+API-role / table / function grant matrix across all five tables, including the
+internal trigger/function surface and the actor+shop enrolment hold.
+
+`apps/mobile/db/a23-device-registry.sqlite.test.ts` (30) proves the local half
+on real SQLite: the zero-budget guarantee, an aborted snapshot rolling back
+whole, a forced read failure refusing the login without spending budget, a
+revocation surviving with no session anywhere, and concurrent old/new snapshots
+resolving to the newest regardless of completion order.
+
+`backend/supabase/functions/sync/deviceRegistryPolicy.test.ts` (61) drives the
+gate through every combination of enforced x bound x device x binding status,
+proves as a PROPERTY that enforcement changes the answer only for unbound
+sessions, proves no routed action escapes classification using a parser that
+handles both quote styles, and executes the requester-IP rule against a spoofed
+`x-forwarded-for`.
+
+`backend/supabase/functions/sync/deviceBinding.test.ts` (9) executes the
+credential-flow preflight: missing capable-client identity, held replacement
+ids, malformed RPC responses, enforced legacy sessions and bind failures all
+fail without silently returning an unbound session.
+
+`apps/mobile/sync/invoke.test.ts` (13) proves revocation is persisted by the
+shared invoker on any guarded call, before the error escapes, and not for a
+merely unbound session.
+
+`apps/mobile/sync/index.test.ts` covers reconnect ordering: validation before
+the first pushed row, nothing at all leaving a revoked device, and nothing
+leaving — or being quarantined — when the registry cannot be reached.
+
+### Owed
+
+**Real-device validation has not been done.** The acceptance test is a shared
+handset switching Owner → Staff → Owner by PIN alone with no phone prompt,
+plus binding revoke, device revoke, restart persistence, reactivation, and a
+WiFi-drop that writes no quarantine. The review pass adds two more: throwing
+the enforcement switch from an enrolled handset and confirming an unenrolled
+one stops syncing, and confirming the switch refuses to arm from a handset that
+is not itself registered. Until that passes on hardware, A2.3 is implemented,
+not signed off, and **H-10 stays open**.
+
+**Enforcement ships OFF for every existing shop**, by construction — nothing in
+this migration sets `devices_enforced_at`. That is deliberate and is the reason
+deploying this cannot strand a till.
+
+What it costs is now much smaller than it was, and the earlier version of this
+note was wrong about it. Revocation no longer depends on the switch: any
+session BOUND to a revoked device or binding is refused whether or not the shop
+enforces, and it cannot dodge that by declining to name its device, because the
+device is read from the session id inside its own token. What the switch still
+decides is only the fate of sessions that were never bound — minted before this
+shipped, or by a flow that proved nothing. Those keep working until an Owner or
+Manager turns enforcement on, which is what makes the rollout additive.
+
+The Vitest **worker RPC timeout** still surfaces as one unhandled error on a
+full run. Pre-existing CI-hygiene issue, present in the baseline before any
+A2.3 test existed; not an A2.3 defect.
+
+---
+
+## 2026-09-27 — A2.3 device registry: SIGNED OFF on hardware; H-10 CLOSED
+
+Two real defects surfaced between the design above and a working till, both
+found against a live shop rather than inferred. Both are fixed, tested, and
+now confirmed on hardware. **H-10 is closed.**
+
+### Defect 1 — a deployed hosted migration took the whole backend down
+
+`assertCallerCurrent`'s caller lookup embedded `shops!inner(...)` off `users`
+with no constraint named. That is fine while `users -> shops` is one
+relationship. A2.3's migration added four tables carrying a foreign key to
+BOTH `users` and `shops` — `shop_devices`, `shop_device_bindings`,
+`auth_session_devices`, `device_enrollment_holds` — and PostgREST reads any
+such table as a junction. `users -> shops` became five relationships, not one,
+and the unqualified embed started failing PGRST201, "more than one
+relationship was found."
+
+That embed runs on every authenticated action, and the function reported the
+failure as "Could not verify caller" — HTTP 500. **Applying the migration on
+hosted DEV took the sync backend down for every user at once**, and that is
+exactly how it was found: on a real handset, against the real project, after
+a real deploy. No pgtest could have caught it — PGlite speaks SQL; PGRST201 is
+PostgREST's own relationship resolver, which only exists in the hosted stack.
+
+Fixed by naming the constraint everywhere the ambiguity could reach:
+`shops!users_shop_id_fkey!inner(...)` in `_shared/auth.ts`'s
+`assertCallerCurrent` and in `deviceLogin.ts`, plus a defensive hint on the
+`shop_memberships`-rooted embed in `multiShop.ts`. `grants.test.ts` now scans
+the deployed function source for any remaining unqualified `shops!inner(`/
+`shops!<anything but a real constraint>!inner(` form and fails the build if
+one exists, and separately asserts the four junction tables still carry both
+foreign keys — so the hint's reason for existing cannot silently stop being
+true while the hint itself gets "cleaned up" later.
+
+Independently reconfirmed while writing this entry: `supabase functions list`
+shows `sync` at **version 20, ACTIVE**; `supabase migration list` shows all 28
+local migrations, including both `20260923000000_a23_device_registry` and
+`20260926000000_a23_persistent_enrollment_holds`, matched exactly against
+remote. Not re-derived from notes — checked live against the hosted project
+while writing this sign-off.
+
+### Defect 2 — first-time Staff device-login: server 200, UI "Something went wrong"
+
+Found on the hardware retest, deterministic across three attempts: a Staff
+member's first phone+PIN device-login enrolled correctly server-side (200,
+active binding, rotated device secret persisted) and then the app showed a
+generic failure screen. Retrying re-enrolled and rotated the secret again,
+every time, and the next PIN-only login worked anyway — the credential had
+landed; the client just didn't know it.
+
+**Root cause**, proven with a real-SQLite scratch reproduction, not inferred:
+`pullChanges` applies the pull's own attached authority snapshot first — that
+snapshot carries no secret and advances the stored `registryVersion`. The
+device-login response then arrives for the SAME version, carrying the newly
+rotated secret, and `applyDeviceAuthority`'s credential guard read
+"equal version, different secret" as a replayed response and discarded it.
+`recordBoundInstallation` turned that discard into a thrown
+`DeviceRegistryError`, which the UI rendered as "Something went wrong." It hit
+only Staff, and only on a till the Owner had already registered, because that
+is the one case where a secret is already stored under the version the pull
+just wrote.
+
+The guard was never a real safeguard against this shape. The server
+increments `registry_version` on every bind, revoke and restore — two
+credential responses can never legitimately share a version. Equal-version
+can only mean a secretless snapshot got there first; a genuinely stale
+response is strictly lower, and the monotonic version check above it already
+discards that. Removed the branch entirely
+(`apps/mobile/db/deviceRegistry.ts`) rather than special-casing it, and added
+`deviceEnrolmentMatches()` — a plain post-condition read — so a discarded
+snapshot that turns out to already match what's stored is treated as success,
+not failure (`apps/mobile/sync/deviceRegistry.ts`'s `recordBoundInstallation`).
+
+A second, related defect found by the same reproduction: the guard also
+compared `current.devicePublicId !== devicePublicId`, which can never fire in
+an actual replay attack (the value is always this device's own id, by
+construction) but silently blocked a legitimate re-enrolment after a
+reinstall. Removed with the rest of the branch.
+
+`apps/mobile/sync/deviceAuth.ts`'s `hydrateAuthenticatedDevice` now names each
+mandatory post-authentication step (`commercial_identity_hydration`,
+`device_enrollment_persistence`, `local_access_unlock`,
+`local_enrollment_write`, `hydrated_exact_user_validation`) through a
+`requireLoginStep` wrapper: an authoritative refusal
+(`DeviceLoginError`/`StaleSessionError`/`SyncHaltedError`) still throws and
+fails the login exactly as before; anything else — a disk I/O fault, a thrown
+string — is normalized to one typed `DeviceLoginError` naming the step, never
+the raw fault, so a merely-local failure can no longer be mistaken for an
+authoritative one and no login step's real error message leaks past this
+boundary into raw form.
+
+Eight new tests on real SQLite
+(`apps/mobile/db/a23-staff-first-login.sqlite.test.ts`) pin the fixed
+behaviour: rotated secret survives being pulled first; PIN-only sign-in works
+immediately after; the enrolment survives a force-stop; a reinstalled
+installation can still receive a credential naming the previous id; a
+repeated response is idempotent; a strictly-older response is still
+discarded; a revocation cannot be talked out of by a replay; a revoked
+installation is never reported enrolled even while still holding its old
+secret. Two assertions in the existing `a23-device-registry.sqlite.test.ts`
+that had encoded the bug itself (asserting `false` for exactly the two cases
+above) were corrected and relabelled with the reasoning. `deviceAuth.test.ts`
+gained an exact 8-stage ordering assertion, a completes-exactly-once case, an
+`it.each` over three faulting steps proving the raw fault never surfaces, and
+a case proving an authoritative access refusal is still denied.
+
+### Hardware evidence — Samsung Galaxy A04s (SM-A047F), Android 14, scratch packages only, `com.muthoy.pos` untouched, DEV-only, WiFi only
+
+All PASS: Owner PIN-only after restart · first Staff phone+PIN enrollment ·
+immediate Staff PIN-only · restart persistence · Owner → Staff → Owner
+PIN-only · binding revoke · device revoke · persistent re-enrolment hold ·
+exact A2 replacement approval, granted on-hardware with the specific refusal
+text "Another active Owner or Manager must approve this device." shown first
+· A3/new installation remains blocked · a consumed approval does not
+authorize a different id · Manager device administration confirmed by ROLE,
+not by `staff_manage` · enforcement ON · unauthorized installation blocked
+under enforcement · reconnect/offline regression.
+
+Sale/stock/cash regression, run before any revocation touched the till, and
+reconciled twice against the server's own paisa figures: stock 20 → **17**
+(`cash_applied: 7500`), sale **৳75.00**, drawer ৳1,000 → **৳1,075.00**
+(`closing_expected: 107500`) — exact.
+
+Final automated evidence: focused A2.3/device-login/H-4/H-7/H-10 — 19 files /
+432 tests; full non-PG suite — 186 files / 2,529 tests, zero failures;
+pgtests sequential — 16 files / 319 tests; typecheck + lint — 14/14 tasks;
+`git diff --check` clean. All PASS.
+
+### Not closed by this sign-off — carried forward, not A2.3 defects
+
+**Permission-scoped hydration on a shared till.** A cashier's full hydration
+sends `saleHistoryScope: "own"` and a narrower `readableTables` set
+(`backend/supabase/functions/sync/pull.ts`), and the client correctly drops
+rows outside that scope from the shared local mirror — by design, per H-7/H-1,
+and observed on hardware: the Owner's dashboard read ৳0.00 after a cashier
+signed in, while the server still held the real figures. Nothing was lost.
+But the Owner returns to the same handset via `device_actor_switch`, which
+does no full hydration, so the incomplete dashboard can persist until one
+happens. Worth a product decision; not something A2.3 introduced or can fix
+by itself.
+
+**Enrolment-hold requested-id re-arm.** A later replacement attempt from a
+different installation id overwrites the hold's recorded requested id and
+voids any prior approval for the old one; approving an id that is not the
+currently requested one returns 403 `device_approval_required`. Correct and
+intentional per-request, but operationally sharp: a stray retry from the
+wrong device can re-lock an installation an admin had just approved, requiring
+a second approval. Documented, not fixed — no client-visible defect exists to
+fix.
+
+**Still deferred, unchanged:** H-5 production OTP provider + real OTP E2E
+(OTP-dependent device-replacement cases remain untested against a live
+provider); H-11 C5 operational restore rehearsal; the pre-existing Vitest
+worker-RPC-timeout flakiness under full-suite load; sole-owner manual account
+recovery UX.
+
+### H-10 status
+
+**CLOSED.** A2.1/A2.2/A2.4 signed off 2026-09-22; A2.3 signed off above. Every
+item in this batch's original acceptance test — shared-handset Owner ↔ Staff
+handover with no phone prompt, binding revoke, whole-device revoke, restart
+persistence, authoritative reactivation, a WiFi drop writing no quarantine,
+the enforcement switch itself, and an unenrolled installation refused under
+it — has now run and passed on real hardware.

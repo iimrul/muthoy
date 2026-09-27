@@ -23,7 +23,7 @@ const ACCOUNT_ID = '86666666-6666-4666-8666-666666666666';
 const caller = {
   authUserId: 'auth-1', appUserId: 'owner-1', principalUserId: 'owner-1',
   shopId: 'shop-1', role: 'owner', permissionVersion: 1,
-  verifiedPhone: null, raw: { app_metadata: {} },
+  freshPhoneOtp: null, raw: { app_metadata: {} },
 } as unknown as Caller;
 
 const OWNER_WITHOUT_ACCOUNT = {

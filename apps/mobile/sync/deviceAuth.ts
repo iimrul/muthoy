@@ -11,7 +11,7 @@ import {
 } from '../db/pinAttemptLock';
 import { handoffAuthTiming, type AuthTimingTrace } from '../dev/authTiming';
 import { useSessionStore } from '../state/sessionStore';
-import { captureSession, type SessionGuard } from '../state/sessionGuard';
+import { captureSession, StaleSessionError, type SessionGuard } from '../state/sessionGuard';
 import { SyncHaltedError } from './invoke';
 import { inspectSessionAuthority } from './sessionAuthority';
 import { withAuthMutation } from './authMutation';
@@ -19,6 +19,11 @@ import { pullChanges } from './pull';
 import { enforceAuthoritativeRevocation } from './revocation';
 import { requireSupabaseConfiguration, supabase } from './supabaseClient';
 import { assertCloudActorBinding, inspectCloudActorBinding } from './authActorBinding';
+import {
+  installationClaim,
+  recordBoundInstallation,
+  type BoundInstallationResponse,
+} from './deviceRegistry';
 import { refreshBillingStatus } from './billing';
 
 // sync/deviceAuth.ts — logging in on a device that has no local data yet.
@@ -77,12 +82,41 @@ function parseResponse(value: unknown): DeviceLoginResponse {
   return body as DeviceLoginResponse;
 }
 
-/** 401 is the server's generic credential refusal; anything else is a fault. */
-function toLoginError(error: unknown): DeviceLoginError {
-  const status = (error as { context?: { status?: number } }).context?.status;
-  return status === 401
-    ? new DeviceLoginError(GENERIC_FAILURE, true)
-    : new DeviceLoginError('Could not reach the server. Check your connection.', false);
+/** 401 stays indistinguishable; safe device-policy codes remain actionable. */
+async function toLoginError(error: unknown): Promise<DeviceLoginError> {
+  const response = (error as { context?: Partial<Response> }).context;
+  const status = typeof response?.status === 'number' ? response.status : null;
+  if (status === 401) return new DeviceLoginError(GENERIC_FAILURE, true);
+
+  let code: string | null = null;
+  if (response && typeof response.clone === 'function') {
+    try {
+      const body: unknown = await response.clone().json();
+      if (body && typeof body === 'object' && !Array.isArray(body)) {
+        const candidate = (body as { code?: unknown }).code;
+        code = typeof candidate === 'string' ? candidate : null;
+      }
+    } catch {
+      // Proxy/non-JSON bodies are ordinary transport failures.
+    }
+  }
+
+  switch (code) {
+    case 'device_session_unbound':
+      return new DeviceLoginError('Sign in again to relink this device.', false);
+    case 'device_enrollment_held':
+      return new DeviceLoginError(
+        'Another active Owner or Manager must approve this device.',
+        false,
+      );
+    case 'device_id_required':
+      return new DeviceLoginError(
+        'This app installation could not be identified. Restart and try again.',
+        false,
+      );
+    default:
+      return new DeviceLoginError('Could not reach the server. Check your connection.', false);
+  }
 }
 
 /**
@@ -127,6 +161,11 @@ export async function authenticateNewDeviceCredentials(
   const invoke = () => supabase.functions.invoke('sync', {
     body: {
       action: 'device-login',
+      // A2.3. The installation travels WITH the credential. There is no
+      // separate enrolment call to make afterwards — the server registers this
+      // handset and binds the session it is about to mint, in one transaction
+      // behind one proof.
+      ...installationClaim(),
       phone: canonicalPhone,
       pin,
       ...(timing ? { _timingId: timing.correlationId } : {}),
@@ -137,7 +176,7 @@ export async function authenticateNewDeviceCredentials(
     : await invoke();
   guard.assertLive();
   if (error) {
-    throw toLoginError(error);
+    throw await toLoginError(error);
   }
 
   const response = parseResponse(data);
@@ -166,6 +205,71 @@ export async function authenticateNewDeviceCredentials(
   );
 
   return response;
+}
+
+/**
+ * Runs a step this login may not be treated as complete without.
+ *
+ * Nothing is swallowed: every caller below is genuinely mandatory and still
+ * fails closed. The only thing this changes is what the person holding the
+ * phone is told. A DeviceRegistryError or a SQLite fault escaping here is not
+ * a DeviceLoginError, so app/(auth)/device-login.tsx rendered it as
+ * "Something went wrong. Please try again." — on a login the server had
+ * already completed, with the secret already issued. That message is untrue
+ * and it is an instruction to retry, and each retry re-enrols and rotates the
+ * device secret again.
+ *
+ * The stage name is also what makes the failing step visible in the DEV
+ * `[auth:timing]` trace. It is a fixed literal: no PIN, token, secret or
+ * response body goes near it.
+ *
+ * StaleSessionError and SyncHaltedError pass through untouched — they are
+ * answers about a device changing hands and about revocation, and their own
+ * handlers act on them.
+ */
+async function requireLoginStep<T>(
+  stage: string,
+  message: string,
+  operation: () => Promise<T>,
+  timing?: AuthTimingTrace,
+): Promise<T> {
+  try {
+    return timing ? await timing.measure(stage, operation) : await operation();
+  } catch (error) {
+    if (
+      error instanceof DeviceLoginError
+      || error instanceof StaleSessionError
+      || error instanceof SyncHaltedError
+    ) throw error;
+    throw new DeviceLoginError(message, false);
+  }
+}
+
+/**
+ * A2.3. Records the installation the login response says the server bound.
+ *
+ * There is nothing to REQUEST here any more, and that is the point. Binding
+ * happened inside device-login / link-device / recover-pin, in the same
+ * transaction that verified the credential, and the response carries the
+ * secret and the snapshot it produced. The separate `device-enroll` call this
+ * replaced was reachable by any live access token, which meant a stolen token
+ * could register itself a brand-new trusted installation.
+ *
+ * A2.3-capable credential flows are strict. The server has already enrolled
+ * and session-bound this installation, so missing/mismatched authority or a
+ * failed SQLCipher write must stop local completion. Otherwise the server
+ * would believe enrolment succeeded while the handset lost the only plaintext
+ * copy of its installation secret.
+ */
+async function recordDeviceBinding(
+  shopId: string,
+  actorUserId: string,
+  response: unknown,
+): Promise<void> {
+  await recordBoundInstallation(shopId, response as BoundInstallationResponse, {
+    required: true,
+    expectedActorUserId: actorUserId,
+  });
 }
 
 /** Full server hydration into whichever isolated database db/ currently owns. */
@@ -197,7 +301,23 @@ export async function hydrateAuthenticatedDevice(
   // Business pull and commercial identity use separate server projections.
   // A recovery/re-link must hydrate both before it can clear quarantine or
   // persist a session carrying principal/billing authority.
-  await refreshBillingStatus(response.shopId, undefined, { isCurrent: ownsHydration });
+  await requireLoginStep(
+    'commercial_identity_hydration',
+    'Could not confirm your shop plan. Reconnect and try again.',
+    () => refreshBillingStatus(response.shopId, undefined, { isCurrent: ownsHydration }),
+    timing,
+  );
+  guard.assertLive();
+
+  // Persist the one-time installation secret before changing any local state
+  // that says this enrollment completed. The shop row now exists because the
+  // full pull above committed first, satisfying the mirror's SQLite FK.
+  await requireLoginStep(
+    'device_enrollment_persistence',
+    'Could not securely save this device registration. Please try again.',
+    () => recordDeviceBinding(response.shopId, response.userId, response),
+    timing,
+  );
   guard.assertLive();
 
   // The lock is device-local and may only clear after BOTH credential proof
@@ -205,7 +325,17 @@ export async function hydrateAuthenticatedDevice(
   // the row that pull produced says the actor is live. Credential proof alone
   // is not enough: the server mints a session before plan suspension or an
   // archived shop is resolved, and neither of those flips `is_active`.
-  const unlocked = await clearLocalUserAccessLock(response.shopId, response.userId);
+  //
+  // A `false` answer is authority and is honoured below. A THROWN fault is not
+  // an answer at all, and it used to reach the screen as the generic failure;
+  // it now fails closed with a message that says which step could not be
+  // completed, because an uncleared lock must never coexist with a session.
+  const unlocked = await requireLoginStep(
+    'local_access_unlock',
+    'Could not confirm your access on this device. Please try again.',
+    () => clearLocalUserAccessLock(response.shopId, response.userId),
+    timing,
+  );
   guard.assertLive();
   if (!unlocked) {
     // A credential refusal, not a transient fault: retrying cannot change the
@@ -218,17 +348,20 @@ export async function hydrateAuthenticatedDevice(
 
   // The device now holds the shop in the same sense a registered one does, so
   // the root gate must route it to PIN Login rather than Registration.
-  if (timing) {
-    await timing.measure('local_enrollment_write', () => markShopCloudLinked(response.shopId));
-  } else {
-    await markShopCloudLinked(response.shopId);
-  }
+  await requireLoginStep(
+    'local_enrollment_write',
+    'Could not finish setting up this device. Please try again.',
+    () => markShopCloudLinked(response.shopId),
+    timing,
+  );
   guard.assertLive();
 
-  const local = timing
-    ? await timing.measure('hydrated_exact_user_validation', () =>
-      verifyPinForUser(pin, response.shopId, response.userId, timing))
-    : await verifyPinForUser(pin, response.shopId, response.userId);
+  const local = await requireLoginStep(
+    'hydrated_exact_user_validation',
+    'Your shop data did not download completely. Please try again.',
+    () => verifyPinForUser(pin, response.shopId, response.userId, timing),
+    timing,
+  );
   guard.assertLive();
   if (!local || local.userId !== response.userId || local.shopId !== response.shopId) {
     // Hydration returned without the row this login depends on. Refusing here
@@ -292,11 +425,19 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
   }
 
   const { data, error } = await supabase.functions.invoke('sync', {
-    body: { action: 'recover-pin', phone: canonicalPhone, newPin },
+    body: {
+      action: 'recover-pin',
+      phone: canonicalPhone,
+      newPin,
+      // Recovery is a credential proof too, and it is frequently performed on
+      // a REPLACEMENT handset — precisely the installation that needs to
+      // appear in the registry and hold the session being minted.
+      ...installationClaim(),
+    },
   });
   guard.assertLive();
   if (error) {
-    throw toLoginError(error);
+    throw await toLoginError(error);
   }
 
   const response = parseResponse({ ...(data as object), role: 'owner' });
@@ -328,9 +469,33 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
   // and on an already-populated device it is an idempotent re-apply.
   await pullChanges(response.shopId, null);
   guard.assertLive();
-  await refreshBillingStatus(response.shopId, undefined, { isCurrent: guard.isStillActive });
+  await requireLoginStep(
+    'commercial_identity_hydration',
+    'Could not confirm your shop plan. Reconnect and try again.',
+    () => refreshBillingStatus(response.shopId, undefined, { isCurrent: guard.isStillActive }),
+  );
   guard.assertLive();
-  await markShopCloudLinked(response.shopId);
+
+  // Recovery is an authoritative login too, and it is frequently the one that
+  // happens on a REPLACEMENT handset — which is precisely the installation
+  // that needs to appear in the registry. Persist its one-time secret before
+  // marking the local shop as linked.
+  //
+  // Wrapped for the same reason device-login is. Recovery reaches an owner who
+  // has just spent an OTP, so a raw DeviceRegistryError rendered as the generic
+  // "Something went wrong" is the worst possible thing to show them: it names
+  // nothing, and retrying costs another code.
+  await requireLoginStep(
+    'device_enrollment_persistence',
+    'Could not securely save this device registration. Please try again.',
+    () => recordDeviceBinding(response.shopId, response.userId, response),
+  );
+  guard.assertLive();
+  await requireLoginStep(
+    'local_enrollment_write',
+    'Could not finish setting up this device. Please try again.',
+    () => markShopCloudLinked(response.shopId),
+  );
   guard.assertLive();
 
   const local = await verifyPinForUser(newPin, response.shopId, response.userId);

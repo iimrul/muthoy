@@ -211,6 +211,13 @@
       "when": 1788314400000,
       "tag": "0029_pin_reserved_while_inactive",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1788400800000,
+      "tag": "0030_a23_device_registry_mirror",
+      "breakpoints": true
     }
   ]
 }

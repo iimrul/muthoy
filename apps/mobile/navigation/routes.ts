@@ -1,5 +1,5 @@
 import type { Href } from 'expo-router';
-import { resolvePermission, type Permission } from '../domain/permissions';
+import { resolvePermission, toRole, type Permission } from '../domain/permissions';
 import type { CatalogKey } from '../i18n/catalog';
 import type { Session } from '../state/sessionStore';
 import {
@@ -31,6 +31,16 @@ export const RULES: readonly {
   { prefixes: ['/staff/management'], dataGate: 'staffManage', rule: DATA_ACCESS_GATES.staffManage },
   { prefixes: [MULTI_SHOP_HREF], dataGate: 'owner', rule: DATA_ACCESS_GATES.owner },
   { prefixes: ['/expenses', '/suppliers', '/staff/sales-view', '/reports/data-export'], dataGate: 'owner', rule: DATA_ACCESS_GATES.owner },
+  // A2.3. BEFORE the owner-gated '/settings' prefix below, deliberately: the
+  // registered-devices screen is Owner AND Manager, matching the server, where
+  // a23_assert_device_admin admits both. A Manager is usually the person
+  // standing in the shop when a handset goes missing.
+  //
+  // Gated on the ROLE, not on `staff_manage`. That permission is grantable to
+  // an individual Staff member, so gating on it let somebody through this
+  // check only to be refused by the screen and by every server call behind it
+  // — and tied the power to remove a device to a capability about rotas.
+  { prefixes: ['/settings/devices'], dataGate: 'deviceAdmin', rule: DATA_ACCESS_GATES.deviceAdmin },
   { prefixes: ['/settings'], dataGate: 'owner', rule: DATA_ACCESS_GATES.owner },
   { prefixes: ['/notifications'], dataGate: 'authenticated', rule: DATA_ACCESS_GATES.authenticated },
 ];
@@ -74,6 +84,12 @@ export function canAccessRule(session: Session | null, rule: RouteRule | null): 
   if (rule.kind === 'authenticated') return true;
   if (rule.kind === 'owner') return session.role === 'owner';
   if (rule.kind === 'staffHome') return session.role === 'staff' || session.role === 'manager';
+  // A2.3. The same two roles a23_assert_device_admin admits, and no third way
+  // in: no permission grant reaches this branch.
+  if (rule.kind === 'deviceAdmin') {
+    const role = toRole(session.role);
+    return role === 'owner' || role === 'manager';
+  }
   return resolvePermission(session.role, rule.permission, session.permissions);
 }
 
@@ -83,11 +99,21 @@ export function canAccessPath(session: Session | null, pathname: string): boolea
 
 export interface MoreRoute {
   key: string;
-  labelKey: 'salesHistory' | 'expiry' | 'cashDrawer' | 'endOfDay' | 'report' | 'expense' | 'supplierInvoices' | 'suppliers' | 'staff' | 'staffSales' | 'multiShop';
+  labelKey: 'salesHistory' | 'expiry' | 'cashDrawer' | 'endOfDay' | 'report' | 'expense' | 'supplierInvoices' | 'suppliers' | 'staff' | 'staffSales' | 'multiShop' | 'devicesTitle';
   href: Href;
   permission?: Permission;
   ownerOnly?: boolean;
   multiShopOnly?: boolean;
+  /**
+   * A2.3. Owner AND Manager, by role — never by a permission.
+   *
+   * Managers do not see /settings, which is owner-gated, so without an entry
+   * here the devices screen existed for them in policy and nowhere in the UI.
+   * The obvious fix — hanging it off `staff_manage` — is the one to avoid: an
+   * Owner can grant that to an individual Staff member, and "can edit the
+   * rota" must not come to mean "can un-revoke a stolen phone".
+   */
+  deviceAdminOnly?: boolean;
 }
 
 export interface OwnerQuickLink {
@@ -134,6 +160,7 @@ export const MORE_ROUTES: readonly MoreRoute[] = [
   // single-shop owner both lose the tile, so More never advertises a route the
   // plan does not cover.
   { key: 'multi-shop', labelKey: 'multiShop', href: MULTI_SHOP_HREF, ownerOnly: true, multiShopOnly: true },
+  { key: 'devices', labelKey: 'devicesTitle', href: '/settings/devices', deviceAdminOnly: true },
 ];
 
 /** `multiShopAllowed` = entitled to multi-shop AND holding more than one shop. */
@@ -141,6 +168,9 @@ export function visibleMoreRoutes(session: Session, multiShopAllowed = false): r
   return MORE_ROUTES.filter((route) => {
     if (route.multiShopOnly && !multiShopAllowed) return false;
     if (session.role === 'owner') return true;
+    // Same two roles the route gate and a23_assert_device_admin admit, and no
+    // third way in: no permission grant reaches this branch.
+    if (route.deviceAdminOnly) return toRole(session.role) === 'manager';
     if (route.ownerOnly) return false;
     return route.permission ? resolvePermission(session.role, route.permission, session.permissions) : false;
   });

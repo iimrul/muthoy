@@ -19,6 +19,11 @@ const mocks = vi.hoisted(() => ({
     return { cancel: vi.fn() };
   }),
   inspectBinding: vi.fn(),
+  // A2.3. The pre-push device gate. Defaults to "no objection" in beforeEach,
+  // so every pre-existing test keeps describing the ordinary cycle.
+  validateDevice: vi.fn(),
+  enforceDeviceRevocation: vi.fn(),
+  applyPulledAuthority: vi.fn(),
 }));
 
 vi.mock("react-native", () => ({
@@ -41,7 +46,17 @@ vi.mock("./connectivity", () => ({
   hasNetworkConnection: mocks.online,
   subscribeToReconnect: mocks.subscribeToReconnect,
 }));
-vi.mock("./pull", () => ({ pullChanges: mocks.pull }));
+vi.mock("./pull", () => ({
+  pullChanges: mocks.pull,
+  // The real class, not a stub: runCycle branches on `instanceof`, so a fake
+  // would make the branch untestable and quietly always-false.
+  DeviceAccessRevokedDuringSyncError: class extends Error {
+    constructor(readonly objection: 'device_revoked' | 'binding_revoked') {
+      super('revoked');
+      this.name = 'DeviceAccessRevokedDuringSyncError';
+    }
+  },
+}));
 vi.mock("./push", () => ({ pushPendingRows: mocks.push }));
 vi.mock("./billingHydration", () => ({ nudgeBillingHydration: mocks.nudgeBilling }));
 vi.mock("./attachments", () => ({ uploadPendingPrescriptionAttachments: mocks.uploadAttachments }));
@@ -52,6 +67,11 @@ vi.mock("./stuckNotification", () => ({
 }));
 vi.mock("./revocation", () => ({
   enforceAuthoritativeRevocation: mocks.enforceRevocation,
+  enforceDeviceRevocation: mocks.enforceDeviceRevocation,
+  validateDeviceBeforePush: mocks.validateDevice,
+}));
+vi.mock("./deviceRegistry", () => ({
+  applyPulledDeviceAuthority: mocks.applyPulledAuthority,
 }));
 vi.mock("./supabaseClient", () => ({ isSupabaseConfigured: true }));
 vi.mock('./authActorBinding', () => ({ inspectCloudActorBinding: mocks.inspectBinding }));
@@ -113,6 +133,11 @@ function resetEngine(): void {
   mocks.notify.mockResolvedValue(undefined);
   mocks.notifyHalted.mockResolvedValue(undefined);
   mocks.enforceRevocation.mockResolvedValue(false);
+  // A2.3. No device objection by default: the ordinary shop, where the
+  // registry has nothing to say and the cycle proceeds exactly as before.
+  mocks.validateDevice.mockResolvedValue({ kind: 'ok' });
+  mocks.enforceDeviceRevocation.mockResolvedValue(undefined);
+  mocks.applyPulledAuthority.mockResolvedValue(null);
   mocks.pull.mockResolvedValue(undefined);
   mocks.uploadAttachments.mockResolvedValue(undefined);
   mocks.push.mockResolvedValue(true);
@@ -126,6 +151,119 @@ function resetEngine(): void {
   stopSyncEngine();
 }
 
+describe("A2.3 device standing gates the cycle", () => {
+  beforeEach(resetEngine);
+
+  it("validates this installation BEFORE a single queued row is pushed", async () => {
+    loginTo("shop-order");
+
+    startSyncEngine("shop-order");
+    await vi.waitFor(() => expect(mocks.push).toHaveBeenCalled());
+
+    // The reconnect-ordering fix, stated as an order. Pushing first and
+    // learning about revocation from the pull that followed is what let a
+    // handset revoked while offline come back and upload a day of sales
+    // before being told it had been cut off.
+    expect(mocks.validateDevice).toHaveBeenCalledWith("shop-order", "user-1");
+    expect(mocks.validateDevice.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.push.mock.invocationCallOrder[0]!);
+  });
+
+  it("pushes NOTHING when the registry has revoked this installation", async () => {
+    mocks.validateDevice.mockResolvedValue({ kind: 'revoked', objection: 'device_revoked' });
+    loginTo("shop-revoked");
+
+    startSyncEngine("shop-revoked");
+    await settle();
+    await settle();
+
+    // Every outbound stage, not just push: a revoked device must not upload
+    // rows, must not upload prescription images, and must not pull the shop's
+    // history either.
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.uploadAttachments).not.toHaveBeenCalled();
+    expect(mocks.pull).not.toHaveBeenCalled();
+    expect(mocks.nudgeBilling).not.toHaveBeenCalled();
+  });
+
+  it("fails CLOSED when the registry cannot be reached at all", async () => {
+    // Blocker 6: remote validation is MANDATORY before anything goes out. The
+    // previous version fell back to the local mirror, so a device that could
+    // not reach the registry pushed anyway on whatever it last heard — which
+    // is exactly what a stolen handset would arrange to be stale.
+    mocks.validateDevice.mockResolvedValue({ kind: 'unverified' });
+    loginTo("shop-unreadable");
+
+    startSyncEngine("shop-unreadable");
+    await settle();
+    await settle();
+
+    // Unknown standing is not permission. Distinguished from a revocation in
+    // the reason, because nothing is quarantined when the answer never came.
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.enforceDeviceRevocation).not.toHaveBeenCalled();
+    expect(mocks.uploadAttachments).not.toHaveBeenCalled();
+    expect(mocks.pull).not.toHaveBeenCalled();
+    expect(mocks.nudgeBilling).not.toHaveBeenCalled();
+    expect(await triggerSyncNow("shop-unreadable")).toEqual({
+      status: 'skipped', reason: 'device_authority_unverified',
+    });
+  });
+
+  it("closes the session the moment a pull reports a revocation", async () => {
+    const { DeviceAccessRevokedDuringSyncError } = await import('./pull');
+    mocks.pull.mockRejectedValue(new DeviceAccessRevokedDuringSyncError('binding_revoked'));
+    loginTo("shop-midcycle");
+
+    startSyncEngine("shop-midcycle");
+    await vi.waitFor(() => expect(mocks.enforceDeviceRevocation).toHaveBeenCalled());
+
+    expect(mocks.enforceDeviceRevocation)
+      .toHaveBeenCalledWith("shop-midcycle", "user-1", 'binding_revoked');
+    // Not reported as a sync FAILURE: nothing broke. The device was told it
+    // may no longer act, and the cycle stopped because of it.
+    expect(await triggerSyncNow("shop-midcycle")).toEqual({
+      status: 'skipped', reason: 'device_revoked',
+    });
+  });
+
+  it("records the snapshot the server attached to a refused PUSH", async () => {
+    const authority = { known: true, status: 'revoked', registryVersion: 9 };
+    mocks.push.mockRejectedValue(
+      new SyncHaltedError('gone', 'device_revoked', undefined, 'user-1', 'shop-push', authority),
+    );
+    loginTo("shop-push");
+
+    startSyncEngine("shop-push");
+    await vi.waitFor(() => expect(mocks.applyPulledAuthority).toHaveBeenCalled());
+
+    // The push path has no response body, so without the snapshot on the 403
+    // the device would be refused forever and never learn why.
+    expect(mocks.applyPulledAuthority)
+      .toHaveBeenCalledWith("shop-push", authority, "user-1");
+    expect(mocks.enforceDeviceRevocation).toHaveBeenCalled();
+    // A device refusal is not an account revocation: the local user row must
+    // not be locked for a phone the shop simply stopped trusting.
+    expect(mocks.enforceRevocation).not.toHaveBeenCalled();
+  });
+
+  it("does NOT quarantine when the proof was merely wrong", async () => {
+    mocks.push.mockRejectedValue(
+      new SyncHaltedError('unbound', 'device_session_unbound', undefined, 'user-1', 'shop-proof'),
+    );
+    loginTo("shop-proof");
+
+    startSyncEngine("shop-proof");
+    await settle();
+    await settle();
+
+    // An unbound session means "sign in again on this device", never "you were
+    // cut off". Persisting a quarantine here would make revocation
+    // self-inflicted: every ordinary expired session would look like one.
+    expect(mocks.enforceDeviceRevocation).not.toHaveBeenCalled();
+  });
+});
+
 describe("sync cycle orchestration", () => {
   beforeEach(resetEngine);
 
@@ -137,7 +275,9 @@ describe("sync cycle orchestration", () => {
     startSyncEngine("shop-complete");
     await vi.waitFor(() => expect(mocks.notify).toHaveBeenCalled());
 
-    expect(mocks.pull).toHaveBeenCalledWith("shop-complete", undefined, expect.any(Function));
+    expect(mocks.pull).toHaveBeenCalledWith(
+      "shop-complete", undefined, expect.any(Function), undefined, "user-1",
+    );
   });
 
   it("nudges Owner trial hydration after the owner row push and data pull", async () => {
@@ -433,7 +573,9 @@ describe("device handover — sync engine stop and resume", () => {
 
     await vi.waitFor(() => expect(mocks.push).toHaveBeenCalledTimes(2));
     expect(mocks.pull).toHaveBeenCalledTimes(1);
-    expect(mocks.pull).toHaveBeenCalledWith("shop-1", undefined, expect.any(Function));
+    expect(mocks.pull).toHaveBeenCalledWith(
+      "shop-1", undefined, expect.any(Function), undefined, "user-1",
+    );
   });
 
   // The engine-armed check is shop-scoped, and a handover keeps the SAME

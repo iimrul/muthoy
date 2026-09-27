@@ -1,6 +1,7 @@
 import * as bcrypt from "npm:bcryptjs@3";
-import { type Caller, HttpError } from "./_shared/auth.ts";
+import { type Caller, HttpError, verifyCallerJwt } from "./_shared/auth.ts";
 import { ensureAuthBinding, mintSessionForAppUser } from "./_shared/identity.ts";
+import { prepareInstallationEnrollment, tryBindSession } from "./deviceBinding.ts";
 import { isSameBdPhone, normalizeBdPhone } from "./_shared/phone.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
 
@@ -101,18 +102,18 @@ export async function recoverPin(caller: Caller, body: Record<string, unknown>) 
     throw new HttpError(403, "This number cannot be recovered here");
   }
 
-  // The caller's token must carry a VERIFIED phone. A session minted any other
-  // way — including one this very endpoint issued a moment ago — has no
-  // phone_confirmed_at, so it cannot be replayed to set the PIN again.
-  if (!caller.verifiedPhone) {
-    throw new HttpError(403, "Phone number is not verified");
+  // The VERIFIED CURRENT JWT must carry a recent OTP AMR event. A historical
+  // auth.users.phone_confirmed_at value says only that this account completed
+  // OTP once; it does not prove who holds this session now.
+  if (!caller.freshPhoneOtp) {
+    throw new HttpError(403, "Fresh phone verification is required", "otp_required");
   }
   // FULL canonical equality, country code included. The previous version
   // compared the last 10 digits, which made +91 1712345678 equal to
   // +880 1712345678: an attacker could OTP-verify their own Indian number and
   // use it to take over a Bangladeshi owner's account. A non-Bangladeshi
   // verified phone normalizes to null and now matches nothing at all.
-  if (!isSameBdPhone(caller.verifiedPhone, canonicalPhone)) {
+  if (!isSameBdPhone(caller.freshPhoneOtp.phone, canonicalPhone)) {
     throw new HttpError(403, "Phone number does not match the verified session");
   }
 
@@ -120,6 +121,15 @@ export async function recoverPin(caller: Caller, body: Record<string, unknown>) 
   if (!owner) {
     throw new HttpError(403, "This number cannot be recovered here");
   }
+
+  // BEFORE auth rebinding, global sign-out or PIN mutation. A device-revoked
+  // owner cannot turn OTP recovery into a fresh-install bypass, and a missing
+  // installation id cannot leave an A2.3 client holding an unbound session.
+  const installation = await prepareInstallationEnrollment(
+    owner.shopId,
+    owner.id,
+    body,
+  );
 
   // ORDER IS THE POINT OF THIS FUNCTION.
   //
@@ -170,10 +180,30 @@ export async function recoverPin(caller: Caller, body: Record<string, unknown>) 
   // would have to complete twice.
   const session = await mintSessionForAppUser(owner.id);
 
+  // A2.3. An OTP-verified recovery is a credential proof, so the session it
+  // mints is bound to this installation exactly as device-login's is. Without
+  // it, recovering your PIN would leave you holding an unbound session that an
+  // enforcing shop then refuses — recovery that does not recover.
+  const mintedCaller = await verifyCallerJwt(
+    new Request("https://sync.internal/recover-pin", {
+      headers: { Authorization: `Bearer ${session.accessToken}` },
+    }),
+  );
+  const bound = await tryBindSession(
+    mintedCaller.authSessionId,
+    owner.shopId,
+    owner.id,
+    body,
+    installation,
+  );
+
   return {
     shopId: owner.shopId,
     userId: owner.id,
     accessToken: session.accessToken,
     refreshToken: session.refreshToken,
+    ...(bound
+      ? { deviceSecret: bound.deviceSecret, deviceAuthority: bound.authority }
+      : {}),
   };
 }

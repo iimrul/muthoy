@@ -6,6 +6,11 @@ import {
   readAccessTokenClaims,
   type SessionClaims,
 } from './authClaims';
+import {
+  installationClaim,
+  recordBoundInstallation,
+  type BoundInstallationResponse,
+} from './deviceRegistry';
 import { requireSupabaseConfiguration, supabase } from './supabaseClient';
 
 interface LinkDeviceOptions {
@@ -41,6 +46,8 @@ const SAFE_EDGE_PREFIXES = [
   'Onboarding details are inconsistent',
   'Could not complete onboarding',
   'Could not initialize owner billing',
+  'Another active Owner or Manager installation must approve this device',
+  'This app installation could not be identified',
 ];
 
 export class LinkDeviceServerError extends Error {
@@ -115,9 +122,12 @@ export async function linkDeviceToShop(
   if (!ownerUserId) {
     throw new Error('Owner identity is required to link this device.');
   }
-  const { error } = await supabase.functions.invoke('sync', {
+  const { data: linkResponse, error } = await supabase.functions.invoke('sync', {
     body: {
       action: 'link-device',
+      // A2.3. OTP registration is a credential proof, so it registers this
+      // installation and binds the session that completed it.
+      ...installationClaim(),
       shopId,
       ownerUserId,
       ...(options.onboarding ? { onboarding: options.onboarding } : {}),
@@ -126,6 +136,18 @@ export async function linkDeviceToShop(
   if (error) {
     throw await toLinkDeviceServerError(error);
   }
+
+  // The server has already bound this installation. Its one-time plaintext
+  // secret must reach the Keystore-wrapped SQLCipher mirror before any caller
+  // may treat registration as complete. A malformed identity, stale snapshot,
+  // or storage failure is a hard stop: continuing would strand the first PIN
+  // handover on the phone-login fallback while the server believes this device
+  // is enrolled.
+  await recordBoundInstallation(
+    shopId,
+    linkResponse as BoundInstallationResponse,
+    { required: true, expectedActorUserId: ownerUserId },
+  );
 
   const { data, error: refreshError } = await supabase.auth.refreshSession();
   if (refreshError) {

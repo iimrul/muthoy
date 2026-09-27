@@ -16,7 +16,7 @@ import { pull } from "./pull.ts";
 const caller = {
   authUserId: "auth-1", appUserId: "user-1", principalUserId: "user-1",
   shopId: "shop-1", role: "staff", permissionVersion: 7,
-  verifiedPhone: null, raw: { app_metadata: {} },
+  freshPhoneOtp: null, raw: { app_metadata: {} },
 } as unknown as Caller;
 
 beforeEach(() => {

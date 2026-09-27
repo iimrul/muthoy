@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // H-7 H-2. An anonymous session is refused by verifyCallerJwt itself.
 //
@@ -53,6 +53,10 @@ function authUser(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   mocks.getUser.mockReset();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('verifyCallerJwt rejects anonymous sessions', () => {
@@ -135,5 +139,68 @@ describe('verifyCallerJwt rejects anonymous sessions', () => {
   it('keeps rejecting an invalid token before it looks at anonymity at all', async () => {
     mocks.getUser.mockResolvedValue({ data: { user: null }, error: { message: 'bad jwt' } });
     await expect(verifyCallerJwt(bearer())).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe('fresh phone authentication belongs to this JWT session', () => {
+  const nowSeconds = 1_800_000_000;
+
+  function phoneUser() {
+    return authUser({
+      phone: '+8801712345678',
+      // Deliberately ancient. This row field must never provide freshness.
+      phone_confirmed_at: '2025-01-01T00:00:00.000Z',
+    });
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(nowSeconds * 1000);
+    mocks.getUser.mockResolvedValue({ data: { user: phoneUser() }, error: null });
+  });
+
+  it('accepts a recent signed OTP AMR event on the current session', async () => {
+    const caller = await verifyCallerJwt(bearer({
+      session_id: '10000000-0000-4000-8000-000000000004',
+      phone: '+8801712345678',
+      amr: [{ method: 'otp', timestamp: nowSeconds - 30 }],
+      app_metadata: {},
+    }));
+    expect(caller.freshPhoneOtp).toEqual({
+      phone: '+8801712345678', authenticatedAt: nowSeconds - 30,
+    });
+  });
+
+  it.each([
+    ['historical row confirmation with magic-link AMR', [{ method: 'magiclink', timestamp: nowSeconds }]],
+    ['an expired OTP event', [{ method: 'otp', timestamp: nowSeconds - 301 }]],
+    ['a future OTP event', [{ method: 'otp', timestamp: nowSeconds + 31 }]],
+  ])('rejects %s', async (_label, amr) => {
+    const caller = await verifyCallerJwt(bearer({
+      session_id: '10000000-0000-4000-8000-000000000004',
+      phone: '+8801712345678',
+      amr,
+      app_metadata: {},
+    }));
+    expect(caller.freshPhoneOtp).toBeNull();
+  });
+
+  it('rejects OTP metadata without a current session id', async () => {
+    const caller = await verifyCallerJwt(bearer({
+      phone: '+8801712345678',
+      amr: [{ method: 'otp', timestamp: nowSeconds }],
+      app_metadata: {},
+    }));
+    expect(caller.freshPhoneOtp).toBeNull();
+  });
+
+  it('rejects a signed phone that does not match the authoritative auth user', async () => {
+    const caller = await verifyCallerJwt(bearer({
+      session_id: '10000000-0000-4000-8000-000000000004',
+      phone: '+8801999999999',
+      amr: [{ method: 'otp', timestamp: nowSeconds }],
+      app_metadata: {},
+    }));
+    expect(caller.freshPhoneOtp).toBeNull();
   });
 });

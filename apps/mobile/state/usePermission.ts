@@ -43,3 +43,22 @@ export function useOwnerAccess(): PermissionCheck {
     isAllowed: session !== null && toRole(session.role) === 'owner',
   };
 }
+
+/**
+ * A2.3. UI mirror of the server's a23_assert_device_admin: Owner or Manager.
+ *
+ * Deliberately not `usePermission('staff_manage')`, which is what the devices
+ * screen originally used. That permission is grantable to an individual Staff
+ * member, so it admitted people the server would then refuse on every action,
+ * and it tied the authority to remove a lost handset to a capability about
+ * managing rotas. Same two roles as the route gate and the database function,
+ * expressed once each.
+ */
+export function useDeviceAdminAccess(): PermissionCheck {
+  const session = useSessionStore((state) => state.session);
+  const role = session ? toRole(session.role) : null;
+  return {
+    session,
+    isAllowed: role === 'owner' || role === 'manager',
+  };
+}

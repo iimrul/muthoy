@@ -23,6 +23,11 @@ function syncedSchemaTables(): string[] {
     "notifications", "notification_receipts", "sync_queue", "conflict_queue",
     "billing_accounts", "shop_memberships", "shop_directory", "shop_summary_cache",
     "entitlement_cache", "payment_attempts",
+    // A2.3. The device registry mirror is device-local by design: it records
+    // what the SERVER last said about THIS installation, so pushing it would
+    // be a device asserting its own access, and hydrating it onto another
+    // device would be meaningless. Never in SYNCED_TABLES.
+    "device_registry_state", "device_binding_state",
   ]);
   return [...schemaSource.matchAll(/sqliteTable\(\s*["']([^"']+)["']/g)]
     .map((match) => match[1])

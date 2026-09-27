@@ -33,6 +33,7 @@ vi.mock("./billing", () => ({ refreshBillingStatus: vi.fn(async () => undefined)
 
 const { db, sqliteConnection } = await import("../db/test/client");
 const { getActiveSessionContext, lockLocalUserAccess } = await import("../db/auth");
+const { readLocalDeviceBinding, readLocalDeviceRegistry } = await import("../db/deviceRegistry");
 const { billingAccounts, roles, shopMemberships, shops, users } = await import("../db/schema");
 const { applyRemoteRow, HYDRATION_TABLE_ORDER } = await import("../db/sync-helpers");
 const { hashPin } = await import("../native/crypto");
@@ -116,6 +117,20 @@ function installServerTransport(): void {
           role: "owner",
           accessToken: accessToken(),
           refreshToken: "server-refresh-token",
+          // A2.3. The binding rides on the login response. There is no
+          // separate enrolment call any more: registering an installation is
+          // a consequence of proving a credential, in the same transaction
+          // that minted and bound this session.
+          deviceSecret: "a".repeat(64),
+          deviceAuthority: {
+            shopId: SHOP,
+            devicePublicId: body.devicePublicId,
+            known: true,
+            status: "active",
+            registryVersion: 1,
+            enforced: true,
+            bindings: [{ actorUserId: USER, status: "active", bindingVersion: 1 }],
+          },
         },
         error: null,
       };
@@ -147,6 +162,10 @@ function installServerTransport(): void {
       };
     }
 
+    // Anything else is a route this flow should not be taking. In particular
+    // `device-enroll` no longer exists: an enrolment route reachable on its
+    // own is one any live access token can call, and a throw here is what
+    // proves the client has stopped calling it.
     throw new Error(`Unexpected sync action: ${String(body.action)}`);
   });
 }
@@ -254,9 +273,26 @@ describe("H-7 real client re-authentication integration", () => {
     await loginOnNewDevice(PHONE, PIN);
 
     const calls = transport.invoke.mock.calls.map((call) => call[1]?.body as Record<string, unknown>);
+    // TWO steps, not three. Enrolment used to be a third round trip after
+    // hydration; it is now part of the login itself, which is what removes
+    // the route an arbitrary token could have used to register a device.
     expect(calls.map((body) => body.action)).toEqual(["device-login", "pull"]);
     expect(calls[0]).toMatchObject({ phone: "+8801700000073", pin: PIN });
+    // The installation travels WITH the credential.
+    expect(typeof calls[0]?.devicePublicId).toBe("string");
     expect(calls[1]).toMatchObject({ shopId: SHOP, since: null, includeAccess: true });
+    // And the pull carries no device identity at all: the server derives it
+    // from the session id inside the token.
+    expect(calls[1]?.devicePublicId).toBeUndefined();
+    expect(calls[1]?.deviceSecret).toBeUndefined();
+
+    // The binding the login returned landed locally, secret and status
+    // together, before verifyPinForUser consulted the mirror.
+    const registry = await readLocalDeviceRegistry(SHOP);
+    expect(registry).toMatchObject({ status: "active", registryVersion: 1, isEnrolled: true });
+    expect(await readLocalDeviceBinding(SHOP, USER)).toEqual({
+      status: "active", bindingVersion: 1,
+    });
     expect(db.select({ name: users.name }).from(users).where(eq(users.id, USER)).get())
       .toEqual({ name: "Hydrated Actor" });
     expect(localLock()).toBeNull();

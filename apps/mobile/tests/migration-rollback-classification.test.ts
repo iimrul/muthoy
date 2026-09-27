@@ -92,14 +92,16 @@ describe('function bodies are not migration-time mutation', () => {
 
 describe('the corrected PostgreSQL classification', () => {
   it('covers every migration on disk exactly once', () => {
-    expect(pg.length).toBe(26);
-    expect(new Set(pg.map((row) => row.name)).size).toBe(26);
+    expect(pg.length).toBe(28);
+    expect(new Set(pg.map((row) => row.name)).size).toBe(28);
   });
 
-  it('is A 6 / B 13 / C 7 — not the 14 forward-only the first audit claimed', () => {
+  it('is A 6 / B 15 / C 7 — not the 14 forward-only the first audit claimed', () => {
     // Hardcoded on purpose. A migration that changes class has to change this
     // number too, which is the point at which somebody looks at it.
-    expect(classCounts(pg)).toEqual({ A: 6, B: 13, C: 7 });
+    // A2.3 added the registry plus its persistent-hold hotfix: function and
+    // trigger definitions, zero migration-time DML, so both are B.
+    expect(classCounts(pg)).toEqual({ A: 6, B: 15, C: 7 });
   });
 
   it('declares its one judgement instead of inferring it', () => {
@@ -121,7 +123,69 @@ describe('the corrected PostgreSQL classification', () => {
   );
 
   it('states the corrected headline count in the document itself', () => {
-    expect(ROLLBACK_DOC).toContain('**A: 6 · B: 13 · C: 7 — of 26.**');
+    expect(ROLLBACK_DOC).toContain('**A: 6 · B: 15 · C: 7 — of 28.**');
+  });
+
+  it('carries no OTHER headline anywhere in any of the three documents', () => {
+    // The blocker this exists for. ROLLBACK.md stated the headline TWICE —
+    // once inside the generated block and once in the hand-maintained section
+    // below it — and only the generated one was ever checked. A2.3 moved the
+    // counts, the generated copy updated itself, and the hand copy sat there
+    // saying "A: 6 · B: 13 · C: 7 — of 26" with the whole suite green.
+    //
+    // Now every headline-shaped string in all three documents is checked,
+    // wherever it appears, generated or not.
+    const counts = classCounts(pg);
+    const expected = `A: ${counts.A} · B: ${counts.B} · C: ${counts.C} — of ${pg.length}`;
+    const headline = /A: \d+ · B: \d+ · C: \d+ — of \d+/g;
+    const documents = {
+      'ROLLBACK.md': ROLLBACK_DOC,
+      'backend/README.md': readFileSync(
+        resolve('backend/supabase/migrations/README.md'), 'utf8',
+      ),
+      'mobile/db/README.md': readFileSync(resolve('apps/mobile/db/README.md'), 'utf8'),
+    };
+    for (const [name, body] of Object.entries(documents)) {
+      for (const found of body.match(headline) ?? []) {
+        expect(found, `${name} states a stale headline`).toBe(expected);
+      }
+    }
+    // And the one we know about is genuinely stated more than once, so this
+    // test cannot pass by finding nothing to check.
+    expect((ROLLBACK_DOC.match(headline) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps every hand-written per-migration row matching the classifier', () => {
+    // The same failure one level down: the table below the headline is
+    // hand-maintained, so its statement counts can drift from the SQL exactly
+    // the way the headline did. Checked here for every row at once.
+    const KINDS: Record<string, keyof (typeof pg)[number]['facts']> = {
+      function: 'createFunction', trigger: 'createTrigger', table: 'createTable',
+      index: 'createIndex', policy: 'createPolicy', 'ADD COLUMN': 'addColumn',
+      GRANT: 'grant', REVOKE: 'revoke', UPDATE: 'update', INSERT: 'insert',
+      'DROP TABLE': 'dropTable', 'DROP FUNCTION': 'dropFunction',
+      'DROP POLICY': 'dropPolicy', 'DROP TRIGGER': 'dropTrigger',
+      'DROP CONSTRAINT': 'dropConstraint',
+    };
+    let checked = 0;
+    for (const row of pg) {
+      const stem = row.name.replace('.sql', '');
+      const line = ROLLBACK_DOC.split('\n').find((entry) => entry.startsWith(`| \`${stem}\``));
+      expect(line, `${stem} missing from the per-migration table`).toBeTruthy();
+      const statements = (line ?? '').split('|')[3] ?? '';
+      for (const match of statements.matchAll(/(\d+) ([A-Za-z ]+?)(?=,|$|—)/g)) {
+        const key = KINDS[(match[2] ?? '').trim()];
+        if (!key) continue;
+        checked += 1;
+        expect(
+          Number(match[1]),
+          `${stem}: ROLLBACK.md claims ${match[1]} ${match[2]}`,
+        ).toBe(row.facts[key]);
+      }
+    }
+    // Guards against the regex silently matching nothing and the loop above
+    // asserting on an empty set.
+    expect(checked).toBeGreaterThan(80);
   });
 
   it.each([

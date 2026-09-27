@@ -20,6 +20,14 @@ export default defineConfig({
         process.cwd(),
         "apps/mobile/db/test/expo-crypto.ts",
       ),
+      // A2.3. sync/deviceRegistry.ts sits in sync/pull.ts's import graph, and
+      // the real expo-device reaches expo-modules-core's EventEmitter at
+      // import time — which failed suites that never touch a device at all.
+      // The three fields it provides are cosmetic device-list labels.
+      "expo-device": resolve(
+        process.cwd(),
+        "apps/mobile/db/test/expo-device.ts",
+      ),
       "muthoy-pin-crypto": resolve(
         process.cwd(),
         "apps/mobile/db/test/muthoy-pin-crypto.ts",
@@ -169,6 +177,15 @@ export default defineConfig({
       // re-sends the locked user's server row.
       "apps/mobile/db/h7-access-lock.sqlite.test.ts",
       "apps/mobile/db/h7-pin-reservation.sqlite.test.ts",
+      // A2.3. The device-registry mirror on real SQLite: a revoked binding
+      // blocks PIN login while spending NO H-4 budget, a revoked device
+      // quarantines the whole shop, and no replayed or "unknown" snapshot can
+      // lift either.
+      "apps/mobile/db/a23-device-registry.sqlite.test.ts",
+      // A2.3 staff first-login completion: the mirror write that follows a
+      // credential proof must not report failure for a snapshot it correctly
+      // discarded, and a completed enrolment must survive restart.
+      "apps/mobile/db/a23-staff-first-login.sqlite.test.ts",
       // Receiving-device sale-graph hydration: A rings it up, B pulls it, and
       // B's own history/report/cash/credit read models have to agree.
       "apps/mobile/db/sale-graph-hydration.sqlite.test.ts",
@@ -301,6 +318,11 @@ export default defineConfig({
       "backend/supabase/pgtest/h7-security.pgtest.ts",
       "backend/supabase/pgtest/h7-fix-pass-b-nonvacuity.pgtest.ts",
       "backend/supabase/pgtest/h7-actor-reactivation.pgtest.ts",
+      // A2.3. The device registry executed against real Postgres: adoption of
+      // an unknown installation, per-binding vs whole-device revocation, that
+      // neither heals itself, cross-shop isolation, the Owner/Manager role
+      // line, and the table lockdown.
+      "backend/supabase/pgtest/a23-device-registry.pgtest.ts",
       "backend/supabase/pgtest/restore-baseline.pgtest.ts",
       "backend/supabase/functions/sync/grants.test.ts",
       // H-7: anonymous callers are refused by verifyCallerJwt itself, not by
@@ -313,6 +335,18 @@ export default defineConfig({
       // Pure, executable device-login authority checks. The adjacent source
       // contract suite cannot import Deno's npm: bcrypt specifier under Node.
       "backend/supabase/functions/sync/deviceLoginPolicy.test.ts",
+      // A2.3, same split and the same reason: the executable half of the
+      // device registry (constant-time compare, deny-by-revocation, the
+      // SQLSTATE map) plus the source contracts Node cannot run.
+      "backend/supabase/functions/sync/deviceRegistryPolicy.test.ts",
+      // Executes the mocked RPC boundary itself: malformed gate/blocked-shop
+      // responses fail closed and credential flows cannot bypass a bound
+      // revocation.
+      "backend/supabase/functions/sync/deviceGuard.test.ts",
+      // Executes enrollment preflight and binding semantics: capable clients
+      // cannot omit installation identity, holds cannot be bypassed, and
+      // malformed registry responses fail closed.
+      "backend/supabase/functions/sync/deviceBinding.test.ts",
       // Same text-reading technique again, for the separate-device login: that
       // the lockout precedes bcrypt, that every credential failure is
       // indistinguishable, that permission_version cannot be pushed by a

@@ -55,6 +55,9 @@ function evaluate(overrides: Partial<SessionAuthorityInput> = {}) {
     claims: null,
     session: SESSION,
     local: local(),
+    // A2.3 default: no registry objection, which is what an unregistered
+    // installation produces and what every pre-A2.3 case here assumes.
+    device: null,
     lease: lease(),
     nowMs: NOW,
     freshServerResponse: false,

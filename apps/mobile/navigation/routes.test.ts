@@ -45,7 +45,11 @@ describe('B1 routes', () => {
     expect(MORE_ROUTES.find((route) => route.key === 'multi-shop')?.href).toBe(MULTI_SHOP_HREF);
   });
   it('guards scan and deep links by exact permission', () => { expect(canAccessPath(cashier, '/scan')).toBe(true); expect(canAccessPath({ ...cashier, permissions: { sale_entry: false } }, '/scan')).toBe(false); expect(canAccessPath(cashier, '/reports/report')).toBe(false); expect(canAccessPath(manager, '/reports/report')).toBe(true); });
-  it('uses exact More visibility/order', () => { expect(visibleMoreRoutes(cashier).map((item) => item.key)).toEqual([]); expect(visibleMoreRoutes(manager).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report']); expect(visibleMoreRoutes(owner).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales']); expect(visibleMoreRoutes(owner, true).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','multi-shop']); });
+  it('uses exact More visibility/order', () => { expect(visibleMoreRoutes(cashier).map((item) => item.key)).toEqual([]); expect(visibleMoreRoutes(manager).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','devices']); expect(visibleMoreRoutes(owner).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','devices']); expect(visibleMoreRoutes(owner, true).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','multi-shop','devices']);
+    // A2.3. Manager sees Devices and Staff does not, by ROLE — a Staff member
+    // holding staff_manage must not reach it, which is why the entry is not
+    // hung off that permission.
+    expect(visibleMoreRoutes(cashier).map((item) => item.key)).not.toContain('devices'); });
   it('keeps the approved Owner Quick Links in one exact registry', () => {
     expect(OWNER_QUICK_LINKS.map((item) => [item.labelKey, item.href])).toEqual([
       ['sale', '/sale'],

@@ -9,7 +9,7 @@ migration below as reversible, redeployable, or forward-only, and carries the
 decision table for who calls a restore.
 
 <!-- rollback-classification:start -->
-Rollback classification: **A: 6 · B: 13 · C: 7 — of 26.** Source: [rollback-classification.json](rollback-classification.json).
+Rollback classification: **A: 6 · B: 15 · C: 7 — of 28.** Source: [rollback-classification.json](rollback-classification.json).
 <!-- rollback-classification:end -->
 
 The data backup at step 2 of "Required sequence" is the only way back from a
@@ -45,6 +45,8 @@ forward-only migration. The procedure that exercises it is
 20260907010000_h7_revoke_api_role_truncate.sql
 20260907020000_h7_fix_pass_b.sql
 20260909000000_h7_actor_binding_staff_reactivation.sql
+20260923000000_a23_device_registry.sql
+20260926000000_a23_persistent_enrollment_holds.sql
 ```
 
 Do not reorder the function-wrapper migrations: each later grouped-operation

@@ -50,6 +50,7 @@ const deps = vi.hoisted(() => ({
   login: vi.fn(),
   inspectCloudActorBinding: vi.fn(),
   networkReachability: vi.fn(),
+  switchActorOnDevice: vi.fn(),
 }));
 
 vi.mock('expo-router', () => ({
@@ -71,6 +72,21 @@ vi.mock('../sync/authActorBinding', () => ({
 vi.mock('../sync/connectivity', () => ({
   networkReachability: deps.networkReachability,
 }));
+
+// A2.3. Stubbed rather than left to load the real module, which reaches
+// SQLite: this suite is about what the SCREEN does with each answer.
+vi.mock('../sync/deviceRegistry', () => {
+  class DeviceRegistryError extends Error {
+    constructor(readonly code: string | null, message: string) {
+      super(message);
+      this.name = 'DeviceRegistryError';
+    }
+  }
+  return {
+    DeviceRegistryError,
+    switchActorOnDevice: deps.switchActorOnDevice,
+  };
+});
 
 vi.mock('../sync/deviceAuth', async () => {
   class DeviceLoginError extends Error {}
@@ -152,6 +168,10 @@ beforeEach(() => {
   });
   deps.networkReachability.mockReset();
   deps.networkReachability.mockResolvedValue('online');
+  // A2.3 default: this installation holds no device secret, so the PIN-only
+  // switch declines and every pre-A2.3 case behaves exactly as it did.
+  deps.switchActorOnDevice.mockReset();
+  deps.switchActorOnDevice.mockResolvedValue(null);
   useLocaleStore.setState({ locale: 'en' });
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
 });
@@ -250,6 +270,91 @@ describe('PIN authentication loading state', () => {
     expect(deps.login).not.toHaveBeenCalled();
   });
 
+  // A2.3. The acceptance behaviour of the batch: on an installation that is
+  // already registered to this shop, handing the phone to a colleague costs
+  // four digits and nothing else.
+  it('completes a shared-device handover by PIN alone on a registered installation', async () => {
+    deps.verifyPin.mockResolvedValueOnce({
+      shopId: SHOP_ID,
+      userId: USER_ID,
+      role: 'staff',
+      permissions: {},
+    });
+    // The outgoing Owner's token is still the one on the device.
+    deps.inspectCloudActorBinding.mockResolvedValueOnce({
+      status: 'mismatched', actorUserId: 'outgoing-owner', shopId: SHOP_ID,
+    });
+    deps.switchActorOnDevice.mockResolvedValueOnce({
+      shopId: SHOP_ID, userId: USER_ID, role: 'staff',
+      accessToken: 'access', refreshToken: 'refresh',
+    });
+    // After the switch the session on the device IS the incoming actor's.
+    deps.inspectCloudActorBinding.mockResolvedValueOnce({
+      status: 'matched', actorUserId: USER_ID, shopId: SHOP_ID,
+    });
+    render(createElement(PinLoginScreen));
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    await waitFor(() => expect(deps.login).toHaveBeenCalledWith(
+      expect.objectContaining({ cloudActorConfirmed: true }),
+    ));
+    expect(deps.switchActorOnDevice).toHaveBeenCalledWith(SHOP_ID, USER_ID, '1234');
+    // The whole point: no phone-number screen.
+    expect(deps.replace).not.toHaveBeenCalledWith(
+      expect.objectContaining({ pathname: '/device-login' }),
+    );
+  });
+
+  it('reports a revoked binding from the switch instead of relinking or logging in', async () => {
+    deps.verifyPin.mockResolvedValueOnce({
+      shopId: SHOP_ID,
+      userId: USER_ID,
+      role: 'staff',
+      permissions: {},
+    });
+    deps.inspectCloudActorBinding.mockResolvedValueOnce({
+      status: 'mismatched', actorUserId: 'outgoing-owner', shopId: SHOP_ID,
+    });
+    const { DeviceRegistryError } = await import('../sync/deviceRegistry');
+    deps.switchActorOnDevice.mockRejectedValueOnce(
+      new (DeviceRegistryError as new (code: string, message: string) => Error)(
+        'binding_revoked', 'removed',
+      ),
+    );
+    render(createElement(PinLoginScreen));
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    // switchActorOnDevice persisted the refusal and H-10 quarantine before
+    // this screen received the error; no authenticated refresh is possible or
+    // required here.
+    await waitFor(() => expect(screen.getByText(
+      'Your access on this device has been removed. Ask the shop owner to restore it.',
+    )).toBeTruthy());
+    expect(deps.login).not.toHaveBeenCalled();
+    expect(deps.replace).not.toHaveBeenCalled();
+  });
+
+  it('reports a locally-known revocation without spending the H-4 attempt budget', async () => {
+    // db/auth.ts throws this only when the PIN MATCHED, so no budget was
+    // charged. The pad must say so rather than showing "Incorrect PIN".
+    const { DeviceAccessRevokedError } = await import('../db/errors');
+    deps.verifyPin.mockRejectedValueOnce(new DeviceAccessRevokedError('device_revoked'));
+    render(createElement(PinLoginScreen));
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    await waitFor(() => expect(screen.getByText(
+      'This device has been removed from the shop. Ask the shop owner to register it again.',
+    )).toBeTruthy());
+    expect(deps.login).not.toHaveBeenCalled();
+    expect(deps.replace).not.toHaveBeenCalled();
+  });
+
   it('keeps a mismatched actor offline-capable without claiming cloud confirmation', async () => {
     deps.verifyPin.mockResolvedValueOnce({
       shopId: SHOP_ID,
@@ -333,6 +438,30 @@ describe('PIN authentication loading state', () => {
     expect(await screen.findByText('Something went wrong. Please try again.')).toBeTruthy();
     expect(screen.queryByText('Setting up account…')).toBeNull();
     expect((screen.getByLabelText('Digit 2') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // The hardware defect, at the surface it was reported from. A staff member's
+  // first sign-in on a till the owner had already registered got a server 200,
+  // a rotated secret and a completed enrolment — and then this screen. The
+  // generic message is right for a genuinely unknown fault (above); it is
+  // wrong, and actively harmful, for a login that worked, because "try again"
+  // re-enrols and rotates the secret every time it is obeyed.
+  it('shows no failure at all once a first Staff device-login completes', async () => {
+    const login = deferred<void>();
+    deps.loginOnNewDevice.mockReturnValueOnce(login.promise);
+    render(createElement(DeviceLoginScreen));
+
+    fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '01733333333' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    pressPin('2222');
+    await paintAndSubmit();
+
+    login.resolve();
+    await waitFor(() => expect(deps.replace).toHaveBeenCalledWith('/'));
+    expect(screen.queryByText('Something went wrong. Please try again.')).toBeNull();
+    expect(screen.queryByText(/Could not/)).toBeNull();
+    expect(screen.queryByText('Setting up account…')).toBeNull();
+    expect(deps.loginOnNewDevice).toHaveBeenCalledTimes(1);
   });
 });
 

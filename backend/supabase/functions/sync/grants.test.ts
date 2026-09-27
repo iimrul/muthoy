@@ -195,3 +195,52 @@ describe('sync edge-function Postgres privileges', () => {
     expect(PUSH_SOURCE).toContain('Permission role does not belong to authenticated shop');
   });
 });
+
+// A grant is not the only thing a migration can take away from a direct read.
+//
+// A2.3 added four tables that each carry a foreign key to BOTH `users` and
+// `shops` — shop_devices, shop_device_bindings, auth_session_devices and
+// device_enrollment_holds. PostgREST reads any such table as a junction, so
+// `users -> shops` stopped being one relationship and became five, and the
+// unqualified embed in assertCallerCurrent started returning PGRST201
+// "more than one relationship was found".
+//
+// That embed runs on EVERY authenticated action, and the function reports its
+// failure as "Could not verify caller" — HTTP 500. Applying the migration
+// therefore took the entire sync backend down for every user at once, which is
+// exactly how it was found: on a real handset, against a real project, after
+// a real deploy. No pgtest could have caught it — PGlite speaks SQL, and this
+// is PostgREST's relationship resolver, which only exists in the hosted stack.
+//
+// Naming the constraint pins the embed to one meaning for good. These tests
+// fail in CI instead of in a shop.
+describe('PostgREST embeds name the relationship they mean', () => {
+  const SOURCE = stripComments(FUNCTIONS_SOURCE);
+
+  test('no embed of shops is left for PostgREST to guess', () => {
+    // `shops!inner(` is the ambiguous form. `shops!<constraint>!inner(` is not.
+    const ambiguous = [...SOURCE.matchAll(/shops!(\w+)?!?inner\(/g)]
+      .filter((match) => match[1] === undefined || match[1] === 'inner');
+    expect(ambiguous).toEqual([]);
+  });
+
+  test('assertCallerCurrent embeds shops through users.shop_id specifically', () => {
+    expect(SOURCE).toContain('shops!users_shop_id_fkey!inner(');
+  });
+
+  test('the junction tables that caused it are still present, so the hint still matters', () => {
+    // If these ever stop referencing both users and shops the hint becomes
+    // cosmetic — but it must not be removed on that basis, because the next
+    // table like them would silently break the embed again.
+    for (const table of [
+      'shop_devices',
+      'shop_device_bindings',
+      'auth_session_devices',
+      'device_enrollment_holds',
+    ]) {
+      expect(MIGRATIONS_SQL).toMatch(
+        new RegExp(String.raw`create\s+table\s+${table}\b`, 'i'),
+      );
+    }
+  });
+});

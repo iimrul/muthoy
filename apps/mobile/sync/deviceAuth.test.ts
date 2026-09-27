@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   inspectAuthority: vi.fn(),
   clearPinAttempts: vi.fn(),
   refreshBillingStatus: vi.fn(),
+  recordBoundInstallation: vi.fn(),
   epoch: 0,
   session: null as null | { shopId: string; userId: string },
 }));
@@ -33,6 +34,10 @@ vi.mock('./supabaseClient', () => ({
 
 vi.mock('./pull', () => ({ pullChanges: mocks.pullChanges }));
 vi.mock('./billing', () => ({ refreshBillingStatus: mocks.refreshBillingStatus }));
+vi.mock('./deviceRegistry', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./deviceRegistry')>();
+  return { ...original, recordBoundInstallation: mocks.recordBoundInstallation };
+});
 vi.mock('./authActorBinding', () => ({
   inspectCloudActorBinding: mocks.inspectBinding,
   assertCloudActorBinding: (binding: { status: string }) => {
@@ -61,7 +66,7 @@ vi.mock('../state/sessionStore', () => ({
   },
 }));
 
-const { loginOnNewDevice, recoverOwnerPin } = await import('./deviceAuth');
+const { DeviceLoginError, loginOnNewDevice, recoverOwnerPin } = await import('./deviceAuth');
 
 beforeEach(() => {
   vi.stubGlobal('__DEV__', true);
@@ -84,6 +89,7 @@ beforeEach(() => {
   });
   mocks.pullChanges.mockResolvedValue(undefined);
   mocks.refreshBillingStatus.mockResolvedValue(undefined);
+  mocks.recordBoundInstallation.mockResolvedValue(true);
   mocks.markShopCloudLinked.mockResolvedValue(undefined);
   // Truthy: the clear now REPORTS whether the hydrated row justified releasing
   // the lock, and loginDeviceUser refuses the login when it does not.
@@ -125,13 +131,28 @@ describe('fresh-device auth orchestration', () => {
         action: 'device-login',
         phone: '+8801712345678',
         pin: '1234',
+        // A2.3. The installation travels WITH the credential, because there is
+        // no enrolment route to call afterwards: registering a device is a
+        // consequence of proving a PIN, in the same transaction that binds the
+        // session being minted.
+        deviceRegistryVersion: 1,
+        devicePublicId: expect.any(String),
+        platform: expect.any(String),
+        model: expect.any(String),
+        osVersion: expect.any(String),
         _timingId: timing.correlationId,
       },
     });
+    // The completion ORDER, as a single assertion: credential proof, then the
+    // server session, then hydration, then the installation secret, then the
+    // local access answer, and only then anything that marks this login done.
     expect(stages).toEqual([
       'edge_function_invocation',
       'supabase_session_set',
       'full_hydration',
+      'commercial_identity_hydration',
+      'device_enrollment_persistence',
+      'local_access_unlock',
       'local_enrollment_write',
       'hydrated_exact_user_validation',
     ]);
@@ -146,6 +167,13 @@ describe('fresh-device auth orchestration', () => {
       { isCurrent: expect.any(Function) },
     );
     expect(mocks.refreshBillingStatus).toHaveBeenCalledBefore(mocks.clearLocalUserAccessLock);
+    expect(mocks.recordBoundInstallation).toHaveBeenCalledWith(
+      SHOP_ID,
+      expect.objectContaining({ userId: USER_ID }),
+      { required: true, expectedActorUserId: USER_ID },
+    );
+    expect(mocks.refreshBillingStatus).toHaveBeenCalledBefore(mocks.recordBoundInstallation);
+    expect(mocks.recordBoundInstallation).toHaveBeenCalledBefore(mocks.clearLocalUserAccessLock);
     expect(mocks.pullChanges).toHaveBeenCalledBefore(mocks.clearLocalUserAccessLock);
     expect(mocks.clearLocalUserAccessLock).toHaveBeenCalledWith(SHOP_ID, USER_ID);
     expect(mocks.clearLocalUserAccessLock).toHaveBeenCalledBefore(mocks.verifyPinForUser);
@@ -196,6 +224,75 @@ describe('fresh-device auth orchestration', () => {
     expect(mocks.verifyPinForUser).not.toHaveBeenCalled();
     expect(mocks.login).not.toHaveBeenCalled();
   });
+
+  it('fails closed before local enrollment state when secure secret persistence fails', async () => {
+    mocks.recordBoundInstallation.mockRejectedValueOnce(new Error('SQLCipher unavailable'));
+
+    // Still fails closed — the server believes this handset is enrolled while
+    // the handset lost the only plaintext copy of its secret, and that must
+    // never read as success. What changed is the MESSAGE: a raw SQLCipher fault
+    // is not a DeviceLoginError, so the screen rendered it as "Something went
+    // wrong. Please try again." and named nothing.
+    const failure = await loginOnNewDevice('01712345678', '1234').catch((error) => error);
+    expect(failure).toBeInstanceOf(DeviceLoginError);
+    expect(failure.message).toContain('securely save this device registration');
+
+    expect(mocks.clearLocalUserAccessLock).not.toHaveBeenCalled();
+    expect(mocks.markShopCloudLinked).not.toHaveBeenCalled();
+    expect(mocks.verifyPinForUser).not.toHaveBeenCalled();
+    expect(mocks.login).not.toHaveBeenCalled();
+  });
+
+  // The hardware defect, at this level. The mirror write is what used to raise
+  // a DeviceRegistryError for a snapshot it had correctly discarded; the screen
+  // could only render that as the generic failure, so a completed login looked
+  // broken and the person retyped their phone number.
+  it('completes the login, exactly once, when the installation is already enrolled', async () => {
+    await loginOnNewDevice('01712345678', '1234');
+
+    expect(mocks.recordBoundInstallation).toHaveBeenCalledTimes(1);
+    expect(mocks.login).toHaveBeenCalledWith(expect.objectContaining({
+      userId: USER_ID,
+      cloudActorConfirmed: true,
+    }));
+  });
+
+  it.each([
+    ['the commercial projection', () => mocks.refreshBillingStatus, 'confirm your shop plan'],
+    ['the local access answer', () => mocks.clearLocalUserAccessLock, 'confirm your access on this device'],
+    ['the cloud-link marker', () => mocks.markShopCloudLinked, 'finish setting up this device'],
+  ] as const)('names the step instead of a generic failure when %s faults', async (
+    _label,
+    faultingStep,
+    expected,
+  ) => {
+    faultingStep().mockRejectedValueOnce(new Error('disk I/O error'));
+
+    const failure = await loginOnNewDevice('01712345678', '1234').catch((error) => error);
+    expect(failure).toBeInstanceOf(DeviceLoginError);
+    expect(failure.message).toContain(expected);
+    // Never the raw fault, which would tell a pharmacist nothing and reads as a
+    // bug report rather than an instruction.
+    expect(failure.message).not.toContain('disk I/O');
+    expect(mocks.login).not.toHaveBeenCalled();
+  });
+
+  // H-7. clearLocalUserAccessLock is NOT post-auth cleanup whose failure can be
+  // shrugged off: a `false` answer is the hydrated server row saying this actor
+  // is not live, and releasing the lock or creating a session anyway is exactly
+  // the hole the lock exists to close.
+  it('still denies an authoritative access refusal, and spends no enrollment on it', async () => {
+    mocks.clearLocalUserAccessLock.mockResolvedValueOnce(false);
+
+    const failure = await loginOnNewDevice('01712345678', '1234').catch((error) => error);
+    expect(failure).toBeInstanceOf(DeviceLoginError);
+    expect(failure.message).toContain('has been revoked');
+    expect(failure.isCredentialFailure).toBe(true);
+
+    expect(mocks.markShopCloudLinked).not.toHaveBeenCalled();
+    expect(mocks.verifyPinForUser).not.toHaveBeenCalled();
+    expect(mocks.login).not.toHaveBeenCalled();
+  });
 });
 
 describe('owner recovery is the only explicit attempt-budget reset', () => {
@@ -205,6 +302,32 @@ describe('owner recovery is the only explicit attempt-budget reset', () => {
     expect(mocks.verifyPinForUser).toHaveBeenCalledBefore(mocks.inspectAuthority);
     expect(mocks.inspectAuthority).toHaveBeenCalledBefore(mocks.clearPinAttempts);
     expect(mocks.clearPinAttempts).toHaveBeenCalledBefore(mocks.login);
+  });
+
+  it('sends mandatory A2.3 installation identity with PIN recovery', async () => {
+    await recoverOwnerPin('+8801712345678', '2468');
+    expect(mocks.invoke).toHaveBeenCalledWith('sync', {
+      body: expect.objectContaining({
+        action: 'recover-pin',
+        deviceRegistryVersion: 1,
+        devicePublicId: expect.any(String),
+      }),
+    });
+  });
+
+  it.each([
+    ['device_session_unbound', 'Sign in again to relink this device.'],
+    ['device_enrollment_held', 'Another active Owner or Manager must approve this device.'],
+    ['device_id_required', 'This app installation could not be identified. Restart and try again.'],
+  ])('maps %s to an actionable recovery error', async (code, message) => {
+    mocks.invoke.mockResolvedValueOnce({
+      data: null,
+      error: { context: new Response(JSON.stringify({ code }), { status: 403 }) },
+    });
+    await expect(recoverOwnerPin('+8801712345678', '2468')).rejects.toMatchObject({
+      message,
+      isCredentialFailure: false,
+    });
   });
 
   it.each([

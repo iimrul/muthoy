@@ -94,6 +94,39 @@ export class PinLockedOutError extends Error {
   }
 }
 
+/**
+ * A2.3. The PIN was RIGHT, and this installation is still refused.
+ *
+ * Distinct from a wrong PIN on purpose, and reported as such. Without it a
+ * revoked staff member types their correct PIN and is told "Incorrect PIN"
+ * forever — a refusal they can neither understand nor act on, and one that
+ * looks exactly like the app being broken.
+ *
+ * It is not an oracle: reaching this requires already knowing a live account's
+ * exact PIN, so it discloses nothing an attacker did not have. And because the
+ * credential matched, no H-4 attempt budget was spent producing it.
+ */
+export class DeviceAccessRevokedError extends Error {
+  readonly objection: 'device_revoked' | 'binding_revoked' | 'read_failed';
+
+  constructor(objection: 'device_revoked' | 'binding_revoked' | 'read_failed') {
+    super(
+      objection === 'device_revoked'
+        ? 'This device has been removed from the shop.'
+        : objection === 'binding_revoked'
+          ? 'This account has been removed from this device.'
+          // The mirror would not answer, so device standing is unknown and the
+          // login fails closed. Worded as a fault rather than a refusal,
+          // because that is what it is: nobody has been removed from
+          // anything, and telling a shopkeeper otherwise would send them
+          // looking for a revocation that never happened.
+          : 'This device could not confirm its access. Sign in with your phone number.',
+    );
+    this.name = 'DeviceAccessRevokedError';
+    this.objection = objection;
+  }
+}
+
 // Thrown by db/auth.ts's requirePermission/requireOwner when the actor's role
 // — re-read from SQLite, never trusted from the session store — does not grant
 // the action. Screens render the same friendly denial text, so a blocked

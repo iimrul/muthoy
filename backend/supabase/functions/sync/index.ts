@@ -1,6 +1,14 @@
 import { HttpError, verifyCallerJwt, type Caller } from "./_shared/auth.ts";
 import { createServerAuthTiming, type ServerAuthTiming } from "./_shared/authTiming.ts";
 import { deviceLogin } from "./deviceLogin.ts";
+import { assertDeviceAuthority, isDeviceGuardedAction } from "./deviceGuard.ts";
+import { requesterIp } from "./deviceRegistryPolicy.ts";
+import {
+  deviceActorSwitch,
+  deviceAuthority,
+  listDevices,
+  mutateDeviceAccess,
+} from "./deviceRegistry.ts";
 import { linkDevice } from "./linkDevice.ts";
 import { pull } from "./pull.ts";
 import { push } from "./push.ts";
@@ -16,18 +24,14 @@ const headers = { "content-type": "application/json", "access-control-allow-orig
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers });
 
 /**
- * The caller's network address, for device-login's per-IP lockout.
+ * The caller's network address, for the per-IP abuse budgets.
  *
- * Edge Functions sit behind Supabase's proxy, so the socket peer is the proxy;
- * the originating address is the FIRST hop of x-forwarded-for. Returns null
- * when the header is absent or unparseable, and deviceLogin then falls back to
- * the per-phone limit alone — a missing IP must never fail a login open OR
- * closed for everyone behind one gateway.
+ * The decision of WHICH header to trust lives in deviceRegistryPolicy.ts so a
+ * test can execute it; this is the adapter. See requesterIp for why the
+ * client-writable forwarding header is not consulted.
  */
 function clientIp(request: Request): string | null {
-  const forwarded = request.headers.get("x-forwarded-for");
-  const first = forwarded?.split(",")[0]?.trim();
-  return first && first.length > 0 && first.length <= 64 ? first : null;
+  return requesterIp((name) => request.headers.get(name));
 }
 
 Deno.serve(async (request) => {
@@ -55,10 +59,42 @@ Deno.serve(async (request) => {
       return json(result);
     }
 
+    // A2.3. The SECOND unauthenticated action, and the only other one there
+    // will be. It exists for the same reason device-login does: a device
+    // handing over to a different actor may hold an expired token, or none at
+    // all after a cold start, and requiring one would put the handover back
+    // behind the phone-based relink this action exists to remove.
+    //
+    // It authenticates instead by the device secret issued at enrolment plus
+    // the target actor's PIN, both verified inside the handler, behind its own
+    // two-key rate limiter. See deviceRegistry.ts.
+    //
+    // The IP is passed for the same reason device-login takes one: the device
+    // and actor keys are both attacker-chosen, so without a dimension the
+    // CALLER cannot pick, rotating identifiers buys unlimited server bcrypt.
+    if (body.action === "device-actor-switch") {
+      return json(await deviceActorSwitch(body, clientIp(request)));
+    }
+
     const caller = authTiming
       ? await authTiming.measure("claims_session_validation", () => verifyCallerJwt(request))
       : await verifyCallerJwt(request);
     verifiedCaller = caller;
+
+    // A2.3. The device gate, once, for every action that carries shop data.
+    //
+    // Deliberately HERE rather than inside each handler. A verified token
+    // answers "who", and until this batch that was the only question asked —
+    // so a revoked handset with an hour left on its access token kept pushing
+    // and pulling exactly as before, and the revocation bit only if the app on
+    // it chose to honour what the server had told it. This answers "from
+    // where", it answers it before any handler runs, and
+    // deviceRegistryPolicy.ts's two action lists are read back against this
+    // file by a test, so a route added later cannot slip past ungated.
+    if (isDeviceGuardedAction(body.action)) {
+      await assertDeviceAuthority(caller);
+    }
+
     if (body.action === "push") return json(await push(caller, body));
     if (body.action === "push-group") return json(await pushGroup(caller, body));
     if (body.action === "refund-claim") return json(await refundClaim(caller, body));
@@ -78,6 +114,14 @@ Deno.serve(async (request) => {
       return json(result);
     }
     if (body.action === "link-device") return json(await linkDevice(caller, body));
+    // A2.3 device registry. There is deliberately NO `device-enroll` action:
+    // registering an installation is a consequence of proving a credential,
+    // never a request an existing token can make. It happens inside
+    // device-login, link-device, recover-pin and device-actor-switch, each of
+    // which binds the session it hands back.
+    if (body.action === "device-authority") return json(await deviceAuthority(caller, body));
+    if (body.action === "device-list") return json(await listDevices(caller, body));
+    if (body.action === "device-access") return json(await mutateDeviceAccess(caller, body));
     // Requires a phone-OTP session, which recoverPin re-checks itself rather
     // than trusting this dispatch — a token minted any other way is refused.
     if (body.action === "recover-pin") return json(await recoverPin(caller, body));

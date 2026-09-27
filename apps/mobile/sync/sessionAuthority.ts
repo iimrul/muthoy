@@ -1,5 +1,6 @@
 import type { LocalActorAuthority } from '../db/auth';
 import { readLocalActorAuthority } from '../db/auth';
+import { readDeviceAccessObjection, type DeviceAccessObjection } from '../db/deviceRegistry';
 import { networkReachability } from './connectivity';
 import { readAccessTokenClaims, type SessionClaims } from './authClaims';
 import {
@@ -38,7 +39,18 @@ export type SessionAuthorityReason =
   | 'offline_window_expired'
   | 'clock_rolled_back'
   | 'authority_read_failed'
-  | 'authority_refresh_unavailable';
+  | 'authority_refresh_unavailable'
+  // A2.3. The whole installation was cut off, so every actor of this shop on
+  // it is quarantined — not just whoever happens to be signed in.
+  | 'device_revoked'
+  // A2.3. This actor alone was cut off on this installation; their colleagues
+  // on the same handset are unaffected.
+  | 'binding_revoked'
+  // A2.3. The encrypted mirror would not answer. Closes the gate WITHOUT
+  // persisting a quarantine — the same shape as authority_read_failed above,
+  // and for the same reason: a read fault is not evidence of revocation, but
+  // it is not evidence of permission either.
+  | 'device_authority_read_failed';
 
 export type SessionAuthorityRefreshReasonCode =
   | 'refresh_success'
@@ -72,6 +84,17 @@ export interface SessionAuthorityInput {
     startedAt?: string;
   };
   local: LocalActorAuthority | null;
+  /**
+   * A2.3. The device registry's objection to this actor on this installation,
+   * read from the encrypted local mirror.
+   *
+   * Null means no objection, which is also what an unregistered installation
+   * produces: absent is unknown, and unknown is not revoked. A mirror that
+   * will not answer reports `read_failed` instead and is handled separately —
+   * it used to collapse into null, which made an unreadable table look exactly
+   * like permission.
+   */
+  device: DeviceAccessObjection | null;
   lease: SessionAuthorityLeaseState;
   nowMs: number;
   /** True only for a token returned by refreshSession in this check. */
@@ -88,6 +111,26 @@ function revoked(reason: SessionAuthorityReason): SessionAuthorityOutcome {
 
 function unverified(reason: SessionAuthorityReason): SessionAuthorityOutcome {
   return { status: 'unverified', reason };
+}
+
+/**
+ * A2.3. The registry's verdict, as a first-class objection.
+ *
+ * Routed through this same evaluator rather than a parallel mechanism so a
+ * device revocation gets everything H-10 already built for an actor
+ * revocation: the persisted MMKV quarantine, the rule that only full
+ * credential proof plus authoritative hydration may clear it, and one place
+ * where the precedence between all of these reasons is decided.
+ */
+function deviceObjection(input: SessionAuthorityInput): SessionAuthorityOutcome | null {
+  if (input.device === 'device_revoked') return revoked('device_revoked');
+  if (input.device === 'binding_revoked') return revoked('binding_revoked');
+  // Unreadable is not the same as unobjectionable. `unverified`, not
+  // `revoked`: the gate closes so nothing proceeds on an assumption, but no
+  // quarantine is written, because corrupting these two tables must be able to
+  // neither create a revocation nor erase one.
+  if (input.device === 'read_failed') return unverified('device_authority_read_failed');
+  return null;
 }
 
 function localObjection(input: SessionAuthorityInput): SessionAuthorityOutcome | null {
@@ -184,6 +227,11 @@ function claimObjection(
 export function evaluateSessionAuthority(input: SessionAuthorityInput): SessionAuthorityOutcome {
   const leaseProblem = leaseObjection(input);
   if (leaseProblem) return leaseProblem;
+  // Before the actor checks: a revoked installation refuses everyone, and
+  // saying so plainly beats reporting whichever per-actor reason happened to
+  // be found first on a device that is entirely cut off.
+  const deviceProblem = deviceObjection(input);
+  if (deviceProblem) return deviceProblem;
   const localProblem = localObjection(input);
   if (localProblem) return localProblem;
   if (!input.freshServerResponse) return { status: 'unverified', reason: 'offline_window_open' };
@@ -327,6 +375,11 @@ export async function inspectSessionAuthority(
     return unverified('authority_read_failed');
   }
 
+  // A2.3. Local-only and offline-safe: the mirror already holds the last
+  // authoritative answer, and a read fault yields null rather than an
+  // objection, so a broken lookup can never manufacture a revocation.
+  const device = await readDeviceAccessObjection(session.shopId, session.userId);
+
   const fresh = await readFreshClaims();
   const outcome = fresh.kind === 'denied'
     ? revoked('auth_session_invalid')
@@ -334,6 +387,7 @@ export async function inspectSessionAuthority(
       claims: fresh.kind === 'fresh' ? fresh.claims : null,
       session,
       local,
+      device,
       lease: readSessionAuthorityLease(session.shopId, session.userId),
       nowMs,
       freshServerResponse: fresh.kind === 'fresh',

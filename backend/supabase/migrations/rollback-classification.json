@@ -26,7 +26,9 @@
     "20260907000000_h7_security_hardening.sql": "B",
     "20260907010000_h7_revoke_api_role_truncate.sql": "A",
     "20260907020000_h7_fix_pass_b.sql": "C",
-    "20260909000000_h7_actor_binding_staff_reactivation.sql": "B"
+    "20260909000000_h7_actor_binding_staff_reactivation.sql": "B",
+    "20260923000000_a23_device_registry.sql": "B",
+    "20260926000000_a23_persistent_enrollment_holds.sql": "B"
   },
   "postgresDeclaredOverrides": [
     "20260813000000_initial_schema.sql"

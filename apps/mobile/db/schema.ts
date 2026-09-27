@@ -1335,3 +1335,47 @@ export const conflictQueue = sqliteTable("conflict_queue", {
     .notNull()
     .default(sql`(current_timestamp)`),
 });
+
+// ── A2.3 device registry mirror (device-local, never synced) ───────────
+//
+// The last authoritative answer the server gave this installation about
+// itself, plus the version that answer arrived with. Deliberately NOT in
+// SYNCED_TABLES: nothing here is pushed, and nothing here is hydrated by a
+// pull's row stream — it is written only by sync/deviceRegistry.ts, from a
+// snapshot the server returned.
+//
+// Why SQLite and not the MMKV session-authority lease: the locked design says
+// the MMKV quarantine is not authoritative. H-3 encrypts this database with a
+// Keystore-wrapped SQLCipher key, and CLAUDE.md rule 1 puts every decision the
+// app's own screens make here anyway.
+export const deviceRegistryState = sqliteTable("device_registry_state", {
+  shopId: text("shop_id").primaryKey(),
+  devicePublicId: text("device_public_id").notNull(),
+  /** Issued once at enrolment. Null means NOT ENROLLED — never "revoked". */
+  deviceSecret: text("device_secret"),
+  status: text("status", { enum: ["unknown", "active", "revoked"] })
+    .notNull()
+    .default("unknown"),
+  /** Server-assigned and monotonic. A lower value than stored is a replay. */
+  registryVersion: integer("registry_version").notNull().default(0),
+  enforced: integer("enforced", { mode: "boolean" }).notNull().default(false),
+  fetchedAt: text("fetched_at").notNull(),
+});
+
+// One row per actor the server has told this device about. An ABSENT row is
+// "unknown", not "revoked" — the deny-by-revocation rule again, and the reason
+// an unenrolled installation keeps behaving exactly as it did before A2.3.
+export const deviceBindingState = sqliteTable(
+  "device_binding_state",
+  {
+    shopId: text("shop_id").notNull(),
+    actorUserId: text("actor_user_id").notNull(),
+    status: text("status", { enum: ["active", "revoked"] }).notNull(),
+    bindingVersion: integer("binding_version").notNull().default(0),
+    fetchedAt: text("fetched_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.shopId, t.actorUserId] }),
+    shopIdx: index("device_binding_state_shop_idx").on(t.shopId, t.status),
+  }),
+);

@@ -244,6 +244,13 @@ export default function SettingsScreen() {
             label={t("printer")}
             onPress={() => router.push("/settings/printer-settings")}
           />
+          {/* A2.3. Each row there is one app INSTALLATION, not a handset —
+              see app/settings/devices.tsx for why that distinction is stated
+              rather than glossed over. */}
+          <Row
+            label={t("devicesTitle")}
+            onPress={() => router.push("/settings/devices")}
+          />
           <Row
             label={t("lowStockExpiryRules")}
             value={b2Settings ? `${b2Settings.lowStockDefault} · ${b2Settings.expiryNearDays}/${b2Settings.expiryFarDays}d` : "…"}
