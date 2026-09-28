@@ -1,11 +1,26 @@
-import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { otpCodeSchema, recoverPinSchema } from '@muthoy/validation';
+import { AuthButton } from '../../components/auth/AuthButton';
+import { AuthFooterNote } from '../../components/auth/AuthFooterNote';
+import { AuthIconTile } from '../../components/auth/AuthIconTile';
+import { AuthNotice } from '../../components/auth/AuthNotice';
+import { AuthShell } from '../../components/auth/AuthShell';
+import { AuthTitleBlock } from '../../components/auth/AuthTitleBlock';
+import { deviceLoginErrorKey } from '../../components/auth/authMessages';
+import { PhoneField } from '../../components/auth/PhoneField';
+import { authPhoneForSubmit, formatPhoneForDisplay, phoneFieldValueFrom } from '../../components/auth/phoneInput';
+import { AUTH_CHIP_LABELS, SecureChip } from '../../components/auth/SecureChip';
+import { latinFont, useCopyFont } from '../../components/auth/typography';
 import { OtpInput } from '../../components/ui/OtpInput';
 import { PinPad, useConfirmedPinEntry } from '../../components/ui/PinPad';
+import { StandardHeader } from '../../components/ui/StandardHeader';
+import type { CatalogKey } from '../../i18n/catalog';
+import { localizeValidationMessage } from '../../i18n/display';
+import { useI18n } from '../../state/localeStore';
 import { DeviceLoginError, recoverOwnerPin } from '../../sync/deviceAuth';
-import { sendOtp, verifyOtp } from '../../sync/otp';
+import { resendOtp, sendOtp, verifyOtp } from '../../sync/otp';
 
 // Forgot PIN — OWNER ONLY, and the one place OTP survives after first-time
 // registration.
@@ -18,39 +33,88 @@ import { sendOtp, verifyOtp } from '../../sync/otp';
 // own to receive a code at, and self-service reset would make anyone able to
 // intercept one SMS able to take over a till — their PIN is reset by the owner
 // (db/staff.ts's resetStaffPin).
+//
+// Restyled to the auth system (Gen B): progress is shown inline instead of
+// replacing the whole screen, the code step can resend or change the number,
+// and a PIN mismatch keeps the first PIN. The server rules are untouched —
+// recover-pin still refuses a stale OTP proof, and that refusal now sends the
+// owner back for a new code instead of reading as "could not reach the server".
 type Step = 'phone' | 'code' | 'pin';
 
+const RESEND_COOLDOWN_SECONDS = 30;
+
+type Problem = { kind: 'catalog'; key: CatalogKey } | { kind: 'validation'; message: string };
+
 export default function ForgotPinScreen() {
-  // Prefilled from Device Login when the owner already typed it there.
+  // Prefilled from Device Login when the owner already typed it there. A route
+  // param is outside input, so it is canonicalized on the way in.
   const params = useLocalSearchParams<{ phone?: string }>();
-  const [phone, setPhone] = useState(params.phone ?? '');
+  const { t, formatNumber } = useI18n();
+  const font = useCopyFont();
+  const [phone, setPhone] = useState(() => phoneFieldValueFrom(params.phone));
   const [step, setStep] = useState<Step>('phone');
   const [code, setCode] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [isBusy, setIsBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const [busy, setBusy] = useState<'sending' | 'verifying' | 'saving' | null>(null);
+  const [cooldown, setCooldown] = useState(0);
+  const [shakeKey, setShakeKey] = useState(0);
   const codeInputRef = useRef<TextInput>(null);
 
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setInterval(() => setCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => clearInterval(timer);
+  }, [cooldown]);
+
+  const problemMessage =
+    problem?.kind === 'validation'
+      ? localizeValidationMessage(problem.message, t) ?? t('deviceLoginGenericFailure')
+      : problem
+        ? t(problem.key)
+        : null;
+
   const handleSendCode = async () => {
-    const parsed = recoverPinSchema.shape.phone.safeParse(phone);
+    const parsed = recoverPinSchema.shape.phone.safeParse(authPhoneForSubmit(phone));
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Enter a valid phone number');
+      setProblem({ kind: 'validation', message: parsed.error.issues[0]?.message ?? '' });
       return;
     }
-    setIsBusy(true);
-    setError(null);
+    setBusy('sending');
+    setProblem(null);
     try {
       await sendOtp(parsed.data);
+      // From here on the code step resends to, verifies against and recovers
+      // with exactly the canonical number the code went to.
+      setPhone(parsed.data);
+      setCode('');
+      setCooldown(RESEND_COOLDOWN_SECONDS);
       setStep('code');
     } catch {
-      setError('Could not send the code. Check your connection and try again.');
+      setProblem({ kind: 'catalog', key: 'otpSendFailed' });
     } finally {
-      setIsBusy(false);
+      setBusy(null);
+    }
+  };
+
+  const handleResend = async () => {
+    if (cooldown > 0 || busy) return;
+    setBusy('sending');
+    setProblem(null);
+    try {
+      await resendOtp(authPhoneForSubmit(phone));
+      setCode('');
+      setCooldown(RESEND_COOLDOWN_SECONDS);
+      codeInputRef.current?.focus();
+    } catch {
+      setProblem({ kind: 'catalog', key: 'otpResendFailed' });
+    } finally {
+      setBusy(null);
     }
   };
 
   const handleCodeChange = async (next: string) => {
     setCode(next);
-    setError(null);
+    setProblem(null);
     if (next.length !== 6) {
       return;
     }
@@ -58,124 +122,196 @@ export default function ForgotPinScreen() {
     if (!parsed.success) {
       return;
     }
-    setIsBusy(true);
+    setBusy('verifying');
     try {
       // This only proves the phone. The new PIN is set in the next step against
       // the session it produces — recoverPin on the server refuses any token
       // that does not carry a verified phone.
-      await verifyOtp(phone, parsed.data);
+      await verifyOtp(authPhoneForSubmit(phone), parsed.data);
       setStep('pin');
     } catch (cause) {
       const message = cause instanceof Error ? cause.message.toLowerCase() : '';
-      setError(
-        message.includes('expired') ? 'Code expired — request a new one' : 'Incorrect code — try again',
-      );
+      setProblem({ kind: 'catalog', key: message.includes('expired') ? 'otpExpired' : 'otpIncorrect' });
       setCode('');
       codeInputRef.current?.focus();
     } finally {
-      setIsBusy(false);
+      setBusy(null);
     }
   };
 
   const handleNewPinConfirmed = useCallback(
     async (newPin: string) => {
-      const parsed = recoverPinSchema.safeParse({ phone, newPin, confirmNewPin: newPin });
+      const parsed = recoverPinSchema.safeParse({ phone: authPhoneForSubmit(phone), newPin, confirmNewPin: newPin });
       if (!parsed.success) {
-        setError(parsed.error.issues[0]?.message ?? 'Check your PIN and try again');
+        setProblem({ kind: 'validation', message: parsed.error.issues[0]?.message ?? '' });
         return;
       }
-      setIsBusy(true);
-      setError(null);
+      setBusy('saving');
+      setProblem(null);
       try {
         // CLAUDE.md rule 8: the raw PIN is handed to recoverOwnerPin and to
         // nothing else. The server bcrypt-hashes it; it is never logged.
         await recoverOwnerPin(parsed.data.phone, parsed.data.newPin);
         router.replace('/');
       } catch (cause) {
-        setError(
-          cause instanceof DeviceLoginError ? cause.message : 'Something went wrong. Please try again.',
-        );
+        if (cause instanceof DeviceLoginError && cause.code === 'otp_required') {
+          // The verified code is too old for the server to accept. A fresh
+          // code is the only thing that can pass, so go back and get one.
+          setStep('code');
+          setCode('');
+          setCooldown(0);
+          setProblem({ kind: 'catalog', key: 'authErrorOtpRequired' });
+          return;
+        }
+        setProblem({
+          kind: 'catalog',
+          key: cause instanceof DeviceLoginError ? deviceLoginErrorKey(cause.code) : 'deviceLoginGenericFailure',
+        });
       } finally {
-        setIsBusy(false);
+        setBusy(null);
       }
     },
     [phone],
   );
 
-  const pinEntry = useConfirmedPinEntry(handleNewPinConfirmed, () =>
-    setError('PINs did not match — start over'),
+  const pinEntry = useConfirmedPinEntry(
+    handleNewPinConfirmed,
+    () => {
+      setProblem({ kind: 'catalog', key: 'pinMismatch' });
+      setShakeKey((value) => value + 1);
+    },
+    { onMismatchStep: 'stay-on-confirm' },
   );
+  const resetPinEntry = pinEntry.reset;
 
-  if (isBusy) {
-    return (
-      <View className="flex-1 items-center justify-center gap-4 bg-brand-softGreen p-6">
-        <ActivityIndicator />
-        <Text className="font-sans text-sm text-midGray">Please wait…</Text>
-      </View>
-    );
-  }
+  const handleBack = () => {
+    setProblem(null);
+    if (step === 'code') {
+      setStep('phone');
+      return;
+    }
+    if (step === 'pin') {
+      resetPinEntry();
+      return;
+    }
+    router.back();
+  };
+
+  const busyNotice =
+    busy === 'sending' ? t('forgotPinSending') : busy === 'verifying' ? t('otpVerifying') : busy === 'saving' ? t('forgotPinSaving') : null;
+  const notice = busyNotice ? (
+    <AuthNotice tone="progress" message={busyNotice} />
+  ) : problemMessage ? (
+    <AuthNotice tone="error" message={problemMessage} />
+  ) : null;
+
+  const title =
+    step === 'pin'
+      ? t(pinEntry.step === 'enter' ? 'forgotPinNewTitle' : 'forgotPinConfirmTitle')
+      : t('forgotPinTitle');
 
   return (
-    <View className="flex-1 justify-center gap-8 bg-brand-softGreen p-6">
-      <View className="items-center gap-1">
-        <Text className="font-sans-bold text-2xl text-richBlack">Reset your PIN</Text>
-        <Text className="font-sans text-center text-sm text-midGray">
-          {step === 'phone'
-            ? "We'll text a code to your registered number."
-            : step === 'code'
-              ? `Enter the code sent to ${phone}`
-              : pinEntry.step === 'enter'
-                ? 'Choose a new PIN'
-                : 'Confirm your new PIN'}
-        </Text>
+    <AuthShell
+      variant="secure"
+      header={
+        <StandardHeader
+          tone="auth"
+          safeAreaTop
+          title={t('forgotPinHeaderTitle')}
+          // From the new-PIN step, Back means "choose again", never "unverify".
+          onBackPress={busy || (step === 'pin' && pinEntry.step === 'enter') ? undefined : handleBack}
+        />
+      }
+      footer={
+        step === 'pin' ? (
+          <View className="w-full">
+            <PinPad
+              variant="secure"
+              value={pinEntry.pin}
+              onDigitPress={(digit) => {
+                setProblem(null);
+                pinEntry.handleDigitPress(digit);
+              }}
+              onBackspace={pinEntry.handleBackspace}
+              error={problem !== null}
+              disabled={pinEntry.isSubmitting || busy !== null}
+              shakeKey={shakeKey}
+              revealLastDigit
+            />
+            {/* Resetting signs out every other device for this owner — the
+                usual reason for a reset is that one of them is lost. */}
+            <AuthFooterNote text={t('forgotPinOtherDevices')} />
+          </View>
+        ) : step === 'code' ? (
+          <View className="w-full items-center">
+            {cooldown > 0 ? (
+              <Text className={`${font()} text-center text-sm text-secure-body`}>
+                {t('otpResendIn')}{' '}
+                <Text className={`${latinFont('bold')} text-secure-primary`}>
+                  {formatNumber(cooldown)}
+                  {t('otpSecondsSuffix')}
+                </Text>
+              </Text>
+            ) : (
+              <AuthButton
+                variant="link"
+                leadingIcon="refresh"
+                label={t('otpResend')}
+                disabled={busy !== null}
+                onPress={() => void handleResend()}
+              />
+            )}
+            <AuthButton variant="secureLink" label={t('authChangeNumber')} disabled={busy !== null} onPress={handleBack} />
+          </View>
+        ) : undefined
+      }
+    >
+      <View className="items-center">
+        <SecureChip label={AUTH_CHIP_LABELS.owner} />
+        <AuthIconTile icon={step === 'pin' ? 'lock-outline' : 'key-outline'} />
+        <AuthTitleBlock
+          eyebrow={t('forgotPinEyebrow')}
+          title={title}
+          body={step === 'phone' ? t('forgotPinPhoneBody') : step === 'code' ? t('otpSentTo') : undefined}
+        />
+        {step === 'code' ? (
+          <Text className={`${latinFont('bold')} mb-4 text-center text-base text-secure-ink`}>
+            {formatPhoneForDisplay(phone)}
+          </Text>
+        ) : null}
       </View>
 
-      {error ? <Text className="font-sans text-center text-sm text-error">{error}</Text> : null}
-
       {step === 'phone' ? (
-        <View className="gap-4">
-          <TextInput
+        <View className="mt-4 gap-3">
+          <PhoneField
+            variant="secure"
             value={phone}
             onChangeText={setPhone}
-            placeholder="01712345678"
-            keyboardType="phone-pad"
-            accessibilityLabel="Registered phone number"
-            className="rounded-lg border border-midGray bg-white px-4 py-3 font-sans text-base text-richBlack"
+            editable={busy === null}
+            onSubmitEditing={() => void handleSendCode()}
           />
-          <Pressable
-            accessibilityRole="button"
+          {notice}
+          <AuthButton
+            variant="secure"
+            label={t('forgotPinSendCode')}
+            loading={busy === 'sending'}
             onPress={() => void handleSendCode()}
-            className="items-center rounded-lg bg-brand-green py-3.5 active:opacity-80"
-          >
-            <Text className="font-sans-semibold text-base text-white">Send code</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
-      {step === 'code' ? (
-        <OtpInput
-          ref={codeInputRef}
-          value={code}
-          onChangeText={(next) => void handleCodeChange(next)}
-          error={Boolean(error)}
-        />
-      ) : null}
-
-      {step === 'pin' ? (
-        <View className="items-center gap-6">
-          <PinPad
-            value={pinEntry.pin}
-            onDigitPress={pinEntry.handleDigitPress}
-            onBackspace={pinEntry.handleBackspace}
-            error={Boolean(error)}
           />
-          {/* Resetting signs out every other device for this owner — the usual
-              reason for a reset is that one of them is lost. */}
-          <Text className="font-sans text-center text-xs text-midGray">
-            Your other devices will need to sign in again with the new PIN.
-          </Text>
         </View>
-      ) : null}
-    </View>
+      ) : step === 'code' ? (
+        <View className="gap-4">
+          <OtpInput
+            ref={codeInputRef}
+            value={code}
+            onChangeText={(next) => void handleCodeChange(next)}
+            error={problem !== null}
+            verifying={busy === 'verifying'}
+          />
+          {notice}
+        </View>
+      ) : (
+        <View className="min-h-[26px] w-full">{notice}</View>
+      )}
+    </AuthShell>
   );
 }

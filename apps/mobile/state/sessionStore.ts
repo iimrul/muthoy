@@ -168,3 +168,52 @@ export const useSessionStore = create<SessionState>()(
     },
   ),
 );
+
+/**
+ * clearActiveUser(), durable first — for a handover that must never leave
+ * memory and disk disagreeing (the A2.3 device-relink teardown).
+ *
+ * zustand's persist middleware commits memory and THEN writes MMKV
+ * (`set(...); return setItem()`), so an MMKV write that throws inside
+ * clearActiveUser() leaves the session gone from memory but still on disk:
+ * signed out now, silently signed back in on the next launch. Here the
+ * signed-out state is written FIRST — same key, same format, same storage the
+ * middleware uses — and memory is cleared only once that write has landed:
+ *   - the write throws: nothing has changed, in memory or on disk; rethrown;
+ *   - the write lands: memory is cleared. The middleware then repeats the
+ *     identical write, and if THAT throws the disk already holds the
+ *     signed-out state — memory and disk agree, so the clear stands.
+ *
+ * switchUser() deliberately keeps plain clearActiveUser(): handing a till over
+ * must end the outgoing user's session in memory NOW, even if the disk write
+ * then fails.
+ */
+export function clearActiveUserDurably(): void {
+  const before = useSessionStore.getState();
+  writePersistedSessionState({ ...before, session: null, authorityTransitioning: false });
+  try {
+    before.clearActiveUser();
+  } catch (cause) {
+    if (useSessionStore.getState().session === null) {
+      // Committed; the throw came after (the repeat write). Disk agrees.
+      return;
+    }
+    // Memory never committed. zustand 5 always commits before it writes, so
+    // this is defensive — but the disk must never stay ahead of memory.
+    try {
+      writePersistedSessionState(useSessionStore.getState());
+    } catch {
+      // The disk stays signed out: the next launch asks for a PIN. Fail-safe.
+    }
+    throw cause;
+  }
+}
+
+/** Writes exactly what the persist middleware would for `state`. MMKV is synchronous, so a failure throws here. */
+function writePersistedSessionState(state: SessionState): void {
+  const { name, storage, partialize, version } = useSessionStore.persist.getOptions();
+  if (name === undefined || storage === undefined || partialize === undefined) {
+    throw new Error('Session persistence is not configured.');
+  }
+  void storage.setItem(name, { state: partialize(state), version });
+}

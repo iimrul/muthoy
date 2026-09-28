@@ -46,7 +46,7 @@ export async function recoverDatabaseFromServer(phone: string, pin: string): Pro
     const local = await verifyPinForUser(pin, response.shopId, response.userId);
     guard.assertLive();
     if (!local || local.userId !== response.userId || local.shopId !== response.shopId) {
-      throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false);
+      throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false, 'hydration_incomplete');
     }
 
     // The new main is open, verified, and actor-bound. Activate the exact local

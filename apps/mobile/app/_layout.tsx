@@ -38,7 +38,10 @@ import {
   CredentialCleanupError,
   enforceSessionAuthority,
   readSessionAuthorityDeadlineMs,
+  retryCloudCredentialCleanup,
 } from '../state/signOutDevice';
+import { switchUser } from '../state/switchUser';
+import { useI18n } from '../state/localeStore';
 import '../global.css';
 import { AppNavigationShell } from '../components/navigation/AppNavigationShell';
 import { AuthenticatedRuntimeErrorBoundary } from '../components/navigation/AuthenticatedRuntimeErrorBoundary';
@@ -47,11 +50,19 @@ import { ToastHost } from '../components/ui/Toast';
 import { DatabaseRecoveryScreen } from '../components/database/DatabaseRecoveryScreen';
 import { DatabaseKeyUnrecoverableError, DatabaseRecoveryPendingError } from '../db/errors';
 import { DevAuthorityRecovery } from '../dev/devAuthorityRecovery';
+import { AuthorityBlockedScreen } from '../components/auth/AuthorityBlockedScreen';
+import { AuthStatusScreen } from '../components/auth/AuthStatusScreen';
+import { BrandLoader } from '../components/auth/BrandLoader';
+import type { AuthorityBlockReason } from '../components/auth/authorityGateCopy';
 
 const FOREGROUND_CHECK_DEBOUNCE_MS = 60_000;
 const AUTHORITY_RETRY_DELAY_MS = 5_000;
 let lastForegroundCheckAt = 0;
-type AuthorityGate = { epoch: number; status: 'checking' | 'allowed' };
+// 'blocked' carries WHY the gate is closed so the screen can say so; it is
+// still closed. Only 'allowed' ever mounts the navigator for a session.
+type AuthorityGate =
+  | { epoch: number; status: 'checking' | 'retrying' | 'allowed' }
+  | { epoch: number; status: 'blocked'; reason: AuthorityBlockReason };
 // Keep the splash screen visible while brand fonts load — CLAUDE.md rule 6
 // requires the correct font family from first paint, never a system-font flash.
 SplashScreen.preventAutoHideAsync();
@@ -66,6 +77,8 @@ export default function RootLayout() {
   const [authorityGate, setAuthorityGate] = useState<AuthorityGate | null>(null);
   // A cloud credential that would not clear is reported, never swallowed.
   const [credentialCleanupFailed, setCredentialCleanupFailed] = useState(false);
+  const [cleanupRetry, setCleanupRetry] = useState<'idle' | 'running' | 'failed'>('idle');
+  const { t } = useI18n();
   const [authorityRecoveryNonce, setAuthorityRecoveryNonce] = useState(0);
   const [fontsLoaded, fontError] = useFonts({
     PlusJakartaSans_300Light,
@@ -188,14 +201,42 @@ export default function RootLayout() {
             // A temporary/unknown provider failure is neither offline
             // authority nor revocation. Keep the gate closed and retry without
             // requiring the user to manufacture a reconnect/AppState event.
+            setAuthorityGate({ epoch: checkedEpoch, status: 'retrying' });
             retryTimer = setTimeout(checkAuthority, AUTHORITY_RETRY_DELAY_MS);
+          } else if (
+            !disposed
+            && !rerunRequested
+            && outcome?.status === 'unverified'
+            && current.session !== null
+            && current.epoch === checkedEpoch
+          ) {
+            // Any other unverified verdict (no anchor yet, offline too long,
+            // clock rolled back, unreadable records): STILL CLOSED, now with
+            // the reason attached so the screen can say what fixes it. The
+            // reconnect/foreground listeners below re-check by themselves.
+            setAuthorityGate({ epoch: checkedEpoch, status: 'blocked', reason: outcome.reason });
           }
         })
         .catch((error: unknown) => {
-          if (!disposed && error instanceof CredentialCleanupError) {
-            setCredentialCleanupFailed(true);
+          // NOT gated on `disposed`. signOutDevice clears the local session
+          // before its cloud call, and that very clear re-runs this effect, so
+          // by the time the error arrives this closure is always disposed —
+          // which made the screen below unreachable, and the stuck refresh
+          // token was swallowed after all. The condition that matters is the
+          // one the screen renders on: nobody is signed in.
+          if (error instanceof CredentialCleanupError) {
+            if (useSessionStore.getState().session === null) {
+              setCleanupRetry('idle');
+              setCredentialCleanupFailed(true);
+            }
+            return;
           }
-          // Any other failure leaves the gate closed.
+          // Any other failure leaves the gate closed — and now says so,
+          // instead of 'Checking your access…' forever.
+          const current = useSessionStore.getState();
+          if (!disposed && !rerunRequested && current.session !== null && current.epoch === checkedEpoch) {
+            setAuthorityGate({ epoch: checkedEpoch, status: 'blocked', reason: 'check_failed' });
+          }
         })
         .finally(() => {
           checking = false;
@@ -285,21 +326,26 @@ export default function RootLayout() {
   // downgrades its own customers.
   if (!isSupabaseConfigured) {
     return (
-      <View className="flex-1 items-center justify-center gap-3 bg-errorBg p-6">
-        <Text className="font-sans-bold text-lg text-error">App is not configured</Text>
-        <Text className="font-sans text-center text-sm text-richBlack">
-          This build is missing its cloud settings, so sync, backup, and plan
-          verification cannot run. Please report this message.
-        </Text>
-        <Text className="font-mono text-center text-xs text-richBlack">
-          {missingSupabaseConfigKeys.join('\n')}
-        </Text>
-        <Text className="font-sans text-center text-xs text-midGray">
-          Dev builds read these from apps/mobile/.env — start Metro from that
-          folder and reload. Cloud builds need them as EAS environment
-          variables.
-        </Text>
-      </View>
+      <AuthStatusScreen
+        icon="cloud-alert-outline"
+        title={t('appNotConfiguredTitle')}
+        body={t('appNotConfiguredBody')}
+      >
+        {/* Technical literals for whoever builds the app, deliberately left
+            untranslated: variable names and where they are read from. Plus
+            Jakarta Sans, not DM Mono — CLAUDE.md rule 6 keeps DM Mono for
+            money. */}
+        <View className="gap-2">
+          <Text className="font-sans text-center text-xs text-secure-ink">
+            {missingSupabaseConfigKeys.join('\n')}
+          </Text>
+          <Text className="font-sans text-center text-xs text-secure-body">
+            Dev builds read these from apps/mobile/.env — start Metro from that
+            folder and reload. Cloud builds need them as EAS environment
+            variables.
+          </Text>
+        </View>
+      </AuthStatusScreen>
     );
   }
 
@@ -316,36 +362,77 @@ export default function RootLayout() {
   // overlay still has the authenticated tree mounted underneath it, running
   // effects and reads.
   if (authorityTransitioning || (session && !authorityAllowed)) {
+    const gate = authorityGate?.epoch === sessionEpoch ? authorityGate : null;
+    // DEV-only (a release bundle resolves this import to an inert stub), and
+    // still only for an Owner session, exactly as before.
+    const devRecovery = session?.role === 'owner' ? (
+      <DevAuthorityRecovery
+        shopId={session.shopId}
+        ownerUserId={session.userId}
+        onRecovered={() => setAuthorityRecoveryNonce((value) => value + 1)}
+      />
+    ) : null;
+
+    // Closed for a reason the person can act on. The navigator stays
+    // unmounted: "Try again" re-runs the same check (the nonce restarts the
+    // effect above) and "Switch user" clears the active actor, which leaves no
+    // session to admit. Neither sets the gate to 'allowed'.
+    if (!authorityTransitioning && session && gate?.status === 'blocked') {
+      return (
+        <AuthorityBlockedScreen
+          reason={gate.reason}
+          onRetry={() => setAuthorityRecoveryNonce((value) => value + 1)}
+          onSwitchUser={switchUser}
+        >
+          {devRecovery}
+        </AuthorityBlockedScreen>
+      );
+    }
+
     return (
-      <View className="flex-1 items-center justify-center gap-3 bg-brand-softGreen p-6">
-        <Text className="font-sans-semibold text-base text-richBlack">Checking your access…</Text>
-        <Text className="font-sans text-center text-sm text-midGray">
-          Confirming this device is still signed in as you.
-        </Text>
-        {session?.role === 'owner' ? (
-          <DevAuthorityRecovery
-            shopId={session.shopId}
-            ownerUserId={session.userId}
-            onRecovered={() => setAuthorityRecoveryNonce((value) => value + 1)}
-          />
-        ) : null}
-      </View>
+      <BrandLoader
+        title={t('gateCheckingTitle')}
+        message={t(gate?.status === 'retrying' ? 'gateRetryingBody' : 'gateCheckingBody')}
+      >
+        {devRecovery}
+      </BrandLoader>
     );
   }
 
   // Access is already denied by this point — the local session was cleared —
   // but the device may still hold a refresh token that would not go away, and
-  // that is worth telling someone about rather than hiding.
+  // that is worth telling someone about rather than hiding. No longer a dead
+  // end: the cloud half can be retried, and continuing only reaches the PIN
+  // pad (there is no session), where the same authority check runs again for
+  // whoever signs in next.
   if (credentialCleanupFailed && !session) {
+    const retryCleanup = () => {
+      setCleanupRetry('running');
+      void retryCloudCredentialCleanup().then((cleared) => {
+        if (cleared) {
+          setCleanupRetry('idle');
+          setCredentialCleanupFailed(false);
+        } else {
+          setCleanupRetry('failed');
+        }
+      });
+    };
     return (
-      <View className="flex-1 items-center justify-center gap-3 bg-errorBg p-6">
-        <Text className="font-sans-bold text-lg text-error">Signed out of this device</Text>
-        <Text className="font-sans text-center text-sm text-richBlack">
-          Your access was withdrawn, but the saved cloud login could not be
-          removed from this phone. Connect to the internet and sign in again so
-          it can be cleared. Please report this message.
-        </Text>
-      </View>
+      <AuthStatusScreen
+        icon="account-lock-outline"
+        title={t('gateCleanupTitle')}
+        body={t('gateCleanupBody')}
+        notice={cleanupRetry === 'failed' ? { tone: 'warning', message: t('gateCleanupRetryFailed') } : null}
+        actions={[
+          { label: t('gateCleanupRetry'), onPress: retryCleanup, loading: cleanupRetry === 'running' },
+          {
+            label: t('gateCleanupContinue'),
+            onPress: () => setCredentialCleanupFailed(false),
+            variant: 'secondary',
+            disabled: cleanupRetry === 'running',
+          },
+        ]}
+      />
     );
   }
 

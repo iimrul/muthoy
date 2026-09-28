@@ -65,6 +65,13 @@ vi.mock("expo-router", () => ({
   usePathname: () => "/dashboard",
 }));
 vi.mock("../domain/permissions", () => ({ resolvePermission: () => true }));
+// The relink banner ends the shift through navigation/endShift.ts, which
+// reaches the sync engine. Its ordering is proven in
+// components/auth/DeviceRelinkBanner.test.tsx; this suite is about the shell.
+vi.mock("../navigation/endShift", () => ({
+  endShiftForDeviceRelink: vi.fn(),
+  endShiftToPinPad: vi.fn(),
+}));
 vi.mock("../navigation/routes", () => ({
   authenticatedHome: () => "/dashboard",
   visibleMoreRoutes: () => [

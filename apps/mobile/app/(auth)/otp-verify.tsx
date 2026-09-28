@@ -1,22 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Pressable, Text, TextInput, View } from "react-native";
+import { Text, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { otpCodeSchema } from "@muthoy/validation";
+import { normalizeBdPhoneInput, otpCodeSchema } from "@muthoy/validation";
 import type { Session } from "@supabase/supabase-js";
+import { AuthButton } from "../../components/auth/AuthButton";
+import { AuthIconTile } from "../../components/auth/AuthIconTile";
+import { AuthNotice } from "../../components/auth/AuthNotice";
+import { AuthShell } from "../../components/auth/AuthShell";
+import { formatPhoneForDisplay } from "../../components/auth/phoneInput";
+import { latinFont, useCopyFont } from "../../components/auth/typography";
 import { OtpInput } from "../../components/ui/OtpInput";
+import { StandardHeader } from "../../components/ui/StandardHeader";
+import { showToast } from "../../components/ui/Toast";
 import {
   createShopAndOwner,
   getOwnerOnboardingPayload,
   markShopCloudLinked,
 } from "../../db/auth";
-import { linkDeviceToShop } from "../../sync/linkDevice";
+import type { CatalogKey } from "../../i18n/catalog";
+import { useI18n } from "../../state/localeStore";
+import { LinkDeviceServerError, linkDeviceToShop } from "../../sync/linkDevice";
 import { resendOtp, sendOtp, verifyOtp } from "../../sync/otp";
 import { pullChanges } from "../../sync/pull";
 
 const RESEND_COOLDOWN_SECONDS = 30;
 
+// OTP Verify — prototype-web's OTPVerification look (Gen A): header, ring
+// illustration, six boxes, a verifying card, the resend row and a manual
+// Verify button. Everything that decides anything is unchanged: the hidden
+// single-input OtpInput (SMS autofill, paste), verifyOtp, and the canonical
+// onboarding → link-device → cloud-marker sequence H-2 pins.
+
+/** The linking step's refusal, as something the screen can say and act on. */
+function setupFailureKey(cause: unknown): { key: CatalogKey; codeExpired: boolean } {
+  if (cause instanceof LinkDeviceServerError) {
+    // The server's own OTP-freshness rule. Retrying setup with the same proof
+    // can never pass, so the person is sent back for a new code instead of
+    // being offered a "Try again" that would fail forever.
+    if (cause.code === "otp_required") return { key: "otpCodeTooOld", codeExpired: true };
+    if (cause.code === "device_enrollment_held") {
+      return { key: "authErrorEnrollmentHeld", codeExpired: false };
+    }
+  }
+  return { key: "otpSetupFailed", codeExpired: false };
+}
+
 export default function OtpVerifyScreen() {
-  const { phone, shopName, resumeShopId, resumeOwnerUserId } = useLocalSearchParams<{
+  const { phone: phoneParam, shopName, resumeShopId, resumeOwnerUserId } = useLocalSearchParams<{
     phone: string;
     shopName?: string;
     resumeShopId?: string;
@@ -26,6 +56,15 @@ export default function OtpVerifyScreen() {
     // yet, which is why the id has to travel with the request.
     resumeOwnerUserId?: string;
   }>();
+  // The number arrives as a route param — from Registration, or from a resumed
+  // registration app/index.tsx read back out of SQLite — so it is outside
+  // input and is canonicalized here, once. Every send, resend, verify and the
+  // owner row then use this one string; a value that is not a Bangladeshi
+  // mobile number reaches no OTP call at all.
+  const phone = normalizeBdPhoneInput(phoneParam);
+  const phoneInvalid = phone === null;
+  const { t, formatNumber } = useI18n();
+  const font = useCopyFont();
   const inputRef = useRef<TextInput>(null);
   const verifiedSessionRef = useRef<Session | null>(null);
   const pendingShopIdRef = useRef<string | null>(null);
@@ -36,7 +75,7 @@ export default function OtpVerifyScreen() {
   const resendInFlightRef = useRef(false);
   const recoveryOtpRequestedRef = useRef(false);
   const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CatalogKey | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [hasVerifiedSession, setHasVerifiedSession] = useState(false);
@@ -63,10 +102,7 @@ export default function OtpVerifyScreen() {
     void sendOtp(phone)
       .catch(() => {
         setCooldown(0);
-        Alert.alert(
-          "OTP could not be sent",
-          "Check your connection and phone number, then try again.",
-        );
+        setError("otpSendFailed");
       })
       .finally(() => {
         setIsSendingRecoveryOtp(false);
@@ -99,11 +135,9 @@ export default function OtpVerifyScreen() {
         } catch (cause) {
           const message =
             cause instanceof Error ? cause.message.toLowerCase() : "";
-          setError(
-            message.includes("expired")
-              ? "Code expired — request a new one"
-              : "Incorrect code — try again",
-          );
+          // Provider-specific codes arrive with H-5; until then the provider's
+          // own message is the only signal that a code expired.
+          setError(message.includes("expired") ? "otpExpired" : "otpIncorrect");
           setCode("");
           inputRef.current?.focus();
           setIsSubmitting(false);
@@ -145,12 +179,17 @@ export default function OtpVerifyScreen() {
         }
         await markShopCloudLinked(completedShopId);
         router.replace("/");
-      } catch {
-        setError("Phone verified, but shop setup did not finish. Try again.");
-        Alert.alert(
-          "Shop setup incomplete",
-          "Your phone is verified. Check your connection and try setup again.",
-        );
+      } catch (cause) {
+        const failure = setupFailureKey(cause);
+        if (failure.codeExpired) {
+          // Back to a fresh code. The pending shop/owner refs are kept, so the
+          // next verified code reuses the rows this attempt already created.
+          verifiedSessionRef.current = null;
+          setHasVerifiedSession(false);
+          setCode("");
+          setCooldown(0);
+        }
+        setError(failure.key);
       } finally {
         setIsSubmitting(false);
         setIsRestoring(false);
@@ -184,28 +223,83 @@ export default function OtpVerifyScreen() {
       setError(null);
       setCode("");
       inputRef.current?.focus();
+      showToast({ message: t("otpResent"), variant: "card" });
     } catch {
-      Alert.alert(
-        "OTP could not be resent",
-        "Check your connection and try again.",
-      );
+      setError("otpResendFailed");
     } finally {
       resendInFlightRef.current = false;
       setIsResending(false);
     }
   };
 
+  const isBusy = isSubmitting || isSendingRecoveryOtp;
+  // Back is only offered while nothing irreversible has happened: a resumed
+  // registration has nowhere to go back to, and once the phone is verified the
+  // next step is setup, not a second registration.
+  const canGoBack = !resumeShopId && !hasVerifiedSession && !isBusy;
+  const setupFailed = hasVerifiedSession && error !== null;
+
   return (
-    <View className="flex-1 justify-center gap-8 bg-brand-softGreen p-6">
-      <View className="items-center gap-2">
-        <Text className="font-sans-bold text-2xl text-richBlack">
-          {isRestoring ? "Restoring your shop data…" : "Verify your phone"}
-        </Text>
-        <Text className="font-sans text-center text-sm text-midGray">
-          {isRestoring
-            ? "Keep the app open while your records download."
-            : "Enter the code sent to " + (phone ?? "")}
-        </Text>
+    <AuthShell
+      variant="brand"
+      header={
+        <StandardHeader
+          tone="auth"
+          safeAreaTop
+          title={t("otpHeaderTitle")}
+          onBackPress={canGoBack ? () => router.back() : undefined}
+        />
+      }
+      footer={
+        <View className="w-full gap-6">
+          {!hasVerifiedSession ? (
+            <View className="items-center">
+              {cooldown > 0 ? (
+                <Text className={`${font()} text-center text-sm text-midGray`}>
+                  {t("otpResendIn")}{" "}
+                  <Text className={`${latinFont("bold")} text-brand-green`}>
+                    {formatNumber(cooldown)}
+                    {t("otpSecondsSuffix")}
+                  </Text>
+                </Text>
+              ) : (
+                <AuthButton
+                  variant="link"
+                  leadingIcon="refresh"
+                  label={t("otpResend")}
+                  loading={isResending}
+                  disabled={isBusy || phoneInvalid}
+                  onPress={() => void handleResend()}
+                />
+              )}
+            </View>
+          ) : null}
+          {code.length === 6 && !isBusy && !hasVerifiedSession ? (
+            <AuthButton
+              variant="gradient"
+              leadingIcon="check"
+              label={t("otpVerify")}
+              onPress={() => void handleVerify(code)}
+            />
+          ) : null}
+        </View>
+      }
+    >
+      <View className="items-center pt-4">
+        <AuthIconTile icon="email-check-outline" variant="ring" />
+        <View className="mb-8 mt-8 items-center">
+          <Text accessibilityRole="header" className={`${font("bold")} mb-2 text-center text-xl text-richBlack`}>
+            {isRestoring ? t("otpRestoringTitle") : t("otpTitle")}
+          </Text>
+          <Text className={`${font()} text-center text-sm text-midGray`}>
+            {isRestoring ? t("otpRestoringBody") : t("otpSentTo")}
+          </Text>
+          {!isRestoring ? (
+            <Text className={`${latinFont("bold")} mt-1 text-center text-base text-richBlack`}>
+              {formatPhoneForDisplay(phone ?? phoneParam ?? "")}
+            </Text>
+          ) : null}
+        </View>
       </View>
 
       {!isRestoring ? (
@@ -213,47 +307,30 @@ export default function OtpVerifyScreen() {
           ref={inputRef}
           value={code}
           onChangeText={handleCodeChange}
-          error={Boolean(error)}
-          disabled={isSubmitting || isSendingRecoveryOtp}
+          error={Boolean(error) && !hasVerifiedSession}
+          disabled={isSendingRecoveryOtp || phoneInvalid}
+          verifying={isSubmitting}
         />
       ) : null}
 
-      {error ? (
-        <Text className="font-sans text-center text-sm text-error">
-          {error}
-        </Text>
-      ) : null}
-
-      {hasVerifiedSession && error ? (
-        <Pressable
-          accessibilityRole="button"
-          disabled={isSubmitting}
-          onPress={() => void handleVerify(code)}
-          className="items-center rounded-lg bg-brand-green py-3.5"
-        >
-          <Text className="font-sans-semibold text-base text-white">
-            Try setup again
-          </Text>
-        </Pressable>
-      ) : null}
-
-      {!hasVerifiedSession ? (
-        <Pressable
-          accessibilityRole="button"
-          disabled={
-            cooldown > 0 ||
-            isSubmitting ||
-            isResending ||
-            isSendingRecoveryOtp
-          }
-          onPress={() => void handleResend()}
-          className="items-center py-3"
-        >
-          <Text className="font-sans-semibold text-sm text-brand-green">
-            {cooldown > 0 ? "Resend code in " + cooldown + "s" : "Resend code"}
-          </Text>
-        </Pressable>
-      ) : null}
-    </View>
+      <View className="mt-6 gap-4">
+        {error ? (
+          <AuthNotice tone="brandError" align="center" message={t(error)} />
+        ) : phoneInvalid ? (
+          <AuthNotice tone="brandError" align="center" message={t("authPhoneInvalid")} />
+        ) : null}
+        {isSubmitting || isRestoring ? (
+          <AuthNotice tone="brandProgress" message={isRestoring ? t("otpRestoringTitle") : t("otpVerifying")} />
+        ) : null}
+        {setupFailed ? (
+          <AuthButton
+            variant="gradient"
+            label={t("otpSetupRetry")}
+            disabled={isSubmitting}
+            onPress={() => void handleVerify(code)}
+          />
+        ) : null}
+      </View>
+    </AuthShell>
   );
 }

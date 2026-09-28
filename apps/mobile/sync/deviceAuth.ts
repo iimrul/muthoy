@@ -40,14 +40,45 @@ import { refreshBillingStatus } from './billing';
 // Once this has run, the device is enrolled and every later login is the
 // existing offline PIN-only path — no network, no phone re-entry.
 
+/**
+ * Which failure this was, for the screen to translate. The English `message`
+ * stays as it was — it is what logs and existing callers read — and the code
+ * is what lets a Bangla-first screen say the same thing in the user's language
+ * without parsing that message.
+ *
+ * `credentials` is deliberately ONE code for every credential problem, for the
+ * same anti-enumeration reason GENERIC_FAILURE below is one string.
+ */
+export type DeviceLoginErrorCode =
+  | 'credentials'
+  | 'invalid_response'
+  | 'relink_required'
+  | 'enrollment_held'
+  | 'installation_unknown'
+  | 'otp_required'
+  | 'network'
+  | 'session_start_failed'
+  | 'plan_unconfirmed'
+  | 'enrollment_save_failed'
+  | 'access_unconfirmed'
+  | 'access_revoked'
+  | 'setup_incomplete'
+  | 'hydration_incomplete';
+
 export class DeviceLoginError extends Error {
   /** True when the server refused the credentials, rather than failing. */
   readonly isCredentialFailure: boolean;
+  readonly code: DeviceLoginErrorCode;
 
-  constructor(message: string, isCredentialFailure: boolean) {
+  constructor(
+    message: string,
+    isCredentialFailure: boolean,
+    code: DeviceLoginErrorCode = isCredentialFailure ? 'credentials' : 'network',
+  ) {
     super(message);
     this.name = 'DeviceLoginError';
     this.isCredentialFailure = isCredentialFailure;
+    this.code = code;
   }
 }
 
@@ -67,7 +98,7 @@ export interface DeviceLoginResponse {
 
 function parseResponse(value: unknown): DeviceLoginResponse {
   if (!value || typeof value !== 'object') {
-    throw new DeviceLoginError('Login failed. Please try again.', false);
+    throw new DeviceLoginError('Login failed. Please try again.', false, 'invalid_response');
   }
   const body = value as Partial<DeviceLoginResponse>;
   if (
@@ -77,7 +108,7 @@ function parseResponse(value: unknown): DeviceLoginResponse {
     typeof body.accessToken !== 'string' ||
     typeof body.refreshToken !== 'string'
   ) {
-    throw new DeviceLoginError('Login failed. Please try again.', false);
+    throw new DeviceLoginError('Login failed. Please try again.', false, 'invalid_response');
   }
   return body as DeviceLoginResponse;
 }
@@ -86,7 +117,7 @@ function parseResponse(value: unknown): DeviceLoginResponse {
 async function toLoginError(error: unknown): Promise<DeviceLoginError> {
   const response = (error as { context?: Partial<Response> }).context;
   const status = typeof response?.status === 'number' ? response.status : null;
-  if (status === 401) return new DeviceLoginError(GENERIC_FAILURE, true);
+  if (status === 401) return new DeviceLoginError(GENERIC_FAILURE, true, 'credentials');
 
   let code: string | null = null;
   if (response && typeof response.clone === 'function') {
@@ -103,19 +134,31 @@ async function toLoginError(error: unknown): Promise<DeviceLoginError> {
 
   switch (code) {
     case 'device_session_unbound':
-      return new DeviceLoginError('Sign in again to relink this device.', false);
+      return new DeviceLoginError('Sign in again to relink this device.', false, 'relink_required');
     case 'device_enrollment_held':
       return new DeviceLoginError(
         'Another active Owner or Manager must approve this device.',
         false,
+        'enrollment_held',
       );
     case 'device_id_required':
       return new DeviceLoginError(
         'This app installation could not be identified. Restart and try again.',
         false,
+        'installation_unknown',
+      );
+    // The server's own freshness rule (recover-pin / link-device refuse an OTP
+    // proof older than their window). Not a provider code, and not a network
+    // fault: retrying the same proof can never pass, so the screen has to send
+    // the owner back for a new code rather than tell them to reconnect.
+    case 'otp_required':
+      return new DeviceLoginError(
+        'Your verification code is too old. Request a new code.',
+        false,
+        'otp_required',
       );
     default:
-      return new DeviceLoginError('Could not reach the server. Check your connection.', false);
+      return new DeviceLoginError('Could not reach the server. Check your connection.', false, 'network');
   }
 }
 
@@ -155,7 +198,7 @@ export async function authenticateNewDeviceCredentials(
   // login if they had registered in a different form.
   const canonicalPhone = normalizeBdPhone(phone);
   if (!canonicalPhone) {
-    throw new DeviceLoginError(GENERIC_FAILURE, true);
+    throw new DeviceLoginError(GENERIC_FAILURE, true, 'credentials');
   }
 
   const invoke = () => supabase.functions.invoke('sync', {
@@ -195,7 +238,7 @@ export async function authenticateNewDeviceCredentials(
     : await withAuthMutation(setSession);
   guard.assertLive();
   if (sessionError) {
-    throw new DeviceLoginError('Could not start your session. Please try again.', false);
+    throw new DeviceLoginError('Could not start your session. Please try again.', false, 'session_start_failed');
   }
   const binding = await inspectCloudActorBinding({ userId: response.userId, shopId: response.shopId });
   guard.assertLive();
@@ -206,6 +249,17 @@ export async function authenticateNewDeviceCredentials(
 
   return response;
 }
+
+/** Each mandatory login step, and the code its failure is reported under. */
+const LOGIN_STEP_CODES = {
+  commercial_identity_hydration: 'plan_unconfirmed',
+  device_enrollment_persistence: 'enrollment_save_failed',
+  local_access_unlock: 'access_unconfirmed',
+  local_enrollment_write: 'setup_incomplete',
+  hydrated_exact_user_validation: 'hydration_incomplete',
+} as const satisfies Record<string, DeviceLoginErrorCode>;
+
+type LoginStep = keyof typeof LOGIN_STEP_CODES;
 
 /**
  * Runs a step this login may not be treated as complete without.
@@ -228,7 +282,7 @@ export async function authenticateNewDeviceCredentials(
  * handlers act on them.
  */
 async function requireLoginStep<T>(
-  stage: string,
+  stage: LoginStep,
   message: string,
   operation: () => Promise<T>,
   timing?: AuthTimingTrace,
@@ -241,7 +295,7 @@ async function requireLoginStep<T>(
       || error instanceof StaleSessionError
       || error instanceof SyncHaltedError
     ) throw error;
-    throw new DeviceLoginError(message, false);
+    throw new DeviceLoginError(message, false, LOGIN_STEP_CODES[stage]);
   }
 }
 
@@ -343,6 +397,7 @@ export async function hydrateAuthenticatedDevice(
     throw new DeviceLoginError(
       'Your access to this shop has been revoked. Ask the shop owner to restore it.',
       true,
+      'access_revoked',
     );
   }
 
@@ -367,7 +422,7 @@ export async function hydrateAuthenticatedDevice(
     // Hydration returned without the row this login depends on. Refusing here
     // leaves the device unenrolled and the attempt retryable, which is far
     // better than a session pointing at a user SQLite does not have.
-    throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false);
+    throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false, 'hydration_incomplete');
   }
 
   return local;
@@ -396,7 +451,7 @@ export async function activateHydratedDevice(
   );
   guard.assertLive();
   if (authority.status !== 'confirmed') {
-    throw new DeviceLoginError('Could not confirm your access. Please reconnect and try again.', false);
+    throw new DeviceLoginError('Could not confirm your access. Please reconnect and try again.', false, 'access_unconfirmed');
   }
   // The same login() every other entry point calls, so the epoch bumps and
   // state/sessionGuard.ts, app/_layout.tsx's sync start and the cart cleanup all
@@ -421,7 +476,7 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
   // Same canonical form the server compares against the OTP-verified number.
   const canonicalPhone = normalizeBdPhone(phone);
   if (!canonicalPhone) {
-    throw new DeviceLoginError(GENERIC_FAILURE, true);
+    throw new DeviceLoginError(GENERIC_FAILURE, true, 'credentials');
   }
 
   const { data, error } = await supabase.functions.invoke('sync', {
@@ -454,7 +509,7 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
   });
   guard.assertLive();
   if (sessionError) {
-    throw new DeviceLoginError('Could not start your session. Please try again.', false);
+    throw new DeviceLoginError('Could not start your session. Please try again.', false, 'session_start_failed');
   }
   const binding = await inspectCloudActorBinding({ userId: response.userId, shopId: response.shopId });
   guard.assertLive();
@@ -501,7 +556,7 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
   const local = await verifyPinForUser(newPin, response.shopId, response.userId);
   guard.assertLive();
   if (!local || local.userId !== response.userId) {
-    throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false);
+    throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false, 'hydration_incomplete');
   }
 
   // H-4. The one authority allowed to refill the offline attempt budget.
@@ -528,7 +583,7 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
   );
   guard.assertLive();
   if (authority.status !== 'confirmed') {
-    throw new DeviceLoginError('Could not confirm your access. Please reconnect and try again.', false);
+    throw new DeviceLoginError('Could not confirm your access. Please reconnect and try again.', false, 'access_unconfirmed');
   }
 
   guard.assertLive();

@@ -1,5 +1,12 @@
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { router } from 'expo-router';
+import { AuthBrandBlock } from '../../components/auth/AuthBrandBlock';
+import { AuthIconTile } from '../../components/auth/AuthIconTile';
+import { AuthShell } from '../../components/auth/AuthShell';
+import { RoleCard } from '../../components/auth/RoleCard';
+import { latinFont, useCopyFont } from '../../components/auth/typography';
+import { LanguageToggle } from '../../components/ui/LanguageToggle';
+import { useI18n } from '../../state/localeStore';
 
 // Role Select — the entry point for a device that holds no shop yet.
 //
@@ -14,51 +21,57 @@ import { router } from 'expo-router';
 // owner has a shop phone and a recovery path; a staff member has a number their
 // owner issued them and does not), and because a wrong tap should read as a
 // wrong door rather than as a broken login.
+//
+// Visuals: prototype-web's RoleSelect (green hero, frosted tile, slide-up white
+// sheet, accent-bar cards), with Muthoy branding instead of its "Portable POS"
+// and a third card for registration, which the prototype handled by redirect.
 export default function RoleSelectScreen() {
+  const { t } = useI18n();
+  const font = useCopyFont();
+
   return (
-    <View className="flex-1 justify-center gap-8 bg-brand-softGreen p-6">
-      <View className="gap-1">
-        <Text className="font-sans-bold text-2xl text-richBlack">Welcome to Muthoy</Text>
-        <Text className="font-sans text-sm text-midGray">How would you like to continue?</Text>
-      </View>
+    <AuthShell
+      variant="hero"
+      cornerEnd={<LanguageToggle tone="auth" />}
+      hero={
+        <>
+          <AuthIconTile icon="shopping-outline" variant="glass" />
+          <AuthBrandBlock variant="hero" />
+        </>
+      }
+    >
+      <Text className={`${font('semibold')} mb-4 text-center text-[11px] uppercase tracking-[1px] text-midGray`}>
+        {t('roleSelectPrompt')}
+      </Text>
 
-      <View className="gap-3">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Register a new shop"
+      <View className="mb-5 gap-3">
+        <RoleCard
+          accent="register"
+          icon="store-plus-outline"
+          title={t('roleRegisterTitle')}
+          subtitle={t('roleRegisterSubtitle')}
+          accessibilityLabel={t('roleRegisterTitle')}
           onPress={() => router.push('/register')}
-          className="gap-1 rounded-lg bg-brand-green p-4 active:opacity-80"
-        >
-          <Text className="font-sans-semibold text-base text-white">Register a new shop</Text>
-          <Text className="font-sans text-xs text-white/80">
-            First time here. Verifies your phone by SMS.
-          </Text>
-        </Pressable>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Owner login"
+        />
+        <RoleCard
+          accent="owner"
+          icon="crown"
+          title={t('roleOwnerTitle')}
+          subtitle={t('roleOwnerSubtitle')}
+          accessibilityLabel={t('roleOwnerA11y')}
           onPress={() => router.push({ pathname: '/device-login', params: { role: 'owner' } })}
-          className="gap-1 rounded-lg bg-white p-4 active:opacity-80"
-        >
-          <Text className="font-sans-semibold text-base text-richBlack">I am the owner</Text>
-          <Text className="font-sans text-xs text-midGray">
-            Your shop already exists. Phone number and PIN, no code needed.
-          </Text>
-        </Pressable>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Staff login"
+        />
+        <RoleCard
+          accent="staff"
+          icon="account-circle-outline"
+          title={t('roleStaffTitle')}
+          subtitle={t('roleStaffSubtitle')}
+          accessibilityLabel={t('roleStaffA11y')}
           onPress={() => router.push({ pathname: '/device-login', params: { role: 'staff' } })}
-          className="gap-1 rounded-lg bg-white p-4 active:opacity-80"
-        >
-          <Text className="font-sans-semibold text-base text-richBlack">I am staff</Text>
-          <Text className="font-sans text-xs text-midGray">
-            Use the phone number and PIN your shop owner gave you.
-          </Text>
-        </Pressable>
+        />
       </View>
-    </View>
+
+      <Text className={`${latinFont()} mt-4 text-center text-[11px] text-auth-placeholder`}>Muthoy</Text>
+    </AuthShell>
   );
 }

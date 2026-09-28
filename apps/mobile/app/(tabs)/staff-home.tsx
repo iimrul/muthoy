@@ -20,7 +20,8 @@ import { resolvePermission } from "../../domain/permissions";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
-import { switchUser } from "../../state/switchUser";
+import { LogoutConfirmSheet } from "../../components/auth/LogoutConfirmSheet";
+import { endShiftToPinPad } from "../../navigation/endShift";
 import { useUnreadCount } from "../../state/useUnreadCount";
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -46,6 +47,7 @@ export default function StaffHomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [endShiftOpen, setEndShiftOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const unread = useUnreadCount(session?.shopId, session?.userId);
 
   useEffect(() => {
@@ -193,18 +195,12 @@ export default function StaffHomeScreen() {
       href: "/reports/report" as const,
     },
   ].filter((item) => can(item.permission));
-  const finish = () =>
-    Alert.alert(t("logout"), t("shiftSummary"), [
-      { text: t("cancel"), style: "cancel" },
-      {
-        text: t("logout"),
-        style: "destructive",
-        onPress: () => {
-          switchUser();
-          router.replace("/");
-        },
-      },
-    ]);
+  // The shift summary above is the context; the one shared confirmation
+  // (LogoutConfirmSheet) replaces the Alert that asked "Shift Summary".
+  const finish = () => {
+    setEndShiftOpen(false);
+    setLogoutOpen(true);
+  };
 
   return (
     <View className="flex-1 bg-brand-softGreen">
@@ -421,6 +417,14 @@ export default function StaffHomeScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+      <LogoutConfirmSheet
+        visible={logoutOpen}
+        onCancel={() => setLogoutOpen(false)}
+        onConfirm={() => {
+          setLogoutOpen(false);
+          endShiftToPinPad();
+        }}
+      />
     </View>
   );
 }

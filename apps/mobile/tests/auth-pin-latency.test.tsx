@@ -1,37 +1,19 @@
 // @vitest-environment jsdom
 
-import { createElement, type ReactNode } from 'react';
+import { createElement } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const SHOP_ID = '8c2f1a30-0000-4000-8000-000000000001';
 const USER_ID = '8c2f1a30-0000-4000-8000-000000000002';
 
-interface StubProps {
-  children?: ReactNode;
-  onPress?: () => void;
-  accessibilityLabel?: string;
-  value?: string;
-  onChangeText?: (value: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
-}
-
-vi.mock('react-native', () => ({
-  View: ({ children }: StubProps) => createElement('div', null, children),
-  Text: ({ children }: StubProps) => createElement('span', null, children),
-  ActivityIndicator: () => createElement('span', { role: 'progressbar' }),
-  Pressable: ({ children, onPress, accessibilityLabel, disabled }: StubProps) =>
-    createElement('button', { onClick: onPress, 'aria-label': accessibilityLabel, disabled }, children),
-  TextInput: ({ value, onChangeText, accessibilityLabel, placeholder }: StubProps) =>
-    createElement('input', {
-      value: value ?? '',
-      'aria-label': accessibilityLabel,
-      placeholder,
-      onChange: (event: { target: { value: string } }) => onChangeText?.(event.target.value),
-    }),
-  Alert: { alert: vi.fn() },
-}));
+// Auth parity: the restyled auth screens render the shared auth primitives
+// (shell, notices, the secure PIN pad with its shake), so this suite uses the
+// shared React Native double. Its Pressable/TextInput/ActivityIndicator stubs
+// expose the same attributes the assertions below always queried.
+vi.mock('react-native', async () =>
+  (await import('./support/reactNativeMock')).createReactNativeMock(),
+);
 
 const deps = vi.hoisted(() => ({
   params: {
@@ -264,7 +246,7 @@ describe('PIN authentication loading state', () => {
     await paintAndSubmit();
 
     await waitFor(() => expect(deps.replace).toHaveBeenCalledWith({
-      pathname: '/device-login', params: { role: 'staff' },
+      pathname: '/device-login', params: { role: 'staff', reason: 'relink' },
     }));
     expect(deps.recordSuccessfulLogin).not.toHaveBeenCalled();
     expect(deps.login).not.toHaveBeenCalled();
@@ -385,7 +367,7 @@ describe('PIN authentication loading state', () => {
 
     pressPin('4321');
     await paintAndSubmit();
-    expect(screen.getByText('Confirm your PIN')).toBeTruthy();
+    expect(screen.getByText('Enter it once more')).toBeTruthy();
 
     pressPin('4321');
     expect(screen.getByText('Setting up account…')).toBeTruthy();
@@ -420,7 +402,7 @@ describe('PIN authentication loading state', () => {
     render(createElement(DeviceLoginScreen));
 
     fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '01712345678' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     pressPin('2468');
 
     expect(screen.getByText('Setting up account…')).toBeTruthy();
@@ -428,8 +410,9 @@ describe('PIN authentication loading state', () => {
     await paintAndSubmit();
     fireEvent.click(screen.getByLabelText('Digit 2'));
     expect(deps.loginOnNewDevice).toHaveBeenCalledTimes(1);
+    // PhoneField reports the canonical number the server keys on.
     expect(deps.loginOnNewDevice).toHaveBeenCalledWith(
-      '01712345678',
+      '+8801712345678',
       '2468',
       expect.objectContaining({ correlationId: expect.any(String) }),
     );
@@ -452,7 +435,7 @@ describe('PIN authentication loading state', () => {
     render(createElement(DeviceLoginScreen));
 
     fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '01733333333' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     pressPin('2222');
     await paintAndSubmit();
 
@@ -490,9 +473,9 @@ describe('owner recovery is reachable from the PIN pad (H-4 #3)', () => {
     useLocaleStore.setState({ locale: 'bn' });
     render(createElement(PinLoginScreen));
 
-    expect(screen.getByLabelText('পিন ভুলে গেছেন? অ্যাক্সেস পুনরুদ্ধার করুন')).toBeTruthy();
+    expect(screen.getByLabelText('PIN ভুলে গেছেন? অ্যাক্সেস পুনরুদ্ধার করুন')).toBeTruthy();
     expect(screen.getByText(
-      'মালিক ফোন নম্বর দিয়ে অনলাইনে পুনরুদ্ধার করুন। কর্মী: পিন রিসেট করতে দোকানের মালিককে বলুন।',
+      'মালিক ফোন নম্বর দিয়ে অনলাইনে পুনরুদ্ধার করুন। কর্মী: PIN রিসেট করতে দোকানের মালিককে বলুন।',
     )).toBeTruthy();
     expect(screen.queryByText('Forgot your PIN? Recover access')).toBeNull();
   });

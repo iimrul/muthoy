@@ -12,7 +12,7 @@
 
 import { createElement, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 const SHOP_ID = '3f1c8a90-0000-4000-8000-000000000001';
 
@@ -60,6 +60,7 @@ const native = vi.hoisted(() => ({
   revalidateOfflineSelectedShop: vi.fn(),
   enforceSessionAuthority: vi.fn(async () => ({ status: 'confirmed', reason: 'claims_match' })),
   readSessionAuthorityDeadlineMs: vi.fn(() => Date.now() + 604_800_000),
+  retryCloudCredentialCleanup: vi.fn(async () => true),
 }));
 
 vi.mock('react-native', () => ({
@@ -68,12 +69,20 @@ vi.mock('react-native', () => ({
   View: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   // The root layout mounts dev/devAuthorityRecovery on the closed gate for an
   // owner session, so the mock has to cover what that component renders.
-  Pressable: ({ children }: { children?: ReactNode }) => createElement('button', null, children),
+  // Auth parity: the gate's status screens render real buttons (Try again,
+  // Switch user) inside the shared auth shell, so presses are wired through.
+  Pressable: ({ children, onPress, accessibilityLabel, disabled }: {
+    children?: ReactNode; onPress?: () => void; accessibilityLabel?: string; disabled?: boolean;
+  }) => createElement('button', { onClick: onPress, 'aria-label': accessibilityLabel, disabled }, children),
+  ScrollView: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
+  KeyboardAvoidingView: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   ActivityIndicator: () => createElement('div'),
   Alert: { alert: vi.fn() },
 }));
 
-vi.mock('expo-router', () => ({ Stack: () => createElement('div') }));
+// The marker is what 'the navigator is mounted' means below: every closed-gate
+// assertion checks it is ABSENT, not merely that some copy is present.
+vi.mock('expo-router', () => ({ Stack: () => createElement('div', null, 'navigator-mounted') }));
 vi.mock('../components/navigation/AppNavigationShell', () => ({ AppNavigationShell: ({ children }: { children?: ReactNode }) => createElement('div', null, children) }));
 vi.mock('../components/navigation/AuthenticatedRuntimeErrorBoundary', () => ({ AuthenticatedRuntimeErrorBoundary: ({ children }: { children?: ReactNode }) => createElement('div', null, children) }));
 vi.mock('../components/navigation/NavigationBoundary', () => ({ NavigationBoundary: ({ children }: { children?: ReactNode }) => createElement('div', null, children) }));
@@ -108,6 +117,7 @@ vi.mock('../state/signOutDevice', () => ({
   CredentialCleanupError: class CredentialCleanupError extends Error {},
   enforceSessionAuthority: native.enforceSessionAuthority,
   readSessionAuthorityDeadlineMs: native.readSessionAuthorityDeadlineMs,
+  retryCloudCredentialCleanup: native.retryCloudCredentialCleanup,
 }));
 
 vi.mock('../db', () => ({
@@ -144,6 +154,10 @@ vi.mock('../sync/billingHydration', () => ({
 }));
 
 const { useSessionStore } = await import('../state/sessionStore');
+const { useLocaleStore } = await import('../state/localeStore');
+const { clearSignOutNotice } = await import('../state/signOutNotice');
+const { CredentialCleanupError } = await import('../state/signOutDevice');
+const { catalog } = await import('../i18n/catalog');
 const { DatabaseKeyUnrecoverableError, DatabaseKeyUnavailableError } = await import('../db/errors');
 type Session = import('../state/sessionStore').Session;
 const RootLayout = (await import('../app/_layout')).default;
@@ -154,6 +168,10 @@ const STAFF: Session = { shopId: SHOP_ID, userId: '3f1c8a90-0000-4000-8000-00000
 beforeEach(() => {
   vi.clearAllMocks();
   mmkv.stores.forEach((store) => store.clear());
+  // The copy asserted below is English; the app's own default is Bangla.
+  useLocaleStore.setState({ locale: 'en' });
+  clearSignOutNotice();
+  native.retryCloudCredentialCleanup.mockResolvedValue(true);
   useSessionStore.setState({
     session: null,
     authorityTransitioning: false,
@@ -394,8 +412,11 @@ describe('the pre-navigation authority gate (H-10 #6)', () => {
       await promiseTick();
     });
 
-    // A check that did not complete is not a check that passed.
-    expect(view.container.textContent).toContain('Checking your access');
+    // A check that did not complete is not a check that passed — and it now
+    // says so instead of 'Checking your access…' forever.
+    expect(view.container.textContent).toContain(catalog.en.gateUnknownTitle);
+    expect(view.container.textContent).not.toContain('navigator-mounted');
+    expect(native.startSyncEngine).not.toHaveBeenCalled();
   });
 
   it('keeps no-anchor offline authority closed and starts no runtime service', async () => {
@@ -407,7 +428,10 @@ describe('the pre-navigation authority gate (H-10 #6)', () => {
       useSessionStore.getState().login(OWNER);
       await promiseTick();
     });
-    expect(view.container.textContent).toContain('Checking your access');
+    // Still closed; now with the reason and what fixes it.
+    expect(view.container.textContent).toContain(catalog.en.gateAbsentTitle);
+    expect(view.container.textContent).toContain(catalog.en.gateAutoRecheck);
+    expect(view.container.textContent).not.toContain('navigator-mounted');
     expect(native.startSyncEngine).not.toHaveBeenCalled();
     expect(native.startBillingHydration).not.toHaveBeenCalled();
   });
@@ -427,6 +451,9 @@ describe('the pre-navigation authority gate (H-10 #6)', () => {
       await Promise.resolve();
     });
     expect(view.container.textContent).toContain('Checking your access');
+    // A temporary outage retries by itself and says so; it is not a block.
+    expect(view.container.textContent).toContain(catalog.en.gateRetryingBody);
+    expect(view.container.textContent).not.toContain('navigator-mounted');
     expect(native.startSyncEngine).not.toHaveBeenCalled();
     expect(native.startBillingHydration).not.toHaveBeenCalled();
 
@@ -541,7 +568,8 @@ describe('the pre-navigation authority gate (H-10 #6)', () => {
       await Promise.resolve();
     });
     expect(native.enforceSessionAuthority).toHaveBeenCalledTimes(2);
-    expect(view.container.textContent).toContain('Checking your access');
+    expect(view.container.textContent).toContain(catalog.en.gateExpiredTitle);
+    expect(view.container.textContent).not.toContain('navigator-mounted');
     expect(native.stopSyncEngine).toHaveBeenCalled();
     expect(native.stopBillingHydration).toHaveBeenCalled();
   });
@@ -568,6 +596,137 @@ describe('the pre-navigation authority gate (H-10 #6)', () => {
     const view = render(createElement(RootLayout));
     // No session, nothing to reconcile, and the auth routes must render.
     expect(view.container.textContent).not.toContain('Checking your access');
+    expect(view.container.textContent).toContain('navigator-mounted');
+  });
+});
+
+describe('the closed gate says why, and its actions never open it (auth parity)', () => {
+  async function loginBlocked(reason: string, session: Session = OWNER) {
+    native.enforceSessionAuthority.mockResolvedValue({ status: 'unverified', reason });
+    const view = render(createElement(RootLayout));
+    await act(async () => {
+      useSessionStore.getState().login(session);
+      await promiseTick();
+    });
+    return view;
+  }
+
+  it.each([
+    ['authority_absent', 'gateAbsentTitle'],
+    ['offline_window_expired', 'gateExpiredTitle'],
+    ['clock_rolled_back', 'gateClockTitle'],
+    ['authority_read_failed', 'gateUnreadableTitle'],
+    ['authority_corrupt', 'gateUnreadableTitle'],
+    ['device_authority_read_failed', 'gateUnreadableTitle'],
+  ] as const)('explains %s and keeps the navigator unmounted', async (reason, titleKey) => {
+    const view = await loginBlocked(reason);
+    expect(view.container.textContent).toContain(catalog.en[titleKey]);
+    expect(view.container.textContent).not.toContain('Checking your access');
+    expect(view.container.textContent).not.toContain('navigator-mounted');
+    expect(native.startSyncEngine).not.toHaveBeenCalled();
+    expect(native.startBillingHydration).not.toHaveBeenCalled();
+  });
+
+  it('Try again re-runs the same check and cannot open the gate by itself', async () => {
+    const view = await loginBlocked('authority_absent');
+    expect(native.enforceSessionAuthority).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      await promiseTick();
+    });
+    // Refused again: still closed, still explained.
+    expect(native.enforceSessionAuthority).toHaveBeenCalledTimes(2);
+    expect(view.container.textContent).toContain(catalog.en.gateAbsentTitle);
+    expect(view.container.textContent).not.toContain('navigator-mounted');
+
+    // Only an authoritative verdict opens it.
+    native.enforceSessionAuthority.mockResolvedValue({ status: 'confirmed', reason: 'claims_match' });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      await promiseTick();
+    });
+    expect(view.container.textContent).toContain('navigator-mounted');
+    expect(native.startSyncEngine).toHaveBeenCalledWith(SHOP_ID);
+  });
+
+  it('Switch user clears only the active actor; the navigator opens with NO session', async () => {
+    const view = await loginBlocked('offline_window_expired');
+    const { epoch } = useSessionStore.getState();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Switch user' }));
+      await promiseTick();
+    });
+
+    expect(useSessionStore.getState().session).toBeNull();
+    expect(useSessionStore.getState().epoch).toBe(epoch + 1);
+    // Nothing authenticated to admit: only the sign-in routes mount, sync
+    // never starts, and no authority check runs for nobody.
+    expect(view.container.textContent).toContain('navigator-mounted');
+    expect(native.startSyncEngine).not.toHaveBeenCalled();
+    expect(native.startBillingHydration).not.toHaveBeenCalled();
+    expect(native.enforceSessionAuthority).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the blocked state in Bangla', async () => {
+    useLocaleStore.setState({ locale: 'bn' });
+    const view = await loginBlocked('clock_rolled_back');
+    expect(view.container.textContent).toContain(catalog.bn.gateClockTitle);
+    expect(view.container.textContent).not.toContain(catalog.en.gateClockTitle);
+  });
+
+});
+
+describe('a cloud credential that would not clear is recoverable (was a dead end)', () => {
+  async function failCleanup() {
+    native.enforceSessionAuthority.mockImplementation(async () => {
+      // signOutDevice clears the local session FIRST, then throws.
+      useSessionStore.getState().clearActiveUser();
+      throw new CredentialCleanupError('cloud session could not be cleared', { localSessionCleared: true, cloudSessionCleared: false });
+    });
+    const view = render(createElement(RootLayout));
+    await act(async () => {
+      useSessionStore.getState().login(OWNER);
+      await promiseTick();
+    });
+    return view;
+  }
+
+  it('explains it without mounting anything', async () => {
+    const view = await failCleanup();
+    expect(view.container.textContent).toContain(catalog.en.gateCleanupTitle);
+    expect(view.container.textContent).not.toContain('navigator-mounted');
+  });
+
+  it('Continue reaches the sign-in routes with no session and no sync', async () => {
+    const view = await failCleanup();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: catalog.en.gateCleanupContinue }));
+    });
+    expect(useSessionStore.getState().session).toBeNull();
+    expect(view.container.textContent).toContain('navigator-mounted');
+    expect(native.startSyncEngine).not.toHaveBeenCalled();
+  });
+
+  it('Retry clears the credential when it can, and says so when it cannot', async () => {
+    native.retryCloudCredentialCleanup.mockResolvedValueOnce(false);
+    const view = await failCleanup();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: catalog.en.gateCleanupRetry }));
+      await promiseTick();
+    });
+    expect(native.retryCloudCredentialCleanup).toHaveBeenCalledTimes(1);
+    expect(view.container.textContent).toContain(catalog.en.gateCleanupRetryFailed);
+    expect(view.container.textContent).not.toContain('navigator-mounted');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: catalog.en.gateCleanupRetry }));
+      await promiseTick();
+    });
+    expect(native.retryCloudCredentialCleanup).toHaveBeenCalledTimes(2);
+    expect(view.container.textContent).toContain('navigator-mounted');
   });
 });
 

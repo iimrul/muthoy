@@ -67,3 +67,81 @@ export function isSameBdPhone(
   const b = normalizeBdPhone(right);
   return a !== null && a === b;
 }
+
+/** What people and phones put between digits: spaces, dashes, dots, brackets. */
+const NUMBER_SEPARATORS = /[\s().-]/g;
+
+/** The subscriber digits so far: 1, an operator digit 3-9, then up to eight more. */
+const SUBSCRIBER_SO_FAR = /^(?:1(?:[3-9]\d{0,8})?)?$/;
+
+/** A Bangladeshi mobile number as far as it has been entered. */
+export interface BdPhoneEntry {
+  /** The entry with separators removed. */
+  compact: string;
+  /** The subscriber digits entered so far: '' before the first, ten when complete. */
+  national: string;
+}
+
+/**
+ * Reads an ENTERED number — complete or still being typed — as one of the
+ * four accepted forms: `017…` (trunk 0), `17…` (after a fixed +880), `880…`
+ * and `+880…`, each followed directly by the subscriber digits. Null when the
+ * text cannot become a Bangladeshi mobile number as written.
+ *
+ * Nothing is removed to make it fit except ordinary separators. Letters, a '+'
+ * anywhere but in front, a country code other than 880 (`+1…`, `+91…`,
+ * `+0…`), a trunk 0 after the country code (`+880 017…`), a doubled prefix
+ * (`880880…`, `0017…`) and a digit too many are all null. This is the ONE
+ * rule set: normalizeBdPhoneInput is built on it, and so is PhoneField's
+ * handling of every keystroke, paste and autofill.
+ */
+export function parseBdPhoneInput(value: string | null | undefined): BdPhoneEntry | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const compact = value.trim().replace(NUMBER_SEPARATORS, '');
+  if (!/^\+?\d*$/.test(compact)) {
+    return null;
+  }
+  const national = subscriberDigitsOf(compact);
+  return national === null ? null : { compact, national };
+}
+
+function subscriberDigitsOf(compact: string): string | null {
+  if (compact.startsWith('+')) {
+    return afterCountryCode(compact.slice(1));
+  }
+  if (compact.startsWith('8')) {
+    return afterCountryCode(compact);
+  }
+  const subscriber = compact.startsWith('0') ? compact.slice(1) : compact;
+  return SUBSCRIBER_SO_FAR.test(subscriber) ? subscriber : null;
+}
+
+/** The subscriber digits after Bangladesh's country code — or '' while 880 itself is still being typed. */
+function afterCountryCode(digits: string): string | null {
+  if (digits.length <= 3) {
+    return '880'.startsWith(digits) ? '' : null;
+  }
+  if (!digits.startsWith('880')) {
+    return null;
+  }
+  const subscriber = digits.slice(3);
+  return SUBSCRIBER_SO_FAR.test(subscriber) ? subscriber : null;
+}
+
+/**
+ * normalizeBdPhone for a number a person has just ENTERED at an auth
+ * boundary: the canonical `+8801…` form of a COMPLETE entry that
+ * parseBdPhoneInput accepts, null for anything else.
+ *
+ * Deliberately a separate function. normalizeBdPhone is the storage and
+ * lookup contract (unique index, lockout key) and stays exactly as it is.
+ * This one also accepts `17…` — what gets typed after a field's fixed "+880"
+ * — and is stricter about shape: an explicit '+' code is taken as written,
+ * and nothing but separators is ever dropped to make a number fit.
+ */
+export function normalizeBdPhoneInput(value: string | null | undefined): string | null {
+  const entry = parseBdPhoneInput(value);
+  return entry !== null && entry.national.length === 10 ? `${CANONICAL_PREFIX}${entry.national}` : null;
+}

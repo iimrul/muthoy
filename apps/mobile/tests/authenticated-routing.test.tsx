@@ -31,6 +31,10 @@ vi.mock('../components/ui/AccessDenied', () => ({
 vi.mock('../components/staff/DashboardLoadState', () => ({
   DashboardLoadState: () => createElement('span', null, 'loading'),
 }));
+// Auth parity: the session overlay is now the shared BrandLoader.
+vi.mock('../components/auth/BrandLoader', () => ({
+  BrandLoader: () => createElement('span', null, 'loading'),
+}));
 // The boundary owns the entitlement decision now and draws PremiumLock as a
 // cover; PremiumGate is no longer in this path.
 vi.mock('../state/usePlan', () => ({

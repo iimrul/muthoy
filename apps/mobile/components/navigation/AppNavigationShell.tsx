@@ -17,6 +17,7 @@ import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
 import { useMultiShopAccess } from "../../state/useMultiShopAccess";
 import { authenticatedHome, visibleMoreRoutes } from "../../navigation/routes";
+import { DeviceRelinkBanner } from "../auth/DeviceRelinkBanner";
 
 function NavButton({
   label,
@@ -249,6 +250,8 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
   return (
     <View className="flex-1">
       {children}
+      {/* A2.3: only renders when sync refused this installation as unbound. */}
+      <DeviceRelinkBanner />
       <Modal
         visible={moreOpen}
         transparent

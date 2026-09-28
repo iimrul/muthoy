@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { sqliteConnection } from './test/client';
 import { createShopAndOwner, setOwnerPin, verifyPin } from './auth';
 import { createStaff } from './staff';
-import { ALWAYS_LIVE, PinLockedOutError } from './errors';
+import { ALWAYS_LIVE, PinAccountRefusedError, PinLockedOutError } from './errors';
 import {
   PIN_FAILURE_DECAY_MS,
   PIN_FREE_ATTEMPTS,
@@ -200,5 +200,41 @@ describe('cross-role lockout reset (the H-4 review bypass)', () => {
     // automatic way back, and it has to actually work or a forgotten PIN
     // takes the shop off the air for the day.
     expect(pinAttemptStatus(scope, later).failures).toBe(0);
+  });
+});
+
+// Auth parity (approved typed refusal). A CORRECT PIN whose row cannot open a
+// session used to come back as a bare null — the pad said "Incorrect PIN" to
+// someone who had typed it right. It now names itself, and still costs the
+// shop-wide budget nothing, because it is decided on the credential.
+describe('correct PIN, refused account', () => {
+  it('reports a missing role as a typed refusal and spends no attempt budget', { timeout: 30_000 }, async () => {
+    await shopWithStaff();
+    sqliteConnection.execSync("UPDATE roles SET is_deleted = 1 WHERE name = 'staff'");
+    const scope = pinAttemptScope(null);
+    const before = pinAttemptStatus(scope).failures;
+
+    const refused = await verifyPin('5678').catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(PinAccountRefusedError);
+    expect((refused as InstanceType<typeof PinAccountRefusedError>).refusal).toBe('role_unavailable');
+    expect(pinAttemptStatus(scope).failures).toBe(before);
+
+    // A wrong PIN is still just a wrong PIN, and still charged.
+    await expect(verifyPin('9999')).resolves.toBeNull();
+    expect(pinAttemptStatus(scope).failures).toBe(before + 1);
+  });
+
+  it('answers no faster than any other outcome', { timeout: 30_000 }, async () => {
+    await shopWithStaff();
+    sqliteConnection.execSync("UPDATE roles SET is_deleted = 1 WHERE name = 'staff'");
+    const started = performance.now();
+    await verifyPin('5678').catch(() => undefined);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(FLOOR_MS - FLOOR_TOLERANCE_MS);
+  });
+
+  it('still signs in the owner, whose role is intact', { timeout: 30_000 }, async () => {
+    await shopWithStaff();
+    sqliteConnection.execSync("UPDATE roles SET is_deleted = 1 WHERE name = 'staff'");
+    await expect(verifyPin('1234')).resolves.toMatchObject({ role: 'owner' });
   });
 });

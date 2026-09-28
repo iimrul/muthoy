@@ -20,13 +20,24 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 
 const mmkv = vi.hoisted(() => {
   const stores = new Map<string, Map<string, string>>();
+  // Failure injection AT the persistence boundary: once armed, the Nth write to
+  // the armed store (and every write after it) throws from `set` — exactly
+  // where a full or failing disk would, inside zustand's persist write.
+  const failure = { storeId: null as string | null, fromWrite: 1, writes: 0 };
   return {
     stores,
+    failure,
     createMMKV: ({ id }: { id: string }) => {
       const store = stores.get(id) ?? new Map<string, string>();
       stores.set(id, store);
       return {
-        set: (key: string, value: string) => void store.set(key, value),
+        set: (key: string, value: string) => {
+          if (failure.storeId === id) {
+            failure.writes += 1;
+            if (failure.writes >= failure.fromWrite) throw new Error('MMKV write failed');
+          }
+          store.set(key, value);
+        },
         getString: (key: string) => store.get(key),
         remove: (key: string) => void store.delete(key),
       };
@@ -43,11 +54,11 @@ vi.mock('react-native-mmkv', () => ({ createMMKV: mmkv.createMMKV }));
 const sync = vi.hoisted(() => ({ stopSyncEngine: vi.fn() }));
 vi.mock('../sync', () => ({ stopSyncEngine: sync.stopSyncEngine }));
 
-const { readPersistedSessionSync, useSessionStore } = await import('./sessionStore');
+const { readLastShopIdSync, readPersistedSessionSync, useSessionStore } = await import('./sessionStore');
 type Session = import('./sessionStore').Session;
 const { useCartStore } = await import('./cartStore');
 const { usePermission } = await import('./usePermission');
-const { switchUser } = await import('./switchUser');
+const { switchUser, switchUserDurably } = await import('./switchUser');
 const { asPaisa } = await import('@muthoy/types');
 
 // The three MMKV stores this app opens, by the ids their owning modules use.
@@ -84,7 +95,15 @@ function seedLinkedDevice(): void {
   mmkv.createMMKV({ id: SYNC_CURSOR_STORE }).set(CURSOR_KEY, CURSOR_VALUE);
 }
 
+/** From the Nth session write on (default: the very next one), MMKV refuses. */
+function failSessionWrites(fromWrite = 1): void {
+  mmkv.failure.storeId = SESSION_STORE;
+  mmkv.failure.fromWrite = fromWrite;
+  mmkv.failure.writes = 0;
+}
+
 beforeEach(() => {
+  mmkv.failure.storeId = null;
   mmkv.stores.forEach((store) => store.clear());
   seedLinkedDevice();
   useSessionStore.setState({ session: null });
@@ -207,6 +226,111 @@ describe('switchUser — what a handover must leave standing', () => {
     // re-derived by a handover — both users land on the same shopId.
     expect(useSessionStore.getState().session?.shopId).toBe(SHOP_ID);
     expect([...mmkv.stores.keys()].sort()).toEqual(storeIds);
+  });
+});
+
+// The A2.3 device-relink teardown. A relink has somewhere safe to stay (the
+// screen the person is on, still signed in), so its handover must either
+// happen completely or not at all — never a session gone from memory but still
+// on disk. Failures are injected at the real MMKV write, not as a thrown stub.
+describe('switchUserDurably — the relink handover, failure-safe', () => {
+  function seedCart(): void {
+    useCartStore.getState().addItem({
+      medicineId: '3f1c8a90-0000-4000-8000-000000000004',
+      medicineName: 'Napa',
+      batchId: '3f1c8a90-0000-4000-8000-000000000005',
+      quantity: 2,
+      unitPrice: asPaisa(1000),
+    });
+  }
+
+  it('injects the failure where the plain clear breaks: after memory commits, before the disk', () => {
+    useSessionStore.getState().login(OWNER);
+    failSessionWrites();
+
+    expect(() => useSessionStore.getState().clearActiveUser()).toThrow('MMKV write failed');
+
+    // Signed out in memory, still signed in on disk — the next launch would
+    // bring the owner back. This divergence is what the relink must never leave.
+    expect(useSessionStore.getState().session).toBeNull();
+    expect(readPersistedSessionSync()).toMatchObject(OWNER);
+  });
+
+  it('changes nothing — memory, disk, cart, sync — when the signed-out session cannot be written', () => {
+    useSessionStore.getState().login(OWNER);
+    seedCart();
+    const epoch = useSessionStore.getState().epoch;
+    failSessionWrites();
+
+    expect(() => switchUserDurably()).toThrow('MMKV write failed');
+
+    expect(useSessionStore.getState().session).toMatchObject(OWNER);
+    expect(readPersistedSessionSync()).toMatchObject(OWNER);
+    expect(useSessionStore.getState().epoch).toBe(epoch);
+    expect(useCartStore.getState().items).toHaveLength(1);
+    expect(sync.stopSyncEngine).not.toHaveBeenCalled();
+  });
+
+  it('on success ends the session on disk and in memory, then empties the cart and stops sync', () => {
+    useSessionStore.getState().login(OWNER);
+    seedCart();
+    const epoch = useSessionStore.getState().epoch;
+
+    switchUserDurably();
+
+    expect(useSessionStore.getState().session).toBeNull();
+    expect(readPersistedSessionSync()).toBeNull();
+    // The shop is still remembered, exactly as after switchUser().
+    expect(readLastShopIdSync()).toBe(SHOP_ID);
+    expect(useSessionStore.getState().epoch).toBe(epoch + 1);
+    expect(useCartStore.getState().items).toEqual([]);
+    expect(sync.stopSyncEngine).toHaveBeenCalledTimes(1);
+  });
+
+  it('stands when only the repeat write fails: the disk already holds the signed-out state', () => {
+    useSessionStore.getState().login(OWNER);
+    seedCart();
+    // The durable write lands; the persist middleware's repeat of it throws.
+    failSessionWrites(2);
+
+    expect(() => switchUserDurably()).not.toThrow();
+
+    expect(useSessionStore.getState().session).toBeNull();
+    expect(readPersistedSessionSync()).toBeNull();
+    expect(useCartStore.getState().items).toEqual([]);
+    expect(sync.stopSyncEngine).toHaveBeenCalledTimes(1);
+  });
+
+  it('puts the disk back in step if memory ever refuses to commit', () => {
+    useSessionStore.getState().login(OWNER);
+    const { clearActiveUser } = useSessionStore.getState();
+    useSessionStore.setState({
+      clearActiveUser: () => {
+        throw new Error('refused before commit');
+      },
+    });
+    try {
+      expect(() => switchUserDurably()).toThrow('refused before commit');
+
+      expect(useSessionStore.getState().session).toMatchObject(OWNER);
+      expect(readPersistedSessionSync()).toMatchObject(OWNER);
+      expect(sync.stopSyncEngine).not.toHaveBeenCalled();
+    } finally {
+      useSessionStore.setState({ clearActiveUser });
+    }
+  });
+
+  it('leaves normal logout as it was: switchUser() still ends the session in memory when the write fails', () => {
+    useSessionStore.getState().login(OWNER);
+    seedCart();
+    failSessionWrites();
+
+    expect(() => switchUser()).toThrow('MMKV write failed');
+
+    // A till being handed over fails closed: the outgoing user is signed out
+    // NOW and their cart is gone, whatever the disk did.
+    expect(useSessionStore.getState().session).toBeNull();
+    expect(useCartStore.getState().items).toEqual([]);
   });
 });
 

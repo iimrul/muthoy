@@ -1,9 +1,24 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { deviceLoginSchema } from '@muthoy/validation';
+import { AuthBrandBlock } from '../../components/auth/AuthBrandBlock';
+import { AuthButton } from '../../components/auth/AuthButton';
+import { AuthIconTile } from '../../components/auth/AuthIconTile';
+import { AuthNotice } from '../../components/auth/AuthNotice';
+import { AuthShell } from '../../components/auth/AuthShell';
+import { AuthTitleBlock } from '../../components/auth/AuthTitleBlock';
+import { deviceLoginErrorKey } from '../../components/auth/authMessages';
+import { PhoneField } from '../../components/auth/PhoneField';
+import { authPhoneForSubmit, formatPhoneForDisplay } from '../../components/auth/phoneInput';
+import { AUTH_CHIP_LABELS, SecureChip } from '../../components/auth/SecureChip';
+import { latinFont, useCopyFont } from '../../components/auth/typography';
 import { PinPad, usePinEntry, type PinCompletionMeta } from '../../components/ui/PinPad';
+import { StandardHeader } from '../../components/ui/StandardHeader';
 import { startAuthTiming } from '../../dev/authTiming';
+import type { CatalogKey } from '../../i18n/catalog';
+import { localizeValidationMessage } from '../../i18n/display';
+import { useI18n } from '../../state/localeStore';
 import { DeviceLoginError, loginOnNewDevice } from '../../sync/deviceAuth';
 
 // Device Login — phone + PIN on a device that holds no shop data yet.
@@ -16,24 +31,42 @@ import { DeviceLoginError, loginOnNewDevice } from '../../sync/deviceAuth';
 // No OTP on this path, for either role — Volume 4 gives staff no phone number
 // to receive a code at, and an owner's routine login must not wait on an SMS.
 // OTP survives only behind "Forgot PIN" at the bottom.
+//
+// Visuals: prototype-web's Owner Login (Gen B phone step, then the secure PIN
+// pad). NOT taken from it: its "no account for this number" answer before the
+// PIN — the server answers every credential problem with one message, and the
+// screen keeps it that way (anti-enumeration).
+type Failure = { kind: 'catalog'; key: CatalogKey; held: boolean } | { kind: 'validation'; message: string };
+
 export default function DeviceLoginScreen() {
   // Owner and Staff reach the same endpoint with the same credentials; the real
   // role is resolved from the account, never from what was tapped. This is
   // display only, so whoever chose "Staff" sees a screen that agrees with them.
-  const { role } = useLocalSearchParams<{ role?: string }>();
+  // `reason=relink` (from PIN Login) likewise only changes what is SAID.
+  const { role, reason } = useLocalSearchParams<{ role?: string; reason?: string }>();
   const isOwner = role === 'owner';
+  const isRelink = reason === 'relink';
+  const { t } = useI18n();
+  const font = useCopyFont();
 
   const [phone, setPhone] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
   const [step, setStep] = useState<'phone' | 'pin'>('phone');
 
+  const failureMessage =
+    failure?.kind === 'validation'
+      ? localizeValidationMessage(failure.message, t) ?? t('deviceLoginGenericFailure')
+      : failure
+        ? t(failure.key)
+        : null;
+
   const handlePhoneNext = () => {
-    const result = deviceLoginSchema.shape.phone.safeParse(phone);
+    const result = deviceLoginSchema.shape.phone.safeParse(authPhoneForSubmit(phone));
     if (!result.success) {
-      setError(result.error.issues[0]?.message ?? 'Enter a valid phone number');
+      setFailure({ kind: 'validation', message: result.error.issues[0]?.message ?? '' });
       return;
     }
-    setError(null);
+    setFailure(null);
     setStep('pin');
   };
 
@@ -41,14 +74,14 @@ export default function DeviceLoginScreen() {
     async (pin: string, { completedAt }: PinCompletionMeta) => {
       const timing = startAuthTiming('device_login', completedAt);
       timing?.mark('submit_start');
-      const parsed = deviceLoginSchema.safeParse({ phone, pin });
+      const parsed = deviceLoginSchema.safeParse({ phone: authPhoneForSubmit(phone), pin });
       if (!parsed.success) {
-        setError(parsed.error.issues[0]?.message ?? 'Check your details and try again');
+        setFailure({ kind: 'validation', message: parsed.error.issues[0]?.message ?? '' });
         timing?.mark('local_input_validation', 'error');
         return;
       }
 
-      setError(null);
+      setFailure(null);
       try {
         // CLAUDE.md rule 8: the raw PIN goes to loginOnNewDevice and nowhere
         // else — never logged, never written anywhere in plain text.
@@ -60,11 +93,13 @@ export default function DeviceLoginScreen() {
         router.replace('/');
       } catch (cause) {
         timing?.mark('device_login_failed', 'error');
-        setError(
-          cause instanceof DeviceLoginError
-            ? cause.message
-            : 'Something went wrong. Please try again.',
-        );
+        // Translated by code; the one `credentials` message still covers every
+        // credential problem, exactly as the server intends.
+        if (cause instanceof DeviceLoginError) {
+          setFailure({ kind: 'catalog', key: deviceLoginErrorKey(cause.code), held: cause.code === 'enrollment_held' });
+        } else {
+          setFailure({ kind: 'catalog', key: 'deviceLoginGenericFailure', held: false });
+        }
       }
     },
     [phone],
@@ -72,84 +107,114 @@ export default function DeviceLoginScreen() {
 
   const { pin, isSubmitting, handleDigitPress, handleBackspace } = usePinEntry(handlePinComplete);
 
+  const handleBack = () => {
+    if (step === 'pin') {
+      setFailure(null);
+      setStep('phone');
+      return;
+    }
+    // The root gate knows where a device with no session belongs: Role Select
+    // on an empty one, the PIN pad on an enrolled one.
+    router.replace('/');
+  };
+
+  const forgotPin = isOwner ? (
+    <AuthButton
+      variant="link"
+      label={t('deviceLoginForgotOwner')}
+      disabled={isSubmitting}
+      onPress={() => router.push({ pathname: '/forgot-pin', params: { phone } })}
+    />
+  ) : (
+    // Owner only: a staff member who forgets their PIN is reset by their
+    // owner, and has no phone number of their own to prove.
+    <Text className={`${font()} px-4 text-center text-xs text-secure-body`}>{t('deviceLoginForgotStaff')}</Text>
+  );
+
+  const notice = isSubmitting ? (
+    <AuthNotice tone="progress" message={t('pinSetupCreating')} detail={t('deviceLoginProgressBody')} />
+  ) : failureMessage ? (
+    <AuthNotice
+      tone={failure?.kind === 'catalog' && failure.held ? 'warning' : 'error'}
+      title={failure?.kind === 'catalog' && failure.held ? t('deviceHeldTitle') : undefined}
+      message={failureMessage}
+    />
+  ) : isRelink ? (
+    <AuthNotice tone="info" message={t('deviceLoginRelinkNotice')} />
+  ) : null;
+
   return (
-    <View className="flex-1 justify-center gap-8 bg-brand-softGreen p-6">
-      <View className="items-center gap-1">
-        <Text className="font-sans-bold text-2xl text-richBlack">
-          {isOwner ? 'Owner login' : 'Staff login'}
-        </Text>
-        <Text className="font-sans text-center text-sm text-midGray">
-          {step === 'phone' ? 'Enter the phone number registered for you.' : 'Enter your PIN'}
-        </Text>
+    <AuthShell
+      variant="secure"
+      header={
+        <StandardHeader
+          tone="auth"
+          safeAreaTop
+          title={t(isOwner ? 'deviceLoginOwnerTitle' : 'deviceLoginStaffTitle')}
+          onBackPress={isSubmitting ? undefined : handleBack}
+        />
+      }
+      footer={
+        step === 'pin' ? (
+          <View className="w-full">
+            <PinPad
+              variant="secure"
+              value={pin}
+              onDigitPress={handleDigitPress}
+              onBackspace={handleBackspace}
+              error={failure !== null}
+              disabled={isSubmitting}
+            />
+            <View className="mt-2.5 items-center">{forgotPin}</View>
+          </View>
+        ) : (
+          <View className="w-full gap-3 pt-8">
+            <AuthButton
+              variant="secondary"
+              label={t(isOwner ? 'deviceLoginStaffTitle' : 'deviceLoginOwnerTitle')}
+              onPress={() =>
+                router.replace({ pathname: '/device-login', params: { role: isOwner ? 'staff' : 'owner' } })
+              }
+            />
+            <AuthButton variant="secureLink" label={t('deviceLoginRegisterLink')} onPress={() => router.push('/register')} />
+            <View className="items-center">{forgotPin}</View>
+          </View>
+        )
+      }
+    >
+      <View className="items-center">
+        <SecureChip label={isOwner ? AUTH_CHIP_LABELS.owner : AUTH_CHIP_LABELS.staff} />
+        <AuthIconTile icon="shield-check" />
+        {step === 'phone' ? (
+          <>
+            <AuthBrandBlock variant="compact" />
+            <Text className={`${font()} max-w-[280px] text-center text-[13px] leading-[19px] text-secure-body`}>
+              {t(isOwner ? 'deviceLoginOwnerBody' : 'deviceLoginStaffBody')}
+            </Text>
+          </>
+        ) : (
+          <>
+            <AuthTitleBlock title={t('pinLoginTitle')} body={t('deviceLoginPinBody')} />
+            <Text className={`${latinFont('medium')} text-[13px] text-secure-chipText`}>{formatPhoneForDisplay(phone)}</Text>
+            <AuthButton
+              variant="link"
+              label={t('authChangeNumber')}
+              disabled={isSubmitting}
+              onPress={handleBack}
+            />
+          </>
+        )}
       </View>
 
-      {error ? <Text className="font-sans text-center text-sm text-error">{error}</Text> : null}
-      {isSubmitting ? (
-        <View className="items-center gap-2">
-          <View className="flex-row items-center gap-2">
-            <ActivityIndicator />
-            <Text className="font-sans-semibold text-sm text-richBlack">Setting up account…</Text>
-          </View>
-          <Text className="font-sans text-center text-xs text-midGray">
-            Keep the app open while your shop downloads.
-          </Text>
-        </View>
-      ) : null}
-
       {step === 'phone' ? (
-        <View className="gap-4">
-          <TextInput
-            value={phone}
-            onChangeText={setPhone}
-            placeholder="01712345678"
-            keyboardType="phone-pad"
-            autoComplete="tel"
-            accessibilityLabel="Phone number"
-            className="rounded-lg border border-midGray bg-white px-4 py-3 font-sans text-base text-richBlack"
-          />
-          <Pressable
-            accessibilityRole="button"
-            onPress={handlePhoneNext}
-            className="items-center rounded-lg bg-brand-green py-3.5 active:opacity-80"
-          >
-            <Text className="font-sans-semibold text-base text-white">Next</Text>
-          </Pressable>
+        <View className="mt-6 gap-3">
+          <PhoneField variant="secure" value={phone} onChangeText={setPhone} autoFocus onSubmitEditing={handlePhoneNext} />
+          {notice}
+          <AuthButton variant="secure" label={t('deviceLoginContinue')} onPress={handlePhoneNext} />
         </View>
       ) : (
-        <View className="items-center gap-6">
-          <PinPad
-            value={pin}
-            onDigitPress={handleDigitPress}
-            onBackspace={handleBackspace}
-            error={Boolean(error)}
-            disabled={isSubmitting}
-          />
-          <Pressable
-            accessibilityRole="button"
-            disabled={isSubmitting}
-            onPress={() => setStep('phone')}
-          >
-            <Text className="font-sans-medium text-sm text-midGray">Change phone number</Text>
-          </Pressable>
-        </View>
+        <View className="mt-3 min-h-[26px] w-full">{notice}</View>
       )}
-
-      {/* Owner only: a staff member who forgets their PIN is reset by their
-          owner, and has no phone number of their own to prove. */}
-      {isOwner ? (
-        <Pressable
-          accessibilityRole="button"
-          disabled={isSubmitting}
-          onPress={() => router.push({ pathname: '/forgot-pin', params: { phone } })}
-          className="items-center py-2"
-        >
-          <Text className="font-sans-semibold text-sm text-brand-green">Forgot your PIN?</Text>
-        </Pressable>
-      ) : (
-        <Text className="font-sans text-center text-xs text-midGray">
-          Forgot your PIN? Ask the shop owner to reset it for you.
-        </Text>
-      )}
-    </View>
+    </AuthShell>
   );
 }

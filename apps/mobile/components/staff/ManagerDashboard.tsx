@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -32,7 +31,8 @@ import { resolvePermission } from "../../domain/permissions";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
-import { switchUser } from "../../state/switchUser";
+import { LogoutConfirmSheet } from "../auth/LogoutConfirmSheet";
+import { endShiftToPinPad } from "../../navigation/endShift";
 import { useUnreadCount } from "../../state/useUnreadCount";
 import { formatUnreadBadge } from "../../domain/dashboard";
 import { triggerSyncNow } from "../../sync";
@@ -53,6 +53,7 @@ export function ManagerDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [endShiftOpen, setEndShiftOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const [openingOpen, setOpeningOpen] = useState(false);
   const [openingText, setOpeningText] = useState("0");
   const unread = useUnreadCount(session?.shopId, session?.userId);
@@ -216,18 +217,12 @@ export function ManagerDashboard() {
     }
   };
 
-  const confirmEndShift = () =>
-    Alert.alert(t("logout"), t("shiftSummary"), [
-      { text: t("cancel"), style: "cancel" },
-      {
-        text: t("logout"),
-        style: "destructive",
-        onPress: () => {
-          switchUser();
-          router.replace("/");
-        },
-      },
-    ]);
+  // The shift summary is the context; the one shared confirmation
+  // (LogoutConfirmSheet) replaces the Alert that asked "Shift Summary".
+  const confirmEndShift = () => {
+    setEndShiftOpen(false);
+    setLogoutOpen(true);
+  };
 
   return (
     <View className="flex-1 bg-brand-softGreen">
@@ -538,6 +533,14 @@ export function ManagerDashboard() {
           </Pressable>
         </Pressable>
       </Modal>
+      <LogoutConfirmSheet
+        visible={logoutOpen}
+        onCancel={() => setLogoutOpen(false)}
+        onConfirm={() => {
+          setLogoutOpen(false);
+          endShiftToPinPad();
+        }}
+      />
       <Modal
         visible={openingOpen}
         transparent

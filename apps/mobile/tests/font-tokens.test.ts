@@ -128,6 +128,37 @@ describe('colour tokens', () => {
     }
   });
 
+  // Auth parity. Every auth primitive, the inputs it restyled, and the auth
+  // screens take their colours from @muthoy/constants — the prototype's
+  // "Muthoy Secure" palette arrived as ~40 raw hex values, and pasting them
+  // into components is exactly the drift this suite exists to stop. The one
+  // exemption is the logo artwork (muthoyLogoXml.ts), an asset whose fills
+  // are the drawing itself.
+  const AUTH_DIRECTORY = 'components/auth';
+  const AUTH_EXEMPT = new Set(['components/auth/muthoyLogoXml.ts']);
+  const AUTH_PARITY_FILES = [
+    ...FILES.map((file) => file.path).filter(
+      (path) => path.startsWith(`${AUTH_DIRECTORY}/`) && !AUTH_EXEMPT.has(path),
+    ),
+    'components/ui/PinPad.tsx',
+    'components/ui/OtpInput.tsx',
+    'components/ui/LanguageToggle.tsx',
+    'components/forms/RegistrationForm.tsx',
+    'components/database/DatabaseRecoveryScreen.tsx',
+    ...FILES.map((file) => file.path).filter((path) => path.startsWith('app/(auth)/')),
+  ];
+
+  it('scans the auth primitives it claims to', () => {
+    expect(AUTH_PARITY_FILES.filter((path) => path.startsWith(AUTH_DIRECTORY)).length).toBeGreaterThan(15);
+  });
+
+  it.each(AUTH_PARITY_FILES)('%s takes every colour from a token', (relative) => {
+    const source = readFileSync(join(ROOT, relative), 'utf8');
+    expect(HEX.test(source)).toBe(false);
+    // An arbitrary COLOUR value (text-[15px] is a size, and allowed).
+    expect(new RegExp('(bg|text|border)-[\\[](#|rgb|hsl)').test(source)).toBe(false);
+  });
+
   it('exposes the field border as a token, so nobody needs to paste it', () => {
     const tokens = JSON.parse(
       readFileSync(resolve('packages/constants/src/tokens/colors.json'), 'utf8'),
@@ -135,6 +166,112 @@ describe('colour tokens', () => {
     expect(tokens.fieldBorder).toBe('#D1D5DB');
     const preset = readFileSync(resolve('packages/config/tailwind/native-preset.js'), 'utf8');
     expect(preset).toContain('fieldBorder: colors.fieldBorder');
+  });
+});
+
+// Auth parity: Bangla-first. Every word an auth surface shows comes from the
+// catalog, so none may sit in the source as English. The scan covers the auth
+// routes AND the shared components they are built from: an English string in a
+// shared chip reaches every screen that renders it, which is exactly how the
+// registration pill's "Cloud Ready" slipped past a routes-only scan.
+describe('auth surfaces render catalog copy only', () => {
+  const AUTH_SCREENS = FILES.filter((file) => file.path.startsWith('app/(auth)/'));
+  const SHARED_AUTH_PATHS = [
+    ...FILES.map((file) => file.path).filter(
+      (path) => path.startsWith('components/auth/') && path !== 'components/auth/muthoyLogoXml.ts',
+    ),
+    'components/ui/PinPad.tsx',
+    'components/ui/OtpInput.tsx',
+    'components/ui/LanguageToggle.tsx',
+    'components/ui/StandardHeader.tsx',
+    'components/forms/RegistrationForm.tsx',
+    'components/database/DatabaseRecoveryScreen.tsx',
+  ];
+  // StandardHeader is shared chrome: only its auth tone is an auth surface.
+  // The app-tone header below it (and its pre-existing English bell label) is
+  // UI Pass 2–4 territory, not this scan's.
+  const authPartOf = (path: string, source: string): string => {
+    if (path !== 'components/ui/StandardHeader.tsx') return source;
+    const start = source.indexOf('function AuthToneHeader(');
+    const end = source.indexOf('export function StandardHeader(');
+    if (start < 0 || end < start) throw new Error('StandardHeader no longer has a separate AuthToneHeader');
+    return source.slice(start, end);
+  };
+  const SHARED_AUTH = SHARED_AUTH_PATHS.map((path) => {
+    const file = FILES.find((candidate) => candidate.path === path);
+    if (!file) throw new Error(`auth surface ${path} is missing from the scan`);
+    return { path, source: authPartOf(path, file.source) };
+  });
+  const AUTH_SURFACES = [...AUTH_SCREENS, ...SHARED_AUTH];
+
+  // Three ways English reaches the screen: JSX text, a string literal as a
+  // JSX child, and a literal handed to a prop that is shown or spoken.
+  const JSX_TEXT = />\s*([A-Za-z][A-Za-z ,.'!?-]{2,})\s*</g;
+  const JSX_STRING_CHILD = />\s*\{\s*(['"`])([^'"`]*[A-Za-z]{2}[^'"`]*)\1\s*\}\s*</g;
+  const TEXT_PROP =
+    /\b(?:accessibilityLabel|accessibilityHint|label|title|message|detail|body|placeholder|tagline)=\{?\s*(['"`])([^'"`]*[A-Za-z]{2}[^'"`]*)\1/g;
+
+  // Literals that are NOT copy, each with the reason it stays the same in both
+  // languages. Anything else English is a missing catalog key.
+  const NOT_COPY = new Map([
+    ['Muthoy', 'the wordmark: a name, identical in both languages'],
+    ['ENG', 'the language switch names English in English, as every language picker does'],
+    ['1XXX XXX XXX', 'a digit-format mask for the phone field, not words'],
+  ]);
+
+  function englishLiterals(source: string): string[] {
+    return [
+      ...[...source.matchAll(JSX_TEXT)].map((match) => match[1] ?? ''),
+      ...[...source.matchAll(JSX_STRING_CHILD)].map((match) => match[2] ?? ''),
+      ...[...source.matchAll(TEXT_PROP)].map((match) => match[2] ?? ''),
+    ]
+      .map((text) => text.trim())
+      .filter((text) => text.length > 0 && !NOT_COPY.has(text));
+  }
+
+  it('scans every auth route and the shared auth components', () => {
+    expect(AUTH_SCREENS.length).toBeGreaterThanOrEqual(7);
+    expect(SHARED_AUTH.filter((file) => file.path.startsWith('components/auth/')).length).toBeGreaterThan(15);
+  });
+
+  it.each([
+    ['JSX text', '<Text className="x">Cloud Ready</Text>'],
+    ['a string child', "<Text>{'Cloud Ready'}</Text>"],
+    ['a spoken label', 'accessibilityLabel="Cloud Ready"'],
+    ['a braced prop literal', "label={'Continue'}"],
+    ['a template-literal prop', 'message={`Try again`}'],
+  ])('the detector catches English as %s', (_name, mutation) => {
+    expect(englishLiterals(mutation)).not.toEqual([]);
+  });
+
+  it.each(['<Text>{t("authCloudReady")}</Text>', 'accessibilityLabel={label}', '<Text>Muthoy</Text>', 'className="text-xs"'])(
+    'the detector leaves %s alone',
+    (source) => {
+      expect(englishLiterals(source)).toEqual([]);
+    },
+  );
+
+  it.each(AUTH_SURFACES.map((file) => [file.path, file.source] as const))('%s has no hardcoded English text', (_path, source) => {
+    expect(englishLiterals(source)).toEqual([]);
+  });
+
+  it('keeps every Gen B chip label a Muthoy brand name, never free English copy', () => {
+    // The chips are the one approved non-catalog label (DECISIONS.md, auth
+    // parity): each is the product name plus a role, rendered in Latin in both
+    // languages like the wordmark. A label that is not "Muthoy …" is copy and
+    // belongs in the catalog.
+    const chip = SHARED_AUTH.find((file) => file.path === 'components/auth/SecureChip.tsx')!;
+    const block = /AUTH_CHIP_LABELS = \{([^}]*)\}/.exec(chip.source)?.[1] ?? '';
+    const labels = [...block.matchAll(/:\s*'([^']*)'/g)].map((match) => match[1] ?? '');
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) {
+      expect(label).toMatch(/^Muthoy [A-Z][a-z]+$/);
+    }
+  });
+
+  it('shows no native Alert on an auth surface (inline notices instead)', () => {
+    const offenders = AUTH_SURFACES.filter((file) => /Alert\.alert\(/.test(file.source)).map((file) => file.path);
+    expect(offenders).toEqual([]);
   });
 });
 

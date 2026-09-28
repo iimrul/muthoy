@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BatchExpiryMismatchError, PurchaseNotVoidableError, SupplierPayableOutstandingError } from '../db/errors';
 import { catalog, type CatalogKey } from './catalog';
-import { countLabel, localizeValidationMessage, paymentMethodLabel, returnReasonLabel, userFacingError } from './display';
+import { countLabel, fillTemplate, localizeValidationMessage, paymentMethodLabel, returnReasonLabel, userFacingError } from './display';
 
 const bn = (key: CatalogKey) => catalog.bn[key];
 
@@ -48,5 +48,31 @@ describe('B3 user-facing localization', () => {
     expect(returnReasonLabel('other', bn)).toBe(catalog.bn.reasonOtherLabel);
     expect(returnReasonLabel('supplier_recall', (key) => catalog.en[key])).toBe(catalog.en.reasonSupplierRecallLabel);
     expect(returnReasonLabel('free-form note', bn)).toBe('free-form note');
+  });
+});
+
+describe('auth parity localization', () => {
+  it('localizes every @muthoy/validation auth message instead of showing English', () => {
+    for (const message of [
+      'Enter a valid Bangladeshi mobile number (e.g. 01712345678)',
+      'Shop name is too short',
+      'PIN must be exactly 4 digits',
+      'Verification code must be exactly 6 digits',
+      'PINs do not match',
+    ]) {
+      const localized = localizeValidationMessage(message, bn);
+      expect(localized).not.toBe(catalog.bn.invalidFieldValueLabel);
+      expect(localized).not.toBe(message);
+    }
+  });
+
+  it('fills named slots and leaves a missing one visible', () => {
+    expect(fillTemplate('{count} of {total} digits entered', { count: 2, total: 4 })).toBe('2 of 4 digits entered');
+    expect(fillTemplate(catalog.bn.pinProgressA11y, { count: '২', total: '৪' })).toBe('৪টির মধ্যে ২টি সংখ্যা দেওয়া হয়েছে');
+    expect(fillTemplate('Step {step}', {})).toBe('Step {step}');
+  });
+
+  it('keeps PIN as PIN in Bangla (locked decision)', () => {
+    expect(Object.values(catalog.bn).some((value) => value.includes('পিন'))).toBe(false);
   });
 });

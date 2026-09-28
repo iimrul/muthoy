@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { router } from 'expo-router';
+import { AuthButton } from '../../components/auth/AuthButton';
+import { AuthIconTile } from '../../components/auth/AuthIconTile';
+import { AuthNotice } from '../../components/auth/AuthNotice';
+import { AuthShell } from '../../components/auth/AuthShell';
+import { AuthTitleBlock } from '../../components/auth/AuthTitleBlock';
+import { AUTH_CHIP_LABELS, SecureChip } from '../../components/auth/SecureChip';
+import { useCopyFont } from '../../components/auth/typography';
 import { PinPad, usePinEntry, type PinCompletionMeta } from '../../components/ui/PinPad';
+import { StandardHeader } from '../../components/ui/StandardHeader';
 import { recordSuccessfulLogin, verifyPin } from '../../db/auth';
-import { DeviceAccessRevokedError, PinLockedOutError } from '../../db/errors';
+import { DeviceAccessRevokedError, PinAccountRefusedError, PinLockedOutError } from '../../db/errors';
 import { pinAttemptScope, pinAttemptStatus } from '../../db/pinAttemptLock';
 import { handoffAuthTiming, startAuthTiming } from '../../dev/authTiming';
 import {
@@ -11,9 +19,16 @@ import {
   sessionDiagnosticContext,
 } from '../../dev/runtimeDiagnostics';
 import { toRole } from '../../domain/permissions';
+import type { CatalogKey } from '../../i18n/catalog';
+import { fillTemplate } from '../../i18n/display';
 import { authenticatedHome } from '../../navigation/routes';
-import { useI18n } from '../../state/localeStore';
+import { useI18n, type Locale } from '../../state/localeStore';
 import { readLastShopIdSync, useSessionStore } from '../../state/sessionStore';
+import {
+  clearSignOutNotice,
+  peekSignOutNotice,
+  type SignOutNoticeKind,
+} from '../../state/signOutNotice';
 import { inspectCloudActorBinding } from '../../sync/authActorBinding';
 import { networkReachability } from '../../sync/connectivity';
 import {
@@ -33,14 +48,41 @@ import {
 // link below load-bearing rather than decorative: an owner who has genuinely
 // forgotten their PIN can now reach a locked pad, and waiting out the cooldown
 // must not be their only way back.
+//
+// Visuals: prototype-web's "Muthoy Secure" PIN pad (Gen B). What is NOT taken
+// from the prototype, deliberately: its phone step and staff picker (the PIN
+// alone identifies the person here — S-1), its "N attempts left" and fixed
+// 5-try/60-second lock (H-4's budget is shop-wide and escalating), its
+// artificial delays (verifyPin's quantised timing is the only delay), its
+// fingerprint button, and its digit reveal (never on a shared-till pad).
 
-/** "4m 05s" / "45s" — enough to wait on, with no digits from the PIN itself. */
-function formatRetryAfter(remainingMs: number): string {
+const BANGLA_DIGITS = '০১২৩৪৫৬৭৮৯';
+
+function localDigits(value: string, locale: Locale): string {
+  return locale === 'bn' ? value.replace(/\d/g, (digit) => BANGLA_DIGITS[Number(digit)] ?? digit) : value;
+}
+
+/** "4m 05s" / "45s" in the active language — enough to wait on, nothing from the PIN. */
+function formatRetryAfter(remainingMs: number, locale: Locale, t: (key: CatalogKey) => string): string {
   const totalSeconds = Math.ceil(remainingMs / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}m ${String(seconds).padStart(2, '0')}s` : `${seconds}s`;
+  return minutes > 0
+    ? fillTemplate(t('pinLockedMinutes'), {
+        minutes: localDigits(String(minutes), locale),
+        seconds: localDigits(String(seconds).padStart(2, '0'), locale),
+      })
+    : fillTemplate(t('pinLockedSeconds'), { seconds: localDigits(String(seconds), locale) });
 }
+
+const SIGNED_OUT_KEYS: Record<SignOutNoticeKind, CatalogKey> = {
+  access_changed: 'signedOutAccessChanged',
+  session_ended: 'signedOutSessionEnded',
+  device_revoked: 'pinDeviceRevoked',
+  binding_revoked: 'pinBindingRevoked',
+};
+
+type Revocation = 'device_revoked' | 'binding_revoked' | 'read_failed';
 
 export default function PinLoginScreen() {
   const [error, setError] = useState(false);
@@ -51,16 +93,25 @@ export default function PinLoginScreen() {
   // revocation, and gets its own message: telling a shopkeeper their device
   // was removed when it was not would send them hunting for something that
   // never happened.
-  const [revoked, setRevoked] = useState<
-    'device_revoked' | 'binding_revoked' | 'read_failed' | null
-  >(null);
+  const [revoked, setRevoked] = useState<Revocation | null>(null);
+  // Approved typed refusal: the PIN was right, the account cannot sign in.
+  const [refused, setRefused] = useState<'role_unavailable' | 'staff_limit' | null>(null);
+  // Why the previous session ended, shown once (state/signOutNotice.ts). Read
+  // without clearing in the initializer so a double render sees the same one.
+  const [signedOut, setSignedOut] = useState<SignOutNoticeKind | null>(() => peekSignOutNotice());
+  const [shakeKey, setShakeKey] = useState(0);
   const [lockedUntilMs, setLockedUntilMs] = useState<number | null>(() => {
     const status = pinAttemptStatus(pinAttemptScope(readLastShopIdSync()));
     return status.isLocked ? Date.now() + status.retryAfterMs : null;
   });
   const [nowMs, setNowMs] = useState(() => Date.now());
   const login = useSessionStore((s) => s.login);
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const font = useCopyFont();
+
+  useEffect(() => {
+    clearSignOutNotice();
+  }, []);
 
   // Ticks only while a cooldown is running, and stops itself the moment it
   // ends — no timer on the ordinary login path.
@@ -103,8 +154,18 @@ export default function PinLoginScreen() {
         // stays unlocked and the message says what actually happened.
         if (caught instanceof DeviceAccessRevokedError) {
           setError(false);
+          setRefused(null);
           setRevoked(caught.objection);
           timing?.mark('device_access_revoked', 'error');
+          return;
+        }
+        // Same footing: a correct PIN on an account with no usable role or
+        // beyond the plan's staff limit. No budget spent; not "Incorrect PIN".
+        if (caught instanceof PinAccountRefusedError) {
+          setError(false);
+          setRevoked(null);
+          setRefused(caught.refusal);
+          timing?.mark('account_refused', 'error');
           return;
         }
         // Beyond that, only the budget refusal is handled here. Anything else
@@ -115,6 +176,7 @@ export default function PinLoginScreen() {
         }
         setError(false);
         setRevoked(null);
+        setRefused(null);
         setNowMs(Date.now());
         setLockedUntilMs(Date.now() + caught.retryAfterMs);
         return;
@@ -122,6 +184,8 @@ export default function PinLoginScreen() {
       if (!result) {
         setError(true);
         setRevoked(null);
+        setRefused(null);
+        setShakeKey((value) => value + 1);
         timing?.mark('login_rejected', 'error');
         // A rejection may have been the one that spent the budget. Re-read it
         // rather than re-deriving the rule on this side of the boundary.
@@ -135,6 +199,7 @@ export default function PinLoginScreen() {
 
       setError(false);
       setRevoked(null);
+      setRefused(null);
       // PIN login remains offline-capable. Online, however, a missing or
       // different cloud actor must be re-linked BEFORE a local session exists.
       // Letting the authenticated navigator mount first makes the authority
@@ -189,7 +254,9 @@ export default function PinLoginScreen() {
 
       if (!bindingMatches && isOnline) {
         timing?.mark('cloud_relink_required');
-        router.replace({ pathname: '/device-login', params: { role: result.role } });
+        // `reason` only lets Device Login explain why a correct PIN was not
+        // enough this time; it grants nothing.
+        router.replace({ pathname: '/device-login', params: { role: result.role, reason: 'relink' } });
         return;
       }
       const boundResult = {
@@ -223,66 +290,90 @@ export default function PinLoginScreen() {
   );
 
   const { pin, isSubmitting, handleDigitPress, handleBackspace } = usePinEntry(handleComplete);
-  return (
-    <View className="flex-1 items-center justify-center gap-8 bg-brand-softGreen p-6">
-      <View className="items-center gap-1">
-        <Text className="font-sans-bold text-xl text-richBlack">{t('pinEnterTitle')}</Text>
-        {isLocked ? (
-          <Text className="text-center font-sans text-sm text-error">
-            {`${t('pinLockedRetryPrefix')}${formatRetryAfter(remainingMs)}`}
-          </Text>
-        ) : revoked ? (
-          <Text className="text-center font-sans text-sm text-error">
-            {t(revoked === 'device_revoked'
-              ? 'pinDeviceRevoked'
-              : revoked === 'binding_revoked'
-                ? 'pinBindingRevoked'
-                : 'pinDeviceAuthorityUnreadable')}
-          </Text>
-        ) : error ? (
-          <Text className="font-sans text-sm text-error">{t('pinIncorrect')}</Text>
-        ) : null}
-        {isSubmitting ? (
-          <View className="flex-row items-center gap-2">
-            <ActivityIndicator />
-            <Text className="font-sans text-sm text-midGray">{t('pinSigningIn')}</Text>
-          </View>
-        ) : null}
-      </View>
-      <PinPad
-        value={pin}
-        onDigitPress={handleDigitPress}
-        onBackspace={handleBackspace}
-        error={error || isLocked || revoked !== null}
-        disabled={isSubmitting || isLocked}
-      />
-      {/* H-4. Owner recovery has to be reachable FROM HERE, not only from
-          Device Login: a successful PIN no longer refills the attempt budget,
-          so an owner who has forgotten theirs can lock the pad and, without
-          this, would have no way forward but waiting. The route is the
-          existing OTP recovery flow (app/(auth)/forgot-pin.tsx) — no phone
-          param, because this pad never asked for one.
 
-          Shown whether or not the pad is locked, and deliberately not
-          disabled while it is: the lock is on guessing, not on recovering. */}
-      <View className="items-center gap-1">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('pinRecoveryAction')}
-          onPress={() => router.push('/forgot-pin')}
-          className="items-center px-4 py-2"
-        >
-          <Text className="font-sans-semibold text-sm text-brand-green">
-            {t('pinRecoveryAction')}
-          </Text>
-        </Pressable>
-        {/* The pad cannot know who is holding the phone, so both audiences are
-            addressed: recovery proves an OWNER's phone number, and Volume 4
-            gives staff none of their own. */}
-        <Text className="text-center font-sans text-xs text-midGray">
-          {t('pinRecoveryGuidance')}
-        </Text>
+  // Typing again answers the last message.
+  const handleDigit = useCallback(
+    (digit: string) => {
+      setSignedOut(null);
+      setError(false);
+      setRefused(null);
+      handleDigitPress(digit);
+    },
+    [handleDigitPress],
+  );
+
+  const notice = isLocked ? (
+    <AuthNotice
+      tone="error"
+      message={t('pinLockedTitle')}
+      detail={`${t('pinLockedWait')} ${formatRetryAfter(remainingMs, locale, t)}`}
+    />
+  ) : isSubmitting ? (
+    <AuthNotice tone="progress" message={t('pinSigningIn')} />
+  ) : revoked ? (
+    <AuthNotice
+      tone="error"
+      message={t(revoked === 'device_revoked'
+        ? 'pinDeviceRevoked'
+        : revoked === 'binding_revoked'
+          ? 'pinBindingRevoked'
+          : 'pinDeviceAuthorityUnreadable')}
+    />
+  ) : refused ? (
+    <AuthNotice tone="error" message={t(refused === 'staff_limit' ? 'pinRefusedStaffLimit' : 'pinRefusedRole')} />
+  ) : error ? (
+    <AuthNotice tone="warning" message={t('pinIncorrect')} detail={t('pinIncorrectHint')} />
+  ) : signedOut ? (
+    <AuthNotice tone="info" title={t('signedOutTitle')} message={t(SIGNED_OUT_KEYS[signedOut])} />
+  ) : null;
+
+  return (
+    <AuthShell
+      variant="secure"
+      header={<StandardHeader tone="auth" safeAreaTop title={t('pinLoginHeaderTitle')} />}
+      footer={
+        <View className="w-full">
+          <PinPad
+            variant="secure"
+            value={pin}
+            onDigitPress={handleDigit}
+            onBackspace={handleBackspace}
+            error={error || isLocked || revoked !== null || refused !== null}
+            disabled={isSubmitting || isLocked}
+            shakeKey={shakeKey}
+          />
+          {/* H-4. Owner recovery has to be reachable FROM HERE, not only from
+              Device Login: a successful PIN no longer refills the attempt
+              budget, so an owner who has forgotten theirs can lock the pad and,
+              without this, would have no way forward but waiting. The route is
+              the existing OTP recovery flow (app/(auth)/forgot-pin.tsx) — no
+              phone param, because this pad never asked for one.
+
+              Shown whether or not the pad is locked, and deliberately not
+              disabled while it is: the lock is on guessing, not on recovering. */}
+          <View className="mt-2.5 items-center gap-1">
+            <AuthButton
+              variant="link"
+              label={t('pinRecoveryAction')}
+              accessibilityLabel={t('pinRecoveryAction')}
+              onPress={() => router.push('/forgot-pin')}
+            />
+            {/* The pad cannot know who is holding the phone, so both audiences
+                are addressed: recovery proves an OWNER's phone number, and
+                Volume 4 gives staff none of their own. */}
+            <Text className={`${font()} px-4 text-center text-[11px] leading-5 text-secure-footnote`}>
+              {t('pinRecoveryGuidance')}
+            </Text>
+          </View>
+        </View>
+      }
+    >
+      <View className="items-center">
+        <SecureChip label={AUTH_CHIP_LABELS.secure} />
+        <AuthIconTile icon="shield-check" />
+        <AuthTitleBlock eyebrow={t('pinLoginEyebrow')} title={t('pinLoginTitle')} body={t('pinLoginBody')} />
       </View>
-    </View>
+      <View className="mt-1 min-h-[26px] w-full">{notice}</View>
+    </AuthShell>
   );
 }

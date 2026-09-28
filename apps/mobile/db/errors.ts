@@ -127,6 +127,30 @@ export class DeviceAccessRevokedError extends Error {
   }
 }
 
+/**
+ * The PIN was RIGHT, and this account still cannot open a session: its role
+ * row is gone, or it sits beyond the plan's staff limit.
+ *
+ * The same reasoning as DeviceAccessRevokedError above, for the two
+ * commercial refusals that used to read as "Incorrect PIN". Reaching it
+ * requires a live account's exact PIN, the matched credential spends no H-4
+ * budget, and verifyPin still raises it inside its quantised timing, so the
+ * answer arrives no faster than any other.
+ */
+export class PinAccountRefusedError extends Error {
+  readonly refusal: 'role_unavailable' | 'staff_limit';
+
+  constructor(refusal: 'role_unavailable' | 'staff_limit') {
+    super(
+      refusal === 'staff_limit'
+        ? 'This account is over the plan staff limit.'
+        : 'This account has no usable role in this shop.',
+    );
+    this.name = 'PinAccountRefusedError';
+    this.refusal = refusal;
+  }
+}
+
 // Thrown by db/auth.ts's requirePermission/requireOwner when the actor's role
 // — re-read from SQLite, never trusted from the session store — does not grant
 // the action. Screens render the same friendly denial text, so a blocked

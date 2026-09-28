@@ -62,9 +62,28 @@ export function localizeValidationMessage(message: string | undefined, t: Transl
     'Quantity must be at least 1': 'quantityMinimumLabel',
     'Purchase price cannot be negative': 'purchasePriceNegativeLabel',
     'Sale price cannot be negative': 'salePriceNegativeLabel',
+    // @muthoy/validation's auth schemas (packages/validation/src/auth.ts).
+    'Enter a valid Bangladeshi mobile number (e.g. 01712345678)': 'authPhoneInvalid',
+    'Shop name is too short': 'authShopNameTooShort',
+    'PIN must be exactly 4 digits': 'authPinFourDigits',
+    'Verification code must be exactly 6 digits': 'authOtpSixDigits',
+    'PINs do not match': 'authPinsDoNotMatch',
   };
   const key = labels[message];
   return t(key ?? 'invalidFieldValueLabel');
+}
+
+/**
+ * Fills `{name}` slots in a catalog string. A slot with no value is left as
+ * written, so a missing argument is visible rather than silently blank.
+ */
+export function fillTemplate(
+  template: string,
+  values: Readonly<Record<string, string | number>>,
+): string {
+  return template.replace(/\{(\w+)\}/g, (slot, name: string) =>
+    Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : slot,
+  );
 }
 
 export function countLabel(

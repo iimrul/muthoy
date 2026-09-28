@@ -34,6 +34,10 @@ vi.mock('react-native', () => ({
   Text: ({ children, className }: StubProps) => createElement('span', { className }, children),
   Pressable: ({ children, onPress, accessibilityLabel }: StubProps) =>
     createElement('button', { onClick: onPress, 'aria-label': accessibilityLabel }, children),
+  // Auth parity: Registration now renders inside the shared auth shell, which
+  // scrolls and avoids the keyboard. Layout only; nothing asserted changes.
+  ScrollView: ({ children }: StubProps) => createElement('div', null, children),
+  KeyboardAvoidingView: ({ children }: StubProps) => createElement('div', null, children),
 }));
 
 vi.mock('expo-router', () => ({ router: { push: deps.push, replace: deps.replace } }));

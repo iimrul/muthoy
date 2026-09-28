@@ -96,6 +96,8 @@ import { SyncHaltedError } from "./invoke";
 import { useSessionStore } from "../state/sessionStore";
 // eslint-disable-next-line import/first
 import { getLastSuccessfulSyncAt } from "./statusStore";
+// eslint-disable-next-line import/first
+import { clearDeviceRelinkRequired, useDeviceRelinkStore } from "../state/deviceRelinkStore";
 
 /** Puts a real logged-in session on `shopId`, as PIN Login would. */
 function loginTo(shopId: string): void {
@@ -261,6 +263,25 @@ describe("A2.3 device standing gates the cycle", () => {
     // cut off". Persisting a quarantine here would make revocation
     // self-inflicted: every ordinary expired session would look like one.
     expect(mocks.enforceDeviceRevocation).not.toHaveBeenCalled();
+  });
+
+  // Auth parity: the same refusal is SURFACED (components/auth/DeviceRelinkBanner)
+  // instead of leaving sync silently halted — and a later completed cycle,
+  // which proves the installation is bound again, takes the prompt away.
+  it("asks this installation to sign in again, and forgets once a cycle completes", async () => {
+    clearDeviceRelinkRequired();
+    mocks.push.mockRejectedValueOnce(
+      new SyncHaltedError('unbound', 'device_session_unbound', undefined, 'user-1', 'shop-relink'),
+    );
+    loginTo("shop-relink");
+
+    startSyncEngine("shop-relink");
+    await vi.waitFor(() => expect(useDeviceRelinkStore.getState().required).not.toBeNull());
+    expect(useDeviceRelinkStore.getState().required).toEqual({ shopId: "shop-relink", userId: "user-1" });
+    expect(mocks.enforceDeviceRevocation).not.toHaveBeenCalled();
+
+    await expect(triggerSyncNow("shop-relink")).resolves.toMatchObject({ status: 'completed' });
+    expect(useDeviceRelinkStore.getState().required).toBeNull();
   });
 });
 

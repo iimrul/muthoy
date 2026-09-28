@@ -1,7 +1,6 @@
 import { useCallback, useState, type ComponentProps } from "react";
 import Feather from "@expo/vector-icons/Feather";
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -48,7 +47,9 @@ import type { Session } from "../../state/sessionStore";
 import { useSessionStore } from "../../state/sessionStore";
 import { usePlan } from "../../state/usePlan";
 import { useMultiShopAccess } from "../../state/useMultiShopAccess";
-import { switchUser } from "../../state/switchUser";
+import { LogoutConfirmSheet } from "../../components/auth/LogoutConfirmSheet";
+import type { CatalogKey } from "../../i18n/catalog";
+import { endShiftToPinPad } from "../../navigation/endShift";
 import { triggerSyncNow } from "../../sync";
 import { MULTI_SHOP_HREF } from "../../navigation/routes";
 
@@ -158,6 +159,7 @@ export default function SettingsScreen() {
   const [taxSettingsOpen, setTaxSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
     if (!session || session.role !== "owner") return;
@@ -182,18 +184,9 @@ export default function SettingsScreen() {
   );
   if (!session || session.role !== "owner") return <AccessDenied />;
   const version = `${Constants.expoConfig?.version ?? "0.1.0"}${Constants.expoConfig?.android?.versionCode ? ` (${Constants.expoConfig.android.versionCode})` : ""}`;
-  const logout = () =>
-    Alert.alert(t("switchUser"), t("shiftSummary"), [
-      { text: t("cancel"), style: "cancel" },
-      {
-        text: t("switchUser"),
-        style: "destructive",
-        onPress: () => {
-          switchUser();
-          router.replace("/");
-        },
-      },
-    ]);
+  // The one shared confirmation (LogoutConfirmSheet); the Alert it replaces
+  // asked "Shift Summary" as its question.
+  const logout = () => setLogoutOpen(true);
   return (
     <View className="flex-1 bg-brand-softGreen pb-20">
       <StandardHeader title={t("settings")} onBackPress={() => router.back()} />
@@ -318,6 +311,14 @@ export default function SettingsScreen() {
           onClose={() => setPinOpen(false)}
         />
       ) : null}
+      <LogoutConfirmSheet
+        visible={logoutOpen}
+        onCancel={() => setLogoutOpen(false)}
+        onConfirm={() => {
+          setLogoutOpen(false);
+          endShiftToPinPad();
+        }}
+      />
       {b2Settings && b2SettingsOpen ? (
         <B2SettingsModal
           visible
@@ -733,10 +734,10 @@ function ChangePinModal({
   session: Session;
   onClose: () => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [step, setStep] = useState<"current" | "new">("current");
   const [currentPin, setCurrentPin] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CatalogKey | null>(null);
   const current = usePinEntry((pin) => {
     setCurrentPin(pin);
     setStep("new");
@@ -758,7 +759,7 @@ function ChangePinModal({
           guard.ifLive(onClose);
         } catch {
           guard.ifLive(() => {
-            setError("Current PIN is incorrect");
+            setError("changePinWrongCurrent");
             setStep("current");
             setCurrentPin("");
           });
@@ -766,9 +767,17 @@ function ChangePinModal({
       },
       [currentPin, onClose, session],
     ),
-    () => setError("PINs did not match"),
+    () => setError("pinMismatch"),
   );
   const entry = step === "current" ? current : confirmed;
+  const face = locale === "bn" ? "font-bangla" : "font-sans";
+  // The prompt names the step, so the three PINs can't be confused.
+  const prompt: CatalogKey =
+    step === "current"
+      ? "changePinCurrentTitle"
+      : confirmed.step === "enter"
+        ? "changePinNewTitle"
+        : "changePinConfirmTitle";
   return (
     <Modal
       visible={visible}
@@ -777,17 +786,28 @@ function ChangePinModal({
       onRequestClose={onClose}
     >
       <View className="flex-1 items-center justify-center bg-black/50 p-5">
-        <View className="items-center gap-4 rounded-2xl bg-white p-5">
-          <Text className="font-sans-bold">{t("changePin")}</Text>
-          {error ? <Text className="text-error">{error}</Text> : null}
+        <View className="w-full max-w-md items-center gap-4 rounded-2xl bg-white p-5">
+          <Text className={`${locale === "bn" ? "font-bangla-bold" : "font-sans-bold"} text-lg text-richBlack`}>
+            {t("changePin")}
+          </Text>
+          <Text className={`${face} text-sm text-midGray`}>{t(prompt)}</Text>
+          {error ? (
+            <Text accessibilityLiveRegion="polite" className={`${face} text-sm text-error`}>
+              {t(error)}
+            </Text>
+          ) : null}
+          {/* The compact (modal) pad; the new PIN may show each digit briefly
+              while it is being chosen, the current one never does. */}
           <PinPad
+            variant="compact"
             value={entry.pin}
             onDigitPress={entry.handleDigitPress}
             onBackspace={entry.handleBackspace}
             error={Boolean(error)}
+            revealLastDigit={step === "new"}
           />
-          <Pressable onPress={onClose}>
-            <Text>{t("cancel")}</Text>
+          <Pressable accessibilityRole="button" onPress={onClose} className="px-4 py-2">
+            <Text className={`${face} text-midGray`}>{t("cancel")}</Text>
           </Pressable>
         </View>
       </View>

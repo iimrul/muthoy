@@ -21,8 +21,9 @@ const { useCartStore } = await import('./cartStore');
 const { stopSyncEngine } = await import('../sync');
 const { readSessionAuthorityLease } = await import('../sync/sessionAuthorityStore');
 const {
-  CredentialCleanupError, enforceSessionAuthority, signOutDevice,
+  CredentialCleanupError, enforceSessionAuthority, retryCloudCredentialCleanup, signOutDevice,
 } = await import('./signOutDevice');
+const { clearSignOutNotice, peekSignOutNotice } = await import('./signOutNotice');
 
 // H-10 A2.4 and the sign-out race. Two things are being pinned here:
 //
@@ -251,5 +252,59 @@ describe('enforceSessionAuthority', () => {
     });
     cloud.signOut.mockResolvedValueOnce({ error: new Error('network down') });
     await expect(enforceSessionAuthority()).rejects.toBeInstanceOf(CredentialCleanupError);
+  });
+});
+
+// Auth parity. UX only: nothing reads the notice to decide anything, so what
+// matters is that it is recorded exactly when THIS verdict ends THIS session.
+describe('the one-time sign-out notice', () => {
+  beforeEach(() => clearSignOutNotice());
+
+  it('records the category when a revoked verdict ends this session', async () => {
+    authority.inspectSessionAuthority.mockResolvedValue({ status: 'revoked', reason: 'binding_revoked' });
+    await enforceSessionAuthority();
+    expect(useSessionStore.getState().session).toBeNull();
+    expect(peekSignOutNotice()).toBe('binding_revoked');
+  });
+
+  it('maps internal reasons to a category and never exposes the code', async () => {
+    authority.inspectSessionAuthority.mockResolvedValue({ status: 'revoked', reason: 'permission_version_mismatch' });
+    await enforceSessionAuthority();
+    expect(peekSignOutNotice()).toBe('access_changed');
+  });
+
+  it('records nothing when the phone changed hands during the check', async () => {
+    authority.inspectSessionAuthority.mockImplementation(async () => {
+      useSessionStore.setState({ session: { ...SESSION, userId: 'incoming' }, epoch: 5 });
+      return { status: 'revoked', reason: 'actor_inactive' };
+    });
+    await enforceSessionAuthority();
+    expect(peekSignOutNotice()).toBeNull();
+    expect(useSessionStore.getState().session?.userId).toBe('incoming');
+  });
+
+  it('records nothing for an unverified verdict', async () => {
+    authority.inspectSessionAuthority.mockResolvedValue({ status: 'unverified', reason: 'authority_absent' });
+    await enforceSessionAuthority();
+    expect(peekSignOutNotice()).toBeNull();
+  });
+});
+
+// Auth parity: the recovery action on the credential-cleanup screen.
+describe('retryCloudCredentialCleanup', () => {
+  it('refuses while anyone is signed in, so it can never sign out a newer session', async () => {
+    await expect(retryCloudCredentialCleanup()).resolves.toBe(false);
+    expect(cloud.signOut).not.toHaveBeenCalled();
+  });
+
+  it('only removes the credential, and reports whether it is gone', async () => {
+    useSessionStore.setState({ session: null });
+    await expect(retryCloudCredentialCleanup()).resolves.toBe(true);
+    expect(cloud.signOut).toHaveBeenCalledWith({ scope: 'local' });
+    cloud.signOut.mockResolvedValueOnce({ error: new Error('offline') });
+    await expect(retryCloudCredentialCleanup()).resolves.toBe(false);
+    cloud.signOut.mockRejectedValueOnce(new Error('network'));
+    await expect(retryCloudCredentialCleanup()).resolves.toBe(false);
+    expect(useSessionStore.getState().session).toBeNull();
   });
 });

@@ -51,7 +51,10 @@ describe('B1 routes', () => {
     // hung off that permission.
     expect(visibleMoreRoutes(cashier).map((item) => item.key)).not.toContain('devices'); });
   it('keeps the approved Owner Quick Links in one exact registry', () => {
-    expect(OWNER_QUICK_LINKS.map((item) => [item.labelKey, item.href])).toEqual([
+    // Widened to string pairs: CatalogKey × Href is now too large a union for
+    // TypeScript to infer an array literal over (TS2590). The values compared
+    // are unchanged.
+    expect(OWNER_QUICK_LINKS.map((item): [string, unknown] => [item.labelKey, item.href])).toEqual([
       ['sale', '/sale'],
       ['inventory', '/inventory'],
       ['credit', '/credit/credit-sales'],

@@ -42,6 +42,10 @@ vi.mock("@muthoy/constants", () => ({ colors: { brandGreen: "green" } }));
 vi.mock("@muthoy/utils", () => ({ formatMoney: (value: number) => String(value) }));
 vi.mock("@muthoy/types", () => ({ ZERO_PAISA: 0 }));
 vi.mock("../components/ui/LanguageToggle", () => ({ LanguageToggle: () => null }));
+// Auth parity: the end-shift confirmation is the shared LogoutConfirmSheet,
+// whose token-derived shadows need the full @muthoy/constants this suite stubs
+// down to one colour. Closed by default; the routing under test is unchanged.
+vi.mock("../components/auth/LogoutConfirmSheet", () => ({ LogoutConfirmSheet: () => null }));
 vi.mock("../components/ui/AccessDenied", () => ({
   AccessDenied: () => createElement("span", null, "ACCESS_DENIED"),
 }));

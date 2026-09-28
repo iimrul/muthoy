@@ -69,7 +69,7 @@ export function AddStaffModal({
     setError(null);
   }, []);
   const pinEntry = useConfirmedPinEntry(handlePin, () =>
-    setError("PINs did not match"),
+    setError(t("pinMismatch")),
   );
   const close = () => {
     pinEntry.reset();
@@ -224,12 +224,16 @@ export function AddStaffModal({
               <Text className="font-sans-semibold">
                 {pinEntry.step === "enter" ? t("setPin") : t("confirmPin")}
               </Text>
+              {/* The prototype's modal pad. Choosing a PIN may show each digit
+                  briefly; a sign-in pad never does. */}
               <PinPad
+                variant="compact"
                 value={pinEntry.pin}
                 onDigitPress={pinEntry.handleDigitPress}
                 onBackspace={pinEntry.handleBackspace}
                 error={Boolean(error)}
                 disabled={pinEntry.isSubmitting}
+                revealLastDigit
               />
               <Pressable onPress={() => setStep("details")}>
                 <Text className="text-brand-green">{t("back")}</Text>

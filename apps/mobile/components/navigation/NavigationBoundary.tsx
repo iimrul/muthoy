@@ -2,7 +2,7 @@ import { useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { router, usePathname } from "expo-router";
 import { AccessDenied } from "../ui/AccessDenied";
-import { DashboardLoadState } from "../staff/DashboardLoadState";
+import { BrandLoader } from "../auth/BrandLoader";
 import {
   markRuntimeDiagnosticStep,
   sessionDiagnosticContext,
@@ -84,13 +84,10 @@ export function NavigationBoundary({ children }: { children: ReactNode }) {
   // reads exactly like a reload: tap Multi-Shop, the entitlement read resolves
   // one tick later, and you are back on the Dashboard. Keeping the navigator
   // mounted and covering it is what makes a guarded push actually land.
+  // The same branded loader the authority gate and the root index show, so a
+  // login no longer flashes three different spinners on its way in.
   const gate = !isHydrated || needsLogin || homeCorrection ? (
-    <DashboardLoadState
-      loading
-      message={t("sessionLoading")}
-      retryLabel={t("retry")}
-      onRetry={() => router.replace("/")}
-    />
+    <BrandLoader message={t("sessionLoading")} />
   ) : session && !canAccessPath(session, pathname) ? (
     <AccessDenied homeHref={authenticatedHome(session)} />
   ) : null;

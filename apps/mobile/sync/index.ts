@@ -3,7 +3,7 @@ import { subscribeToReconnect, hasNetworkConnection } from './connectivity';
 import { DeviceAccessRevokedDuringSyncError, pullChanges } from './pull';
 import { pushPendingRows } from './push';
 import { nudgeBillingHydration } from './billingHydration';
-import { DEVICE_REVOCATION_CODES, SyncHaltedError } from './invoke';
+import { DEVICE_REENROLMENT_CODES, DEVICE_REVOCATION_CODES, SyncHaltedError } from './invoke';
 import { applyPulledDeviceAuthority } from './deviceRegistry';
 import {
   enforceAuthoritativeRevocation,
@@ -17,6 +17,7 @@ import { isSupabaseConfigured } from './supabaseClient';
 import { recordSuccessfulSync } from './statusStore';
 import { inspectCloudActorBinding } from './authActorBinding';
 import { useSessionStore } from '../state/sessionStore';
+import { clearDeviceRelinkRequired, markDeviceRelinkRequired } from '../state/deviceRelinkStore';
 import {
   completePendingAuthTimingStage,
   startPendingAuthTimingStage,
@@ -211,6 +212,8 @@ async function runCycle(
 
     const completedAt = new Date().toISOString();
     recordSuccessfulSync(shopId, completedAt);
+    // A cycle that got all the way here is bound; any earlier re-link prompt is stale.
+    clearDeviceRelinkRequired();
     await notifySyncCompletion(shopId, completedAt);
     return { status: 'completed', completedAt };
   } catch (error) {
@@ -231,6 +234,13 @@ async function runCycle(
       }
       if (error.shopId === shopId && error.actorUserId) {
         await enforceAuthoritativeRevocation(shopId, error.code, error.actorUserId);
+      }
+      // A2.3 re-enrolment (e.g. device_session_unbound): nothing was revoked,
+      // but only a phone + PIN sign-in can bind this installation. Surface it
+      // (components/auth/DeviceRelinkBanner.tsx) instead of leaving sync
+      // silently halted behind a notification.
+      if (DEVICE_REENROLMENT_CODES.has(error.code)) {
+        markDeviceRelinkRequired(shopId, localActor.userId);
       }
       await notifySyncHalted(shopId, error.message);
     }

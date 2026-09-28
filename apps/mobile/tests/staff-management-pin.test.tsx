@@ -55,6 +55,14 @@ vi.mock("react-native", () => ({
         onChangeText?.(event.target.value),
     }),
   Alert: { alert: native.alert },
+  // Auth parity: PinPad's rejection shake and its reduced-motion check.
+  Animated: {
+    View: ({ children }: StubProps) => createElement("div", null, children),
+    Value: class { constructor(public value: number) {} },
+    timing: () => ({ start: () => undefined }),
+    sequence: () => ({ start: () => undefined }),
+  },
+  AccessibilityInfo: { isReduceMotionEnabled: () => Promise.resolve(false) },
 }));
 
 vi.mock("expo-router", () => ({

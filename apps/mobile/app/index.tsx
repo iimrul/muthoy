@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Redirect } from 'expo-router';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
-import { colors } from '@muthoy/constants';
+import { AuthStatusScreen } from '../components/auth/AuthStatusScreen';
+import { BrandLoader } from '../components/auth/BrandLoader';
 import { getActiveSessionContext, getRegistrationStatus } from '../db/auth';
+import { runtimeDiagnosticError } from '../dev/runtimeDiagnostics';
 import type { Permission, PermissionOverrides } from '../domain/permissions';
 import { authenticatedHome, type AuthenticatedHomePath } from '../navigation/routes';
+import { useI18n } from '../state/localeStore';
 import { useSessionStore } from '../state/sessionStore';
 
 type RootDestination =
@@ -43,15 +45,19 @@ export default function RootSessionGate() {
   const login = useSessionStore((state) => state.login);
   const clearActiveUser = useSessionStore((state) => state.clearActiveUser);
   const [destination, setDestination] = useState<RootDestination | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Whether the startup read failed. The raw message is not shown: it is a
+  // SQLite/driver string that tells a pharmacist nothing and a stranger more
+  // than it should. DEV builds still log it (runtimeDiagnosticError).
+  const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const { t } = useI18n();
 
   useEffect(() => {
     let isCurrent = true;
 
     async function resolveDestination() {
       setDestination(null);
-      setError(null);
+      setError(false);
 
       try {
         const registration = await getRegistrationStatus();
@@ -140,7 +146,8 @@ export default function RootSessionGate() {
         }
       } catch (cause) {
         if (isCurrent) {
-          setError(cause instanceof Error ? cause.message : 'Unknown startup error');
+          runtimeDiagnosticError(cause);
+          setError(true);
         }
       }
     }
@@ -158,26 +165,17 @@ export default function RootSessionGate() {
 
   if (error) {
     return (
-      <View className="flex-1 items-center justify-center gap-3 bg-errorBg p-6">
-        <Text className="font-sans-bold text-lg text-error">Startup check failed</Text>
-        <Text className="font-mono text-center text-xs text-richBlack">{error}</Text>
-        <Pressable
-          accessibilityRole="button"
-          className="rounded-lg bg-brand-green px-5 py-3"
-          onPress={handleRetry}
-        >
-          <Text className="font-sans-semibold text-white">Retry</Text>
-        </Pressable>
-      </View>
+      <AuthStatusScreen
+        icon="database-alert-outline"
+        title={t('startupFailedTitle')}
+        body={t('startupFailedBody')}
+        actions={[{ label: t('retry'), onPress: handleRetry }]}
+      />
     );
   }
 
   if (!destination) {
-    return (
-      <View className="flex-1 items-center justify-center bg-brand-softGreen">
-        <ActivityIndicator color={colors.brandGreen} />
-      </View>
-    );
+    return <BrandLoader />;
   }
 
   return <Redirect href={destination} />;

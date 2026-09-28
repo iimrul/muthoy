@@ -5,6 +5,7 @@ import {
 } from "../db/deviceRegistry";
 import { useCartStore } from "../state/cartStore";
 import { useSessionStore } from "../state/sessionStore";
+import { recordSignOutNotice } from "../state/signOutNotice";
 import { quarantineSessionAuthority } from "./sessionAuthorityStore";
 import type { SyncControlCode } from "./invoke";
 
@@ -41,6 +42,8 @@ export async function enforceAuthoritativeRevocation(
   if (session?.shopId === shopId && session.userId === actorUserId) {
     useCartStore.getState().clear();
     useSessionStore.getState().clearActiveUser();
+    // UX only: the PIN pad says once why the session ended (category, not code).
+    recordSignOutNotice('access_changed');
   }
   await lockLocalUserAccess(shopId, actorUserId);
   return true;
@@ -82,6 +85,7 @@ export async function enforceDeviceRevocation(
   if (session?.shopId === shopId && session.userId === actorUserId) {
     useCartStore.getState().clear();
     useSessionStore.getState().clearActiveUser();
+    recordSignOutNotice(objection === 'device_revoked' ? 'device_revoked' : 'binding_revoked');
   }
 }
 

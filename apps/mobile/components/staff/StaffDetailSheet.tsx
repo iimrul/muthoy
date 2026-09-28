@@ -125,7 +125,7 @@ export function StaffDetailSheet({
     [onChanged, session, staff],
   );
   const pinEntry = useConfirmedPinEntry(pinConfirmed, () =>
-    setError("PINs did not match"),
+    setError(t("pinMismatch")),
   );
   if (!staff) return null;
   const closeResetPin = () => {
@@ -275,16 +275,20 @@ export function StaffDetailSheet({
           onRequestClose={closeResetPin}
         >
           <View className="flex-1 items-center justify-center bg-black/50 p-5">
-            <View className="items-center gap-4 rounded-2xl bg-white p-5">
+            <View className="w-full max-w-md items-center gap-4 rounded-2xl bg-white p-5">
               <Text className="font-sans-bold">
                 {pinEntry.step === "enter" ? t("resetPin") : t("confirmPin")}
               </Text>
+              {/* The prototype's modal pad; choosing a PIN may show each digit
+                  briefly, a sign-in pad never does. */}
               <PinPad
+                variant="compact"
                 value={pinEntry.pin}
                 onDigitPress={pinEntry.handleDigitPress}
                 onBackspace={pinEntry.handleBackspace}
                 error={Boolean(error)}
                 disabled={pinEntry.isSubmitting}
+                revealLastDigit
               />
               <Pressable onPress={closeResetPin}>
                 <Text>{t("cancel")}</Text>

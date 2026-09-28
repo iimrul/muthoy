@@ -2714,3 +2714,210 @@ handover with no phone prompt, binding revoke, whole-device revoke, restart
 persistence, authoritative reactivation, a WiFi drop writing no quarantine,
 the enforcement switch itself, and an unenrolled installation refused under
 it — has now run and passed on real hardware.
+
+## 2026-09-27 — Auth UI/UX parity (prototype-web): implemented, NOT signed off
+
+**Status:** implemented and automated-tested; awaiting a separate read-only
+review, then Phase E (device + screenshot parity on a scratch package, never
+`com.muthoy.pos`). Nothing committed.
+
+**Sequencing (founder decision).** Auth parity is done now, ahead of UI Passes
+2–4 in `docs/plans/pre-rc-master-plan.md` (it was Pass 5 / Wave 5). Reason: the
+auth surfaces are the first thing every owner and staff member meets, most of
+them were English-only in a Bangla-first product, and the H-10 gate had two
+dead ends (below). Passes 2–4 keep their order after this.
+
+**Locked decisions applied.** prototype-web is the UI truth, production the
+auth truth. Gen A look for Role Select / Registration / OTP, Gen B ("Muthoy
+Secure") for the PIN surfaces; the two generations are NOT unified yet.
+Last-digit reveal (~400 ms) only while creating/confirming a PIN, never on a
+sign-in or shared-till pad. No "attempts left" count anywhere. "PIN" stays
+"PIN" in Bangla (all `পিন` in the catalog replaced). Muthoy branding, not
+"Portable POS". No Terms/Privacy links, no fingerprint, no Owner-name field.
+`StandardHeader` changes are additive (`tone="auth"`, `subtitle`,
+`safeAreaTop`); app headers are not restyled.
+
+**Deliberate deviations from the prototype** (security/architecture wins):
+Role Select shows a third door (register) and only on an empty device; no
+staff avatar picker (S-1 — the PIN identifies the person); no pre-OTP "account
+exists" check (enumeration oracle); OTP keeps the single hidden input (paste,
+SMS autofill, one field for TalkBack); no artificial PIN delays (H-4
+quantised timing only); H-4's shop-wide escalating lock instead of 5 tries /
+60 s; the prototype's "PIN stays on this device" copy replaced (the hash syncs
+for new-device login); logout always returns to the PIN pad.
+
+**Security-relevant changes (approved, behaviour-narrow):**
+- *Typed refusal.* `verifyPin` now throws `PinAccountRefusedError`
+  (`role_unavailable` | `staff_limit`) when a CORRECT PIN belongs to a row that
+  cannot open a session, instead of returning null ("Incorrect PIN"). Same
+  footing as A2.3's `DeviceAccessRevokedError`: only reachable with a matched
+  credential, spends no H-4 budget, thrown inside `withQuantizedPinTiming`.
+  Proven in `db/pin-hardening.sqlite.test.ts`.
+- *Reason-specific H-10 gate.* The gate state now carries WHY it is closed
+  (`authority_absent`, `offline_window_expired`, `clock_rolled_back`,
+  unreadable records, a thrown check) and shows an explanation with "Try
+  again" (re-runs the same check) and "Switch user" (`switchUser()`, clears the
+  active actor only). Neither can set the gate to allowed; the navigator stays
+  unmounted (`tests/app-layout.test.tsx` asserts the Stack is absent). The
+  authority decision logic (`sync/sessionAuthority.ts`) is unchanged.
+- *Credential-cleanup screen was unreachable.* `signOutDevice` clears the
+  local session before its cloud call; that clear re-ran the layout effect, so
+  the `disposed` guard swallowed the `CredentialCleanupError` and the "Signed
+  out of this device" screen never appeared. It now keys on "no session", and
+  offers retry (`retryCloudCredentialCleanup`, refuses while anyone is signed
+  in) or continue (reaches the PIN pad with no session).
+- *One-time sign-out notice.* `enforceSessionAuthority` and the two sync
+  revocation paths record a CATEGORY (access changed / session ended / device
+  removed / removed from this device) in memory; PIN Login shows it once.
+- *`device_session_unbound`* now raises an in-app "sign in again" banner
+  (`state/deviceRelinkStore.ts`) instead of only halting sync silently; it
+  sends the person to Device Login (phone + PIN binds the installation).
+- `DeviceLoginError` carries a `code` so screens translate refusals; the
+  server's `otp_required` (stale OTP proof) is mapped and sends the owner back
+  for a new code instead of reading as a network error. Messages unchanged.
+- Registration/Device Login/Forgot PIN/DB recovery emit the canonical
+  `+880…` phone (was: as typed). `sendOtp` now receives E.164 — required by a
+  real SMS provider; verify under H-5.
+- H-3 recovery takes the PIN on the secure pad, not a text field.
+- Switch user / logout uses one localized `LogoutConfirmSheet` (the four
+  Alerts disagreed; three asked "Shift Summary") and clears the stack under
+  the PIN pad (`navigation/endShift.ts`).
+
+**Deferred to H-5:** real SMS delivery and provider error codes, SMS autofill
+on device, resend abuse limits, OTP freshness E2E, Forgot-PIN and
+duplicate-phone restore E2E, DEV harness removal.
+
+**Read-only review P1 fixes (2026-09-28).**
+- *Relink ordering.* The unbound-session banner now tears the actor down
+  FIRST and synchronously (`endShiftForDeviceRelink` in
+  `navigation/endShift.ts`: `switchUser()` → clear the relink requirement →
+  dismiss the stack → replace with Device Login). It was navigate-first with a
+  lazily imported `switchUser`, so an import failure left the old session live
+  on Device Login with the notice already gone. A teardown that throws now
+  navigates nowhere and keeps the banner.
+- *OTP accessibility.* The hidden input is the ONE accessible OTP control; the
+  tap-to-focus wrapper is `accessible={false}` and the six boxes are hidden
+  from the tree. The input is 1% opaque, not 0: Android's
+  `View.isVisibleToUser()` treats alpha 0 as invisible and TalkBack skips it.
+- *Phone canonicalization at every boundary.* `normalizeBdPhoneInput`
+  (`packages/validation/src/phone.ts`) accepts 017…, 17…, 880… and +880… and
+  emits `+8801…`; `normalizeBdPhone` (storage / lookup / lockout key) is
+  unchanged. Route params (Forgot PIN prefill, OTP Verify, resumed
+  registration) and submit handlers canonicalize; `sync/otp.ts` refuses a
+  non-Bangladeshi number (`OtpPhoneError`) before touching the provider or the
+  local auth session.
+- *Localization.* "Cloud Ready" is catalog copy now (`authCloudReady`). The
+  only non-catalog literals left on auth surfaces, kept as not-copy and
+  listed for the re-review to confirm: the wordmark "Muthoy"; the Gen B chips, each "Muthoy <Role>" (a
+  test pins that shape); the language switch's "ENG"; the phone mask
+  "1XXX XXX XXX". The English-text scan now covers the shared auth components,
+  not only `app/(auth)`.
+
+**Final review P1 fixes (2026-09-28).**
+- *Relink teardown is durable first.* zustand's persist middleware commits
+  memory and then writes MMKV, so a failed write inside `clearActiveUser()`
+  left the session gone from memory but still on disk (back on next launch).
+  The relink now uses `switchUserDurably()` → `clearActiveUserDurably()`
+  (`state/sessionStore.ts`): the signed-out state is written first, through
+  the middleware's own storage and format; a failed write throws with memory,
+  disk, cart and sync unchanged, and nothing navigates. Once that write lands,
+  memory is cleared; the middleware's identical repeat write failing leaves
+  memory and disk agreeing, so the teardown stands. Session before cart here
+  (the cart is memory-only; clearing it first would lose a sale on a failed
+  relink). Normal logout (`switchUser()`) is deliberately unchanged: a till
+  handover fails closed in memory even if the disk write fails. Tests inject
+  the failure at the real MMKV `set`, not as a stubbed teardown.
+- *A foreign number is never re-read as Bangladeshi.* `normalizeBdPhoneInput`
+  takes an explicit '+' country code as written (`+880…` or rejected — so
+  `+1712345678`, `+91…`, `(+1) …` are rejected) and accepts only digits and
+  ordinary separators; only 017…/17…/880… are rewritten to `+8801…`. A Forgot
+  PIN prefill is kept only if it is a valid Bangladeshi number or a half-typed
+  `+880…` exactly as a PhoneField reports it; anything else prefills nothing.
+  PhoneField shows and reports a typed, pasted or autofilled foreign code
+  exactly as written (the schema then rejects it), and folds an explicit
+  `+880` into its fixed prefix. Numbers are formatted for display only when
+  valid.
+- *PhoneField follows the same rules, not looser ones (2026-09-28).* The
+  field still stripped every non-digit, so `+88001712345678`,
+  `+880+1712345678` and `017abc12345678` came out as a valid `+8801…`. There
+  is now ONE rule set, `parseBdPhoneInput` (packages/validation): a number as
+  far as it has been typed, in one of the four accepted forms, dropping only
+  separators. `normalizeBdPhoneInput` is that parse, completed (accepted set
+  unchanged); PhoneField reports `+880` + the subscriber digits so far when
+  the parse succeeds, and the text exactly as typed when it does not.
+  Typing past a complete number is refused (the key never lands) instead of
+  cut off — the old 11-digit cut also turned a pasted `017123456789` into a
+  valid number.
+
+## 2026-09-28 — Auth UI/UX parity (prototype-web): SIGNED OFF
+
+**Status:** signed off. Implemented A→D→B→C (2026-09-27), read-only reviewed
+across three fix rounds — 4 P1s, then 2, then 1, all recorded above — then
+validated on real hardware across two Phase E rounds (device pass, then a
+gap-closure pass). Nothing outstanding blocks this sign-off.
+
+**Hardware evidence** (the same Samsung Galaxy A04s / SM-A047F used
+throughout H-3/H-4/H-10/A2.3; scratch packages `com.muthoy.pos.h3scratch` and
+`com.muthoy.pos.h3scratch2` run as two independent installations;
+`com.muthoy.pos` never started, cleared, or otherwise touched; DEV/Test
+Supabase project only):
+
+- Fresh flow, Bangla: Role Select → Registration (DEV harness) → PIN Setup
+  (mismatch, then success) → Dashboard. A real, non-DEV registration attempt
+  correctly fails closed with a localized error when no SMS provider is
+  configured, instead of hanging.
+- Returning flow, English: restart, PIN Login, wrong PIN, the H-4 30 s
+  lockout (keypad disabled, recovery still reachable from it), Forgot PIN —
+  including a live on-device confirmation that malformed input
+  (`+88001712345678`, embedded letters) is rejected rather than cleaned into
+  a valid number.
+- Staff and Manager actors created from Owner → Staff Management; each signs
+  in through the existing first-time device+phone+PIN confirmation
+  (`cloud_relink_required`, no SMS) and lands on a correctly role-scoped
+  home — Cashier, Manager and Owner are visibly distinct, and permission-gated
+  tabs and Cash Drawer visibility match the actual grants. Owner ↔ Staff ↔
+  Manager handover exercised repeatedly via Logout/End Shift → PIN.
+- A2.3 binding/revoke exercised as a genuine two-installation scenario: a
+  staff actor bound to a second device with enforcement off; "Only
+  registered devices" turned on and confirmed to gate resync of an
+  already-*removed* device, not a fresh legitimate registration; a binding
+  removed from the admin screen (reversible via "Restore") produced an
+  automatic, safe sign-out on the affected device with no authenticated
+  screen left showing and no crash; a fully deactivated staff account drew
+  the same generic "wrong phone number or PIN" refusal as any bad
+  credential — anti-enumeration held under a real revoke, not only the unit
+  tests.
+- Language toggle confirmed working and persisted app-wide on auth-tone
+  screens.
+- TalkBack: no audio capture, but a real accessibility-tree dump on Role
+  Select confirmed the primary buttons each expose one correct label, and
+  the language toggle exposes its full name plus selection state rather than
+  the abbreviated on-screen text.
+- One native SIGSEGV surfaced once, during the first Phase E round's own
+  initial device/Metro setup churn; explicitly watched for across a full
+  second round of cold starts and force-stops afterward and never recurred.
+  Treated as an artifact of that setup, not the app.
+
+**Deferred — H-5 (real OTP provider, real OTP E2E).** Neither Phase E round
+added or configured an OTP/SMS provider, per standing instruction. The
+OTP-entry screen itself, real SMS delivery, and OTP-provider error handling
+remain unverified against a live provider and stay deferred to H-5, unchanged
+from the carry-forward already recorded when A2.3/H-10 closed.
+
+**P2 carried forward, not blocking this sign-off:**
+- The "Only registered devices" enforcement toggle's copy reads more
+  restrictively than it behaves (above) — worth a one-line clarification
+  later, not a defect.
+- The soft, tap-to-relink `DeviceRelinkBanner` path — as opposed to the
+  automatic hard sign-out on an outright revoke/deactivate, which *was*
+  exercised — has no in-app way to reach from a "relink requested but not
+  yet revoked" server state, so it was not directly exercised on hardware.
+- Unrelated dashboard/POS UI issues noticed in passing (the app-tone header
+  bell label is English; one capture showed an icon-font glyph not
+  rendering in the dashboard's "More" grid) belong to UI Passes 2-4 and are
+  out of scope here.
+
+**No P0/P1 reopened.** Every P1 raised across the three fix rounds — relink
+teardown ordering and atomicity, OTP accessibility, phone normalization at
+every boundary including PhoneField itself, localization — stayed fixed
+through both Phase E rounds; none reproduced.

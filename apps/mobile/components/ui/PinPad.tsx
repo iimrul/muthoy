@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { AccessibilityInfo, Animated, Pressable, Text, View } from "react-native";
+import Feather from "@expo/vector-icons/Feather";
+import { colors } from "@muthoy/constants";
+import { AUTH_SHADOW } from "../auth/authStyles";
+import { fillTemplate } from "../../i18n/display";
+import { useI18n } from "../../state/localeStore";
 
 // PinPad — Volume 2 components/ui: "Header, PinPad, PlanBadge, buttons".
 // Presentation only, fully controlled by props (DEVELOPMENT_RULES.md) —
@@ -110,17 +115,29 @@ export function usePinEntry(
   return { pin, isSubmitting, handleDigitPress, handleBackspace, reset };
 }
 
+export interface ConfirmedPinEntryOptions {
+  /**
+   * Where a mismatch leaves the person. 'restart' (the default, and what the
+   * staff modals rely on) throws both entries away. 'stay-on-confirm' keeps
+   * the first PIN and asks for the confirmation again — the prototype's PIN
+   * Setup, which offers "Try Again" / "Change PIN" instead. Opt-in only.
+   */
+  onMismatchStep?: "restart" | "stay-on-confirm";
+}
+
 // Three screens (PIN Setup, Add Staff, Reset Staff PIN) all need "enter PIN,
 // confirm PIN, check they match" — this wraps usePinEntry with that step
 // machine so it's written once. Fires onConfirmed only once both entries
-// match; onMismatch otherwise. Either way, returns to the 'enter' step
-// automatically.
+// match; onMismatch otherwise. Returns to the 'enter' step automatically,
+// except after a mismatch in 'stay-on-confirm' mode.
 export function useConfirmedPinEntry(
   onConfirmed: (pin: string, meta: PinCompletionMeta) => void | Promise<void>,
   onMismatch?: () => void,
+  options: ConfirmedPinEntryOptions = {},
 ) {
   const [step, setStep] = useState<"enter" | "confirm">("enter");
   const [firstPin, setFirstPin] = useState("");
+  const staysOnConfirm = options.onMismatchStep === "stay-on-confirm";
 
   const handleComplete = useCallback(
     async (pin: string, meta: PinCompletionMeta) => {
@@ -133,11 +150,16 @@ export function useConfirmedPinEntry(
         await onConfirmed(pin, meta);
       } else {
         onMismatch?.();
+        if (staysOnConfirm) {
+          // The first PIN is kept; usePinEntry has already cleared the typed
+          // confirmation, so the pad is ready for the second attempt.
+          return;
+        }
       }
       setStep("enter");
       setFirstPin("");
     },
-    [step, firstPin, onConfirmed, onMismatch],
+    [step, firstPin, onConfirmed, onMismatch, staysOnConfirm],
   );
 
   const entry = usePinEntry(handleComplete);
@@ -152,20 +174,43 @@ export function useConfirmedPinEntry(
   return { step, ...entry, reset };
 }
 
+export type PinPadVariant = "secure" | "compact";
+
 export interface PinPadProps {
-  /** Current entered length, drives the 4-dot indicator. */
+  /** Current entered digits; drives the four-box indicator. */
   value: string;
   onDigitPress: (digit: string) => void;
   onBackspace: () => void;
-  /** True while a submitted PIN is being verified/rejected (e.g. shake animation). */
+  /** True after a rejected/mismatched PIN: the empty boxes take the error edge. */
   error?: boolean;
   /** Prevents every keypad action while digit four is being submitted. */
   disabled?: boolean;
+  /**
+   * 'secure' is the prototype's "Muthoy Secure" pad (every auth screen);
+   * 'compact' is its modal pad (staff PIN, change PIN). Visual only — both
+   * drive exactly the same usePinEntry buffer.
+   */
+  variant?: PinPadVariant;
+  /**
+   * Bump to replay the rejection shake. Purely visual and fire-and-forget:
+   * submission never waits on it, and it is skipped when the OS asks for
+   * reduced motion.
+   */
+  shakeKey?: number;
+  /**
+   * Show the digit just typed for ~400 ms before masking it. For CREATING or
+   * CONFIRMING a PIN only. A sign-in or shared-till pad must never set this:
+   * on a counter, the person behind the customer can read it.
+   */
+  revealLastDigit?: boolean;
 }
 
 const PIN_LENGTH = 4;
+const REVEAL_MS = 400;
+const SHAKE_OFFSETS = [-8, 8, -6, 6, -3, 3, 0];
+const SHAKE_STEP_MS = 50;
 
-// null = the skip cell (bottom-left); 'backspace' = the backspace cell
+// null = the empty cell (bottom-left); 'backspace' = the backspace cell
 // (bottom-right) — Volume 4's exact layout.
 const KEYPAD_ROWS: (string | null)[][] = [
   ["1", "2", "3"],
@@ -174,40 +219,156 @@ const KEYPAD_ROWS: (string | null)[][] = [
   [null, "0", "backspace"],
 ];
 
+interface VariantClasses {
+  gap: string;
+  key: string;
+  keyText: string;
+  keyShadow: { boxShadow: string };
+  boxShadow?: { boxShadow: string };
+  backspace: string;
+  backspaceColor: string;
+}
+
+const VARIANT_CLASSES: Record<PinPadVariant, VariantClasses> = {
+  secure: {
+    gap: "gap-2.5",
+    key: "h-[50px] flex-1 items-center justify-center rounded-2xl border border-secure-keyBorder bg-white/90 active:bg-secure-keyPressed",
+    keyText: "font-sans-semibold text-[21px] text-secure-keyText",
+    keyShadow: AUTH_SHADOW.key,
+    boxShadow: AUTH_SHADOW.pinBox,
+    backspace: "h-[50px] flex-1 items-center justify-center rounded-2xl active:bg-white/60",
+    backspaceColor: colors.secureKeyIcon,
+  },
+  compact: {
+    gap: "gap-3",
+    key: "h-[52px] flex-1 items-center justify-center rounded-2xl bg-white active:bg-auth-ringEnd",
+    keyText: "font-sans-medium text-[22px] text-richBlack",
+    keyShadow: AUTH_SHADOW.subtle,
+    backspace: "h-[52px] flex-1 items-center justify-center rounded-2xl",
+    backspaceColor: colors.midGray,
+  },
+};
+
+function indicatorBoxClass(state: "filled" | "active" | "empty", error: boolean): string {
+  const base = "h-[52px] w-[52px] items-center justify-center rounded-2xl border-2";
+  if (state === "filled") return `${base} border-secure-accent bg-secure-pinFilled`;
+  if (state === "active") return `${base} ${error ? "border-notice-errorInk" : "border-secure-accent"} bg-white`;
+  return `${base} ${error ? "border-notice-errorBorder" : "border-secure-pinEmpty"} bg-white`;
+}
+
+/** Index of a digit shown in the clear for REVEAL_MS after it is typed, else null. */
+function useRevealedDigit(value: string, enabled: boolean): number | null {
+  const [revealIndex, setRevealIndex] = useState<number | null>(null);
+  const previousLength = useRef(value.length);
+
+  useEffect(() => {
+    const before = previousLength.current;
+    previousLength.current = value.length;
+    if (!enabled || value.length <= before) {
+      // Backspace, reset or submission clear: never leave a digit showing.
+      setRevealIndex(null);
+      return;
+    }
+    const index = value.length - 1;
+    setRevealIndex(index);
+    const timer = setTimeout(() => {
+      setRevealIndex((current) => (current === index ? null : current));
+    }, REVEAL_MS);
+    return () => clearTimeout(timer);
+  }, [enabled, value]);
+
+  return enabled ? revealIndex : null;
+}
+
+/** Horizontal rejection shake, replayed whenever `shakeKey` changes. */
+function useShake(shakeKey: number | undefined): Animated.Value {
+  // Created once and never replaced; state, not a ref, so render never reads
+  // a ref value (react-hooks/refs).
+  const [offset] = useState(() => new Animated.Value(0));
+  const reduceMotion = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (active) reduceMotion.current = enabled;
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!shakeKey || reduceMotion.current) return;
+    Animated.sequence(
+      SHAKE_OFFSETS.map((toValue) =>
+        Animated.timing(offset, { toValue, duration: SHAKE_STEP_MS, useNativeDriver: true }),
+      ),
+    ).start();
+  }, [offset, shakeKey]);
+
+  return offset;
+}
+
 export function PinPad({
   value,
   onDigitPress,
   onBackspace,
   error = false,
   disabled = false,
+  variant = "secure",
+  shakeKey,
+  revealLastDigit = false,
 }: PinPadProps) {
+  const { t, formatNumber } = useI18n();
   const isFull = value.length >= PIN_LENGTH;
   const isKeypadDisabled = disabled || isFull;
+  const classes = VARIANT_CLASSES[variant];
+  const revealIndex = useRevealedDigit(value, revealLastDigit);
+  const shakeOffset = useShake(shakeKey);
 
   return (
-    <View className="items-center gap-10">
-      <View className="flex-row gap-4">
-        {Array.from({ length: PIN_LENGTH }).map((_, i) => {
-          const filled = i < value.length;
-          return (
-            <View
-              key={i}
-              className={
-                filled
-                  ? `h-4 w-4 rounded-full ${error ? "bg-error" : "bg-brand-green"}`
-                  : "h-4 w-4 rounded-full border border-midGray bg-brand-softGreen"
-              }
-            />
-          );
-        })}
-      </View>
+    <View className="w-full">
+      <Animated.View style={{ transform: [{ translateX: shakeOffset }] }}>
+        <View
+          className="mb-5 flex-row justify-center gap-3"
+          accessible
+          accessibilityLabel={fillTemplate(t("pinProgressA11y"), {
+            count: formatNumber(value.length),
+            total: formatNumber(PIN_LENGTH),
+          })}
+        >
+          {Array.from({ length: PIN_LENGTH }).map((_, i) => {
+            const isFilled = i < value.length;
+            const state = isFilled ? "filled" : i === value.length && !isFull ? "active" : "empty";
+            const boxStyle =
+              state === "active" && !error
+                ? AUTH_SHADOW.pinRing
+                : state === "filled"
+                  ? { ...classes.boxShadow, transform: [{ scale: 1.05 }] }
+                  : classes.boxShadow;
+            return (
+              <View key={i} className={indicatorBoxClass(state, error)} style={boxStyle}>
+                {isFilled ? (
+                  i === revealIndex ? (
+                    <Text className="font-sans-semibold text-2xl text-secure-primary">{value[i]}</Text>
+                  ) : (
+                    <View className="h-2.5 w-2.5 rounded-full bg-secure-primary" />
+                  )
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
+      </Animated.View>
 
-      <View className="gap-4">
+      <View className={classes.gap}>
         {KEYPAD_ROWS.map((row, rowIndex) => (
-          <View key={rowIndex} className="flex-row gap-6">
+          <View key={rowIndex} className={`flex-row ${classes.gap}`}>
             {row.map((key, colIndex) => {
               if (key === null) {
-                return <View key={`skip-${colIndex}`} className="h-16 w-16" />;
+                return <View key={`skip-${colIndex}`} className="flex-1" />;
               }
 
               if (key === "backspace") {
@@ -217,12 +378,10 @@ export function PinPad({
                     onPress={onBackspace}
                     disabled={isKeypadDisabled}
                     accessibilityRole="button"
-                    accessibilityLabel="Backspace"
-                    className="h-16 w-16 items-center justify-center rounded-full active:bg-brand-softGreen"
+                    accessibilityLabel={t("pinBackspaceA11y")}
+                    className={`${classes.backspace} ${isKeypadDisabled ? "opacity-50" : ""}`}
                   >
-                    <Text className="font-sans-semibold text-xl text-richBlack">
-                      ⌫
-                    </Text>
+                    <Feather name="delete" size={20} color={classes.backspaceColor} />
                   </Pressable>
                 );
               }
@@ -233,12 +392,11 @@ export function PinPad({
                   onPress={() => onDigitPress(key)}
                   disabled={isKeypadDisabled}
                   accessibilityRole="button"
-                  accessibilityLabel={`Digit ${key}`}
-                  className="h-16 w-16 items-center justify-center rounded-full active:bg-brand-softGreen"
+                  accessibilityLabel={`${t("pinDigitA11y")} ${formatNumber(Number(key))}`}
+                  className={`${classes.key} ${isKeypadDisabled ? "opacity-50" : ""}`}
+                  style={classes.keyShadow}
                 >
-                  <Text className="font-sans-semibold text-2xl text-richBlack">
-                    {key}
-                  </Text>
+                  <Text className={classes.keyText}>{key}</Text>
                 </Pressable>
               );
             })}

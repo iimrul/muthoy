@@ -1,6 +1,6 @@
 import { stopSyncEngine } from '../sync';
 import { useCartStore } from './cartStore';
-import { useSessionStore } from './sessionStore';
+import { clearActiveUserDurably, useSessionStore } from './sessionStore';
 
 // state/switchUser.ts — the device-handover action for Volume 0 Days 5/11.
 // One pharmacy phone is shared by the owner and their staff, and Day 11's
@@ -50,5 +50,27 @@ export function switchUser(): void {
   // some other screen happens to notice. Idempotent — app/_layout.tsx's own
   // cleanup calls this again when it reacts to the session change, which is a
   // harmless no-op by then.
+  stopSyncEngine();
+}
+
+/**
+ * switchUser() for the A2.3 device relink, made failure-safe.
+ *
+ * A relink that fails half-way has a safe place to stay (the screen the person
+ * is on, still signed in) and an unsafe place to go (Device Login with the old
+ * session still live in memory, or still on disk for the next launch). So
+ * nothing changes until the signed-out session is durably on disk
+ * (clearActiveUserDurably): a failed write throws with memory, disk, cart and
+ * sync exactly as they were. Only then do the cart and sync go.
+ *
+ * The session goes before the cart here, the reverse of switchUser(): the cart
+ * is memory-only and cannot fail on storage, and emptying it first would throw
+ * away a half-built sale on a relink whose write then failed. The cart is
+ * still empty before any new login is possible — nothing between these lines
+ * can create one.
+ */
+export function switchUserDurably(): void {
+  clearActiveUserDurably();
+  useCartStore.getState().clear();
   stopSyncEngine();
 }

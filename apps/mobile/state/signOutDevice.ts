@@ -3,6 +3,7 @@ import { inspectSessionAuthority, type SessionAuthorityOutcome } from '../sync/s
 import { isSupabaseConfigured, supabase } from '../sync/supabaseClient';
 import { useCartStore } from './cartStore';
 import { useSessionStore } from './sessionStore';
+import { recordSignOutNotice, signOutNoticeKindFor } from './signOutNotice';
 import {
   quarantineSessionAuthority,
   readSessionAuthorityLease,
@@ -196,8 +197,35 @@ export async function enforceSessionAuthority(
   if (outcome.status !== 'revoked') return outcome;
 
   if (useSessionStore.getState().epoch !== epoch) return outcome;
+  // UX only, and recorded HERE because this is the one place that knows this
+  // verdict is about to end this session (a handover that raced the check
+  // returned above). The PIN pad shows the category once; no decision reads it.
+  recordSignOutNotice(signOutNoticeKindFor(outcome.reason));
   await signOutDevice(epoch);
   return outcome;
+}
+
+/**
+ * Retries ONLY the cloud half of a sign-out whose local half already ran —
+ * the recovery action on the "Signed out of this device" screen, which used to
+ * be a dead end until the app was killed.
+ *
+ * It can only ever remove a credential, never grant one, and it refuses while
+ * a local session exists: by then the stored JWT may belong to whoever signed
+ * in since, and signing THEM out is not this function's decision. True when no
+ * cloud credential is left behind (including a build with no cloud at all).
+ */
+export async function retryCloudCredentialCleanup(): Promise<boolean> {
+  if (useSessionStore.getState().session !== null) return false;
+  if (!isSupabaseConfigured) return true;
+  try {
+    const { error } = await withAuthMutation(
+      () => supabase.auth.signOut({ scope: 'local' }),
+    );
+    return !error;
+  } catch {
+    return false;
+  }
 }
 
 /** Exact wall-clock deadline used by UI and headless gates for the open lease. */

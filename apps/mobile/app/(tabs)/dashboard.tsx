@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -53,7 +52,8 @@ import { captureSessionFor } from "../../state/sessionGuard";
 import { useSessionStore } from "../../state/sessionStore";
 import { switchActiveShop } from "../../state/switchShop";
 import { usePlan } from "../../state/usePlan";
-import { switchUser } from "../../state/switchUser";
+import { LogoutConfirmSheet } from "../../components/auth/LogoutConfirmSheet";
+import { endShiftToPinPad } from "../../navigation/endShift";
 import { useMultiShopAccess } from "../../state/useMultiShopAccess";
 import { useUnreadCount } from "../../state/useUnreadCount";
 import {
@@ -89,6 +89,7 @@ export default function MorningDashboardScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [syncFailed, setSyncFailed] = useState(false);
@@ -295,20 +296,12 @@ export default function MorningDashboardScreen() {
     }
   }, [multiShop.primaryShopId, t]);
 
+  // One confirmation for every way out of a shift (LogoutConfirmSheet); the
+  // menu closes first so the sheet is not stacked on top of it.
   const handleLogout = useCallback(() => {
-    Alert.alert(t("logout"), t("logoutConfirmBody"), [
-      { text: t("cancel"), style: "cancel" },
-      {
-        text: t("logout"),
-        style: "destructive",
-        onPress: () => {
-          setMenuOpen(false);
-          switchUser();
-          router.replace("/");
-        },
-      },
-    ]);
-  }, [t]);
+    setMenuOpen(false);
+    setLogoutOpen(true);
+  }, []);
 
   const dateLabel = useCallback(
     (businessDate: string) => {
@@ -886,6 +879,15 @@ export default function MorningDashboardScreen() {
         dateLabel={dateLabel(
           previousDay?.businessDate ?? data.yesterday.businessDate,
         )}
+      />
+
+      <LogoutConfirmSheet
+        visible={logoutOpen}
+        onCancel={() => setLogoutOpen(false)}
+        onConfirm={() => {
+          setLogoutOpen(false);
+          endShiftToPinPad();
+        }}
       />
     </View>
   );

@@ -15,6 +15,7 @@ import {
 import { normalizeBdPhone } from '@muthoy/validation';
 import {
   DeviceAccessRevokedError,
+  PinAccountRefusedError,
   DuplicatePinError,
   NotAuthorizedError,
   PinLockedOutError,
@@ -773,7 +774,20 @@ const liveLoginWhere = () => and(
   isNull(users.accessLockedAt),
 );
 
+/**
+ * Why a row whose PIN verified still cannot open a session. `device` is the
+ * A2.3 objection (reported separately, as DeviceAccessRevokedError); the other
+ * two are the commercial refusals verifyPin reports as PinAccountRefusedError.
+ */
+type LocalPinRefusal = 'device' | 'role_unavailable' | 'staff_limit';
+
 async function toLocalPinSession(user: LoginUserRow): Promise<LocalPinSession | null> {
+  return (await resolveLocalPinEligibility(user)).session;
+}
+
+async function resolveLocalPinEligibility(
+  user: LoginUserRow,
+): Promise<{ session: LocalPinSession; refusal: null } | { session: null; refusal: LocalPinRefusal }> {
   // A2.3, and FIRST, before any other eligibility work.
   //
   // The credential has already verified by the time this runs — that is what
@@ -794,7 +808,7 @@ async function toLocalPinSession(user: LoginUserRow): Promise<LocalPinSession | 
   // corrupting them the way to undo a revocation. A database predating
   // migration 0030 is a separate, allowed case and yields null.
   const objection = await readDeviceAccessObjection(user.shopId, user.id);
-  if (objection) return null;
+  if (objection) return { session: null, refusal: 'device' };
 
   const b4 = commercialSchemaInstalled();
   const roleRow = await db
@@ -803,7 +817,13 @@ async function toLocalPinSession(user: LoginUserRow): Promise<LocalPinSession | 
     .where(and(eq(roles.id, user.roleId), eq(roles.shopId, user.shopId), eq(roles.isDeleted, false)))
     .get();
   const role = toRole(roleRow?.name);
-  if (!role || (b4 && !await isUserWithinStaffLimit(user.shopId, user.id))) return null;
+  // Same order and short-circuit as before: no staff-limit read for a row
+  // with no usable role. Only the reason is now reported instead of a bare
+  // null, so the pad can stop calling a correct PIN "incorrect".
+  if (!role) return { session: null, refusal: 'role_unavailable' };
+  if (b4 && !await isUserWithinStaffLimit(user.shopId, user.id)) {
+    return { session: null, refusal: 'staff_limit' };
+  }
   const membership = b4 ? await db.select({
     principalUserId: shopMemberships.principalUserId,
     billingAccountId: shopMemberships.billingAccountId,
@@ -818,7 +838,7 @@ async function toLocalPinSession(user: LoginUserRow): Promise<LocalPinSession | 
     role,
     permissions: await getUserPermissionOverrides(user.shopId, user.id),
   };
-  return b4 ? {
+  const session: LocalPinSession = b4 ? {
     ...baseSession,
     principalUserId: membership?.principalUserId ?? user.id,
     billingAccountId: membership?.billingAccountId,
@@ -827,6 +847,7 @@ async function toLocalPinSession(user: LoginUserRow): Promise<LocalPinSession | 
     // persisted cloud JWT. The login screen performs that comparison.
     cloudActorConfirmed: false,
   } : baseSession;
+  return { session, refusal: null };
 }
 
 async function storeCurrentPinLookup(user: LoginUserRow, tag: string): Promise<void> {
@@ -922,7 +943,7 @@ export async function verifyPin(
       throw new PinLockedOutError(lock.retryAfterMs);
     }
 
-    const { matched, session, objection } = await resolveLocalPinSession(
+    const { matched, session, objection, refusal } = await resolveLocalPinSession(
       rawPin,
       lastShopId,
       timing,
@@ -948,6 +969,10 @@ export async function verifyPin(
     // session, because "your PIN is right and this device is cut off" is not
     // something a person can act on if it reads as "Incorrect PIN".
     if (objection) throw new DeviceAccessRevokedError(objection);
+    // Auth parity (approved typed refusal). Same footing as the objection
+    // above: only reachable with `matched` true, so no budget was spent, and
+    // thrown inside withQuantizedPinTiming, so it is no faster than a miss.
+    if (!session && refusal) throw new PinAccountRefusedError(refusal);
     return session;
   });
 }
@@ -967,6 +992,8 @@ async function resolveLocalPinSession(
   matched: boolean;
   session: LocalPinSession | null;
   objection: DeviceAccessObjection | null;
+  /** Set only when `matched` and the row is commercially refused. */
+  refusal: 'role_unavailable' | 'staff_limit' | null;
 }> {
   const lookup = async () => {
     const tag = await createPinLookupTag(rawPin);
@@ -1018,16 +1045,25 @@ async function resolveLocalPinSession(
   }
 
   // Corrupted/old duplicate PINs must never choose an identity by row order.
-  if (verified.length !== 1) return { matched: false, session: null, objection: null };
+  if (verified.length !== 1) return { matched: false, session: null, objection: null, refusal: null };
   const match = verified[0];
-  if (!match) return { matched: false, session: null, objection: null };
+  if (!match) return { matched: false, session: null, objection: null, refusal: null };
   const { user, tag } = match;
   await storeCurrentPinLookup(user, tag);
   // A2.3. Read once here, where the identity IS known, so the refusal can name
-  // itself. toLocalPinSession re-checks it as a backstop for every other
-  // caller; this read exists purely so the screen can say something true.
+  // itself. resolveLocalPinEligibility re-checks it as a backstop for every
+  // other caller; this read exists purely so the screen can say something true.
   const objection = await readDeviceAccessObjection(user.shopId, user.id);
-  return { matched: true, session: await toLocalPinSession(user), objection };
+  const eligibility = await resolveLocalPinEligibility(user);
+  return {
+    matched: true,
+    session: eligibility.session,
+    objection,
+    refusal:
+      eligibility.refusal === 'role_unavailable' || eligibility.refusal === 'staff_limit'
+        ? eligibility.refusal
+        : null,
+  };
 }
 
 /**

@@ -68,6 +68,21 @@ export default defineConfig({
         process.cwd(),
         "apps/mobile/db/test/vector-icons.ts",
       ),
+      // Auth parity: the auth primitives use the same icon family the nav
+      // shell already ships, plus safe-area insets and SVG gradients. All three
+      // load native modules at import time; see each double's header.
+      "@expo/vector-icons/MaterialCommunityIcons": resolve(
+        process.cwd(),
+        "apps/mobile/db/test/vector-icons-material.ts",
+      ),
+      "react-native-safe-area-context": resolve(
+        process.cwd(),
+        "apps/mobile/db/test/safe-area-context.ts",
+      ),
+      "react-native-svg": resolve(
+        process.cwd(),
+        "apps/mobile/db/test/react-native-svg.ts",
+      ),
     },
   },
   test: {
@@ -80,6 +95,12 @@ export default defineConfig({
       "apps/mobile/navigation/**/*.test.ts",
       "apps/mobile/components/scanner/*.test.tsx",
       "apps/mobile/components/ui/PinPad.test.tsx",
+      // Auth parity: the shared auth primitives (shell, notices, buttons, the
+      // +880 phone field, status/loader screens, the logout sheet) and the
+      // PinPad/OtpInput visual variants.
+      "apps/mobile/components/auth/*.test.ts",
+      "apps/mobile/components/auth/*.test.tsx",
+      "apps/mobile/components/ui/auth-inputs.test.tsx",
       // Phase C Pass 1 (D1, D2). The toast and skeleton primitives that three
       // screens previously each re-implemented, tested on the behaviour those
       // copies disagreed about rather than on their markup.
@@ -267,6 +288,11 @@ export default defineConfig({
       // reload on device), across trial/free/expired and every role.
       "apps/mobile/tests/b4-multi-shop-navigation.test.tsx",
       "apps/mobile/tests/auth-pin-latency.test.tsx",
+      // Auth parity: onboarding (Phase B) and sign-in / shared-till (Phase C)
+      // screens, rendered in both languages with only the network/SQLite edge
+      // mocked.
+      "apps/mobile/tests/auth-onboarding.test.tsx",
+      "apps/mobile/tests/auth-signin.test.tsx",
       "apps/mobile/tests/staff-home-routing.test.tsx",
       "apps/mobile/tests/staff-management-pin.test.tsx",
       "apps/mobile/sync/**/*.test.ts",

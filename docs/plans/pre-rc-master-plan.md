@@ -200,7 +200,10 @@ screen must clear the §13 Visual Acceptance Gate before it counts as complete.
 - **Pass 4 — management.** Expiry, customers, suppliers, cash, expenses, EOD,
   staff/permissions, notifications.
 - **Pass 5 — platform/account.** Auth/onboarding, settings, reports, export,
-  printer, plans, payment, multi-shop, `+not-found`.
+  printer, plans, payment, multi-shop, `+not-found`. Auth/onboarding was
+  pulled forward out of sequence and signed off 2026-09-28 (founder decision,
+  see `DECISIONS.md`); the rest of Pass 5 is unaffected and still runs in its
+  Wave 5 place below.
 
 Per-screen audit axes: layout, spacing, typography, colors, cards, icons,
 headers, bottom navigation, empty/loading/error states, Bangla/English microcopy,
