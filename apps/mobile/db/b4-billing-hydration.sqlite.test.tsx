@@ -15,6 +15,7 @@ import { resolve } from 'node:path';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
+import { DAY_MS } from '../domain/entitlements';
 import { sqlite } from './test/expo-sqlite';
 import type { ServerCommercialSnapshot } from './commercial';
 
@@ -102,7 +103,15 @@ const OWNER_TWO_ID = '9e222222-2222-4222-8222-222222222222';
 const ROLE_TWO_ID = '9e444444-4444-4444-8444-444444444444';
 const ACCOUNT_TWO_ID = '9e666666-6666-4666-8666-666666666666';
 const MEMBERSHIP_TWO_ID = '9e777777-7777-4777-8777-777777777777';
-const T0 = '2026-09-01T06:00:00.000Z';
+/**
+ * When the server verified the entitlement: one day before the run, always.
+ * The cache is resolved against the device clock with a 30-day offline
+ * ceiling, so a fixed date here stops verifying 30 days after it is written —
+ * 2026-09-01T06:00Z did on 2026-10-01. Relative rather than frozen: these
+ * tests drive real timers (waitFor, retry backoff), and three of them install
+ * fake ones, which a frozen Date would fight.
+ */
+const T0 = new Date(Date.now() - DAY_MS).toISOString();
 
 const OWNER_SESSION = { shopId: SHOP_ID, userId: OWNER_ID, role: 'owner' as const };
 

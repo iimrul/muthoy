@@ -192,24 +192,80 @@ describe('owner PIN recovery is the only surviving OTP path', () => {
     expect(code(RECOVER_PIN)).toMatch(/This number cannot be recovered here/);
   });
 
-  test('it globally signs out prior sessions', () => {
+  test('it globally signs out prior sessions — with the caller\'s own token', () => {
     // Recovery is what someone does after losing a phone; a session still
-    // living on that phone must not survive it.
-    expect(code(RECOVER_PIN)).toMatch(/signOut\(\s*caller\.authUserId,\s*"global",?\s*\)/);
+    // living on that phone must not survive it. GoTrue's global logout takes a
+    // logged-in JWT. This test used to assert `signOut(caller.authUserId, …)` —
+    // the user id GoTrue refused as bad_jwt on every call, so recovery failed
+    // after the OTP was spent (DEV, 2026-10-05). Executed, not read, in
+    // backend/supabase/pgtest/session-revocation.pgtest.ts.
+    const body = code(RECOVER_PIN);
+    expect(body).toMatch(/revokeCallerSessionsGlobally\(caller\)/);
+    expect(body).not.toMatch(/admin\.signOut\(/);
     // And BEFORE the new hash is written: a failure here must leave the old PIN
     // standing rather than a new PIN beside sessions that were meant to die.
-    const bodyText = code(RECOVER_PIN);
-    expect(bodyText.indexOf('signOut(')).toBeLessThan(bodyText.indexOf('bcrypt.hash('));
+    expect(body.indexOf('revokeCallerSessionsGlobally(caller)')).toBeLessThan(body.indexOf('bcrypt.hash('));
   });
 
-  test('a recovery rebind fails closed when global sign-out fails', () => {
+  test('every auth.admin.signOut call lives in _shared/auth.ts, each scoped to exactly its own token', () => {
+    // Two calls, by design: the caller's own verified token (global, for
+    // recoverPin's own-account logout) and a just-minted session's own token
+    // (local, for recoverPin's post-write cleanup — see below). A revocation
+    // by a BARE user id goes through h5_revoke_auth_user_sessions instead.
+    const sources = [RECOVER_PIN, IDENTITY, PUSH, PULL, INDEX, DEVICE_LOGIN].map(code).join('\n');
+    expect(sources).not.toMatch(/admin\.signOut\(/);
+    const auth = code(SHARED_AUTH);
+    expect(auth.match(/admin\.signOut\(/g)).toHaveLength(2);
+    expect(auth).toMatch(/admin\.signOut\(token, "global"\)/);
+    expect(auth).toMatch(/admin\.signOut\(accessToken, "local"\)/);
+  });
+
+  test('a post-write session failure is reported as pin_changed_login_required, never recovery_failed', () => {
+    const body = code(RECOVER_PIN);
+    const commit = body.indexOf('.update({ pin_hash: pinHash');
+    const tryBlock = body.indexOf('try {', commit);
+    const cleanup = body.indexOf('revokeMintedSessionLocally(session.accessToken)');
+    // From `cleanup` onward: PIN_CHANGED_LOGIN_REQUIRED is also a constant
+    // declared near the top of the file, which indexOf would otherwise find
+    // first.
+    const rethrow = body.indexOf('PIN_CHANGED_LOGIN_REQUIRED', cleanup);
+    // The write commits BEFORE the try/catch that can no longer touch it.
+    expect(commit).toBeGreaterThan(-1);
+    expect(tryBlock).toBeGreaterThan(commit);
+    // Cleanup targets the ONE session just minted, not the account.
+    expect(cleanup).toBeGreaterThan(tryBlock);
+    // And the outer catch answers with the stable code either way, not the
+    // generic server-fault code the two checks above the write still use.
+    expect(rethrow).toBeGreaterThan(cleanup);
+    expect(body.slice(tryBlock, rethrow)).not.toMatch(/RECOVERY_FAILED/);
+  });
+
+  test('signOutAppUser resolves the stable principal from shop_memberships before reading auth_bindings', () => {
+    // A direct `auth_bindings.eq("app_user_id", appUserId)` here is the DEV,
+    // 2026-10-05 defect: `appUserId` may be a Multi-Shop secondary-shop actor,
+    // a different row from the principal `auth_bindings` actually keys on, so
+    // the lookup silently missed and no session was ever cut for them.
+    const auth = code(SHARED_AUTH);
+    const resolvePrincipal = auth.indexOf('async function resolvePrincipalForActor');
+    const signOut = auth.indexOf('export async function signOutAppUser');
+    const membershipLookup = auth.indexOf('.from("shop_memberships")');
+    const bindingLookup = auth.indexOf('.from("auth_bindings")', signOut);
+    expect(resolvePrincipal).toBeGreaterThan(-1);
+    expect(membershipLookup).toBeGreaterThan(resolvePrincipal);
+    expect(membershipLookup).toBeLessThan(signOut);
+    expect(bindingLookup).toBeGreaterThan(signOut);
+    expect(auth.slice(signOut, bindingLookup)).toMatch(/resolvePrincipalForActor\(appUserId\)/);
+  });
+
+  test('a recovery rebind fails closed when session revocation fails', () => {
     const body = code(IDENTITY);
     const rebind = body.slice(
       body.indexOf('async function rebindAuthUser'),
       body.indexOf('export interface EnsureBindingOptions'),
     );
-    expect(rebind).toMatch(/signOutError/);
-    expect(rebind).toMatch(/if \(signOutError\)[\s\S]*?throw new HttpError/);
+    expect(rebind).toMatch(/if \(!\(await revokeAuthUserSessions\(oldAuthUserId\)\)\)\s*\{\s*throw new HttpError/);
+    // Before anything about the identity moves.
+    expect(rebind.indexOf('revokeAuthUserSessions(')).toBeLessThan(rebind.indexOf('updateUserById('));
   });
 });
 

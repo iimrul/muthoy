@@ -196,10 +196,10 @@ describe('RoleCard', () => {
 
 describe('BrandLoader and AuthStatusScreen', () => {
   it('shows the loader title and message, and whatever it is handed below them', () => {
-    render(createElement(BrandLoader, { title: 'Checking your access…', message: 'One moment' }, createElement('span', null, 'dev-slot')));
+    render(createElement(BrandLoader, { title: 'Checking your access…', message: 'One moment' }, createElement('span', null, 'extra-slot')));
     expect(screen.getByRole('heading').textContent).toBe('Checking your access…');
     expect(screen.getByText('One moment')).toBeTruthy();
-    expect(screen.getByText('dev-slot')).toBeTruthy();
+    expect(screen.getByText('extra-slot')).toBeTruthy();
   });
 
   it('renders the reason, the hint and every action as a button', () => {

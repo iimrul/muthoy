@@ -50,6 +50,24 @@ function count(sql, pattern) {
 }
 
 /**
+ * PostgreSQL functions that give a different value on every call. As the
+ * DEFAULT of an ADD COLUMN, one of these is evaluated once per EXISTING row and
+ * written into it — a backfill. A constant or stable default (0, 'VAT', now())
+ * is stored once in the catalog instead, and writes no row.
+ */
+const VOLATILE_DEFAULT_FUNCTIONS = [
+  'gen_random_uuid', 'gen_random_bytes', 'uuid_generate_v1', 'uuid_generate_v1mc',
+  'uuid_generate_v4', 'uuidv4', 'uuidv7', 'random', 'clock_timestamp', 'timeofday', 'nextval',
+];
+
+/** One ADD COLUMN clause — never past its statement or into the next clause — with such a default. */
+const VOLATILE_ADD_COLUMN_DEFAULT = new RegExp(
+  String.raw`\bADD\s+COLUMN\b(?:(?!\bADD\s+COLUMN\b|\bALTER\s+COLUMN\b|;)[\s\S])*?`
+    + String.raw`\bDEFAULT\s+(?:${VOLATILE_DEFAULT_FUNCTIONS.join('|')})\s*\(`,
+  'gi',
+);
+
+/**
  * What a migration actually does at migration time, after runtime bodies are
  * removed.
  */
@@ -80,6 +98,9 @@ export function describeMigration(sql, dialect) {
     createTable: count(body, /\bCREATE\s+TABLE\b/gi),
     createIndex: count(body, /\bCREATE\s+(?:UNIQUE\s+)?INDEX\b/gi),
     addColumn: count(body, /\bADD\s+COLUMN\b/gi),
+    // Each existing row gets its own value, which no DROP COLUMN gives back:
+    // a data write, however additive the statement looks.
+    volatileDefault: count(body, VOLATILE_ADD_COLUMN_DEFAULT),
     grant: count(body, /\bGRANT\b/gi),
     revoke: count(body, /\bREVOKE\b/gi),
   };
@@ -89,11 +110,12 @@ export function describeMigration(sql, dialect) {
  * A — reversible: purely additive objects, reversed by the obvious inverse.
  * B — redeployable: ships a function, policy, trigger or constraint whose
  *     previous definition is in git; reverting is a deploy, not a data op.
- * C — forward-only: the migration wrote or destroyed DATA.
+ * C — forward-only: the migration wrote or destroyed DATA — including an
+ *     ADD COLUMN whose volatile DEFAULT fills every existing row.
  */
 export function classify(facts, { forwardOnly = false } = {}) {
   const destroysData = facts.update + facts.insert + facts.delete
-    + facts.dropTable + facts.dropColumn > 0;
+    + facts.dropTable + facts.dropColumn + facts.volatileDefault > 0;
   if (forwardOnly || destroysData) return 'C';
   const swapsDefinitions = facts.createFunction + facts.createPolicy
     + facts.createTrigger + facts.dropFunction + facts.dropPolicy

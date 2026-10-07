@@ -31,8 +31,6 @@ import { withAuthMutation } from '../sync/authMutation';
 //   - 'muthoy-device-identity', 'muthoy-printer', 'muthoy-locale',
 //     'muthoy-business-day', 'muthoy-notification-preferences'. Device
 //     preferences and correlation ids; none is a credential.
-//   - 'muthoy-dev-harness'. DEV-only, and production code may not import it
-//     at all (tests/dev-production-safety.test.ts enforces that boundary).
 //   - SQLite. Every row, every shop id (CLAUDE.md rule 7) and
 //     shops.cloud_linked_at survive, so the device stays linked and the next
 //     person reaches PIN Login rather than Registration or OTP.

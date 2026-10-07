@@ -7,9 +7,10 @@
 // the code is not in the import graph at all.
 //
 // So this suite reads the production source tree as text and proves the DEV
-// OTP bypass is absent by construction: the files do not exist, nothing imports
-// them, and no production module contains the primitives they were built from.
-// A behavioural test cannot prove that — it can only exercise the paths someone
+// OTP bypass (H-2) and the DEV registration harness that replaced it (removed
+// by H-5) are absent by construction: the files do not exist, nothing imports
+// them, and no module contains the primitives they were built from. A
+// behavioural test cannot prove that — it can only exercise the paths someone
 // remembered to write a test for. A future re-introduction fails here.
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -99,9 +100,8 @@ describe('H-2 · the DEV OTP bypass is gone, not merely guarded', () => {
   it.each([
     ['DevSkipOtpButton', /DevSkipOtpButton/],
     ['devAnonAuth', /devAnonAuth/],
-    // The removed bootstrap module, not the `devRegistrationHarness` that
-    // replaced the affordance on a bundler boundary — hence the lookahead.
-    ['devRegistration', /devRegistration(?!Harness)/],
+    // The removed bootstrap module AND the H-5-removed devRegistrationHarness.
+    ['devRegistration', /devRegistration/],
     ['isDevPlaceholderPhone', /isDevPlaceholderPhone/],
     ['repairOwnerDeviceLink', /repairOwnerDeviceLink/],
     ['getDevRegistrationState', /getDevRegistrationState/],
@@ -129,18 +129,10 @@ describe('H-2 · the DEV OTP bypass is gone, not merely guarded', () => {
   });
 
   // authTiming and runtimeDiagnostics are inert in release and ship as-is.
-  // devRegistrationHarness is the one exception, and it is only allowed because
-  // metro.config.js swaps it for an inert stub in every non-dev bundle —
-  // dev/devOnlyResolver.test.ts is what proves that, and the two tests below
-  // keep this exception from widening on its own.
+  // Nothing else in dev/ may be imported — there is nothing else there.
   it('no production source imports anything from dev/ outside the allowlist', () => {
     const devImport = /from\s+['"][^'"]*\/dev\/([A-Za-z0-9_-]+)['"]/g;
-    const allowed = new Set([
-      'authTiming',
-      'runtimeDiagnostics',
-      'devRegistrationHarness',
-      'devAuthorityRecovery',
-    ]);
+    const allowed = new Set(['authTiming', 'runtimeDiagnostics']);
     const offenders: string[] = [];
     for (const file of PRODUCTION_SOURCES) {
       for (const match of file.text.matchAll(devImport)) {
@@ -149,50 +141,62 @@ describe('H-2 · the DEV OTP bypass is gone, not merely guarded', () => {
     }
     expect(offenders).toEqual([]);
   });
+});
 
-  it('only Registration imports the DEV harness, and only by the swapped specifier', () => {
-    const importers = PRODUCTION_SOURCES.filter((file) =>
-      /devRegistrationHarness/.test(file.text),
-    ).map((file) => file.path);
-    expect(importers).toEqual(['app/(auth)/register.tsx']);
-
-    // The bundler matches on this exact suffix. A different spelling would
-    // resolve to the real harness in a release build.
-    const register = readFileSync(join(MOBILE_ROOT, 'app/(auth)/register.tsx'), 'utf8');
-    expect(register).toContain("from '../../dev/devRegistrationHarness'");
+describe('H-5 · the DEV registration harness is gone, not merely stubbed', () => {
+  // dev/README.md's H-5 removal checklist, plus the DEV authority-recovery
+  // control that was added on the same bundler boundary afterwards.
+  it.each([
+    'dev/devRegistrationHarness.tsx',
+    'dev/devRegistrationHarness.prod.tsx',
+    'dev/devOwnerOnboarding.ts',
+    'dev/devOwnerOnboarding.test.ts',
+    'dev/devOnlyResolver.cjs',
+    'dev/devOnlyResolver.test.ts',
+    'dev/devAuthorityRecovery.tsx',
+    'dev/devAuthorityRecovery.prod.tsx',
+  ])('%s does not exist', (relativePath) => {
+    expect(fileExists(relativePath)).toBe(false);
   });
 
-  it('the harness flow module is reachable only from inside dev/', () => {
-    const offenders = PRODUCTION_SOURCES.filter((file) =>
-      /devOwnerOnboarding/.test(file.text),
-    ).map((file) => file.path);
-    expect(offenders).toEqual([]);
-
-    // Unreachable from the entry graph is what keeps it out of the bundle, so
-    // its single importer has to be the module the resolver already stubs.
-    const harnessImporters = collectSources('dev')
-      .filter((file) => /from\s+['"]\.\/devOwnerOnboarding['"]/.test(file.text))
-      .map((file) => file.path);
-    expect(harnessImporters).toEqual([
-      'dev/devAuthorityRecovery.tsx',
-      'dev/devRegistrationHarness.tsx',
+  // With no bundler boundary left, dev/ may hold instrumentation only. A new
+  // file there is the first step of a new harness, so it has to be argued for.
+  it('dev/ holds only the release-inert instrumentation and its tests', () => {
+    expect(readdirSync(join(MOBILE_ROOT, 'dev')).sort()).toEqual([
+      'README.md',
+      'authTiming.test.ts',
+      'authTiming.ts',
+      'runtimeDiagnostics.test.ts',
+      'runtimeDiagnostics.ts',
     ]);
   });
 
-  it('the DEV harness is covered by the bundler boundary', () => {
-    const resolver = readFileSync(join(MOBILE_ROOT, 'dev/devOnlyResolver.cjs'), 'utf8');
-    expect(resolver).toContain("'dev/devRegistrationHarness': 'dev/devRegistrationHarness.prod.tsx'");
-    expect(fileExists('dev/devRegistrationHarness.prod.tsx')).toBe(true);
+  it('metro.config.js swaps no module at resolution time', () => {
+    const metro = readFileSync(join(MOBILE_ROOT, 'metro.config.js'), 'utf8');
+    expect(metro).not.toMatch(/devOnlyResolver|resolveRequest/);
   });
 
-  it('the DEV authority recovery control is covered by its own inert bundler boundary', () => {
-    const resolver = readFileSync(join(MOBILE_ROOT, 'dev/devOnlyResolver.cjs'), 'utf8');
-    expect(resolver).toContain("'dev/devAuthorityRecovery': 'dev/devAuthorityRecovery.prod.tsx'");
-    expect(fileExists('dev/devAuthorityRecovery.prod.tsx')).toBe(true);
-    const importers = PRODUCTION_SOURCES.filter((file) =>
-      /devAuthorityRecovery/.test(file.text),
-    ).map((file) => file.path);
-    expect(importers).toEqual(['app/_layout.tsx']);
+  it.each([
+    ['the harness modules', /devRegistrationHarness|devOwnerOnboarding|devOnlyResolver|[dD]evAuthorityRecovery/],
+    ['the harness entry points', /registerDevOwner|recoverDevOwnerSession/],
+    ['the harness identity store', /muthoy-dev-harness/],
+    ['the harness email domain', /harness\.muthoy\.invalid/],
+    ['the DEV onboarding switch', /MUTHOY_DEV_ONBOARDING/],
+  ])('no app source, DEV source included, references %s', (_label, pattern) => {
+    const offenders = [...PRODUCTION_SOURCES, ...collectSources('dev')]
+      .filter((file) => pattern.test(file.text))
+      .map((file) => file.path);
+    expect(offenders).toEqual([]);
+  });
+
+  // The harness signed in as an email/password identity. No real flow does:
+  // an Owner proves a phone by OTP, everyone else uses phone + PIN through
+  // sync, so an email sign-in or sign-up here can only be a new shortcut.
+  it('no app source signs in or signs up with an email password', () => {
+    const offenders = [...PRODUCTION_SOURCES, ...collectSources('dev')]
+      .filter((file) => /signInWithPassword|\bsignUp\s*\(/.test(file.text))
+      .map((file) => file.path);
+    expect(offenders).toEqual([]);
   });
 });
 
@@ -270,6 +274,44 @@ describe('H-2 · the canonical production onboarding path is intact', () => {
     expect(rootGate).toContain("registration.status === 'link_pending'");
     expect(rootGate).toContain("pathname: '/otp-verify'");
     expect(rootGate).not.toContain("setDestination('/register')");
+  });
+});
+
+describe('H-5 · the SMS provider is the server\'s business, never the app\'s', () => {
+  // The provider credentials, the Send SMS hook's signing secret and the
+  // dispatch-ledger key live only in Supabase Edge Function secrets. Anything
+  // in this tree ships inside the bundle or the build config, where it is
+  // public — so none of their names, the provider host or the hook may appear.
+  const PROVIDER_MATERIAL =
+    /REVE_|revesms|SEND_SMS_HOOK|whsec_|SMS_DISPATCH_HASH_KEY|OTP_SMS_DAILY_CAP|auth-send-sms|secretkey=/i;
+
+  // Build and runtime configuration the bundler or EAS reads. `.env` is local
+  // and untracked, but EXPO_PUBLIC_* values from it are inlined into the bundle.
+  const APP_CONFIG_FILES = [
+    'app.json',
+    'eas.json',
+    '.env.example',
+    '.env',
+    'metro.config.js',
+    'babel.config.js',
+    'package.json',
+  ];
+
+  it('no app source, DEV source or app configuration names provider or hook material', () => {
+    const sources = [...PRODUCTION_SOURCES, ...collectSources('dev')]
+      .filter((file) => PROVIDER_MATERIAL.test(file.text))
+      .map((file) => file.path);
+    const configs = APP_CONFIG_FILES
+      .filter((name) => fileExists(name))
+      .filter((name) => PROVIDER_MATERIAL.test(readFileSync(join(MOBILE_ROOT, name), 'utf8')));
+    expect([...sources, ...configs]).toEqual([]);
+  });
+
+  it('a code is only ever requested from and checked by Supabase Auth, in sync/otp.ts', () => {
+    const callers = PRODUCTION_SOURCES
+      .filter((file) => /\bsignInWithOtp\b|\bauth\.verifyOtp\b/.test(file.text))
+      .map((file) => file.path);
+    expect(callers).toEqual(['sync/otp.ts']);
   });
 });
 

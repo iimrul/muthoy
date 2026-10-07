@@ -28,6 +28,8 @@ const MIGRATIONS_DIR = resolve('backend/supabase/migrations');
  *   is the same mechanism PostgREST itself uses (`request.jwt.claims`).
  * - The four roles must exist because the migrations GRANT and REVOKE against
  *   them by name.
+ * - GoTrue's user and session tables, with hosted's cascades and ownership, so
+ *   session revocation runs against the real thing and not a stand-in.
  * - service_role carries BYPASSRLS on the platform. Without it here, RLS would
  *   apply to the sync path too and the tests would prove the wrong thing.
  * - The API roles hold blanket table privileges here so that `authenticated`
@@ -48,7 +50,7 @@ const MIGRATIONS_DIR = resolve('backend/supabase/migrations');
  * has SELECT on exactly roles, sales, shops and users — the four tables a
  * migration explicitly granted — and on nothing else.
  */
-const PLATFORM_BOOTSTRAP = `
+export const PLATFORM_BOOTSTRAP = `
 create schema if not exists auth;
 
 create or replace function auth.jwt() returns jsonb language sql stable as $$
@@ -81,6 +83,73 @@ $roles$;
 
 grant usage on schema public to anon, authenticated, service_role;
 grant usage on schema auth to anon, authenticated, service_role, supabase_auth_admin;
+
+-- GoTrue's own tables — the subset session revocation reaches — with the
+-- foreign keys measured on the hosted DEV project (2026-10-05): a session
+-- belongs to its user ON DELETE CASCADE, and a session's refresh tokens and
+-- MFA claims cascade from it. A refresh token from before sessions existed has
+-- a NULL session_id. Owned by supabase_auth_admin as on hosted, and granted to
+-- no API role: hosted service_role has USAGE on schema auth and no DELETE on
+-- these tables, so a function that reaches them must be SECURITY DEFINER —
+-- and here, as there, one that is not fails with 42501.
+create table if not exists auth.users (
+  instance_id uuid,
+  id uuid primary key,
+  aud varchar(255),
+  role varchar(255),
+  email varchar(255) unique,
+  phone text unique,
+  email_confirmed_at timestamptz,
+  phone_confirmed_at timestamptz,
+  raw_app_meta_data jsonb,
+  raw_user_meta_data jsonb,
+  is_anonymous boolean not null default false,
+  created_at timestamptz,
+  updated_at timestamptz
+);
+create table if not exists auth.identities (
+  id uuid primary key default gen_random_uuid(),
+  provider_id text not null,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  identity_data jsonb not null,
+  provider text not null,
+  created_at timestamptz,
+  updated_at timestamptz
+);
+create table if not exists auth.sessions (
+  id uuid primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  created_at timestamptz,
+  updated_at timestamptz,
+  not_after timestamptz,
+  refreshed_at timestamp,
+  user_agent text,
+  ip inet,
+  tag text
+);
+create table if not exists auth.refresh_tokens (
+  instance_id uuid,
+  id bigserial primary key,
+  token varchar(255) unique,
+  user_id varchar(255),
+  revoked boolean,
+  created_at timestamptz,
+  updated_at timestamptz,
+  parent varchar(255),
+  session_id uuid references auth.sessions (id) on delete cascade
+);
+create table if not exists auth.mfa_amr_claims (
+  session_id uuid not null references auth.sessions (id) on delete cascade,
+  created_at timestamptz not null,
+  updated_at timestamptz not null,
+  authentication_method text not null,
+  id uuid primary key
+);
+alter table auth.users owner to supabase_auth_admin;
+alter table auth.identities owner to supabase_auth_admin;
+alter table auth.sessions owner to supabase_auth_admin;
+alter table auth.refresh_tokens owner to supabase_auth_admin;
+alter table auth.mfa_amr_claims owner to supabase_auth_admin;
 
 -- Measured against the hosted DEV project on 2026-09-07 by reading
 -- pg_default_acl, rather than assumed. For schema public, owner postgres:
@@ -135,7 +204,7 @@ alter default privileges in schema public grant all on sequences to anon, authen
  * pg_default_acl for functions in public reads `postgres=X/postgres` — so a
  * function nobody granted is a function nobody outside the owner can call.
  */
-const HOSTED_FUNCTION_EXECUTE_MODEL =
+export const HOSTED_FUNCTION_EXECUTE_MODEL =
   'revoke execute on all functions in schema public from public;';
 
 export interface Harness {

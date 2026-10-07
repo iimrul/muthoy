@@ -8,7 +8,7 @@ import { AuthIconTile } from '../../components/auth/AuthIconTile';
 import { AuthNotice } from '../../components/auth/AuthNotice';
 import { AuthShell } from '../../components/auth/AuthShell';
 import { AuthTitleBlock } from '../../components/auth/AuthTitleBlock';
-import { deviceLoginErrorKey } from '../../components/auth/authMessages';
+import { deviceLoginErrorKey, otpSendErrorKey, otpVerifyErrorKey } from '../../components/auth/authMessages';
 import { PhoneField } from '../../components/auth/PhoneField';
 import { authPhoneForSubmit, formatPhoneForDisplay, phoneFieldValueFrom } from '../../components/auth/phoneInput';
 import { AUTH_CHIP_LABELS, SecureChip } from '../../components/auth/SecureChip';
@@ -21,6 +21,7 @@ import { localizeValidationMessage } from '../../i18n/display';
 import { useI18n } from '../../state/localeStore';
 import { DeviceLoginError, recoverOwnerPin } from '../../sync/deviceAuth';
 import { resendOtp, sendOtp, verifyOtp } from '../../sync/otp';
+import { OTP_RESEND_COOLDOWN_SECONDS } from '../../sync/otpPolicy';
 
 // Forgot PIN — OWNER ONLY, and the one place OTP survives after first-time
 // registration.
@@ -41,8 +42,6 @@ import { resendOtp, sendOtp, verifyOtp } from '../../sync/otp';
 // owner back for a new code instead of reading as "could not reach the server".
 type Step = 'phone' | 'code' | 'pin';
 
-const RESEND_COOLDOWN_SECONDS = 30;
-
 type Problem = { kind: 'catalog'; key: CatalogKey } | { kind: 'validation'; message: string };
 
 export default function ForgotPinScreen() {
@@ -59,6 +58,9 @@ export default function ForgotPinScreen() {
   const [cooldown, setCooldown] = useState(0);
   const [shakeKey, setShakeKey] = useState(0);
   const codeInputRef = useRef<TextInput>(null);
+  // When the code being typed was sent: what tells a wrong code from an
+  // expired one, which Supabase refuses identically.
+  const codeSentAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -83,14 +85,17 @@ export default function ForgotPinScreen() {
     setProblem(null);
     try {
       await sendOtp(parsed.data);
+      codeSentAtRef.current = Date.now();
       // From here on the code step resends to, verifies against and recovers
       // with exactly the canonical number the code went to.
       setPhone(parsed.data);
       setCode('');
-      setCooldown(RESEND_COOLDOWN_SECONDS);
+      setCooldown(OTP_RESEND_COOLDOWN_SECONDS);
       setStep('code');
-    } catch {
-      setProblem({ kind: 'catalog', key: 'otpSendFailed' });
+    } catch (cause) {
+      // One message for every failure but a rate limit, so this screen never
+      // says whether the number belongs to an owner.
+      setProblem({ kind: 'catalog', key: otpSendErrorKey(cause) });
     } finally {
       setBusy(null);
     }
@@ -102,11 +107,14 @@ export default function ForgotPinScreen() {
     setProblem(null);
     try {
       await resendOtp(authPhoneForSubmit(phone));
+      codeSentAtRef.current = Date.now();
       setCode('');
-      setCooldown(RESEND_COOLDOWN_SECONDS);
+      setCooldown(OTP_RESEND_COOLDOWN_SECONDS);
       codeInputRef.current?.focus();
-    } catch {
-      setProblem({ kind: 'catalog', key: 'otpResendFailed' });
+    } catch (cause) {
+      const key = otpSendErrorKey(cause, 'otpResendFailed');
+      if (key === 'otpRateLimited') setCooldown(OTP_RESEND_COOLDOWN_SECONDS);
+      setProblem({ kind: 'catalog', key });
     } finally {
       setBusy(null);
     }
@@ -130,8 +138,7 @@ export default function ForgotPinScreen() {
       await verifyOtp(authPhoneForSubmit(phone), parsed.data);
       setStep('pin');
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message.toLowerCase() : '';
-      setProblem({ kind: 'catalog', key: message.includes('expired') ? 'otpExpired' : 'otpIncorrect' });
+      setProblem({ kind: 'catalog', key: otpVerifyErrorKey(cause, codeSentAtRef.current, Date.now()) });
       setCode('');
       codeInputRef.current?.focus();
     } finally {
@@ -161,6 +168,13 @@ export default function ForgotPinScreen() {
           setCode('');
           setCooldown(0);
           setProblem({ kind: 'catalog', key: 'authErrorOtpRequired' });
+          return;
+        }
+        if (cause instanceof DeviceLoginError && cause.code === 'pin_changed_login_required') {
+          // The PIN already changed on the server; only the automatic sign-in
+          // could not finish. Nothing left on THIS screen can be retried —
+          // the thing left to do is sign in with the new PIN, the normal way.
+          router.replace({ pathname: '/device-login', params: { role: 'owner', reason: 'pin-recovered' } });
           return;
         }
         setProblem({
@@ -272,7 +286,7 @@ export default function ForgotPinScreen() {
         <AuthTitleBlock
           eyebrow={t('forgotPinEyebrow')}
           title={title}
-          body={step === 'phone' ? t('forgotPinPhoneBody') : step === 'code' ? t('otpSentTo') : undefined}
+          body={step === 'phone' ? t('forgotPinPhoneBody') : step === 'code' ? t('otpCheckMessages') : undefined}
         />
         {step === 'code' ? (
           <Text className={`${latinFont('bold')} mb-4 text-center text-base text-secure-ink`}>

@@ -18,7 +18,7 @@ import { useCopyFont } from './typography';
 export interface BrandLoaderProps {
   title?: string;
   message?: string;
-  /** Extra content under the message (e.g. the DEV-only authority recovery). */
+  /** Extra content under the message. */
   children?: ReactNode;
 }
 

@@ -9,7 +9,7 @@ migration below as reversible, redeployable, or forward-only, and carries the
 decision table for who calls a restore.
 
 <!-- rollback-classification:start -->
-Rollback classification: **A: 6 · B: 15 · C: 7 — of 28.** Source: [rollback-classification.json](rollback-classification.json).
+Rollback classification: **A: 6 · B: 17 · C: 8 — of 31.** Source: [rollback-classification.json](rollback-classification.json).
 <!-- rollback-classification:end -->
 
 The data backup at step 2 of "Required sequence" is the only way back from a
@@ -47,7 +47,62 @@ forward-only migration. The procedure that exercises it is
 20260909000000_h7_actor_binding_staff_reactivation.sql
 20260923000000_a23_device_registry.sql
 20260926000000_a23_persistent_enrollment_holds.sql
+20261001000000_h5_auth_sms_dispatch.sql
+20261004000000_h5_sms_dispatch_claim_owner.sql
+20261005000000_h5_revoke_auth_user_sessions.sql
 ```
+
+`20261001000000_h5_auth_sms_dispatch.sql` (H-5) adds the Send SMS hook's
+dispatch ledger (`auth_sms_dispatches`) behind two service-role-only functions;
+nothing else reads or writes it. **Applied to DEV only** (2026-10-02).
+`20261004000000_h5_sms_dispatch_claim_owner.sql` gives every claim an owner so
+a hook that lost a claim's reply can safely resume it (live DEV finding,
+2026-10-04), and changes both functions' signatures: **applied to DEV only**
+(2026-10-05, after a schema + data backup, with `auth-send-sms` v5 deployed
+straight after; DECISIONS.md). It is **class C** ([ROLLBACK.md](ROLLBACK.md)): its
+`gen_random_uuid()` default writes an owner into every existing row. Between
+the migration and the matching `auth-send-sms` build, the live hook fails
+closed (no claim, no SMS), so DEV gets it in this order and no other. The
+maintenance pause is the Phone provider — never the Send SMS hook, whose
+configuration and secret stay untouched throughout (locked 2026-10-05):
+
+1. Disable DEV's Phone provider (phone sign-in): the pause. Leave the Send
+   SMS hook as it is.
+2. Confirm a phone OTP request cannot proceed: `POST /auth/v1/otp` for the
+   fictional non-Bangladeshi `+15555550100` must be refused by Auth (expected
+   `phone_provider_disabled`) and add no `auth_sms_dispatches` row. Were the
+   provider still on, the hook would refuse that number before any claim —
+   no real SMS either way.
+3. Take the schema and data backups (step 2 of "Required sequence" below —
+   the only way back from a class C step).
+4. Push `20261004000000_h5_sms_dispatch_claim_owner.sql`; a dry run first
+   must list it as the only pending migration.
+5. Deploy the matching current `auth-send-sms` at once.
+6. Verify: `claim_owner uuid not null` with no default; only the
+   owner-taking `h5_claim_sms_dispatch` / `h5_record_sms_dispatch` exist,
+   `SECURITY DEFINER` with `search_path=public` and EXECUTE for
+   `service_role` only; a new function version is live; an unsigned request
+   answers 401.
+7. Confirm the Send SMS hook is still enabled, still calls `auth-send-sms`,
+   and still holds the same secret.
+8. Re-enable the Phone provider.
+9. Re-check the hosted OTP settings: 6 digits, 300 s expiry, 60 s resend.
+10. Send exactly ONE controlled OTP to the founder's number; expect one SMS
+    and one ledger row, accepted and settled by its owner.
+
+If any check fails: stop, with the Phone provider OFF. The way back is
+[ROLLBACK.md](ROLLBACK.md)'s decision table; a restore is the founder's call.
+
+`20261005000000_h5_revoke_auth_user_sessions.sql` adds
+`h5_revoke_auth_user_sessions(uuid)` — `SECURITY DEFINER`, `search_path=''`,
+EXECUTE for `service_role` only — which deletes ONE auth user's sessions for
+the two `sync` paths that hold no JWT of that user: the auth-account rebind and
+`signOutAppUser` (DEV finding, 2026-10-05; DECISIONS.md). **Applied to DEV
+only** (2026-10-06, after a schema + data backup, with `sync` v24 deployed
+straight after; DECISIONS.md). Class B, and additive: apply it BEFORE the `sync` build
+that calls it. The other order fails closed — that build's rebind refuses with
+500 and `signOutAppUser` only reports a failure — and PIN recovery, which logs
+out with the caller's own token, does not depend on it at all.
 
 Do not reorder the function-wrapper migrations: each later grouped-operation
 dispatcher delegates to the function version installed immediately before it.

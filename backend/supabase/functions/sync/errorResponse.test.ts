@@ -12,6 +12,21 @@ function controlError(message: string, code: string): Error & { code: string } {
 }
 
 describe('verified actor identity on sync control errors', () => {
+  it('keeps a recovered Owner shop distinct from the caller active shop', () => {
+    expect(httpErrorBody(
+      Object.assign(controlError('PIN changed', 'pin_changed_login_required'), {
+        details: { recoveryShopId: 'shop-b', shopId: 'untrusted-detail' },
+      }),
+      caller,
+    )).toEqual({
+      recoveryShopId: 'shop-b',
+      shopId: 'shop-a',
+      actorUserId: 'verified-staff',
+      error: 'PIN changed',
+      code: 'pin_changed_login_required',
+    });
+  });
+
   it('attaches only the actor/shop from a verified caller', () => {
     expect(httpErrorBody(
       controlError('inactive', 'account_inactive'),

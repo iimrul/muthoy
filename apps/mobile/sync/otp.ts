@@ -1,5 +1,6 @@
 import type { Session } from "@supabase/supabase-js";
 import { normalizeBdPhoneInput } from "@muthoy/validation";
+import { OtpSendFailedError, toOtpSendError, toOtpVerifyError } from "./otpPolicy";
 import { requireSupabaseConfiguration, supabase } from "./supabaseClient";
 
 /** The number handed to an OTP call is not a Bangladeshi mobile number. */
@@ -25,10 +26,21 @@ function otpPhone(phone: string): string {
   return canonical;
 }
 
+// H-5. Every failure leaves this file TYPED, decided by the auth error's status
+// and code (sync/otpPolicy.ts) and never by its message text: a rate limit, a
+// send that failed, a code the server refused, or a check that never happened.
+// A send failure is one type whatever its cause, so no screen can say whether
+// a number has an account.
+
 async function requestOtp(phone: string): Promise<void> {
-  const { error } = await supabase.auth.signInWithOtp({ phone });
-  if (error) {
-    throw error;
+  let result: Awaited<ReturnType<typeof supabase.auth.signInWithOtp>>;
+  try {
+    result = await supabase.auth.signInWithOtp({ phone });
+  } catch (cause) {
+    throw toOtpSendError(cause);
+  }
+  if (result.error) {
+    throw toOtpSendError(result.error);
   }
 }
 
@@ -40,7 +52,8 @@ export async function sendOtp(phone: string): Promise<void> {
     scope: "local",
   });
   if (signOutError) {
-    throw signOutError;
+    // No code was requested: the old session had to go first.
+    throw new OtpSendFailedError({ cause: signOutError });
   }
   await requestOtp(canonical);
 }
@@ -54,16 +67,21 @@ export async function resendOtp(phone: string): Promise<void> {
 export async function verifyOtp(phone: string, code: string): Promise<Session> {
   const canonical = otpPhone(phone);
   requireSupabaseConfiguration();
-  const { data, error } = await supabase.auth.verifyOtp({
-    phone: canonical,
-    token: code,
-    type: "sms",
-  });
-  if (error) {
-    throw error;
+  let result: Awaited<ReturnType<typeof supabase.auth.verifyOtp>>;
+  try {
+    result = await supabase.auth.verifyOtp({
+      phone: canonical,
+      token: code,
+      type: "sms",
+    });
+  } catch (cause) {
+    throw toOtpVerifyError(cause);
   }
-  if (!data.session) {
+  if (result.error) {
+    throw toOtpVerifyError(result.error);
+  }
+  if (!result.data.session) {
     throw new Error("OTP verification succeeded without creating a session.");
   }
-  return data.session;
+  return result.data.session;
 }

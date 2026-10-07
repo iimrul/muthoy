@@ -4,10 +4,13 @@ import { SyncHaltedError } from './invoke';
 
 const SHOP_ID = '8c2f1a30-0000-4000-8000-000000000001';
 const USER_ID = '8c2f1a30-0000-4000-8000-000000000002';
+const ACTIVE_SHOP_ID = '8c2f1a30-0000-4000-8000-000000000003';
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   setSession: vi.fn(),
+  signOutCurrent: vi.fn(),
+  signOutMinted: vi.fn(),
   pullChanges: vi.fn(),
   markShopCloudLinked: vi.fn(),
   clearLocalUserAccessLock: vi.fn(),
@@ -28,7 +31,11 @@ vi.mock('./supabaseClient', () => ({
   requireSupabaseConfiguration: vi.fn(),
   supabase: {
     functions: { invoke: mocks.invoke },
-    auth: { setSession: mocks.setSession },
+    auth: {
+      setSession: mocks.setSession,
+      signOut: mocks.signOutCurrent,
+      admin: { signOut: mocks.signOutMinted },
+    },
   },
 }));
 
@@ -84,6 +91,7 @@ beforeEach(() => {
     error: null,
   });
   mocks.setSession.mockResolvedValue({ error: null });
+  mocks.signOutMinted.mockResolvedValue({ error: null });
   mocks.inspectBinding.mockResolvedValue({
     status: 'matched', actorUserId: USER_ID, shopId: SHOP_ID,
   });
@@ -296,12 +304,14 @@ describe('fresh-device auth orchestration', () => {
 });
 
 describe('owner recovery is the only explicit attempt-budget reset', () => {
-  it('clears only after local and authoritative identity validation, before login', async () => {
+  it('clears at the valid server-success commit point, before session setup', async () => {
     await recoverOwnerPin('+8801712345678', '2468');
     expect(mocks.clearPinAttempts).toHaveBeenCalledWith(`scope:${SHOP_ID}`);
+    expect(mocks.invoke).toHaveBeenCalledBefore(mocks.clearPinAttempts);
+    expect(mocks.clearPinAttempts).toHaveBeenCalledBefore(mocks.setSession);
     expect(mocks.verifyPinForUser).toHaveBeenCalledBefore(mocks.inspectAuthority);
-    expect(mocks.inspectAuthority).toHaveBeenCalledBefore(mocks.clearPinAttempts);
     expect(mocks.clearPinAttempts).toHaveBeenCalledBefore(mocks.login);
+    expect(mocks.signOutMinted).not.toHaveBeenCalled();
   });
 
   it('sends mandatory A2.3 installation identity with PIN recovery', async () => {
@@ -330,21 +340,146 @@ describe('owner recovery is the only explicit attempt-budget reset', () => {
     });
   });
 
-  it.each([
-    ['server refusal', () => mocks.invoke.mockResolvedValueOnce({ data: null, error: { context: { status: 401 } } })],
-    ['binding mismatch', () => mocks.inspectBinding.mockResolvedValueOnce({ status: 'mismatched' })],
-    ['pull failure', () => mocks.pullChanges.mockRejectedValueOnce(new Error('offline'))],
-    ['billing authority failure', () => mocks.refreshBillingStatus.mockRejectedValueOnce(new Error('offline'))],
-    ['local exact-user failure', () => mocks.verifyPinForUser.mockResolvedValueOnce(null)],
-    ['authority failure', () => mocks.inspectAuthority.mockResolvedValueOnce({ status: 'revoked', reason: 'actor_inactive' })],
-  ])('does not clear after %s', async (_label, arrange) => {
-    arrange();
-    await expect(recoverOwnerPin('+8801712345678', '2468')).rejects.toThrow();
+  it('does not clear after a server refusal before PIN commit', async () => {
+    mocks.invoke.mockResolvedValueOnce({ data: null, error: { context: { status: 401 } } });
+    await expect(recoverOwnerPin('+8801712345678', '2468')).rejects.toMatchObject({ code: 'otp_required' });
     expect(mocks.clearPinAttempts).not.toHaveBeenCalled();
-    expect(mocks.login).not.toHaveBeenCalled();
+    expect(mocks.signOutMinted).not.toHaveBeenCalled();
   });
 
-  it('cannot clear the budget or overwrite a session that arrives during authority recovery', async () => {
+  it.each([
+    ['setSession', () => mocks.setSession.mockResolvedValueOnce({ error: new Error('session failed') })],
+    ['binding inspection', () => mocks.inspectBinding.mockResolvedValueOnce({ status: 'mismatched' })],
+    ['hydration', () => mocks.pullChanges.mockRejectedValueOnce(new Error('offline'))],
+    ['plan confirmation', () => mocks.refreshBillingStatus.mockRejectedValueOnce(new Error('offline'))],
+    ['device persistence', () => mocks.recordBoundInstallation.mockRejectedValueOnce(new Error('disk fault'))],
+    ['setup write', () => mocks.markShopCloudLinked.mockRejectedValueOnce(new Error('disk fault'))],
+    ['local verification', () => mocks.verifyPinForUser.mockResolvedValueOnce(null)],
+    ['access confirmation', () => mocks.inspectAuthority.mockResolvedValueOnce({ status: 'revoked', reason: 'actor_inactive' })],
+    ['final activation', () => mocks.login.mockImplementationOnce(() => { throw new Error('activation failed'); })],
+  ] as const)('keeps the PIN committed after %s fails, and revokes only this attempt\'s session', async (_label, arrange) => {
+    arrange();
+    const failure = await recoverOwnerPin('+8801712345678', '2468').catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({ code: 'pin_changed_login_required', recoveryShopId: SHOP_ID });
+    expect(mocks.clearPinAttempts).toHaveBeenCalledTimes(1);
+    expect(mocks.clearPinAttempts).toHaveBeenCalledWith(`scope:${SHOP_ID}`);
+    expect(mocks.clearPinAttempts).toHaveBeenCalledBefore(mocks.setSession);
+    expect(mocks.signOutMinted).toHaveBeenCalledTimes(1);
+    expect(mocks.signOutMinted).toHaveBeenCalledWith('access-token', 'local');
+    expect(mocks.signOutCurrent).not.toHaveBeenCalled();
+  });
+
+  // H-5 (DEV, 2026-10-05). recover-pin's refusals used to fall through to
+  // "Could not reach the server" — every one of them, right after the owner had
+  // paid for the SMS. They are read from the server's stable codes now, then
+  // from the status; only a request that got no answer at all is a network
+  // failure. None of the unconfirmed/pre-commit failures may refill H-4.
+  const answered = (status: number, body?: unknown) => ({
+    data: null,
+    error: {
+      context: new Response(body === undefined ? 'upstream unavailable' : JSON.stringify(body), { status }),
+    },
+  });
+  it.each([
+    // Unlike device-login's network failures, recoverPin commits the PIN
+    // write before anything else that could still fail — so a lost response
+    // here may already have landed it. This reads distinctly from `network`
+    // and carries uncertain, not confident-retry, copy (see deviceAuth.ts).
+    ['no answer at all (transport failure)', { data: null, error: { context: new TypeError('Network request failed') } }, 'recovery_uncertain'],
+    ['a PIN another user of the shop holds', answered(409, { code: 'pin_in_use' }), 'pin_in_use'],
+    ['a proof the server calls stale', answered(403, { code: 'otp_required' }), 'otp_required'],
+    ['a token the server no longer accepts', answered(401, { error: 'Invalid or expired token' }), 'otp_required'],
+    ['a number that cannot recover here', answered(403, { code: 'recovery_refused' }), 'recovery_refused'],
+    ['an inactive account', answered(403, { code: 'account_inactive' }), 'recovery_refused'],
+    ['an uncoded refusal', answered(403, { error: 'Forbidden' }), 'recovery_refused'],
+    ['a revoked device', answered(403, { code: 'device_revoked' }), 'access_revoked'],
+    ['a malformed request', answered(400, { code: 'pin_format_invalid' }), 'recovery_failed'],
+    ['the server failing', answered(500, { code: 'recovery_failed' }), 'recovery_failed'],
+    ['an uncoded server failure', answered(500, { error: 'Internal server error' }), 'recovery_failed'],
+    ['a registry outage', answered(503, { code: 'device_gate_unavailable' }), 'recovery_failed'],
+    ['a proxy page instead of JSON', answered(502), 'recovery_failed'],
+  ])('reads %s as %s, and resets nothing', async (_label, reply, code) => {
+    mocks.invoke.mockResolvedValueOnce(reply);
+    const failure = await recoverOwnerPin('+8801712345678', '2468').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(DeviceLoginError);
+    expect(failure).toMatchObject({ code, isCredentialFailure: false });
+    expect(mocks.clearPinAttempts).not.toHaveBeenCalled();
+    expect(mocks.login).not.toHaveBeenCalled();
+    expect(mocks.setSession).not.toHaveBeenCalled();
+  });
+
+  // H-5. pin_changed_login_required is the one refusal in the table above
+  // that is NOT a refusal: the server has already committed the write, only
+  // the automatic sign-in that was supposed to follow it did not finish. It
+  // gets the opposite treatment — the budget DOES clear, on the same
+  // authority as a full recovery's own clear further up this file — even
+  // though, like every other case here, no session is ever set.
+  it('clears recovered shop B, never active shop A, after confirmed partial success', async () => {
+    mocks.invoke.mockResolvedValueOnce(answered(422, {
+      code: 'pin_changed_login_required',
+      shopId: ACTIVE_SHOP_ID,
+      recoveryShopId: SHOP_ID,
+    }));
+    const failure = await recoverOwnerPin('+8801712345678', '2468').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(DeviceLoginError);
+    expect(failure).toMatchObject({
+      code: 'pin_changed_login_required',
+      isCredentialFailure: false,
+      recoveryShopId: SHOP_ID,
+    });
+    expect(mocks.clearPinAttempts).toHaveBeenCalledWith(`scope:${SHOP_ID}`);
+    expect(mocks.clearPinAttempts).not.toHaveBeenCalledWith(`scope:${ACTIVE_SHOP_ID}`);
+    expect(mocks.clearPinAttempts).toHaveBeenCalledTimes(1);
+    expect(mocks.login).not.toHaveBeenCalled();
+    expect(mocks.setSession).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, null, 'not-a-uuid'])('never clears H-4 from an unconfirmed target %s', async (recoveryShopId) => {
+    mocks.invoke.mockResolvedValueOnce(answered(422, {
+      code: 'pin_changed_login_required',
+      shopId: ACTIVE_SHOP_ID,
+      recoveryShopId,
+    }));
+    const failure = await recoverOwnerPin('+8801712345678', '2468').catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: 'recovery_uncertain' });
+    expect(mocks.clearPinAttempts).not.toHaveBeenCalled();
+  });
+
+  it('does not clear H-4 on a malformed successful response', async () => {
+    mocks.invoke.mockResolvedValueOnce({ data: { shopId: 'not-a-uuid', userId: USER_ID }, error: null });
+    await expect(recoverOwnerPin('+8801712345678', '2468')).rejects.toBeInstanceOf(DeviceLoginError);
+    expect(mocks.clearPinAttempts).not.toHaveBeenCalled();
+    expect(mocks.setSession).not.toHaveBeenCalled();
+    expect(mocks.signOutMinted).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['returned error', () => mocks.signOutMinted.mockResolvedValueOnce({ error: new Error('secret response') })],
+    ['thrown transport error', () => mocks.signOutMinted.mockRejectedValueOnce(new Error('secret transport'))],
+  ] as const)('logs one generic line for mobile %s cleanup without downgrading PIN success', async (_label, arrange) => {
+    mocks.pullChanges.mockRejectedValueOnce(new Error('offline'));
+    arrange();
+    const report = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await expect(recoverOwnerPin('+8801712345678', '2468')).rejects.toMatchObject({
+        code: 'pin_changed_login_required', recoveryShopId: SHOP_ID,
+      });
+      expect(report.mock.calls).toEqual([['sync/recover-pin cleanup failed: minted session was not revoked']]);
+    } finally {
+      report.mockRestore();
+    }
+    expect(mocks.signOutMinted).toHaveBeenCalledWith('access-token', 'local');
+    expect(mocks.signOutCurrent).not.toHaveBeenCalled();
+  });
+
+  it('keeps device-login\'s own reading of an unrecognised failure', async () => {
+    // The recovery mapping is recovery's: device-login still treats what it
+    // cannot name as a connection problem, exactly as before.
+    mocks.invoke.mockResolvedValueOnce(answered(500, { error: 'Internal server error' }));
+    await expect(loginOnNewDevice('+8801712345678', '2468')).rejects.toMatchObject({ code: 'network' });
+  });
+
+  it('clears only the recovered shop and cannot overwrite a later app session', async () => {
     mocks.inspectAuthority.mockImplementationOnce(async () => {
       mocks.epoch += 1;
       mocks.session = { shopId: 'shop-2', userId: 'incoming' };
@@ -353,8 +488,10 @@ describe('owner recovery is the only explicit attempt-budget reset', () => {
 
     await expect(recoverOwnerPin('+8801712345678', '2468')).rejects.toThrow();
 
-    expect(mocks.clearPinAttempts).not.toHaveBeenCalled();
+    expect(mocks.clearPinAttempts).toHaveBeenCalledWith(`scope:${SHOP_ID}`);
     expect(mocks.login).not.toHaveBeenCalled();
     expect(mocks.session).toEqual({ shopId: 'shop-2', userId: 'incoming' });
+    expect(mocks.signOutMinted).toHaveBeenCalledWith('access-token', 'local');
+    expect(mocks.signOutCurrent).not.toHaveBeenCalled();
   });
 });

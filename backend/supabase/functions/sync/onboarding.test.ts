@@ -12,7 +12,7 @@ vi.mock("./_shared/supabaseAdmin.ts", () => ({
   supabaseAdmin: { rpc: mocks.rpc },
 }));
 
-import { onboardOwner, parseOnboarding } from "./onboarding.ts";
+import { bindOnboardingOwnerPhone, onboardOwner, parseOnboarding } from "./onboarding.ts";
 
 const SHOP = "10000000-0000-4000-8000-000000000001";
 const OWNER = "10000000-0000-4000-8000-000000000002";
@@ -167,4 +167,52 @@ describe("the diagnostic that was missing", () => {
       message: expect.not.stringContaining("8801700000000") as unknown as string,
     });
   });
+});
+
+describe("H-5: the Owner gets the number the session proved", () => {
+  const VERIFIED = "8801711111111"; // Supabase's stored form of payload()'s phone
+
+  it("keeps a matching Owner and stores the canonical verified number", () => {
+    const bound = bindOnboardingOwnerPhone(
+      payload({ owner: { ...payload().owner, phone: "01711111111" } }),
+      VERIFIED,
+    ) as unknown as { owner: { phone: string; id: string }; shop: { phone: string } };
+    expect(bound.owner.phone).toBe("+8801711111111");
+    expect(bound.owner.id).toBe(OWNER);
+    // The shop's contact number is a business field and is left alone.
+    expect(bound.shop.phone).toBe("+8801711111111");
+  });
+
+  it("returns a new payload and leaves the caller's untouched", () => {
+    const original = payload({ owner: { ...payload().owner, phone: "01711111111" } });
+    const bound = bindOnboardingOwnerPhone(original, VERIFIED);
+    expect(bound).not.toBe(original);
+    expect((original.owner as { phone: string }).phone).toBe("01711111111");
+  });
+
+  it.each([
+    ["another number", "+8801722222222"],
+    ["a foreign number with the same last ten digits", "+911711111111"],
+    ["no number", null],
+    ["an empty number", ""],
+  ])("refuses an Owner with %s", (_label, phone) => {
+    expect(() => bindOnboardingOwnerPhone(payload({ owner: { ...payload().owner, phone } }), VERIFIED))
+      .toThrowError(expect.objectContaining({ status: 403, code: "onboarding_phone_mismatch" }));
+  });
+
+  it.each([
+    ["no verified number", null],
+    ["a foreign verified number", "+911711111111"],
+  ])("refuses everything when the session has %s", (_label, verified) => {
+    expect(() => bindOnboardingOwnerPhone(payload(), verified))
+      .toThrowError(expect.objectContaining({ status: 403, code: "onboarding_phone_mismatch" }));
+  });
+
+  it.each([["not an object", "payload"], ["no owner", { shop: {} }]])(
+    "refuses a payload that is %s as invalid, not as a mismatch",
+    (_label, raw) => {
+      expect(() => bindOnboardingOwnerPhone(raw, VERIFIED))
+        .toThrowError(expect.objectContaining({ status: 400, code: "onboarding_invalid" }));
+    },
+  );
 });

@@ -1,4 +1,5 @@
 import { HttpError } from "./_shared/auth.ts";
+import { isSameBdPhone, normalizeBdPhone } from "./_shared/phone.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
 
 /**
@@ -15,8 +16,8 @@ import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
  *
  * Both now call b4_onboard_owner, a SECURITY DEFINER function that creates the
  * shop, its three system roles, the Owner and the B2 settings row in one
- * transaction, idempotently. DEV differs from production in exactly one place —
- * how the session was authenticated — and nowhere after it.
+ * transaction, idempotently. DEV and production reach it the same way, behind
+ * the same fresh phone OTP: H-5 removed the DEV registration harness.
  */
 
 type Json = Record<string, unknown>;
@@ -132,6 +133,36 @@ export function parseOnboarding(raw: unknown, shopId: string, ownerUserId: strin
     throw new HttpError(403, "This account cannot be linked to that shop");
   }
   return parsed as unknown as Json;
+}
+
+/**
+ * H-5. The Owner an OTP registration creates must carry the number that
+ * session just proved.
+ *
+ * The payload is written by the device, and owner.phone used to reach
+ * b4_onboard_owner unchecked. users.phone is a CREDENTIAL with a global unique
+ * index, so a tampered client could prove its own number by OTP and register
+ * an Owner under somebody else's: the real holder of that number was then
+ * refused registration (phone_already_registered) while the squatter kept a
+ * phone + PIN sign-in under it.
+ *
+ * The comparison is the full canonical one (isSameBdPhone — never a last-N-
+ * digits match), and the number stored is the canonical form of the VERIFIED
+ * phone, never the client's spelling of it. A missing or foreign number is a
+ * mismatch. Returns a new payload; the caller's is not modified.
+ */
+export function bindOnboardingOwnerPhone(raw: unknown, verifiedPhone: string | null): Json {
+  const root = object(raw, "payload");
+  const owner = object(root.owner, "owner");
+  const canonical = normalizeBdPhone(verifiedPhone);
+  if (!canonical || !isSameBdPhone(owner.phone, canonical)) {
+    throw new HttpError(
+      403,
+      "The verified phone number does not match this registration",
+      "onboarding_phone_mismatch",
+    );
+  }
+  return { ...root, owner: { ...owner, phone: canonical } };
 }
 
 /** Maps the function's own error codes onto answers the device can act on. */

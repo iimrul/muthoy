@@ -5,6 +5,7 @@ import { normalizeBdPhoneInput, otpCodeSchema } from "@muthoy/validation";
 import type { Session } from "@supabase/supabase-js";
 import { AuthButton } from "../../components/auth/AuthButton";
 import { AuthIconTile } from "../../components/auth/AuthIconTile";
+import { otpSendErrorKey, otpVerifyErrorKey } from "../../components/auth/authMessages";
 import { AuthNotice } from "../../components/auth/AuthNotice";
 import { AuthShell } from "../../components/auth/AuthShell";
 import { formatPhoneForDisplay } from "../../components/auth/phoneInput";
@@ -21,9 +22,8 @@ import type { CatalogKey } from "../../i18n/catalog";
 import { useI18n } from "../../state/localeStore";
 import { LinkDeviceServerError, linkDeviceToShop } from "../../sync/linkDevice";
 import { resendOtp, sendOtp, verifyOtp } from "../../sync/otp";
+import { OTP_RESEND_COOLDOWN_SECONDS } from "../../sync/otpPolicy";
 import { pullChanges } from "../../sync/pull";
-
-const RESEND_COOLDOWN_SECONDS = 30;
 
 // OTP Verify — prototype-web's OTPVerification look (Gen A): header, ring
 // illustration, six boxes, a verifying card, the resend row and a manual
@@ -74,6 +74,9 @@ export default function OtpVerifyScreen() {
   const pendingOwnerUserIdRef = useRef<string | null>(null);
   const resendInFlightRef = useRef(false);
   const recoveryOtpRequestedRef = useRef(false);
+  // When the code being typed was sent. Supabase refuses a wrong code and an
+  // expired one identically, so this is what tells the two apart on screen.
+  const codeSentAtRef = useRef<number | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<CatalogKey | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -81,7 +84,15 @@ export default function OtpVerifyScreen() {
   const [hasVerifiedSession, setHasVerifiedSession] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [isSendingRecoveryOtp, setIsSendingRecoveryOtp] = useState(false);
-  const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_SECONDS);
+  const [cooldown, setCooldown] = useState(OTP_RESEND_COOLDOWN_SECONDS);
+
+  useEffect(() => {
+    // A fresh registration arrives here the moment Registration's send
+    // succeeded. A resumed one sends its own code below.
+    if (!resumeShopId) {
+      codeSentAtRef.current = Date.now();
+    }
+  }, [resumeShopId]);
 
   useEffect(() => {
     if (cooldown <= 0) {
@@ -100,9 +111,15 @@ export default function OtpVerifyScreen() {
     recoveryOtpRequestedRef.current = true;
     setIsSendingRecoveryOtp(true);
     void sendOtp(phone)
-      .catch(() => {
-        setCooldown(0);
-        setError("otpSendFailed");
+      .then(() => {
+        codeSentAtRef.current = Date.now();
+      })
+      .catch((cause: unknown) => {
+        const key = otpSendErrorKey(cause);
+        // Rate-limited: the server refuses another code until the window
+        // passes, so the resend waits too. Anything else may resend at once.
+        setCooldown(key === "otpRateLimited" ? OTP_RESEND_COOLDOWN_SECONDS : 0);
+        setError(key);
       })
       .finally(() => {
         setIsSendingRecoveryOtp(false);
@@ -133,11 +150,10 @@ export default function OtpVerifyScreen() {
           verifiedSessionRef.current = session;
           setHasVerifiedSession(true);
         } catch (cause) {
-          const message =
-            cause instanceof Error ? cause.message.toLowerCase() : "";
-          // Provider-specific codes arrive with H-5; until then the provider's
-          // own message is the only signal that a code expired.
-          setError(message.includes("expired") ? "otpExpired" : "otpIncorrect");
+          // Typed by sync/otp.ts from the auth error's status and code — wrong
+          // and expired told apart by when the code was sent, and a check
+          // that never happened never shown as a wrong code.
+          setError(otpVerifyErrorKey(cause, codeSentAtRef.current, Date.now()));
           setCode("");
           inputRef.current?.focus();
           setIsSubmitting(false);
@@ -219,13 +235,18 @@ export default function OtpVerifyScreen() {
     setIsResending(true);
     try {
       await resendOtp(phone);
-      setCooldown(RESEND_COOLDOWN_SECONDS);
+      codeSentAtRef.current = Date.now();
+      setCooldown(OTP_RESEND_COOLDOWN_SECONDS);
       setError(null);
       setCode("");
       inputRef.current?.focus();
-      showToast({ message: t("otpResent"), variant: "card" });
-    } catch {
-      setError("otpResendFailed");
+      showToast({ message: t("otpResendRequested"), variant: "card" });
+    } catch (cause) {
+      const key = otpSendErrorKey(cause, "otpResendFailed");
+      if (key === "otpRateLimited") {
+        setCooldown(OTP_RESEND_COOLDOWN_SECONDS);
+      }
+      setError(key);
     } finally {
       resendInFlightRef.current = false;
       setIsResending(false);
@@ -292,7 +313,7 @@ export default function OtpVerifyScreen() {
             {isRestoring ? t("otpRestoringTitle") : t("otpTitle")}
           </Text>
           <Text className={`${font()} text-center text-sm text-midGray`}>
-            {isRestoring ? t("otpRestoringBody") : t("otpSentTo")}
+            {isRestoring ? t("otpRestoringBody") : t("otpCheckMessages")}
           </Text>
           {!isRestoring ? (
             <Text className={`${latinFont("bold")} mt-1 text-center text-base text-richBlack`}>

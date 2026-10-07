@@ -7,6 +7,7 @@ import {
   PG_MIGRATIONS_DIR,
   SQLITE_MIGRATIONS_DIR,
   classCounts,
+  classify,
   classifyDirectory,
   describeMigration,
   assertManifestMatchesMigrations,
@@ -46,7 +47,7 @@ describe('single machine-readable rollback authority', () => {
   it('detects a mutated count/reference in each generated document', () => {
     const blocks = generatedBlocks();
     for (const [key, body] of Object.entries(blocks)) {
-      const mutated = body.replace('C: 7', 'C: 8').replace('`0001`', '`9999`');
+      const mutated = body.replace('C: 8', 'C: 9').replace('`0001`', '`9999`');
       const sources = {
         rollback: ROLLBACK_DOC,
         backend: readFileSync(resolve('backend/supabase/migrations/README.md'), 'utf8'),
@@ -90,18 +91,64 @@ describe('function bodies are not migration-time mutation', () => {
   });
 });
 
-describe('the corrected PostgreSQL classification', () => {
-  it('covers every migration on disk exactly once', () => {
-    expect(pg.length).toBe(28);
-    expect(new Set(pg.map((row) => row.name)).size).toBe(28);
+describe('a volatile ADD COLUMN default is a backfill', () => {
+  // PostgreSQL evaluates a volatile default once per existing row and writes
+  // the result; a DROP COLUMN cannot give those values back. A constant or
+  // stable default is stored once in the catalog and writes nothing.
+  it.each([
+    ['gen_random_uuid()', 'ALTER TABLE t ADD COLUMN owner uuid NOT NULL DEFAULT gen_random_uuid();'],
+    ['clock_timestamp()', 'alter table t add column seen_at timestamptz default clock_timestamp();'],
+    ['a type with a comma in it', 'ALTER TABLE t ADD COLUMN price numeric(10,2) DEFAULT random();'],
+    ['the second clause of one ALTER', 'ALTER TABLE t ADD COLUMN a int, ADD COLUMN b uuid DEFAULT gen_random_uuid();'],
+  ])('counts %s as a data write: class C', (_label, sql) => {
+    const facts = describeMigration(sql, 'postgres');
+    expect(facts.volatileDefault).toBe(1);
+    expect(classify(facts)).toBe('C');
   });
 
-  it('is A 6 / B 15 / C 7 — not the 14 forward-only the first audit claimed', () => {
+  it.each([
+    ['a constant default', 'ALTER TABLE t ADD COLUMN n integer NOT NULL DEFAULT 0;'],
+    ['a stable default', 'ALTER TABLE t ADD COLUMN at timestamptz NOT NULL DEFAULT now();'],
+    ['SET DEFAULT on an existing column', 'ALTER TABLE t ADD COLUMN a int, ALTER COLUMN b SET DEFAULT gen_random_uuid();'],
+    ['a new table, which has no rows to fill', 'CREATE TABLE t (id uuid DEFAULT gen_random_uuid()); ALTER TABLE t ADD COLUMN n int;'],
+    ['a default in the NEXT statement', 'ALTER TABLE t ADD COLUMN n int; CREATE TABLE u (id uuid DEFAULT gen_random_uuid());'],
+  ])('does not count %s', (_label, sql) => {
+    const facts = describeMigration(sql, 'postgres');
+    expect(facts.volatileDefault).toBe(0);
+    expect(classify(facts)).toBe('A');
+  });
+
+  it('ignores one inside a function body — runtime code, not migration time', () => {
+    const facts = describeMigration(
+      'CREATE FUNCTION f() RETURNS void AS $$ BEGIN '
+      + 'ALTER TABLE x ADD COLUMN y uuid DEFAULT gen_random_uuid(); END; $$ LANGUAGE plpgsql;',
+      'postgres',
+    );
+    expect(facts.volatileDefault).toBe(0);
+  });
+
+  it('makes the H-5 claim-owner migration forward-only, and nothing else on disk', () => {
+    expect(pg.filter((row) => row.facts.volatileDefault > 0).map((row) => [row.name, row.class]))
+      .toEqual([['20261004000000_h5_sms_dispatch_claim_owner.sql', 'C']]);
+  });
+});
+
+describe('the corrected PostgreSQL classification', () => {
+  it('covers every migration on disk exactly once', () => {
+    expect(pg.length).toBe(31);
+    expect(new Set(pg.map((row) => row.name)).size).toBe(31);
+  });
+
+  it('is A 6 / B 16 / C 8 — not the 14 forward-only the first audit claimed', () => {
     // Hardcoded on purpose. A migration that changes class has to change this
     // number too, which is the point at which somebody looks at it.
     // A2.3 added the registry plus its persistent-hold hotfix: function and
-    // trigger definitions, zero migration-time DML, so both are B.
-    expect(classCounts(pg)).toEqual({ A: 6, B: 15, C: 7 });
+    // trigger definitions, zero migration-time DML, so both are B. H-5's SMS
+    // dispatch ledger is the same shape: a new table and two functions, no DML.
+    // Its claim-owner follow-up is C: the new column's gen_random_uuid()
+    // default writes a fresh value into every existing row — a backfill, and
+    // first counted as B until review caught it (2026-10-05).
+    expect(classCounts(pg)).toEqual({ A: 6, B: 17, C: 8 });
   });
 
   it('declares its one judgement instead of inferring it', () => {
@@ -123,7 +170,7 @@ describe('the corrected PostgreSQL classification', () => {
   );
 
   it('states the corrected headline count in the document itself', () => {
-    expect(ROLLBACK_DOC).toContain('**A: 6 · B: 15 · C: 7 — of 28.**');
+    expect(ROLLBACK_DOC).toContain('**A: 6 · B: 17 · C: 8 — of 31.**');
   });
 
   it('carries no OTHER headline anywhere in any of the three documents', () => {
@@ -165,7 +212,7 @@ describe('the corrected PostgreSQL classification', () => {
       GRANT: 'grant', REVOKE: 'revoke', UPDATE: 'update', INSERT: 'insert',
       'DROP TABLE': 'dropTable', 'DROP FUNCTION': 'dropFunction',
       'DROP POLICY': 'dropPolicy', 'DROP TRIGGER': 'dropTrigger',
-      'DROP CONSTRAINT': 'dropConstraint',
+      'DROP CONSTRAINT': 'dropConstraint', 'volatile DEFAULT': 'volatileDefault',
     };
     let checked = 0;
     for (const row of pg) {

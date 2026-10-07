@@ -63,22 +63,43 @@ export type DeviceLoginErrorCode =
   | 'access_unconfirmed'
   | 'access_revoked'
   | 'setup_incomplete'
-  | 'hydration_incomplete';
+  | 'hydration_incomplete'
+  // H-5. PIN recovery's own refusals, read from the server's stable codes.
+  | 'pin_in_use'
+  | 'recovery_refused'
+  | 'recovery_failed'
+  // The PIN write committed; only the follow-up session setup did not. Not a
+  // failure of recovery — the opposite of one — so it is never read as
+  // `recovery_failed` and never shown as one.
+  | 'pin_changed_login_required'
+  // No response at all after submitting the new PIN. Unlike every other
+  // `network` failure in this file, the write may already have landed —
+  // see toRecoverPinError below — so this gets its own uncertain copy rather
+  // than device-login's confident "nothing happened yet, just retry".
+  | 'recovery_uncertain';
 
 export class DeviceLoginError extends Error {
   /** True when the server refused the credentials, rather than failing. */
   readonly isCredentialFailure: boolean;
   readonly code: DeviceLoginErrorCode;
+  /**
+   * Only set for 'pin_changed_login_required': which shop's H-4 PIN-attempt
+   * budget the screen should clear. The device may hold no session at all at
+   * this point, so this is the only place that shop id comes from.
+   */
+  readonly recoveryShopId: string | null;
 
   constructor(
     message: string,
     isCredentialFailure: boolean,
     code: DeviceLoginErrorCode = isCredentialFailure ? 'credentials' : 'network',
+    recoveryShopId: string | null = null,
   ) {
     super(message);
     this.name = 'DeviceLoginError';
     this.isCredentialFailure = isCredentialFailure;
     this.code = code;
+    this.recoveryShopId = recoveryShopId;
   }
 }
 
@@ -87,6 +108,11 @@ export class DeviceLoginError extends Error {
 // apart or improve on it. Distinguishing them here would leak precisely what
 // the server withheld.
 const GENERIC_FAILURE = 'Incorrect phone number or PIN';
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: unknown): value is string {
+  return typeof value === 'string' && UUID_SHAPE.test(value);
+}
 
 export interface DeviceLoginResponse {
   shopId: string;
@@ -113,24 +139,45 @@ function parseResponse(value: unknown): DeviceLoginResponse {
   return body as DeviceLoginResponse;
 }
 
+/** A malformed success cannot authorize an H-4 reset or a new local session. */
+function parseRecoveryResponse(value: unknown): DeviceLoginResponse {
+  const response = parseResponse({ ...(value as object), role: 'owner' });
+  if (
+    !isUuid(response.shopId)
+    || !isUuid(response.userId)
+    || response.accessToken.length === 0
+    || response.refreshToken.length === 0
+  ) {
+    throw new DeviceLoginError('Could not confirm the reset. Try signing in with your new PIN first.', false, 'recovery_uncertain');
+  }
+  return response;
+}
+
+/** The server's own JSON body, if the refusal has one. */
+async function refusalBody(response: Partial<Response> | undefined): Promise<Record<string, unknown> | null> {
+  if (!response || typeof response.clone !== 'function') return null;
+  try {
+    const body: unknown = await response.clone().json();
+    return body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : null;
+  } catch {
+    // Proxy/non-JSON bodies carry no code.
+    return null;
+  }
+}
+
+/** The stable `code` a refusal carries, if its body is the server's own JSON. */
+async function refusalCode(response: Partial<Response> | undefined): Promise<string | null> {
+  const candidate = (await refusalBody(response))?.code;
+  return typeof candidate === 'string' ? candidate : null;
+}
+
 /** 401 stays indistinguishable; safe device-policy codes remain actionable. */
 async function toLoginError(error: unknown): Promise<DeviceLoginError> {
   const response = (error as { context?: Partial<Response> }).context;
   const status = typeof response?.status === 'number' ? response.status : null;
   if (status === 401) return new DeviceLoginError(GENERIC_FAILURE, true, 'credentials');
 
-  let code: string | null = null;
-  if (response && typeof response.clone === 'function') {
-    try {
-      const body: unknown = await response.clone().json();
-      if (body && typeof body === 'object' && !Array.isArray(body)) {
-        const candidate = (body as { code?: unknown }).code;
-        code = typeof candidate === 'string' ? candidate : null;
-      }
-    } catch {
-      // Proxy/non-JSON bodies are ordinary transport failures.
-    }
-  }
+  const code = await refusalCode(response);
 
   switch (code) {
     case 'device_session_unbound':
@@ -160,6 +207,98 @@ async function toLoginError(error: unknown): Promise<DeviceLoginError> {
     default:
       return new DeviceLoginError('Could not reach the server. Check your connection.', false, 'network');
   }
+}
+
+/**
+ * How a failed recover-pin call reads to the owner.
+ *
+ * Not toLoginError: that ends in "Could not reach the server" for anything it
+ * does not recognise, and recovery is refused for its own nameable reasons —
+ * every one of which used to reach an owner who had just paid for an SMS as a
+ * connection problem. Here only a request that got NO answer is a network
+ * failure; anything the server said is read from its stable code, and failing
+ * that from its status. Number and account refusals share one generic message,
+ * as the server shares one code for them.
+ */
+async function toRecoverPinError(error: unknown): Promise<DeviceLoginError> {
+  const response = (error as { context?: Partial<Response> }).context;
+  const status = typeof response?.status === 'number' ? response.status : null;
+  if (status === null) {
+    // Unlike device-login's network failures, this request may have already
+    // written the new PIN before the response was lost — recoverPin's own
+    // order commits the write before it does anything else that could still
+    // fail. "Check your connection and retry" would read as "nothing
+    // happened yet", which is not something this screen can promise.
+    return new DeviceLoginError(
+      "We couldn't confirm the reset. Try signing in with your new PIN first.",
+      false,
+      'recovery_uncertain',
+    );
+  }
+
+  const body = await refusalBody(response);
+  const code = typeof body?.code === 'string' ? body.code : null;
+  switch (code) {
+    case 'pin_changed_login_required': {
+      // shopId belongs to the caller's active actor in errorResponse.ts. Only
+      // the distinct, server-derived recoveryShopId may clear the H-4 scope.
+      const recoveryShopId = status === 422 && isUuid(body?.recoveryShopId)
+        ? body.recoveryShopId
+        : null;
+      if (!recoveryShopId) {
+        return new DeviceLoginError(
+          "We couldn't confirm the reset. Try signing in with your new PIN first.",
+          false,
+          'recovery_uncertain',
+        );
+      }
+      return new DeviceLoginError(
+        'PIN changed successfully. Sign in with your new PIN.',
+        false,
+        'pin_changed_login_required',
+        recoveryShopId,
+      );
+    }
+    case 'pin_in_use':
+      return new DeviceLoginError('That PIN is already in use at this shop. Choose another.', false, 'pin_in_use');
+    case 'otp_required':
+      return new DeviceLoginError('Your verification code is too old. Request a new code.', false, 'otp_required');
+    case 'device_session_unbound':
+      return new DeviceLoginError('Sign in again to relink this device.', false, 'relink_required');
+    case 'device_enrollment_held':
+      return new DeviceLoginError(
+        'Another active Owner or Manager must approve this device.',
+        false,
+        'enrollment_held',
+      );
+    case 'device_id_required':
+      return new DeviceLoginError(
+        'This app installation could not be identified. Restart and try again.',
+        false,
+        'installation_unknown',
+      );
+    case 'device_revoked':
+    case 'binding_revoked':
+      return new DeviceLoginError(
+        'Your access to this shop has been revoked. Ask the shop owner to restore it.',
+        false,
+        'access_revoked',
+      );
+    case 'recovery_request_invalid':
+    case 'pin_format_invalid':
+      return new DeviceLoginError('Could not reset PIN. Try again.', false, 'recovery_failed');
+    default:
+      break;
+  }
+  // The token behind the verified code is no longer accepted: only a new code
+  // can pass now.
+  if (status === 401) {
+    return new DeviceLoginError('Your verification code is too old. Request a new code.', false, 'otp_required');
+  }
+  if (status >= 500) {
+    return new DeviceLoginError('Could not reset PIN. Try again.', false, 'recovery_failed');
+  }
+  return new DeviceLoginError('PIN reset is not available for this number.', false, 'recovery_refused');
 }
 
 /**
@@ -461,6 +600,19 @@ export async function activateHydratedDevice(
   handoffAuthTiming(timing);
 }
 
+/** Revoke this recovery attempt's minted session, never whichever is current. */
+async function revokeRecoverySessionLocally(accessToken: string): Promise<void> {
+  try {
+    // GoTrue's logout authenticates this exact JWT. Unlike auth.signOut(),
+    // admin.signOut does not read or erase a later device-current session.
+    const { error } = await supabase.auth.admin.signOut(accessToken, 'local');
+    if (!error) return;
+  } catch {
+    // auth-js rethrows transport errors; a confirmed PIN change stays confirmed.
+  }
+  console.error('sync/recover-pin cleanup failed: minted session was not revoked');
+}
+
 /**
  * Owner PIN recovery. The caller must ALREADY have completed a phone OTP
  * through sync/otp.ts — this hands the resulting session to the server, which
@@ -490,12 +642,26 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
       ...installationClaim(),
     },
   });
-  guard.assertLive();
   if (error) {
-    throw await toLoginError(error);
+    const mapped = await toRecoverPinError(error);
+    if (mapped.code === 'pin_changed_login_required' && mapped.recoveryShopId) {
+      // The same authority documented on clearPinAttemptsAfterOwnerRecovery
+      // below: this request's session already carried a server-verified OTP
+      // for the owner's own number before the server would touch the PIN at
+      // all, and the server has just confirmed the write landed. Automatic
+      // sign-in failing to finish does not withdraw that proof.
+      clearPinAttemptsAfterOwnerRecovery(pinAttemptScope(mapped.recoveryShopId));
+    }
+    guard.assertLive();
+    throw mapped;
   }
 
-  const response = parseResponse({ ...(data as object), role: 'owner' });
+  // A valid success means the server already committed the PIN. This is the
+  // CLIENT commit point too: everything below is sign-in follow-up only.
+  const response = parseRecoveryResponse(data);
+  try {
+    clearPinAttemptsAfterOwnerRecovery(pinAttemptScope(response.shopId));
+    guard.assertLive();
 
   // The server signed out every previous session for this owner, including the
   // OTP one this request travelled on, so the device has to adopt the fresh
@@ -559,17 +725,8 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
     throw new DeviceLoginError('Your shop data did not download completely. Please try again.', false, 'hydration_incomplete');
   }
 
-  // H-4. The one authority allowed to refill the offline attempt budget.
-  //
-  // A successful PIN login deliberately does not, because the budget is
-  // shop-wide and the pad cannot tell who is typing — clearing it on success
-  // let anyone holding one valid PIN reset the guard forever. Recovery is
-  // different in kind: the server has verified an OTP against the owner's
-  // phone number before it would write this hash at all, so the person in
-  // front of the device has proved something the pad never can.
-  //
-  // Placed AFTER the local verification above, so a recovery that did not
-  // actually land locally leaves the budget where it was.
+  // H-4 cleared at the response commit point above. A successful ordinary
+  // PIN login still cannot refill the shop-wide attempt budget.
   const authority = await inspectSessionAuthority(
     {
       userId: local.userId,
@@ -587,7 +744,20 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
   }
 
   guard.assertLive();
-  clearPinAttemptsAfterOwnerRecovery(pinAttemptScope(response.shopId));
-
   useSessionStore.getState().login({ ...local, cloudActorConfirmed: true });
+  } catch (cause) {
+    // This JWT came from THIS response, so the logout can never target a later
+    // or unrelated current session. Failure is best-effort and cannot turn a
+    // committed PIN change into a reset failure.
+    await revokeRecoverySessionLocally(response.accessToken);
+    // A different app user may now hold the phone. Never route their screen
+    // from a stale recovery continuation.
+    if (cause instanceof StaleSessionError) throw cause;
+    throw new DeviceLoginError(
+      'PIN changed successfully. Sign in with your new PIN.',
+      false,
+      'pin_changed_login_required',
+      response.shopId,
+    );
+  }
 }

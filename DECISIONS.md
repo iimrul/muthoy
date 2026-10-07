@@ -2921,3 +2921,578 @@ from the carry-forward already recorded when A2.3/H-10 closed.
 teardown ordering and atomicity, OTP accessibility, phone normalization at
 every boundary including PhoneField itself, localization — stayed fixed
 through both Phase E rounds; none reproduced.
+
+## 2026-10-01 — H-5 REVE SMS: code phases 1–4 implemented, NOT signed off
+
+**Status:** implemented and automated-tested; awaiting read-only review.
+Nothing deployed, no hosted setting changed, the Send SMS hook is NOT enabled,
+no SMS sent, nothing committed. The DEV registration harness is unchanged.
+
+**Locked decisions applied (2026-09-29):** Supabase generates and verifies
+every OTP; REVE only delivers. Six digits, 300 s expiry, 60 s resend cooldown,
+ten provider calls per number per rolling 24 h, English GSM-7 text
+`Muthoy code: NNNNNN. Valid 5 minutes. Never share this code.`, the
+verified-phone ↔ onboarding-Owner-phone binding, and the harness kept until
+REVE passes DEV end to end (then Supabase test OTP numbers replace it).
+
+**Built:**
+- `20261001000000_h5_auth_sms_dispatch.sql` (class B): `auth_sms_dispatches`
+  (no FKs, RLS on, no grant to any API role) behind service-role-only
+  `h5_claim_sms_dispatch` / `h5_record_sms_dispatch`. One row per provider
+  call, claimed before it and settled once after; per-number cap counted
+  under one ledger-wide advisory lock; phone and code stored only as HMAC
+  keys, each row tagged with the key's fingerprint (`key_id`).
+- `functions/auth-send-sms/` (`verify_jwt = false`): Standard Webhooks
+  signature first, then a strict Bangladeshi destination and six-digit code,
+  fail-closed config, ledger claim, ONE REVE call (3 s timeout, never
+  retried), outcome recorded. REVE transport and endpoint allowlist isolated
+  in `reve.ts`: only REVE's two documented HTTPS endpoints, only the
+  documented GET; plain-HTTP and raw-IP endpoints are unrepresentable.
+- `sync/link-device`: in OTP mode the onboarded Owner's phone must equal the
+  OTP-verified phone (canonical, full-length) or 403
+  `onboarding_phone_mismatch`, checked before anything is claimed; the
+  verified number is what gets stored.
+- Mobile: `sync/otpPolicy.ts` (constants + typed errors by status/code),
+  60 s cooldown on both OTP screens, wrong vs expired told apart by send time,
+  "could not check" never shown as "incorrect", a rate-limit message.
+
+**Supabase's hook contract, read from supabase/auth source 2026-10-01 —
+three facts the plan had open or wrong:**
+1. GoTrue mints a NEW `webhook-id` for every retry attempt
+   (`internal/hooks/hookshttp`). Webhook-id idempotency alone only stops an
+   exact replay, so the ledger also dedupes on HMAC(number, code) inside the
+   code's five-minute life — that is what stops a GoTrue retry from becoming a
+   second SMS.
+2. GoTrue reads the hook's error object only from an HTTP 200/202 reply;
+   every other status becomes a generic 500. Every decided outcome therefore
+   answers 200 + `{"error":{"http_code","message"}}` — how the per-number cap
+   reaches the app as 429 — and no reply carries `retry-after`, so GoTrue
+   never re-sends a decided request.
+3. The destination is `sms.phone` (every OTP type), `user.phone` only as a
+   fallback. When the hook fails, GoTrue does not save the OTP — so an SMS
+   from an AMBIGUOUS attempt (timeout, 101) that arrives late carries a code
+   that will not verify. **Locked 2026-10-02:** a REVE timeout or status
+   101 answers failure (503); an ambiguous send is never reported as success,
+   and a late SMS's code may be invalid. *Superseded 2026-10-04 (live DEV
+   finding — "First real send, and the fix it forced", below): an ambiguous
+   send now answers success, so its code stands.*
+
+**Review fix pass, 2026-10-02 (five P1s; still NOT signed off, nothing
+deployed or committed):**
+1. *Hash-key rotation.* Optional `SMS_DISPATCH_HASH_KEY_PREVIOUS`: claims read
+   rows under the current and previous key and write under the current only,
+   so a rotation neither resets the cap nor reopens a duplicate. While any row
+   from the last 24 h was written under a key the caller does not hold, the
+   claim answers `unknown_key` and nothing is sent (hook: 503,
+   `ledger_key_unknown`) — dropping the previous key early, or an instance
+   still on the old key, stops sends instead of doubling them. Procedure: set
+   the new key and the old one as previous together; remove the previous key
+   no sooner than 24 h later. The lock became ledger-wide because the same
+   number has a different `phone_key` under each key. An unreadable previous
+   key, or one equal to the current, fails closed.
+2. *Webhook secret.* Only `whsec_<base64>` or `v1,whsec_<base64>`, canonical
+   base64, 24–64 bytes; bare base64, other prefixes, whitespace, URL-safe or
+   non-canonical encodings fail closed.
+3. *Concurrency.* `pgtest/h5-sms-dispatch.concurrency.pgtest.ts` runs the
+   migration on a throwaway PostgreSQL server (`pgtest/serverPostgres.ts`;
+   machine binaries, no npm driver), each claim its own backend: a second
+   claim is seen queued on the lock in `pg_locks`; a lock-stripped copy of
+   the function double-sends (negative control); barrier-released stampedes
+   hold one code to one send, the cap to ten, one webhook id to one send, and
+   a mixed-key rotation to one send. Skips where no PostgreSQL binaries exist.
+4. *REVE evidence.* `auth-send-sms/testdata/reve-sendtext-statuses.json`,
+   sanitized; `reve.test.ts` is pinned to it. Statuses 0, 1, 101, 108, 109
+   and 114 are in REVE's PDF (page 2). **Closed 2026-10-02:** all eleven,
+   136, 137, 151, 170 and 5400 included, are in REVE's Postman collection
+   ("SMSServer", supplied by the founder as REVE's official collection), each
+   with the reply body REVE returns; nothing rests on a relayed instruction
+   any more. The collection's REVE origin is the founder's attestation — the
+   file does not name REVE and its samples use raw-IP endpoints — but its API
+   surface and its six shared codes agree with the PDF. None of its sample
+   credentials, numbers or addresses is in the repo.
+5. *OTP fallback.* Only an explicit `otp_expired` code reads as incorrect or
+   expired. A 400/401/403 with no code, or with any other code, is "could not
+   verify".
+
+**Final review fixes, 2026-10-02 (two P1s; still NOT signed off, nothing
+deployed or committed):**
+1. *Destination.* A present `sms.phone` is the only destination. Empty,
+   blank, null, non-string, foreign or malformed fails closed
+   (`phone_unsupported`: no claim, no SMS) and is never replaced by
+   `user.phone`, which during a phone change is the OLD number. `user.phone`
+   is read only when `sms.phone` is absent altogether — GoTrue omits an empty
+   one (`omitempty`), so only an older GoTrue sends none. *Strict format,
+   2026-10-02:* the value must be exactly GoTrue's `8801XXXXXXXXX` (its
+   `validatePhone` strips "+" and spaces before a number is stored or sent),
+   checked on the raw string BEFORE the shared normalizer — which drops every
+   non-digit, and so had accepted `abc8801712345678`. Junk, separators,
+   whitespace, a "+" anywhere and the local `01…` form now fail closed; the
+   same check holds the `user.phone` fallback. The shared normalizer itself
+   is unchanged.
+2. *REVE HTTP status.* Accepted needs an HTTP 2xx AND `Status "0"`. A
+   redirect (still never followed; `provider_redirected`) or any other non-2xx
+   (`provider_http_error`) is ambiguous whatever its body says, and that body
+   is not read: the hook answers 503 and the ledger records `ambiguous`. One
+   call, never retried, as before.
+
+**DEV preparation, 2026-10-02 (Send SMS hook NOT enabled, no SMS sent,
+nothing committed):**
+- Migration `20261001000000` pushed to DEV (`btfprhticjgeihcngpif`, the only
+  pending one). Verified there: RLS on with no policy, no table grant to any
+  API role, both RPCs `SECURITY DEFINER` with `search_path=public` and EXECUTE
+  for `service_role` only. A rolled-back round trip answered send → duplicate
+  → `unknown_key` as designed and left 0 rows.
+- `auth-send-sms` deployed (`verify_jwt = false`, bundled server-side).
+  Before any secret it answered GET 405 and POST 500 "Hook is not
+  configured". No signed probe was run.
+- Secrets: `SEND_SMS_HOOK_SECRET` and `SMS_DISPATCH_HASH_KEY` (generated; a
+  copy is kept outside the repo on the founder's machine, needed again at
+  activation and for rotation) and `OTP_SMS_DAILY_CAP_PER_PHONE=10`. REVE
+  credentials not set — awaiting the founder. `REVE_API_URL` and
+  `REVE_TRANSPORT` deliberately unset, so the function cannot reach REVE.
+- Auth untouched: Email on, Confirm email off, anonymous sign-ins off, and
+  `MUTHOY_DEV_ONBOARDING` kept, so the DEV registration harness is intact. The
+  Phone provider is OFF and no Send SMS hook is configured.
+- Transport: REVE's Postman collection shows POST only on raw-IP servers —
+  plain HTTP on 8124, or HTTPS on 8125 with the credentials in the URL path —
+  none of them reachable from here and none the same server as REVE's
+  hostnames. `smpp.revesms.com:7790` presents a valid certificate;
+  `apismpp.revesms.com` refuses connections. Proposed: POST JSON, credentials
+  in the body, to `https://smpp.revesms.com:7790/sendtext` — pending REVE's
+  confirmation that this host takes it for our account, and its answer on
+  source-IP restriction (Edge Functions have no fixed outbound IP).
+  *Confirmed 2026-10-04 by live use: the first real DEV send went by POST JSON
+  to this host, and REVE answered Status 0 with a message id — no 5400, so no
+  source-IP restriction showed.*
+
+**POST transport, 2026-10-02 (not deployed; Send SMS hook NOT enabled; no
+SMS sent; nothing committed):**
+- `reve.ts` gains `post_json`: a POST to the approved endpoint exactly as
+  configured — no query, nothing added to the path — with
+  `Content-Type: application/json`, `Accept: application/json` and the body
+  `{apikey, secretkey, callerID, toUser, messageContent}` in REVE's order.
+  Redirects are never followed; one call, never retried; accepted still needs
+  an HTTP 2xx AND Status "0".
+- `get_query` is INACTIVE: no configuration may select it
+  (`reve_transport_unsupported`). Its builder stays until a live POST is
+  confirmed, then goes. *A live POST is confirmed (2026-10-04); removing the
+  builder is an open follow-up.*
+- Signed DEV smoke, one request with a five-digit code: HTTP 200
+  `{"error":{"http_code":400}}` — the payload refusal, reachable only past
+  the signature check. The ledger stayed at 0 rows, and DEV holds no REVE
+  setting, so no provider call was possible. DEV still runs the earlier build;
+  the POST build ships once REVE confirms the host. *Superseded: the POST build
+  (v3) reached DEV on 2026-10-04 after a transport probe, and that day's first
+  real send confirmed the host (above).*
+
+**DEV activation, steps 1–2, 2026-10-04 (Send SMS hook still NOT enabled; no
+SMS sent; nothing committed):**
+- Transport probe first: a temporary DEV function (production's `post_json`
+  builder, random invalid credentials, called once, deleted) reached
+  `smpp.revesms.com:7790` from Supabase Edge over HTTPS. REVE answered HTTP 200,
+  Status 109, in 512 ms — no 170, no 5400.
+- `auth-send-sms` v3, the reviewed `post_json` build, deployed to DEV.
+- All eight function secrets set from the founder's local file: hook secret,
+  hash key, cap 10, REVE key, secret and Sender ID,
+  `REVE_API_URL=https://smpp.revesms.com:7790/sendtext`,
+  `REVE_TRANSPORT=post_json`. The function is now ARMED but idle: Auth does not
+  call it until the Send SMS hook is configured, and nothing else holds the
+  hook secret. Unsigned requests answer 401.
+- Pending, by the founder: DEV Auth — Phone provider on, Send SMS hook →
+  `auth-send-sms` with the same secret, OTP expiry 300 s, length 6, resend
+  60 s, and confirmation that the access-token hook is still enabled. Then
+  exactly one real OTP to the founder's own number.
+
+**First real send, and the fix it forced, 2026-10-04 (fix implemented and
+tested, NOT deployed; nothing committed; no SMS since the one below):**
+- *What happened.* The founder configured DEV Auth (Phone on, Send SMS hook →
+  `auth-send-sms`, six digits, 300 s, 60 s). ONE `POST /auth/v1/otp` answered
+  200 in 3.3 s — but the hook ran TWICE, with two different codes. The first
+  claim committed and stayed `pending` for good; the second was accepted by
+  REVE (Status 0 — no 5400, so no IP restriction) and delivered.
+- *Why — inferred; Auth and Edge logs need dashboard access this session did
+  not have.* GoTrue's hook client only ever re-sends the SAME payload (same
+  code), and `sendPhoneConfirmation` never retries, so a new code means
+  `/otp` itself ran twice. `auth.users` holds only the second attempt's user,
+  created after the first claim, so the first attempt was rolled back. Best
+  fit: the first claim committed on a cold PostgREST call but its reply
+  outran the hook's 750 ms wait → `ledger_unavailable` → hook 503 → GoTrue
+  answered `/otp` with 503 → something upstream of GoTrue re-ran `/otp`, warm
+  this time. REVE was never called for the first code. To confirm when
+  convenient: `auth-send-sms` logs `outcome=ledger_unavailable step=claim` for
+  the first webhook; Auth logs two `POST /otp`, a 503 then a 200.
+- *Fix 1 — the claim is waited for, and asked again under its owner.*
+  `20261004000000_h5_sms_dispatch_claim_owner.sql` (additive —
+  `20261001000000` is applied to DEV and stays untouched; first called class
+  B, *class C since 2026-10-05, below*) adds
+  `claim_owner uuid not null`; existing rows get an owner nobody holds, so
+  they can be neither resumed nor settled. The hook makes one random owner
+  per invocation, held in memory, never logged. The claim is idempotent for
+  its owner: the owner's own pending row answers `send` again
+  (`resumed: true`) — no second row, no second cap slot. Anyone else, and the
+  owner too once the row is settled, gets the duplicate answer as before;
+  only the owner can settle. The hook now waits up to 2 s for a claim (was
+  750 ms) and, when no answer came, asks ONCE more under the same owner. REVE
+  is called only after `send`.
+- *Time budget.* GoTrue allows the hook 5 s, a cold start included. The hook
+  keeps 3.5 s of it: up to 2 s per claim ask; a second ask only if REVE would
+  still get 0.5 s and the record 0.5 s; REVE gets the rest, at most 3 s. Every
+  wait used in full adds up to exactly 3.5 s (tested).
+- *Fix 2 — **supersedes the 2026-10-02 lock** in "Supabase's hook contract"
+  above.* Once REVE has been called, an outcome nobody can confirm — timeout,
+  network failure, Status 101, an unreadable or unconfirmed reply, and,
+  through the reviewed adapter, a non-2xx or redirect — is recorded
+  `ambiguous` and answers GoTrue SUCCESS: that code stands and is never sent
+  again, so a late SMS carries a code that verifies, and a failure can no
+  longer start a second `/otp` with a new code and a second SMS. A duplicate
+  of an `ambiguous` row also answers success, with no REVE call. Still
+  failures: a claim with no answer after the second ask, bad config, bad
+  payload, `unknown_key`, the cap (429), and REVE's definite rejections (500;
+  TPS 137 → 503). A duplicate of a still-`pending` row stays 503, unchanged.
+  *Superseded 2026-10-05 (below): it answers success.* The ledger still never
+  records a non-2xx as `accepted`.
+- *Deploy order, when authorised:* push the migration, then deploy
+  `auth-send-sms` straight after. DEV's hook is live, and the v3 build fails
+  closed against the new signatures until the matching build lands. The
+  first send's orphaned `pending` row needs nothing: it counts against that
+  number's cap for 24 h and is purged after 7 days. *Superseded 2026-10-05 by
+  the six-step order below.*
+
+**Consolidated review fixes, 2026-10-05 (three P1s; implemented and tested,
+NOT deployed; nothing committed; no OTP or SMS sent):**
+1. *A pending replay answers success.* A claim that finds this request or
+   this code already `pending` under ANOTHER invocation's owner now answers
+   GoTrue success, not 503. That owner may have called REVE already — its
+   outcome lost before it was recorded, or still on the way — and a failure
+   could start a second `/otp` with a new code and a second SMS. Nothing else
+   changes: REVE is not called for that number and code again, the row stays
+   `pending` (a replay never records anything, and only the owner can settle
+   it), and the owner's own lost-reply resume works as before. Only a
+   definite rejection (`rejected`) still fails a replay. Cost, accepted: if
+   that owner died before calling REVE, the code never arrives and the user
+   resends after the 60 s cooldown — a new code, a new claim, sent normally.
+2. *Neutral OTP copy.* A successful send only means Supabase took the
+   request; the SMS may be late, its outcome unknown, or — for a number with
+   no account — lead nowhere. The OTP screens no longer say a code was sent:
+   "Check your messages for a verification code. It may take a moment to
+   arrive." / "যাচাই কোডের জন্য আপনার মেসেজ দেখুন। কোডটি আসতে একটু সময় লাগতে
+   পারে।" (registration and forgot-PIN alike), and the resend toast reads "New
+   code requested" / "নতুন কোডের অনুরোধ করা হয়েছে" — short enough for a
+   1.8 s toast, with the full line still on screen. Keys renamed to match
+   (`otpSentTo` → `otpCheckMessages`, `otpResent` → `otpResendRequested`).
+   Same copy for every number and every provider outcome.
+3. *`20261004000000` is class C.* Its `gen_random_uuid()` default writes a
+   fresh owner into every existing row — a backfill, which the classifier
+   missed. `scripts/classify-migrations.mjs` now counts an `ADD COLUMN` whose
+   DEFAULT is volatile as a data write; it reclassifies this migration and no
+   other. Headline A 6 · B 16 · C 8, of 30.
+- *DEV rollout, in this order and no other (migrations/README.md):* (1)
+  disable DEV's Send SMS hook; (2) take the schema and data backups — class C,
+  so the backup is the way back (the repo's "Required sequence", step 2) — and
+  push the migration; (3) deploy the matching `auth-send-sms` at once; (4)
+  verify the column, the two owner-taking functions (definer, pinned
+  `search_path`, `service_role` only, old signatures gone) and an unsigned
+  401; (5) re-enable the hook; (6) send one controlled OTP and check its single
+  ledger row. *Superseded the same day by the locked ten-step plan ("Final
+  gates", below): the pause is the Phone provider, never the Send SMS hook.*
+- *Hygiene.* Seventeen git-ignored `bash.exe.stackdump` crash dumps removed
+  (Git Bash leftovers, 2026-08-16 to 2026-10-05). Statements that the POST
+  host was unconfirmed are corrected where they stood (`reve.ts`, above).
+
+**Final gates, 2026-10-05 (no H-5 logic change; nothing deployed or committed;
+no OTP or SMS sent; DEV harness kept):**
+- *Hygiene.* The repo-root `bash.exe.stackdump` — re-created by Git Bash
+  crashes after the sweep above, last at 10:33 during the suite run below,
+  which still exited 0 — removed from PowerShell; no stackdump remains
+  anywhere in the tree, `node_modules` included.
+- *Full suite.* `pnpm test --maxWorkers=2 --minWorkers=1` — Vitest's own
+  worker cap; no timeout raised, nothing skipped, no code or test changed:
+  **216 files, 3,751 tests passed, exit 0** (753 s). The review's earlier full
+  run had failed only on H-7 load timeouts and Vitest worker-RPC noise, each
+  file passing alone; with two workers neither recurred. Typecheck, lint and
+  `git diff --check` pass.
+- *DEV rollout, locked.* The maintenance pause is the Phone provider — never
+  the Send SMS hook, whose configuration and secret stay untouched: (1) Phone
+  provider OFF; (2) confirm a phone OTP request is refused — the fictional
+  `+15555550100`, no ledger row, no SMS; (3) schema and data backup; (4) push
+  `20261004000000`, dry run first; (5) deploy the matching `auth-send-sms` at
+  once; (6) verify the owner column, both RPCs and their grants, the live
+  function and an unsigned 401; (7) confirm the Send SMS hook is still
+  configured as before; (8) Phone provider ON; (9) re-check the OTP settings —
+  6 digits, 300 s, 60 s; (10) exactly one controlled OTP. Detail and expected
+  results: `backend/supabase/migrations/README.md`. Not executed.
+
+**DEV redeploy and first verified OTP, 2026-10-05 (DEV only; nothing
+committed; DEV harness kept):**
+- *Pause.* The Phone provider needed a second dashboard save and a hard
+  reload, each way, before Auth applied it. Checked every time with Auth's
+  public settings and the fictional `+15555550100`: switched off, Auth itself
+  refused it (`phone_provider_disabled`) and the hook never saw it; switched
+  on again, the hook received it and refused it (400), which proves the hook
+  URL and secret match the new build. No probe made a claim, a user or an SMS.
+- *Backup.* Schema, data and roles, taken with the CLI's own `pg_dump`
+  scripts run through the local `pg_dump` 18 (Docker is off), kept outside
+  the repo in the founder's private folder: 53 public tables; 86 tables of
+  data, both ledger rows and `auth.users` included; roles without passwords.
+- *Migration.* The dry run listed only `20261004000000`; pushed and recorded.
+- *Function.* `auth-send-sms` v5 deployed straight after (the CLI listed the
+  build it replaced as v4).
+- *Verified.* `claim_owner uuid not null`, no default; only the owner-taking
+  RPCs, definer, `search_path=public`, `service_role` only, bodies identical
+  to the migration's; RLS on, no policy, no API-role grant; the old `pending`
+  row answers `duplicate` to a new owner and cannot be settled by one; an
+  unsigned POST answers 401.
+- *Baseline.* The two 2026-10-04 test rows — the orphaned `pending` and the
+  `accepted` Status 0 — deleted (both are in the backup); the ledger was
+  empty.
+- *Real OTPs.* Two sends to the founder's number, each exactly one request:
+  06:21Z (Message_ID 1315099211), left to expire, then 06:29Z (Message_ID
+  1315116919). Each: Auth 200 `{}` in 2.2–2.6 s; exactly one ledger row,
+  `accepted`, REVE Status 0 (no 5400, so no IP restriction), settled
+  648–670 ms after its claim; nothing `pending`, no second code. The second
+  SMS arrived and its code verified at 06:30Z: session issued (`amr` otp),
+  then revoked.
+
+**DEV E2E matrix, 2026-10-05 (DEV only; one real SMS; nothing committed;
+harness kept):**
+- *Hosted hook, no SMS — 22/22.* Signed requests to the deployed hook: a
+  wrong key, a ten-minute-old signature and no signature all answer 401; a
+  non-Bangladeshi number, a five-digit code and seven malformed numbers are
+  refused before any claim; an invalid PRESENT `sms.phone` (non-BD, empty,
+  null) is refused even beside a valid `user.phone`. A replayed accepted
+  webhook id, and pending or ambiguous rows replayed exactly or as a GoTrue
+  retry, answer success with no new row; a rejected row's replay still fails.
+  The ledger never grew. Synthetic rows (`h5-e2e-` prefix) were removed.
+- *Hosted OTP — one real SMS* (07:05Z, Message_ID 1315177540, Status 0): a
+  resend seconds later → 429 `over_sms_send_rate_limit`; a wrong code → 403
+  `otp_expired`, which the app reads as incorrect; with the number's 24 h
+  count filled to ten by synthetic rows, a resend after 60 s passed Auth,
+  reached the hook and was refused by the cap (429, no row, the first code
+  still in force); the correct code after 300 s → 403 `otp_expired`, read as
+  expired; a request without a token → 400 `validation_failed`, read as
+  "could not verify".
+- *Automated:* 64 files, 1,476 tests — H-5, OTP screens, binding, forgot PIN,
+  H-4/H-7/H-10/A2.3, the DEV harness.
+- *Found, both blocking harness removal:* (1) DEV's server-side SMS interval
+  is about 5 s, not the locked 60 s — Auth said "after 2 seconds" four
+  seconds after a send — so the 60 s cooldown is the app's alone; (2) DEV's
+  `sync` (v22, deployed 2026-09-26) predates the H-5 onboarding binding:
+  `bindOnboardingOwnerPhone` exists only in the working tree, so the binding
+  and the OTP forgot-PIN path were validated by tests only.
+
+**DEV rollout gaps, 2026-10-05 (DEV only; nothing committed; harness kept):**
+- *SMS interval — fixed and proven.* DEV Auth's `sms_max_frequency` was 5 s;
+  the "60 s" the dashboard showed was the EMAIL interval
+  (`auth.email.max_frequency`). Set to 60 s by `supabase config push` from a
+  scratch workdir whose `config.toml` declares only
+  `[auth.sms] max_frequency = "60s"`: CLI 2.119 pushes declared properties only
+  and writes nothing without a piped "y". `config diff` before and after: that
+  one property moved, the 15 undeclared ones did not (OTP expiry 300, length 6,
+  both hooks, email settings). On a real send, Auth itself refused at +9 s and
+  +35 s ("after 50 / 24 seconds", ≈60 s); at +74 s the request passed Auth and
+  met the hook's daily cap — no second SMS, the first code still in force.
+- *`sync` v23 deployed to DEV.* Live v22 was byte-identical to HEAD (the earlier
+  "five files differ" was line endings); the delta was exactly the H-5 binding
+  in `linkDevice.ts` and `onboarding.ts`. `verify_jwt` stays true; the
+  downloaded v23 equals the working tree (29/29); unauthenticated → 401.
+- *Registration, on one OTP session* (08:10Z, Message_ID 1315256471): an
+  owner.phone that is not the verified number → 403 `onboarding_phone_mismatch`
+  with nothing written (no shop, roles, users, claim, binding, device, billing
+  account or auth link); the verified number sent as `01…` → 200, stored as the
+  canonical verified `+880…` form, every onboarding row created, the device
+  bound, and the refreshed token carries the full Owner claim set. The same
+  session's recover-pin was refused while the Owner was held
+  (`device_enrollment_held`), for another number (403), and at +331 s
+  (`otp_required`) — none changed the PIN or cut a session.
+- *Device* (Samsung SM-A047F, `h3scratch2` cleared, working tree via Metro):
+  Owner sign-in by phone + PIN enrolled the handset in the test shop (A2.3
+  binding, initial sync, dashboard); five wrong PINs; Forgot PIN sent one SMS
+  (09:20Z, Message_ID 1315384706) and the code verified; setting the new PIN
+  then failed with "Could not reach the server". A first attempt went through
+  Register by mistake (09:00Z SMS): a number that already owns a shop was
+  refused with nothing written.
+- *Found — Owner PIN recovery can never complete.* `recoverPin.ts` calls
+  `supabaseAdmin.auth.admin.signOut(caller.authUserId, "global")`, but
+  auth-js's admin `signOut` takes a JWT, not a user id; GoTrue answers 403
+  `bad_jwt`, so recover-pin returns 500 after the OTP is spent and before the
+  PIN changes, and the app shows its generic network message. The same call
+  with a user id sits in `_shared/identity.ts` (auth-account rebind → 500) and
+  `_shared/auth.ts` `signOutAppUser` (result ignored, so the sign-out meant to
+  follow deactivation, a role change or a PIN reset never happens). It predates
+  H-5 (already in v22): unit tests mock the call and server recover-pin is only
+  checked as source text. Not fixed here — a `sync` change needs its own
+  approved plan (CLAUDE.md rule 10).
+- Real SMS today: six (06:21, 06:29, 07:05, 08:10, 09:00, 09:20Z), all accepted,
+  Status 0. Synthetic ledger rows removed.
+
+**Session revocation fixed (local, 2026-10-05; not deployed, no SMS, nothing
+committed):**
+- *Recovery* logs out with the caller's OWN verified JWT
+  (`revokeCallerSessionsGlobally`). The token is held in a module-private
+  WeakMap beside the Caller verifyCallerJwt returned — never a field of it — so
+  no handler can read, log or forward it, and a copied Caller carries no
+  credential at all. Order unchanged: identity, binding and PIN-collision
+  checks → global sign-out → PIN write → mint and bind a fresh session.
+- *Rebind and signOutAppUser* hold no JWT of the user they cut off, so they call
+  `h5_revoke_auth_user_sessions(uuid)` (migration `20261005000000`, class B):
+  SECURITY DEFINER because hosted service_role has no DELETE on auth.sessions
+  (measured on DEV), `search_path=''`, service_role only, one user, sessions
+  only — refresh tokens and AMR claims cascade; legacy session-less refresh
+  tokens are deleted by user; the user and identities are never touched. A
+  rebind still fails hard before the identity moves; signOutAppUser stays
+  best-effort but now actually executes, and reports a failure without naming
+  anyone. Access JWTs already issued stay signature-valid until expiry (as
+  everywhere on Supabase); GoTrue — and therefore every sync request — refuses
+  them once their session is gone, and they cannot refresh.
+- *Recover-PIN errors are typed.* The server tags its refusals
+  (`recovery_refused` — one code for every way a number fails to qualify —
+  `pin_in_use`, `recovery_failed`, `pin_format_invalid`,
+  `recovery_request_invalid`). The app reads them through its own mapping, not
+  device-login's: no answer at all → `recovery_uncertain` (the PIN write may
+  have committed); PIN collision → PIN in use;
+  stale or rejected proof (incl. 401) → new code; number or account refusal →
+  one generic refusal; device refusals as before; any 5xx → "Could not reset
+  PIN. Try again." Device-login's mapping is unchanged.
+- *Tests that execute it.* `pgtest/session-revocation.pgtest.ts` runs
+  recoverPin, the rebind and signOutAppUser for real — supabase-js and auth-js
+  unmodified, GoTrue answered by `authServerDouble.ts` from GoTrue's own tables
+  (added to the harness bootstrap with hosted's cascades and ownership),
+  PostgREST by `restDouble.ts` as service_role against the real migrations.
+  Restoring the old user-id call fails 2, 1 and 2 of its tests in the three
+  places. The source-text tests that asserted the user-id call now assert the
+  fix.
+- *To reach DEV:* push `20261005000000`, then deploy `sync`; then one device
+  forgot-PIN run (one SMS).
+
+**Recovery commit-point correction (local, 2026-10-06; not deployed, no SMS,
+nothing committed; DEV harness kept):** A confirmed PIN write is a credential
+success even when fresh-session setup fails. The server's 422
+`pin_changed_login_required` carries `recoveryShopId` from the proven Owner row,
+not the caller's possibly different active `shopId`; the verified caller
+identity in the error body remains protected. The device validates that target
+before clearing its H-4 budget. A valid 200 response also clears the recovered
+shop's budget immediately; later mobile setup faults keep the same confirmed
+success code and direct the owner to normal login with the new PIN. Any minted
+session cleanup targets that attempt's JWT with local scope, never whichever
+session is current later. Returned and thrown cleanup errors log only a fixed
+message and cannot undo the committed-PIN result. A true no-response remains
+`recovery_uncertain` and clears no attempt budget.
+
+**DEV deploy and hardware Forgot PIN, 2026-10-06 (DEV only; one real SMS;
+nothing committed; DEV harness kept):**
+- *Preflight.* Only `20261005000000` was pending (30/31 applied). Live `sync`
+  v23 differed from the working tree in exactly the four reviewed files
+  (`recoverPin.ts`, `_shared/auth.ts`, `_shared/identity.ts`,
+  `errorResponse.ts`); nothing in the deploy path changed after the review's
+  test run; no native or app-config diff, so the `h3scratch2` dev client with a
+  cache-cleared Metro bundle of the working tree is the current mobile build.
+- *Migration.* Schema, data and roles backup (`dev-20261006-pre-revoke-sessions`,
+  founder's private folder); the dry run listed only `20261005000000`; pushed.
+  `h5_revoke_auth_user_sessions(uuid)`: SECURITY DEFINER, `search_path=""`,
+  owner `postgres`, ACL exactly `postgres` + `service_role`, no PUBLIC grant;
+  anon and authenticated cannot execute it (anon through PostgREST: 401
+  `42501`); body identical to the file. Ledger invariant PASS.
+- *Function.* `sync` v24, `verify_jwt` true, byte-identical to the working tree
+  (29/29) with the H-5 onboarding binding; no auth header → 401, anon key →
+  401. All 17 secrets (by digest) and the Auth settings unchanged.
+- *Hardware* (Samsung SM-A047F, `h3scratch2`, H-5 E2E Test Shop;
+  `com.muthoy.pos` untouched): five wrong PINs locked the pad (first 30 s rung;
+  the five failures outlived it). Forgot PIN sent one SMS (08:30:02Z,
+  `accepted`, REVE Status 0, settled 0.75 s later). Android's SMS auto-fill
+  entered the real code, so the wrong-code step was NOT exercised. New PIN
+  saved 08:30:37Z; the app removed the shop's H-4 record before any further
+  setup and opened the Owner home. After logout the old PIN was refused with
+  the pad still open at one failure — had the budget not been cleared it would
+  have been the sixth and locked — and the new PIN signed in.
+- *Server.* PIN hash changed (bcrypt) and the old PIN no longer matches it.
+  Every pre-run Owner session and its refresh tokens are gone — the handset's
+  stale one by `sendOtp`'s local sign-out, the rest by recovery's global
+  sign-out — and one fresh session (08:30:37Z, in use) is bound to the phone's
+  device record. The other principals' 91 sessions, auth users, identities,
+  the Owner's binding, claims and device rows are unchanged; no holds. Metro's
+  client log held no error and no credential; Edge logs are not readable from
+  here.
+- *Gate.* 80 files, 1,852 tests (recovery/session revocation, H-4, H-7, H-10,
+  A2.3, Multi-Shop, H-5 SMS, DEV-harness safety), all pass.
+- *Open:* the wrong-code screen on hardware — it needs one more real SMS.
+  (Closed the same day without one: see the next entry.)
+
+**DEV registration harness removed; Supabase test OTP numbers on DEV,
+2026-10-06 (DEV + local code; zero REVE calls; nothing committed):**
+- *Why now.* The harness existed only because no SMS provider did; real REVE
+  OTP has passed DEV end to end, so DEV and production now onboard through the
+  same proof. The founder accepted the real-REVE hardware run as passed.
+- *Client.* Deleted the eight harness files in `apps/mobile/dev/` (the
+  Registration button, its flow, the "Dev: Restore test owner session" gate
+  control, their inert stubs, the Metro resolver and its test), the
+  Registration footer, the gate control in `app/_layout.tsx`, the
+  `metro.config.js` swap (plain `withNativeWind` export again) and
+  `RegisterShopInput.ownerPhone`. `dev/` now holds instrumentation only, pinned
+  by `tests/dev-production-safety.test.ts`, which also bans the harness
+  symbols, its identity store and email domain, `MUTHOY_DEV_ONBOARDING` and any
+  email-password sign-in or sign-up; the render suite proves Registration has
+  no DEV control even with `__DEV__` on.
+- *Server.* Deleted `sync/_shared/devOnboarding.ts`. `link-device` admits an
+  Owner only with a fresh phone OTP (`requireFreshOwnerOtp`) and never writes
+  the `dev_harness` stamp; a guard test proves the old switch grants nothing.
+  `sync` v25 deployed (byte-identical to the working tree, 28 files, no harness
+  marker; JWT verification unchanged); `auth-send-sms` untouched (v5).
+  `MUTHOY_DEV_ONBOARDING` unset on DEV; the other 16 secrets are
+  digest-identical, `MUTHOY_ENVIRONMENT` kept for server auth timing.
+- *Test OTP numbers.* Four fictional numbers configured on DEV
+  (`[auth.sms.test_otp]` via `config push` from a scratch workdir; only those
+  four properties changed — OTP length 6, expiry 300 s, resend 60 s, the Send
+  SMS hook and the access-token hook unchanged). GoTrue skips the SMS hook and
+  provider for a test number (read in its source). The numbers and codes live
+  in the founder's `.muthoy-secrets/dev-test-otp.env` only — never in Git or the
+  app. None existed on DEV beforehand.
+- *Verified, test numbers only, zero REVE* (a tripwire filled each number's
+  daily cap with synthetic ledger rows so a hook call could not reach REVE;
+  the real ledger stayed at 7 rows throughout; tripwire removed): server E2E —
+  wrong OTP refused, right OTP verifies, registration refused for an unproven
+  Owner phone and accepted for the proven one, full Owner claims, A2.3 binding,
+  device login (wrong PIN refused), Forgot PIN (every older session revoked,
+  fresh one bound, old PIN refused, new PIN accepted), revoked installation
+  refused, enrolment hold refused, a harness-shaped email identity refused
+  onboarding on DEV. On the Samsung (`h3scratch` wiped first; `com.muthoy.pos`
+  untouched): registration through the real screens with no DEV control, the
+  wrong-code screen ("ভুল কোড — আবার চেষ্টা করুন"), PIN setup, five wrong PINs
+  → H-4 lock, Forgot PIN → new PIN → H-4 record removed, old PIN refused at one
+  failure with no lock, new PIN signs in. Release JS bundle (`expo export`):
+  zero harness strings in UTF-8 and UTF-16.
+- *Observed, by design:* revoking an installation creates the Owner's
+  enrolment hold, which `a23_prepare_enrollment` checks first, so a login from
+  the revoked installation is refused as `device_enrollment_held`, not
+  `device_revoked` (its live session gets `device_revoked`).
+- *Residual DEV data at the time:* DEV held 14 harness-stamped accounts (14
+  shops, 33 live sessions) with email+password credentials; nothing admitted
+  them to onboarding or recovery. No cleanup was run. The proposed deletion
+  was later rejected; see the 2026-10-07 decision below.
+
+**Residual DEV harness data retained, 2026-10-07 (no deletion, deploy, SMS or
+commit):** The founder's read-only DEV preflight found 14 stamped historical
+identities, but only 12 matched the original strict shop/Owner/account proof.
+One excluded identity had a renamed shop and populated Owner phone (repurposed);
+the other had a renamed shop and possible reuse (ambiguous). A second,
+twelve-target preflight returned `safe_to_delete_12 = 0`: those scopes contain
+business, device, membership or other unrelated data. Both destructive cleanup
+plans are closed as unsafe and not required for H-5. All 14 identities and their
+stamps remain intentionally untouched. They are DEV data-retention debt, not an
+H-5 P1: the mobile harness code and server onboarding bypass are gone,
+`MUTHOY_DEV_ONBOARDING` is unset on DEV, and the live app/server path neither
+reads the stamp nor offers email/password harness sign-in. The stamps do not
+re-enable the removed harness. Any future disposal requires separate
+data-retention work, with its own scope, backup and approval, outside H-5.
+
+**Pre-existing, not H-5 — fixed in this change set, test fixtures only:**
+`db/b4-billing-hydration.sqlite.test.tsx` (7) and
+`db/b4-multi-shop-entitlement.sqlite.test.ts` (2) started failing on
+2026-10-01: their fixtures verified the entitlement at `2026-09-01T06:00Z`, and
+the 30-day offline ceiling (`domain/entitlements.ts`) passed at 06:00 UTC that
+day. Reproduced identically on clean `08ba2fa`. Fixed 2026-10-02 without
+touching the ceiling or any production code: billing-hydration's `T0` is now
+one day before each run (relative, not frozen — those tests drive real timers
+and three install fake ones); multi-shop-entitlement freezes the Date, no
+timers, nine days after its `T0`, checks that each denial is for the plan
+itself (`free` / `trial_ended`) rather than a stale cache, and adds a test
+pinning the 30-day ceiling to the millisecond.

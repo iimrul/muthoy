@@ -1,138 +1,301 @@
--- ============================================================================
--- DEV PROJECT ONLY. Removes shops created by the temporary DEV registration
--- harness (H-2), and the auth users behind them.
--- ============================================================================
---
--- Run manually, in the SQL editor, against the DEV project. Deliberately NOT a
--- migration and NOT a SECURITY DEFINER function: a migration would install a
--- destructive helper on production too, and no grant here is worth that. It
--- needs the service role / SQL editor, which the DEV project's operator
--- already has and a client never does.
---
--- WHY THE OLD PROCEDURE COULD NOT WORK
---
--- dev/README.md used to say `delete from public.shops where id in (...)`.
--- B4 introduced a mutual RESTRICT pair:
---
---     billing_accounts.primary_shop_id -> shops(id)            ON DELETE RESTRICT
---     shops.billing_account_id         -> billing_accounts(id) ON DELETE RESTRICT
---
--- so the shop cannot go while its billing account exists, and the billing
--- account cannot go while the shop points at it. The delete failed every time.
---
--- Dozens of business tables also carry `created_by/actor_id -> users(id)
--- ON DELETE RESTRICT` while cascading from `shops`. Within a single
--- `DELETE FROM shops`, PostgreSQL fires RESTRICT immediately, so whether the
--- cascade reaches those child rows before it reaches `users` is not something
--- to rely on. The order below removes them explicitly instead.
---
--- SELECTION
---
--- Every row is chosen through `auth.users.raw_app_meta_data->>'dev_harness'`,
--- which `sync/link-device` stamps with the service role when it admits a
--- harness caller. It is the only selector that survives the email rewrite
--- `ensureAuthBinding` performs, and the only one a client cannot forge.
--- Production accounts never carry it, so no production row can be matched even
--- if this is run somewhere it should not be.
---
--- IDEMPOTENT. Every statement is a delete by key; a second run removes nothing
--- and reports zero rows. Safe to re-run after an interruption.
+-- DEV SQL Editor ONLY. DO NOT RUN before a fresh schema/data backup, the
+-- count-only dev_harness_preflight.sql, and separate approval of its output.
+-- This file ends in ROLLBACK by default. Change only that last word to COMMIT
+-- after every guard below has passed and the exact 14-account scope is agreed.
+-- Never run on PROD. Never use a billing account as a shop selector.
 
 begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '60s';
 
--- ── 0. Inspect. Run this ALONE first and read it. ───────────────────────────
--- Expect only "DEV Test Shop" rows. Anything else means STOP and roll back.
-with harness_auth as (
-  select id from auth.users
-  where raw_app_meta_data->>'dev_harness' = 'true'
-)
-select s.id as shop_id, s.name, s.created_at, sc.claimed_by_user_id
-from public.shop_claims sc
-join public.shops s on s.id = sc.shop_id
-where sc.claimed_by_user_id in (select id from harness_auth)
-order by s.created_at;
+-- Freeze scope-bearing tables so a concurrent DEV registration cannot change
+-- the relationship between validation and deletion in this transaction.
+lock table auth.users, public.shop_claims, public.shops,
+  public.auth_bindings, public.billing_accounts, public.shop_memberships
+  in share row exclusive mode;
 
--- ── The working set, resolved once. ─────────────────────────────────────────
-create temporary table dev_harness_auth on commit drop as
+create temporary table h5_cleanup_auth on commit drop as
   select id from auth.users where raw_app_meta_data->>'dev_harness' = 'true';
 
-create temporary table dev_harness_principals on commit drop as
-  select distinct ab.app_user_id as id
-  from public.auth_bindings ab
-  where ab.auth_user_id in (select id from dev_harness_auth);
+-- Every shop must independently name its stamped claimant. The Owner row,
+-- binding, role, and singleton account must all agree with THAT shop; no shop
+-- is added merely because its billing_account_id matches another target.
+create temporary table h5_cleanup_scope on commit drop as
+  select c.shop_id, c.claimed_by_user_id as auth_user_id,
+    s.owner_id, ba.id as account_id
+  from public.shop_claims c
+  join h5_cleanup_auth a on a.id = c.claimed_by_user_id
+  join public.shops s on s.id = c.shop_id and s.name = 'DEV Test Shop'
+  join public.users u on u.id = s.owner_id and u.shop_id = s.id and u.phone is null
+  join public.roles r on r.id = u.role_id and r.shop_id = s.id
+    and r.name = 'owner' and not r.is_deleted
+  join public.auth_bindings ab on ab.app_user_id = u.id
+    and ab.auth_user_id = c.claimed_by_user_id
+  join public.billing_accounts ba on ba.principal_owner_user_id = u.id
+    and ba.primary_shop_id = s.id and s.billing_account_id = ba.id;
 
-create temporary table dev_harness_accounts on commit drop as
-  select distinct ba.id
-  from public.billing_accounts ba
-  where ba.principal_owner_user_id in (select id from dev_harness_principals)
-     or ba.primary_shop_id in (
-       select sc.shop_id from public.shop_claims sc
-       where sc.claimed_by_user_id in (select id from dev_harness_auth)
-     );
+create unique index on h5_cleanup_scope(shop_id);
+create unique index on h5_cleanup_scope(auth_user_id);
+create unique index on h5_cleanup_scope(account_id);
 
--- Include every Multi-Shop child on the harness Owner's billing account, plus
--- a claimed primary shop if onboarding stopped before billing was initialized.
-create temporary table dev_harness_shops on commit drop as
-  select s.id from public.shops s
-  where s.billing_account_id in (select id from dev_harness_accounts)
-  union
-  select sc.shop_id from public.shop_claims sc
-  where sc.claimed_by_user_id in (select id from dev_harness_auth);
+do $safety$
+declare
+  v_count bigint;
+  v_table record;
+  v_auth_fk_issues bigint;
+  v_shop_ids uuid[];
+  v_account_ids uuid[];
+begin
+  select array_agg(shop_id), array_agg(account_id)
+    into v_shop_ids, v_account_ids from h5_cleanup_scope;
+  if (select count(*) from h5_cleanup_auth) <> 14
+     or (select count(*) from h5_cleanup_scope) <> 14
+     or (select count(*) from public.shop_claims c
+         join h5_cleanup_auth a on a.id = c.claimed_by_user_id) <> 14 then
+    raise exception 'DEV harness cleanup stopped: expected exactly 14 proven accounts, claims, shops and accounts';
+  end if;
 
--- ── 1. Break the mutual RESTRICT cycle. ─────────────────────────────────────
--- shops.billing_account_id is nullable; primary_shop_id is not. So the shop
--- side is the one that can let go first.
+  if exists (select 1 from auth.users a join h5_cleanup_auth h on h.id = a.id
+      where a.phone is not null or a.is_anonymous)
+     or exists (select 1 from auth.identities i join h5_cleanup_auth h on h.id = i.user_id
+      where i.provider <> 'email') then
+    raise exception 'DEV harness cleanup stopped: marked account has a phone or non-email identity';
+  end if;
+
+  if exists (select 1 from public.users u
+      where u.shop_id in (select shop_id from h5_cleanup_scope)
+        and u.id not in (select owner_id from h5_cleanup_scope))
+     or exists (select 1 from public.shops s
+      where s.billing_account_id in (select account_id from h5_cleanup_scope)
+        and s.id not in (select shop_id from h5_cleanup_scope))
+     or exists (select 1 from public.shop_memberships m
+      where m.billing_account_id in (select account_id from h5_cleanup_scope)
+        and m.shop_id not in (select shop_id from h5_cleanup_scope))
+     or exists (select 1 from public.auth_bindings ab
+      join public.users u on u.id = ab.app_user_id
+      where u.shop_id in (select shop_id from h5_cleanup_scope)
+        and ab.auth_user_id not in (select id from h5_cleanup_auth))
+     or exists (select 1 from public.auth_bindings ab
+      where ab.auth_user_id in (select id from h5_cleanup_auth)
+        and ab.app_user_id not in (select owner_id from h5_cleanup_scope)) then
+    raise exception 'DEV harness cleanup stopped: a target account or shop has an outside relationship';
+  end if;
+
+  select coalesce(sum(n), 0) into v_count from (
+    select count(*)::bigint as n from public.shop_memberships m
+      join h5_cleanup_scope p on p.shop_id = m.shop_id
+      where m.principal_user_id <> p.owner_id or m.actor_user_id <> p.owner_id
+    union all select count(*) from public.user_permissions x
+      join h5_cleanup_scope p on p.shop_id = x.shop_id where x.user_id <> p.owner_id
+    union all select count(*) from public.shop_devices d
+      join h5_cleanup_scope p on p.shop_id = d.shop_id
+      where d.enrolled_by_user_id <> p.owner_id
+        or (d.revoked_by is not null and d.revoked_by <> p.owner_id)
+    union all select count(*) from public.shop_device_bindings b
+      join h5_cleanup_scope p on p.shop_id = b.shop_id
+      where b.actor_user_id <> p.owner_id
+        or (b.bound_by_user_id is not null and b.bound_by_user_id <> p.owner_id)
+        or (b.revoked_by is not null and b.revoked_by <> p.owner_id)
+    union all select count(*) from public.device_registry_events e
+      join h5_cleanup_scope p on p.shop_id = e.shop_id
+      where (e.actor_user_id is not null and e.actor_user_id <> p.owner_id)
+        or (e.target_user_id is not null and e.target_user_id <> p.owner_id)
+    union all select count(*) from public.auth_session_devices sd
+      join h5_cleanup_scope p on p.shop_id = sd.shop_id
+      left join auth.sessions s on s.id = sd.auth_session_id
+      where sd.actor_user_id <> p.owner_id
+        or (s.user_id is not null and s.user_id <> p.auth_user_id)
+    union all select count(*) from public.device_enrollment_holds h
+      join h5_cleanup_scope p on p.shop_id = h.shop_id
+      where h.actor_user_id <> p.owner_id or h.held_by_user_id <> p.owner_id
+        or (h.approved_by_user_id is not null and h.approved_by_user_id <> p.owner_id)
+  ) parts;
+  if v_count <> 0 then
+    raise exception 'DEV harness cleanup stopped: a structural row references another principal';
+  end if;
+
+  -- Paid/commercial orders are not stale registration residue. A shop that
+  -- ever traded needs a bespoke, separately reviewed disposal plan instead.
+  if exists (select 1 from public.payment_orders
+      where billing_account_id in (select account_id from h5_cleanup_scope)) then
+    raise exception 'DEV harness cleanup stopped: target account has a payment order';
+  end if;
+
+  -- Every populated public shop_id table must be one of the specifically
+  -- reviewed structural tables below. This catches new migrations and real
+  -- trading data before a cascading DELETE can touch either.
+  for v_table in
+    select n.nspname, c.relname
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    join pg_attribute a on a.attrelid = c.oid and a.attname = 'shop_id'
+      and a.atttypid = 'uuid'::regtype and not a.attisdropped
+    where n.nspname = 'public' and c.relkind in ('r', 'p')
+      and c.relname not in (
+        'shop_claims', 'roles', 'users', 'subscriptions', 'user_permissions',
+        'shop_b2_settings', 'h7_shop_billing_bootstrap_windows',
+        'shop_memberships', 'shop_devices', 'shop_device_bindings',
+        'device_registry_events', 'auth_session_devices', 'device_enrollment_holds'
+      )
+  loop
+    execute format('select count(*) from %I.%I where shop_id = any($1)',
+      v_table.nspname, v_table.relname)
+      into v_count using v_shop_ids;
+    if v_count <> 0 then
+      raise exception 'DEV harness cleanup stopped: nonstructural target-shop rows exist';
+    end if;
+  end loop;
+
+  -- Account-only tables other than the reviewed subscription/snapshot/order
+  -- set must not be silently cascaded by a future migration.
+  for v_table in
+    select n.nspname, c.relname
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    join pg_attribute a on a.attrelid = c.oid and a.attname = 'billing_account_id'
+      and a.atttypid = 'uuid'::regtype and not a.attisdropped
+    where n.nspname = 'public' and c.relkind in ('r', 'p')
+      and c.relname not in ('shops', 'shop_memberships',
+        'billing_subscriptions', 'entitlement_snapshots', 'payment_orders')
+  loop
+    execute format('select count(*) from %I.%I where billing_account_id = any($1)',
+      v_table.nspname, v_table.relname)
+      into v_count using v_account_ids;
+    if v_count <> 0 then
+      raise exception 'DEV harness cleanup stopped: unreviewed account-linked rows exist';
+    end if;
+  end loop;
+
+  if exists (select 1 from public.sync_operation_chunks c
+      join public.sync_operation_staging s on s.operation_id = c.operation_id
+      where s.shop_id in (select shop_id from h5_cleanup_scope))
+     or exists (select 1 from auth.refresh_tokens rt
+      join auth.sessions s on s.id = rt.session_id
+      where s.user_id in (select id from h5_cleanup_auth)
+        and rt.user_id is distinct from s.user_id::text)
+     or exists (select 1 from auth.refresh_tokens rt
+      where rt.user_id in (select id::text from h5_cleanup_auth)
+        and rt.session_id is not null
+        and not exists (select 1 from auth.sessions s where s.id = rt.session_id
+          and s.user_id::text = rt.user_id)) then
+    raise exception 'DEV harness cleanup stopped: an indirect child has ambiguous ownership';
+  end if;
+
+  if exists (
+    select 1 from pg_constraint fk
+    join pg_class parent on parent.oid = fk.confrelid
+    join pg_namespace parent_ns on parent_ns.oid = parent.relnamespace
+    join pg_class child on child.oid = fk.conrelid
+    join pg_namespace child_ns on child_ns.oid = child.relnamespace
+    where fk.contype = 'f' and parent_ns.nspname = 'public' and child_ns.nspname = 'public'
+      and parent.relname in ('shops', 'users', 'roles', 'permissions',
+        'shop_claims', 'subscriptions', 'user_permissions', 'shop_b2_settings',
+        'h7_shop_billing_bootstrap_windows', 'billing_accounts',
+        'shop_memberships', 'billing_subscriptions', 'entitlement_snapshots',
+        'payment_orders', 'sync_operation_staging', 'shop_devices',
+        'shop_device_bindings', 'device_registry_events',
+        'auth_session_devices', 'device_enrollment_holds')
+      and child.relname not in ('permissions', 'billing_accounts',
+        'payment_provider_events', 'sync_operation_chunks')
+      and not exists (select 1 from pg_attribute a where a.attrelid = child.oid
+        and a.attname in ('shop_id', 'billing_account_id') and not a.attisdropped)
+  ) then
+    raise exception 'DEV harness cleanup stopped: an unreviewed public FK child exists';
+  end if;
+
+  -- Auth child FKs must all CASCADE from a stamped user, never SET NULL or
+  -- reach public data. The exact child-table counts are in the preflight.
+  with recursive auth_tree(relid, seen) as (
+    select 'auth.users'::regclass::oid, array['auth.users'::regclass::oid]
+    union all
+    select fk.conrelid, t.seen || fk.conrelid
+    from auth_tree t
+    join pg_constraint fk on fk.confrelid = t.relid and fk.contype = 'f'
+      and fk.confdeltype = 'c' and cardinality(fk.conkey) = 1
+      and cardinality(fk.confkey) = 1
+    where cardinality(t.seen) < 9 and not fk.conrelid = any(t.seen)
+  )
+  select count(*) into v_auth_fk_issues from (
+    select 1 from pg_constraint fk
+    join auth_tree t on t.relid = fk.confrelid
+    join pg_class child on child.oid = fk.conrelid
+    join pg_namespace ns on ns.oid = child.relnamespace
+    where fk.contype = 'f' and (
+      fk.confdeltype <> 'c' or cardinality(fk.conkey) <> 1
+      or cardinality(fk.confkey) <> 1 or ns.nspname <> 'auth'
+    )
+    union all
+    select 1 from auth_tree group by relid having count(*) > 1
+    union all
+    select 1 from auth_tree t
+      join pg_constraint fk on fk.confrelid = t.relid and fk.contype = 'f'
+        and fk.confdeltype = 'c'
+      where cardinality(t.seen) = 9 and not fk.conrelid = any(t.seen)
+  ) problems;
+  if v_auth_fk_issues <> 0 then
+    raise exception 'DEV harness cleanup stopped: auth FK graph is not cascade-only and auth-local';
+  end if;
+end
+$safety$;
+
+-- The only updated rows are independently proven shops. This breaks B4's
+-- mutual RESTRICT pair without touching any other shop on the account.
 update public.shops set billing_account_id = null
-where id in (select id from dev_harness_shops);
-
--- ── 2. Commercial rows that reference the billing account. ──────────────────
--- Provider events RESTRICT deletion of their payment order, so they go first.
-delete from public.payment_provider_events
-where payment_order_id in (
-  select id from public.payment_orders
-  where billing_account_id in (select id from dev_harness_accounts)
-);
-
-delete from public.payment_orders
-where billing_account_id in (select id from dev_harness_accounts);
-
-delete from public.entitlement_snapshots
-where billing_account_id in (select id from dev_harness_accounts);
-
-delete from public.billing_subscriptions
-where billing_account_id in (select id from dev_harness_accounts);
+where id in (select shop_id from h5_cleanup_scope);
 
 delete from public.shop_memberships
-where shop_id in (select id from dev_harness_shops);
-
--- ── 3. The billing accounts themselves. ─────────────────────────────────────
--- Now unreferenced by shops (step 1), so their primary_shop_id RESTRICT on
--- shops is the only thing left holding the shop, and it goes with this row.
+where shop_id in (select shop_id from h5_cleanup_scope);
+delete from public.entitlement_snapshots
+where billing_account_id in (select account_id from h5_cleanup_scope);
+delete from public.billing_subscriptions
+where billing_account_id in (select account_id from h5_cleanup_scope);
 delete from public.billing_accounts
-where id in (select id from dev_harness_accounts);
+where id in (select account_id from h5_cleanup_scope);
 
--- ── 4. The shop and everything scoped to it. ────────────────────────────────
--- Cascade handles the ~40 shop-scoped business tables. Fresh DEV shops hold no
--- sales, so the users(id) RESTRICT references from those tables have nothing
--- to block; if a DEV shop was actually traded in, delete its sales, purchases,
--- inventory_movements, cash_* and audit_logs rows first and re-run.
-delete from public.shops where id in (select id from dev_harness_shops);
-
--- ── 5. Rows with no FK to shops, so no cascade reaches them. ────────────────
-delete from public.shop_claims
-where claimed_by_user_id in (select id from dev_harness_auth)
-   or shop_id in (select id from dev_harness_shops);
+-- A2.3's RESTRICT links require leaf-first deletion. Every predicate is the
+-- independently proven shop_id; no current-session or device-wide operation.
+delete from public.device_enrollment_holds
+where shop_id in (select shop_id from h5_cleanup_scope);
+delete from public.auth_session_devices
+where shop_id in (select shop_id from h5_cleanup_scope);
+delete from public.device_registry_events
+where shop_id in (select shop_id from h5_cleanup_scope);
+delete from public.shop_device_bindings
+where shop_id in (select shop_id from h5_cleanup_scope);
+delete from public.shop_devices
+where shop_id in (select shop_id from h5_cleanup_scope);
 
 delete from public.auth_bindings
-where auth_user_id in (select id from dev_harness_auth);
+where auth_user_id in (select id from h5_cleanup_auth);
+delete from public.user_permissions
+where shop_id in (select shop_id from h5_cleanup_scope);
+delete from public.permissions
+where role_id in (select id from public.roles
+  where shop_id in (select shop_id from h5_cleanup_scope));
+delete from public.users
+where id in (select owner_id from h5_cleanup_scope);
+delete from public.roles
+where shop_id in (select shop_id from h5_cleanup_scope);
+delete from public.shop_claims
+where shop_id in (select shop_id from h5_cleanup_scope);
+delete from public.shops
+where id in (select shop_id from h5_cleanup_scope);
 
--- ── 6. The auth accounts. Last: everything above selects through them. ──────
-delete from auth.users where id in (select id from dev_harness_auth);
+-- Old session-less refresh tokens have no session FK to cascade through.
+delete from auth.refresh_tokens
+where user_id in (select id::text from h5_cleanup_auth);
+delete from auth.users
+where id in (select id from h5_cleanup_auth);
 
--- Review the row counts, then:
-commit;
--- rollback;
+-- Re-check these counts in the same transaction before changing ROLLBACK to
+-- COMMIT in a separately approved run. No IDs or secrets are returned.
+select 'stamped_auth_remaining' as entity, count(*) as row_count from auth.users
+where raw_app_meta_data->>'dev_harness' = 'true'
+union all
+select 'target_shops_remaining', count(*) from public.shops
+where id in (select shop_id from h5_cleanup_scope)
+union all
+select 'target_claims_remaining', count(*) from public.shop_claims
+where shop_id in (select shop_id from h5_cleanup_scope);
 
--- ── Verification (run after commit; both must return zero rows). ────────────
--- select count(*) from auth.users where raw_app_meta_data->>'dev_harness' = 'true';
--- select count(*) from public.shops where name = 'DEV Test Shop';
+rollback;

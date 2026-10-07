@@ -5,3 +5,9 @@ project_id = "muthoy-pos"
 # service-role payment RPC can activate entitlement.
 [functions.payment-webhook]
 verify_jwt = false
+
+# Supabase Auth's Send SMS hook calls this with no user JWT. Every request is
+# authenticated by its Standard Webhooks signature (SEND_SMS_HOOK_SECRET)
+# before anything else runs — see functions/auth-send-sms/signature.ts.
+[functions.auth-send-sms]
+verify_jwt = false

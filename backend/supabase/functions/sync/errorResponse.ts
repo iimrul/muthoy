@@ -8,10 +8,9 @@ export function httpErrorBody(
   const verifiedIdentity = caller?.appUserId && caller.shopId
     ? { actorUserId: caller.appUserId, shopId: caller.shopId }
     : {};
-  // A2.3. `details` carries the device authority snapshot on a device refusal,
-  // and nothing else. Spread FIRST so it can never overwrite the message, the
-  // code, or the verified identity: a snapshot is evidence the device must
-  // persist, not a place from which to redefine who the caller is.
+  // A2.3 authority details and the post-commit, server-derived recoveryShopId
+  // spread FIRST. Neither can overwrite the verified caller's actor/shop or
+  // the error code. Recovery's target is deliberately NOT called shopId.
   return {
     ...(error.details ?? {}),
     error: error.message,

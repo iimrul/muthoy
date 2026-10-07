@@ -1,9 +1,4 @@
 import { type Caller, callerShopId, HttpError } from "./_shared/auth.ts";
-import {
-  assertOwnerOnboardingIdentity,
-  DEV_HARNESS_METADATA_KEY,
-  needsDevHarnessStamp,
-} from "./_shared/devOnboarding.ts";
 import { assertBindingTarget, ensureAuthBinding } from "./_shared/identity.ts";
 import {
   prepareInstallationEnrollment,
@@ -12,19 +7,41 @@ import {
 } from "./deviceBinding.ts";
 import { assertSessionMayBindInstallation } from "./deviceGuard.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
-import { onboardOwner } from "./onboarding.ts";
+import { bindOnboardingOwnerPhone, onboardOwner } from "./onboarding.ts";
+
+/**
+ * THE Owner onboarding gate: a session whose phone Supabase verified by OTP
+ * moments ago, on every project. An email, anonymous or long-ago
+ * phone-confirmed session is refused with one message, so the refusal cannot
+ * be used to probe which identities exist.
+ *
+ * This function used to accept any authenticated JWT, which made an email or
+ * anonymous session a second route to Owner onboarding. The last exception —
+ * the DEV registration harness, admitted by a DEV-project secret — was removed
+ * by H-5: DEV and production onboard through the same proof.
+ */
+function requireFreshOwnerOtp(caller: Caller): NonNullable<Caller["freshPhoneOtp"]> {
+  if (caller.freshPhoneOtp) return caller.freshPhoneOtp;
+  throw new HttpError(
+    403,
+    "Owner onboarding requires a phone number verified by OTP",
+    "otp_required",
+  );
+}
 
 export async function linkDevice(caller: Caller, body: Record<string, unknown>) {
   const shopId = body.shopId;
   if (typeof shopId !== "string")
     throw new HttpError(400, "shopId is required");
 
-  // BEFORE anything is claimed, bound or created. This function used to accept
-  // any authenticated JWT, which made an email or anonymous session a second
-  // route to Owner onboarding on every project. Production now accepts only a
-  // Supabase-verified phone; the DEV harness is admitted solely by a
-  // server-side project secret the client cannot influence.
-  const mode = assertOwnerOnboardingIdentity(caller);
+  // BEFORE anything is claimed, bound or created.
+  const proof = requireFreshOwnerOtp(caller);
+  // H-5. An OTP registration may only create an Owner under the number this
+  // session just proved — checked here, before anything is claimed, bound or
+  // created, so a refused payload leaves no claim behind.
+  const onboarding = body.onboarding !== undefined
+    ? bindOnboardingOwnerPhone(body.onboarding, proof.phone)
+    : undefined;
   let installation: InstallationDetails | null | undefined;
   if (caller.appUserId) {
     await assertSessionMayBindInstallation(caller, shopId, caller.appUserId);
@@ -75,25 +92,7 @@ export async function linkDevice(caller: Caller, body: Record<string, unknown>) 
       }
     }
     const { error } = await supabaseAdmin.auth.admin.updateUserById(caller.authUserId, {
-      app_metadata: {
-        ...caller.raw.app_metadata,
-        shop_id: shopId,
-        // Stamped here because ensureAuthBinding is about to REWRITE this
-        // account's email to the canonical u-<appUserId>@users.muthoy.invalid
-        // address every account gets, erasing the first-run marker. Only the
-        // service role can write app_metadata, so this is both durable and
-        // unforgeable — and it is what lets a resume be recognised, and what
-        // the DEV purge selects on.
-        ...(mode === "dev_harness" ? { [DEV_HARNESS_METADATA_KEY]: true } : {}),
-      },
-    });
-    if (error) throw new HttpError(500, "Could not link device");
-  } else if (needsDevHarnessStamp(caller, mode)) {
-    // A shop already claimed by this account, admitted by the first-run email
-    // marker but never stamped — the resume of an attempt that died between
-    // the claim and the binding.
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(caller.authUserId, {
-      app_metadata: { ...caller.raw.app_metadata, [DEV_HARNESS_METADATA_KEY]: true },
+      app_metadata: { ...caller.raw.app_metadata, shop_id: shopId },
     });
     if (error) throw new HttpError(500, "Could not link device");
   }
@@ -117,8 +116,8 @@ export async function linkDevice(caller: Caller, body: Record<string, unknown>) 
     // because onboarding creates the rows first. Registration sends the payload;
     // a resume, where the shop is already on the server, omits it and skips
     // straight to the binding.
-    if (body.onboarding !== undefined) {
-      await onboardOwner(shopId, ownerUserId, body.onboarding);
+    if (onboarding !== undefined) {
+      await onboardOwner(shopId, ownerUserId, onboarding);
     }
     await assertBindingTarget(ownerUserId, shopId, "owner");
     // A recent OTP is necessary but a session already bound to a revoked

@@ -17,7 +17,7 @@ export interface AuthorityBlockedScreenProps {
   reason: AuthorityBlockReason;
   onRetry: () => void;
   onSwitchUser: () => void;
-  /** Rendered under the actions (the DEV-only authority recovery). */
+  /** Rendered under the actions. */
   children?: ReactNode;
 }
 

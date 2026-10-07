@@ -39,21 +39,6 @@ import { readDeviceAccessObjection, type DeviceAccessObjection } from './deviceR
 export interface RegisterShopInput {
   shopName: string;
   phone: string;
-  /**
-   * Declares that no phone was PROVED for this Owner, so the account gets no
-   * phone credential at all.
-   *
-   * The type admits only `null` on purpose. `shops.phone` is a business contact
-   * field, but `users.phone` is a credential — it names the account on a fresh
-   * device at phone + PIN login and carries a GLOBAL partial unique index — so
-   * the only honest alternative to "the number we just verified" is "none".
-   * Allowing an arbitrary string here would invite writing an unverified number
-   * into a credential column.
-   *
-   * Omit it, as production OTP registration does, and the verified number is
-   * used for both.
-   */
-  ownerPhone?: null;
 }
 
 export type RegistrationStatus =
@@ -523,11 +508,6 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
     throw new Error('Enter a valid Bangladeshi mobile number');
   }
 
-  // The shop's contact number and the Owner's login credential are the same
-  // value only because OTP proved that one number. A caller that proved
-  // nothing says so, and the Owner row gets no credential at all.
-  const ownerPhone = input.ownerPhone === null ? null : phone;
-
   await db.transaction(async (tx) => {
     const timestamp = new Date().toISOString();
     // shops.owner_id is intentionally NOT a foreign key (same reason as
@@ -574,7 +554,10 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
       id: userId,
       shopId,
       name: input.shopName,
-      phone: ownerPhone,
+      // The shop's contact number and the Owner's login credential are the
+      // same value because OTP proved that one number (H-5: no registration
+      // path exists that proves none).
+      phone,
       pinHash: placeholderPinHash,
       roleId: ownerRoleId,
       isActive: true,

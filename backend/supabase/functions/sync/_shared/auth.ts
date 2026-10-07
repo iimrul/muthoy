@@ -68,7 +68,11 @@ export interface Caller {
   authSessionId: string | null;
   /** A recent phone-OTP event carried by this verified JWT's current session. */
   freshPhoneOtp: { phone: string; authenticatedAt: number } | null;
-  /** Row fields the onboarding gate needs; see _shared/devOnboarding.ts. */
+  /**
+   * Account facts from the verified user row. No route grants anything on an
+   * email identity: Owner onboarding needs freshPhoneOtp (linkDevice.ts), and
+   * H-5 removed the DEV registration harness, the last route that did not.
+   */
   isAnonymous: boolean;
   email: string | null;
   emailConfirmedAt: string | null;
@@ -149,6 +153,18 @@ function freshPhoneOtpFromClaims(
   return { phone, authenticatedAt };
 }
 
+/**
+ * The bearer token each Caller was verified from.
+ *
+ * Deliberately NOT a field of Caller. Every handler receives a Caller, and
+ * none of them has any business holding the credential it arrived with — a
+ * field is one log line or one spread away from leaving the function. The one
+ * thing the token is needed for, GoTrue's own logout, is reachable only through
+ * revokeCallerSessionsGlobally below. Keyed weakly, so it lives exactly as long
+ * as the request's Caller does.
+ */
+const verifiedTokens = new WeakMap<Caller, string>();
+
 export async function verifyCallerJwt(request: Request): Promise<Caller> {
   const authorization = request.headers.get("authorization");
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
@@ -170,10 +186,6 @@ export async function verifyCallerJwt(request: Request): Promise<Caller> {
   // indistinguishable from a real one — which is why the client lost the
   // ability to create one (DECISIONS.md, H-2) and why the server now says so
   // explicitly instead of inferring it.
-  //
-  // The DEV harness is unaffected: it authenticates as a real, re-signinable
-  // email identity, and _shared/devOnboarding.ts refuses an anonymous caller on
-  // both of its routes regardless.
   if (data.user.is_anonymous === true) {
     throw new HttpError(
       403,
@@ -191,7 +203,7 @@ export async function verifyCallerJwt(request: Request): Promise<Caller> {
 
   const version = metadata.permission_version;
 
-  return {
+  const caller: Caller = {
     authUserId: data.user.id,
     appUserId: claimString(metadata, "app_user_id"),
     // NO fallback to app_user_id. custom_access_token_hook mints all six
@@ -223,6 +235,73 @@ export async function verifyCallerJwt(request: Request): Promise<Caller> {
     emailConfirmedAt: data.user.email_confirmed_at ?? null,
     raw: data.user,
   };
+  verifiedTokens.set(caller, token);
+  return caller;
+}
+
+/**
+ * Ends EVERY session of the caller's own auth account — the one this request
+ * arrived on included — through GoTrue's /logout?scope=global.
+ *
+ * That endpoint authenticates by a logged-in JWT and by nothing else:
+ * `auth.admin.signOut` takes that JWT, NOT a user id. Handing it a user id was
+ * the defect this replaced (DEV, 2026-10-05) — GoTrue answered 403 bad_jwt, and
+ * Owner PIN recovery failed after the OTP had been spent, on every project.
+ *
+ * False for a Caller this module did not verify, or when GoTrue refuses. The
+ * token is never logged, stored or returned.
+ *
+ * Access tokens already issued stay signature-valid until they expire —
+ * Supabase JWTs are not revocable — but their sessions are gone: GoTrue
+ * refuses them (and so does verifyCallerJwt above), and they cannot refresh.
+ */
+export async function revokeCallerSessionsGlobally(caller: Caller): Promise<boolean> {
+  const token = verifiedTokens.get(caller);
+  if (!token) return false;
+  const { error } = await supabaseAdmin.auth.admin.signOut(token, "global");
+  return !error;
+}
+
+/**
+ * Ends exactly the ONE session a just-minted access token belongs to —
+ * "local" scope, never "global". For recoverPin's cleanup when something
+ * AFTER minting a fresh session fails: that account's other sessions are
+ * already gone by this point, so "global" would merely restate that, and
+ * reaching for it instead of "local" would stop being true the moment that
+ * stops being the case. This is the one call narrow enough for the job.
+ *
+ * Logs its own failure, generically and without the token or any id. Kept
+ * here rather than in the caller: recoverPin.ts is checked elsewhere to hand
+ * the raw PIN to bcrypt and nowhere else, by asserting it has no console
+ * call AT ALL — the bluntest guard against that call ever picking up a
+ * secret. A fault report belongs beside the call that can fail, not inside
+ * the one file that must stay provably silent.
+ */
+export async function revokeMintedSessionLocally(accessToken: string): Promise<boolean> {
+  try {
+    const { error } = await supabaseAdmin.auth.admin.signOut(accessToken, "local");
+    if (!error) return true;
+  } catch {
+    // auth-js returns AuthErrors but rethrows transport failures. Both have
+    // the same bounded report; neither may replace the committed-PIN result.
+  }
+  console.error("sync/recover-pin cleanup failed: session was not revoked");
+  return false;
+}
+
+/**
+ * Ends every session of ONE auth user, by id, for the paths that hold no JWT
+ * of the user they must cut off: an auth-account rebind and signOutAppUser.
+ *
+ * h5_revoke_auth_user_sessions (20261005000000) deletes the user's sessions —
+ * their refresh tokens cascade — and nothing else. Same caveat as above for
+ * access tokens already issued.
+ */
+export async function revokeAuthUserSessions(authUserId: string): Promise<boolean> {
+  const { error } = await supabaseAdmin.rpc("h5_revoke_auth_user_sessions", {
+    p_auth_user_id: authUserId,
+  });
+  return !error;
 }
 
 export function callerShopId(caller: Caller): string | null {
@@ -380,6 +459,35 @@ export async function assertCallerCurrent(caller: Caller): Promise<CallerRecord>
 }
 
 /**
+ * The stable auth-bound principal for a changed actor, from the authoritative
+ * Multi-Shop rows — never from a JWT claim, since this function is called
+ * with nothing but an id (push.ts holds no Caller for the user who changed).
+ *
+ * `shop_memberships.actor_user_id` is the per-shop `users.id` that may have
+ * just been edited; `principal_user_id` is the one identity `auth_bindings`
+ * actually keys on. Every live user has a row here — a direct, single-shop
+ * user as a self-reference (principal = actor), a Multi-Shop owner's
+ * secondary-shop actor as a distinct row pointing at their primary identity —
+ * so one query answers both without a special case for either.
+ *
+ * Null for anything this cannot answer confidently: a missing row, or more
+ * than one (`.maybeSingle()` itself refuses that). Guessing the wrong
+ * principal here would revoke a stranger's sessions, which is worse than
+ * revoking none.
+ */
+async function resolvePrincipalForActor(actorUserId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from("shop_memberships")
+    .select("principal_user_id")
+    .eq("actor_user_id", actorUserId)
+    .maybeSingle();
+  if (error || !data) {
+    return null;
+  }
+  return data.principal_user_id;
+}
+
+/**
  * Cuts every live session for an app user — access tokens AND refresh tokens.
  *
  * A permission_version bump alone stops the CURRENT access token at its next
@@ -390,15 +498,34 @@ export async function assertCallerCurrent(caller: Caller): Promise<CallerRecord>
  * Best-effort by design: it runs AFTER the authoritative change is committed,
  * and a failure here must not roll that change back — the database is already
  * the source of truth for whether the user may act.
+ *
+ * Best-effort is not the same as inert. This used to hand the user id to
+ * `auth.admin.signOut`, which takes a JWT, and ignore the 403 that came back —
+ * so no session was ever cut (DEV, 2026-10-05). A failure is now at least
+ * reported, without naming anybody.
+ *
+ * It also used to read `auth_bindings` by `appUserId` directly, which is only
+ * the PRINCIPAL's id. Under Multi-Shop, `appUserId` here is whichever actor
+ * row `push.ts` just wrote — for a Multi-Shop owner acting in a secondary
+ * shop, that is a DIFFERENT row from the one `auth_bindings` keys on, so the
+ * lookup silently found nothing and no session was ever cut for them either.
  */
 export async function signOutAppUser(appUserId: string): Promise<void> {
+  const principalUserId = await resolvePrincipalForActor(appUserId);
+  if (!principalUserId) {
+    console.error("sync/sign-out failed: sessions were not revoked");
+    return;
+  }
   const { data, error } = await supabaseAdmin
     .from("auth_bindings")
     .select("auth_user_id")
-    .eq("app_user_id", appUserId)
+    .eq("app_user_id", principalUserId)
     .maybeSingle();
   if (error || !data) {
+    console.error("sync/sign-out failed: sessions were not revoked");
     return;
   }
-  await supabaseAdmin.auth.admin.signOut(data.auth_user_id, "global");
+  if (!(await revokeAuthUserSessions(data.auth_user_id))) {
+    console.error("sync/sign-out failed: sessions were not revoked");
+  }
 }

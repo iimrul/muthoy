@@ -29,14 +29,11 @@ are all removed (H-2, 2026-09-06) and must not return; `dev/README.md` records
 why, and `tests/dev-production-safety*` fails the build if any of them comes
 back.
 
-Until H-5 configures a real OTP provider, a **temporary DEV registration
-harness** (`dev/devRegistrationHarness.tsx`) keeps fresh local registration
-testable. It skips only the SMS code and then joins the canonical path above at
-`createShopAndOwner`; it is not a second path. `metro.config.js` resolves it to
-an inert stub in every non-dev bundle, so no release build contains it, and the
-DEV Owner it creates has a **null** phone — nothing claims a verification that
-did not happen. **H-5 removes the harness before RC**; `dev/README.md` carries
-the removal checklist.
+The temporary DEV registration harness that kept registration testable before
+a real OTP provider existed is removed too (H-5, 2026-10-06), on the client and
+on the server. On the DEV project, register or recover without an SMS by using
+its Supabase test OTP numbers (fixed codes; Auth never calls the SMS hook for
+them); every other number gets a real SMS. `dev/README.md` has the details.
 
 A successful refreshed Owner token requires `app_user_id`,
 `principal_user_id`, `shop_id`, `role=owner`, `permission_version`, and

@@ -87,14 +87,15 @@ RC fresh-install/upgrade/offline/multi-device matrix.
 
 DEV bypass/debug removal is DONE in code (H-2, 2026-09-06) — the Skip-OTP entry,
 its anonymous sign-in, the owner-link repair, and the B4 build-marker log are
-gone, with static and behavioural guards against their return. A release-bundle
-grep on a native rebuild is still owed.
+gone, with static and behavioural guards against their return. A release-mode
+JS bundle (`expo export`) was grepped clean on 2026-10-06; a grep of a native
+release build is still owed.
 
-Fresh local registration stays testable through a temporary DEV harness that
-skips only the SMS code and then runs the canonical onboarding path. It is kept
-out of every non-dev bundle by `apps/mobile/metro.config.js` rather than by a
-runtime flag, and **H-5 deletes it** when a real OTP provider lands; the removal
-checklist is in `apps/mobile/dev/README.md`.
+The temporary DEV registration harness that followed it is deleted too (H-5,
+2026-10-06), client and server: every project onboards an Owner only behind a
+fresh phone OTP. On the DEV project, register or recover without an SMS through
+Supabase test OTP numbers (fixed codes kept outside Git; Auth never calls the
+SMS hook for them) — see `apps/mobile/dev/README.md`.
 
 ## Prerequisites
 

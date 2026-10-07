@@ -1,4 +1,4 @@
-import { HttpError } from "./auth.ts";
+import { HttpError, revokeAuthUserSessions } from "./auth.ts";
 import type { ServerAuthTiming } from "./authTiming.ts";
 import { supabaseAdmin, supabaseAnon } from "./supabaseAdmin.ts";
 
@@ -149,11 +149,9 @@ async function rebindAuthUser(
   oldAuthUserId: string,
   newAuthUserId: string,
 ): Promise<void> {
-  const { error: signOutError } = await supabaseAdmin.auth.admin.signOut(
-    oldAuthUserId,
-    "global",
-  );
-  if (signOutError) {
+  // By id: nothing here holds a JWT of the OLD account to log out with. A
+  // failure stops the rebind before the identity moves.
+  if (!(await revokeAuthUserSessions(oldAuthUserId))) {
     throw new HttpError(500, "Could not resolve account");
   }
 

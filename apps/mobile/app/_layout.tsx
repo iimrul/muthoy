@@ -49,7 +49,6 @@ import { NavigationBoundary } from '../components/navigation/NavigationBoundary'
 import { ToastHost } from '../components/ui/Toast';
 import { DatabaseRecoveryScreen } from '../components/database/DatabaseRecoveryScreen';
 import { DatabaseKeyUnrecoverableError, DatabaseRecoveryPendingError } from '../db/errors';
-import { DevAuthorityRecovery } from '../dev/devAuthorityRecovery';
 import { AuthorityBlockedScreen } from '../components/auth/AuthorityBlockedScreen';
 import { AuthStatusScreen } from '../components/auth/AuthStatusScreen';
 import { BrandLoader } from '../components/auth/BrandLoader';
@@ -363,15 +362,6 @@ export default function RootLayout() {
   // effects and reads.
   if (authorityTransitioning || (session && !authorityAllowed)) {
     const gate = authorityGate?.epoch === sessionEpoch ? authorityGate : null;
-    // DEV-only (a release bundle resolves this import to an inert stub), and
-    // still only for an Owner session, exactly as before.
-    const devRecovery = session?.role === 'owner' ? (
-      <DevAuthorityRecovery
-        shopId={session.shopId}
-        ownerUserId={session.userId}
-        onRecovered={() => setAuthorityRecoveryNonce((value) => value + 1)}
-      />
-    ) : null;
 
     // Closed for a reason the person can act on. The navigator stays
     // unmounted: "Try again" re-runs the same check (the nonce restarts the
@@ -383,9 +373,7 @@ export default function RootLayout() {
           reason={gate.reason}
           onRetry={() => setAuthorityRecoveryNonce((value) => value + 1)}
           onSwitchUser={switchUser}
-        >
-          {devRecovery}
-        </AuthorityBlockedScreen>
+        />
       );
     }
 
@@ -393,9 +381,7 @@ export default function RootLayout() {
       <BrandLoader
         title={t('gateCheckingTitle')}
         message={t(gate?.status === 'retrying' ? 'gateRetryingBody' : 'gateCheckingBody')}
-      >
-        {devRecovery}
-      </BrandLoader>
+      />
     );
   }
 

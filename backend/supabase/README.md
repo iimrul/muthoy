@@ -49,7 +49,9 @@ The older warning that deployed `sync` was v10 and might predate the H-2/H-5
 onboarding gate is **withdrawn**: the pre-deploy function source was downloaded
 on 2026-09-07 and v12 already contained the two-condition DEV gate in
 `_shared/devOnboarding.ts`. Production `link-device` was never accepting an
-arbitrary authenticated JWT for Owner onboarding.
+arbitrary authenticated JWT for Owner onboarding. (Historical: H-5 deleted that
+DEV gate on 2026-10-06 — `link-device` now requires a fresh phone OTP on every
+project, DEV included.)
 
 M-5 remains accepted on a narrow boundary: Edge requests pass through
 `assertCallerCurrent`, and hosted API roles have no direct table data grants.

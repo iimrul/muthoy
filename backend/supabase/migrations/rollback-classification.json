@@ -28,7 +28,10 @@
     "20260907020000_h7_fix_pass_b.sql": "C",
     "20260909000000_h7_actor_binding_staff_reactivation.sql": "B",
     "20260923000000_a23_device_registry.sql": "B",
-    "20260926000000_a23_persistent_enrollment_holds.sql": "B"
+    "20260926000000_a23_persistent_enrollment_holds.sql": "B",
+    "20261001000000_h5_auth_sms_dispatch.sql": "B",
+    "20261004000000_h5_sms_dispatch_claim_owner.sql": "C",
+    "20261005000000_h5_revoke_auth_user_sessions.sql": "B"
   },
   "postgresDeclaredOverrides": [
     "20260813000000_initial_schema.sql"

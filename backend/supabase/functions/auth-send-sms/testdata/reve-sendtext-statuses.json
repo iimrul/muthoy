@@ -1,0 +1,117 @@
+{
+  "about": "REVE SMS sendtext reply statuses: the evidence reve.ts is pinned to (reve.test.ts). Sanitized. No API key, secret key, Sender ID, phone number, host, IP address or port is recorded here; neither vendor source is reproduced beyond its status replies. Every status rests on vendor material, and each entry names which.",
+  "sources": {
+    "reve-api-pdf": "REVE SMS 'SMS API' PDF (4 pages), supplied by the founder on 2026-09-29. Page 2, 'REVE SMS API', 'Submitted API' (sendtext): the sample reply and the 'API Response Status' table. The table's typographic quotes are normalized to JSON; its two spellings of the success Text, ACCEPTD and Acceptd, are kept as printed.",
+    "reve-postman-collection": "REVE's Postman collection 'SMSServer' (Postman v2.1, 21072 bytes, sha256 prefix 2bd168d92e845b8b), supplied by the founder on 2026-10-02 as REVE's official collection. Collection description, 'Sample Response for submit': one sample reply per status, copied exactly. The file does not name REVE itself and its sample requests address raw IP endpoints, so its REVE origin rests on the founder's attestation; its API surface (sendtext and getstatus, the same five request fields, Status/Text/Message_ID replies) and its codes 0, 1, 101, 108, 109 and 114 agree with the PDF above. Its sample requests carry API keys, secret keys, Sender IDs, phone numbers and raw IP endpoints; none of them is reproduced here."
+  },
+  "sendtext": [
+    {
+      "status": "0",
+      "source": "reve-api-pdf",
+      "case": "If request successful",
+      "body": { "Status": "0", "Text": "Acceptd" }
+    },
+    {
+      "status": "0",
+      "source": "reve-api-pdf",
+      "case": "Sample reply to a submitted message",
+      "body": { "Status": "0", "Text": "ACCEPTD", "Message_ID": "444" }
+    },
+    {
+      "status": "1",
+      "source": "reve-api-pdf",
+      "case": "If request failed",
+      "body": { "Status": "1", "Text": "REJECTD" }
+    },
+    {
+      "status": "101",
+      "source": "reve-api-pdf",
+      "case": "if internal server error occurs",
+      "body": { "Status": "101", "Text": "REJECTD" }
+    },
+    {
+      "status": "108",
+      "source": "reve-api-pdf",
+      "case": "If wrong password/ not provided",
+      "body": { "Status": "108", "Text": "REJECTD" }
+    },
+    {
+      "status": "109",
+      "source": "reve-api-pdf",
+      "case": "If user not provided/Deleted",
+      "body": { "Status": "109", "Text": "REJECTD" }
+    },
+    {
+      "status": "114",
+      "source": "reve-api-pdf",
+      "case": "If content not provided",
+      "body": { "Status": "114", "Text": "REJECTD" }
+    },
+    {
+      "status": "0",
+      "source": "reve-postman-collection",
+      "case": "ACCEPTD",
+      "body": { "Status": "0", "Text": "ACCEPTD", "Message_ID": "1373129" }
+    },
+    {
+      "status": "1",
+      "source": "reve-postman-collection",
+      "case": "REJECTD",
+      "body": { "Status": "1", "Text": "REJECTD", "Message_ID": "1373129", "Delivery Time": "0" }
+    },
+    {
+      "status": "101",
+      "source": "reve-postman-collection",
+      "case": "Internal server error",
+      "body": { "Status": "101", "Text": "Internal server error", "Message_ID": "" }
+    },
+    {
+      "status": "108",
+      "source": "reve-postman-collection",
+      "case": "Invalid secret key",
+      "body": { "Status": "108", "Text": "Invalid secret key", "Message_ID": "" }
+    },
+    {
+      "status": "109",
+      "source": "reve-postman-collection",
+      "case": "Invalid api key/secret key",
+      "body": { "Status": "109", "Text": "Invalid api key/secret key", "Message_ID": "" }
+    },
+    {
+      "status": "114",
+      "source": "reve-postman-collection",
+      "case": "Inappropriate request parameter",
+      "body": { "Status": "114", "Text": "Inappropriate request parameter", "Message_ID": "" }
+    },
+    {
+      "status": "136",
+      "source": "reve-postman-collection",
+      "case": "Profile/Provider is blocked",
+      "body": { "Status": "136", "Text": "Profile/Provider is blocked", "Message_ID": "" }
+    },
+    {
+      "status": "137",
+      "source": "reve-postman-collection",
+      "case": "TPS limit exceeded",
+      "body": { "Status": "137", "Text": "TPS limit exceeded", "Message_ID": "" }
+    },
+    {
+      "status": "151",
+      "source": "reve-postman-collection",
+      "case": "Invalid traffic type",
+      "body": { "Status": "151", "Text": "Invalid traffic type", "Message_ID": "" }
+    },
+    {
+      "status": "170",
+      "source": "reve-postman-collection",
+      "case": "Invalid Content-Type, support only json/xml",
+      "body": { "Status": "170", "Text": "Invalid Content-Type, support only json/xml", "Message_ID": "" }
+    },
+    {
+      "status": "5400",
+      "source": "reve-postman-collection",
+      "case": "IP restricted",
+      "body": { "Status": "5400", "Text": "IP restricted", "Message_ID": "" }
+    }
+  ]
+}

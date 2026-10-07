@@ -46,6 +46,10 @@ export default function DeviceLoginScreen() {
   const { role, reason } = useLocalSearchParams<{ role?: string; reason?: string }>();
   const isOwner = role === 'owner';
   const isRelink = reason === 'relink';
+  // H-5. From Forgot PIN, when the server confirmed the PIN changed but could
+  // not finish signing the device in automatically — see deviceAuth.ts's
+  // `pin_changed_login_required`. The new PIN already works here.
+  const isPinRecovered = reason === 'pin-recovered';
   const { t } = useI18n();
   const font = useCopyFont();
 
@@ -141,6 +145,8 @@ export default function DeviceLoginScreen() {
     />
   ) : isRelink ? (
     <AuthNotice tone="info" message={t('deviceLoginRelinkNotice')} />
+  ) : isPinRecovered ? (
+    <AuthNotice tone="info" message={t('authErrorPinChangedLoginRequired')} />
   ) : null;
 
   return (

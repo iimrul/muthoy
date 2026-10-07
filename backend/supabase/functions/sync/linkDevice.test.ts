@@ -21,7 +21,10 @@ vi.mock("./_shared/identity.ts", () => ({
   assertBindingTarget: mocks.assertBindingTarget,
   ensureAuthBinding: mocks.ensureAuthBinding,
 }));
-vi.mock("./onboarding.ts", () => ({
+// The real H-5 phone binder, the mocked RPC: what reaches onboardOwner is the
+// payload link-device actually decided to send.
+vi.mock("./onboarding.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./onboarding.ts")>()),
   onboardOwner: mocks.onboardOwner,
 }));
 vi.mock("./deviceBinding.ts", () => ({
@@ -42,7 +45,9 @@ import { linkDevice } from "./linkDevice.ts";
 const SHOP_ID = "10000000-0000-4000-8000-000000000001";
 const OWNER_ID = "10000000-0000-4000-8000-000000000002";
 const AUTH_ID = "10000000-0000-4000-8000-000000000003";
-const ONBOARDING = { safe: "payload" };
+// The Owner carries the number the caller below proved by OTP — the only
+// shape an honest registration can send (H-5).
+const ONBOARDING = { safe: "payload", owner: { id: OWNER_ID, phone: "+8801712345678" } };
 
 // A production Owner: Supabase itself verified this phone by OTP. Every test
 // that is not specifically about the onboarding gate uses this, because it is
@@ -80,8 +85,7 @@ function claimBuilder(
 }
 
 beforeEach(() => {
-  // Project secrets are per-test. Left set, one gate test would silently make
-  // the next one's "production project" a DEV project.
+  // Environment stubs are per-test; see the removed-switch guard below.
   vi.unstubAllEnvs();
   vi.clearAllMocks();
   mocks.callerShopId.mockReturnValue(null);
@@ -225,7 +229,9 @@ describe("link-device registration order", () => {
   // link-device accepted any authenticated JWT, so an email or anonymous
   // session was a second route to Owner onboarding on every project.
   describe("the onboarding identity gate", () => {
-    const devHarnessCaller = {
+    // The identity the removed DEV registration harness (H-2 → H-5) signed in
+    // with: a confirmed email account and no phone proof.
+    const harnessShapedCaller = {
       ...caller,
       freshPhoneOtp: null,
       email: "dev-0707070707070707@harness.muthoy.invalid",
@@ -309,70 +315,35 @@ describe("link-device registration order", () => {
       expect(mocks.onboardOwner).not.toHaveBeenCalled();
     });
 
-    // The blocker this gate exists for: a DEV BUILD talking to production. The
-    // client's __DEV__ flag is not part of the decision, so production refuses
-    // the harness identity outright.
-    it("denies the DEV harness identity on a production project", async () => {
-      await expect(attempt(devHarnessCaller))
-        .rejects.toMatchObject({ status: 403, code: "otp_required" });
+    // A DEV build is no longer special anywhere: the harness identity is just an
+    // email account, refused like any other — before AND after link-device used
+    // to stamp it, so an account created by the old harness cannot onboard again.
+    it.each([
+      ["first-run harness address", {}],
+      ["stamped by the old link-device", { app_metadata: { dev_harness: true }, is_anonymous: false }],
+    ])("denies the removed DEV harness identity (%s)", async (_label, rawOverride) => {
+      await expect(attempt({
+        ...harnessShapedCaller,
+        ...(Object.keys(rawOverride).length > 0 ? { raw: rawOverride } : {}),
+      } as unknown as Caller)).rejects.toMatchObject({ status: 403, code: "otp_required" });
       expect(mocks.onboardOwner).not.toHaveBeenCalled();
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.updateUserById).not.toHaveBeenCalled();
     });
 
-    it("denies an anonymous JWT even on the DEV project", async () => {
+    // Guard for the removal itself: the DEV-project switch that admitted the
+    // harness is gone from the code, so setting it again grants nothing.
+    it("grants nothing even with the removed DEV onboarding switch set", async () => {
       vi.stubEnv("MUTHOY_ENVIRONMENT", "development");
       vi.stubEnv("MUTHOY_DEV_ONBOARDING", "1");
+      await expect(attempt(harnessShapedCaller))
+        .rejects.toMatchObject({ status: 403, code: "otp_required" });
       await expect(attempt({
-        ...devHarnessCaller,
+        ...harnessShapedCaller,
         isAnonymous: true,
         raw: { app_metadata: {}, is_anonymous: true },
       } as unknown as Caller)).rejects.toMatchObject({ status: 403, code: "otp_required" });
       expect(mocks.onboardOwner).not.toHaveBeenCalled();
-    });
-
-    it("denies a generic email identity even on the DEV project", async () => {
-      vi.stubEnv("MUTHOY_ENVIRONMENT", "development");
-      vi.stubEnv("MUTHOY_DEV_ONBOARDING", "1");
-      await expect(attempt({
-        ...devHarnessCaller,
-        email: "someone@example.com",
-      } as unknown as Caller)).rejects.toMatchObject({ status: 403, code: "otp_required" });
-      expect(mocks.onboardOwner).not.toHaveBeenCalled();
-    });
-
-    it("requires BOTH project secrets, not either one", async () => {
-      vi.unstubAllEnvs();
-      vi.stubEnv("MUTHOY_ENVIRONMENT", "development");
-      await expect(attempt(devHarnessCaller)).rejects.toMatchObject({ code: "otp_required" });
-
-      vi.unstubAllEnvs();
-      vi.stubEnv("MUTHOY_DEV_ONBOARDING", "1");
-      await expect(attempt(devHarnessCaller)).rejects.toMatchObject({ code: "otp_required" });
-    });
-
-    it("allows the DEV harness identity on the DEV project and stamps it durably", async () => {
-      vi.stubEnv("MUTHOY_ENVIRONMENT", "development");
-      vi.stubEnv("MUTHOY_DEV_ONBOARDING", "1");
-      await expect(attempt(devHarnessCaller)).resolves.toEqual({ shopId: SHOP_ID });
-
-      // ensureAuthBinding is about to rewrite this account's email, so the
-      // marker has to move somewhere only the service role can write.
-      expect(mocks.updateUserById).toHaveBeenCalledWith(
-        AUTH_ID,
-        { app_metadata: { shop_id: SHOP_ID, dev_harness: true } },
-      );
-      expect(mocks.onboardOwner).toHaveBeenCalledWith(SHOP_ID, OWNER_ID, ONBOARDING);
-    });
-
-    it("recognises a resumed harness caller by the stamp once the email is gone", async () => {
-      vi.stubEnv("MUTHOY_ENVIRONMENT", "development");
-      vi.stubEnv("MUTHOY_DEV_ONBOARDING", "1");
-      // What the account looks like after link-device rewrote its address.
-      await expect(attempt({
-        ...devHarnessCaller,
-        email: `u-${OWNER_ID}@users.muthoy.invalid`,
-        raw: { app_metadata: { dev_harness: true }, is_anonymous: false },
-      } as unknown as Caller)).resolves.toEqual({ shopId: SHOP_ID });
-      expect(mocks.onboardOwner).toHaveBeenCalledOnce();
     });
 
     it("never stamps a production OTP owner", async () => {
@@ -396,5 +367,121 @@ describe("link-device registration order", () => {
       message: "This account cannot be linked to that shop",
     });
     expect(mocks.ensureAuthBinding).not.toHaveBeenCalled();
+  });
+});
+
+// H-5. The number Supabase verified by OTP is the number the onboarded Owner
+// gets. Before this, a tampered client could prove its own number and register
+// an Owner under somebody else's — locking the real holder out of registering
+// with phone_already_registered while keeping a phone + PIN sign-in under it.
+describe("the verified OTP phone binds the onboarded Owner", () => {
+  function payloadWithOwnerPhone(phone: unknown) {
+    return { ...ONBOARDING, owner: { id: OWNER_ID, phone } };
+  }
+
+  function expectNothingClaimedOrBound() {
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.updateUserById).not.toHaveBeenCalled();
+    expect(mocks.onboardOwner).not.toHaveBeenCalled();
+    expect(mocks.assertBindingTarget).not.toHaveBeenCalled();
+    expect(mocks.prepareInstallationEnrollment).not.toHaveBeenCalled();
+    expect(mocks.ensureAuthBinding).not.toHaveBeenCalled();
+    expect(mocks.tryBindSession).not.toHaveBeenCalled();
+  }
+
+  it.each([
+    ["somebody else's number", "+8801812345678"],
+    ["a number one digit off", "+8801712345679"],
+    ["the same last ten digits under a foreign code", "+911712345678"],
+    ["no number at all", null],
+    ["an empty number", ""],
+    ["a non-string number", 8801712345678],
+  ])("refuses an Owner with %s before anything is claimed", async (_label, phone) => {
+    await expect(linkDevice(caller, {
+      shopId: SHOP_ID,
+      ownerUserId: OWNER_ID,
+      onboarding: payloadWithOwnerPhone(phone),
+    })).rejects.toMatchObject({ status: 403, code: "onboarding_phone_mismatch" });
+    expectNothingClaimedOrBound();
+  });
+
+  it("refuses an Owner with no phone field at all", async () => {
+    await expect(linkDevice(caller, {
+      shopId: SHOP_ID,
+      ownerUserId: OWNER_ID,
+      onboarding: { ...ONBOARDING, owner: { id: OWNER_ID } },
+    })).rejects.toMatchObject({ status: 403, code: "onboarding_phone_mismatch" });
+    expectNothingClaimedOrBound();
+  });
+
+  it("refuses an onboarding payload with no Owner object", async () => {
+    await expect(linkDevice(caller, {
+      shopId: SHOP_ID,
+      ownerUserId: OWNER_ID,
+      onboarding: { safe: "payload" },
+    })).rejects.toMatchObject({ status: 400, code: "onboarding_invalid" });
+    expectNothingClaimedOrBound();
+  });
+
+  it("refuses when the session proved a foreign number, even one sharing the last ten digits", async () => {
+    await expect(linkDevice({
+      ...caller,
+      freshPhoneOtp: { phone: "+911712345678", authenticatedAt: 1_800_000_000 },
+    } as Caller, {
+      shopId: SHOP_ID,
+      ownerUserId: OWNER_ID,
+      onboarding: ONBOARDING,
+    })).rejects.toMatchObject({ status: 403, code: "onboarding_phone_mismatch" });
+    expectNothingClaimedOrBound();
+  });
+
+  it.each([
+    ["Supabase's stored form against a local spelling", "8801712345678", "01712345678"],
+    ["E.164 against the stored form", "+8801712345678", "8801712345678"],
+    ["the canonical form on both sides", "+8801712345678", "+8801712345678"],
+  ])("accepts %s and stores the canonical verified number", async (_label, verified, ownerPhone) => {
+    await expect(linkDevice({
+      ...caller,
+      freshPhoneOtp: { phone: verified, authenticatedAt: 1_800_000_000 },
+    } as Caller, {
+      shopId: SHOP_ID,
+      ownerUserId: OWNER_ID,
+      onboarding: payloadWithOwnerPhone(ownerPhone),
+    })).resolves.toEqual({ shopId: SHOP_ID });
+
+    expect(mocks.onboardOwner).toHaveBeenCalledWith(SHOP_ID, OWNER_ID, {
+      safe: "payload",
+      owner: { id: OWNER_ID, phone: "+8801712345678" },
+    });
+  });
+
+  it("never modifies the request's own payload", async () => {
+    const onboarding = payloadWithOwnerPhone("01712345678");
+    await linkDevice(caller, { shopId: SHOP_ID, ownerUserId: OWNER_ID, onboarding });
+    expect(onboarding.owner.phone).toBe("01712345678");
+  });
+
+  it("leaves a resume that sends no onboarding payload exactly as it was", async () => {
+    mocks.callerShopId.mockReturnValue(SHOP_ID);
+    await expect(linkDevice({ ...caller, shopId: SHOP_ID }, {
+      shopId: SHOP_ID,
+      ownerUserId: OWNER_ID,
+    })).resolves.toEqual({ shopId: SHOP_ID });
+    expect(mocks.onboardOwner).not.toHaveBeenCalled();
+    expect(mocks.ensureAuthBinding).toHaveBeenCalledWith(OWNER_ID, AUTH_ID);
+  });
+
+  it("refuses a phoneless Owner from a session that proved no number", async () => {
+    await expect(linkDevice({
+      ...caller,
+      freshPhoneOtp: null,
+      email: "dev-0707070707070707@harness.muthoy.invalid",
+      emailConfirmedAt: "2026-09-06T09:15:00.000Z",
+    } as unknown as Caller, {
+      shopId: SHOP_ID,
+      ownerUserId: OWNER_ID,
+      onboarding: payloadWithOwnerPhone(null),
+    })).rejects.toMatchObject({ status: 403, code: "otp_required" });
+    expectNothingClaimedOrBound();
   });
 });

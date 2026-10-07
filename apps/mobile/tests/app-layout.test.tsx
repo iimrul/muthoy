@@ -67,8 +67,6 @@ vi.mock('react-native', () => ({
   AppState: { addEventListener: native.addEventListener, currentState: 'active' },
   Text: ({ children }: { children?: ReactNode }) => createElement('span', null, children),
   View: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
-  // The root layout mounts dev/devAuthorityRecovery on the closed gate for an
-  // owner session, so the mock has to cover what that component renders.
   // Auth parity: the gate's status screens render real buttons (Try again,
   // Switch user) inside the shared auth shell, so presses are wired through.
   Pressable: ({ children, onPress, accessibilityLabel, disabled }: {

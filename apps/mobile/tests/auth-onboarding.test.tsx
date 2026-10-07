@@ -5,7 +5,7 @@
 // languages. The network and SQLite edges are mocked; everything the screens
 // decide (what they send, where they go, what they say) is real.
 
-import { createElement } from 'react';
+import { createElement, Fragment } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -29,7 +29,6 @@ const deps = vi.hoisted(() => ({
   linkDeviceToShop: vi.fn(),
   pullChanges: vi.fn(),
   refreshBillingStatus: vi.fn(),
-  registerDevOwner: vi.fn(),
 }));
 
 vi.mock('expo-router', () => ({
@@ -62,14 +61,13 @@ vi.mock('../sync/linkDevice', () => {
 });
 vi.mock('../sync/pull', () => ({ pullChanges: deps.pullChanges }));
 vi.mock('../sync/billing', () => ({ refreshBillingStatus: deps.refreshBillingStatus }));
-// The DEV harness's own flow reaches SQLite and Supabase; its rendering rules
-// are H-2's business (tests/dev-production-safety.render.test.tsx).
-vi.mock('../dev/devOwnerOnboarding', () => ({ registerDevOwner: deps.registerDevOwner }));
 
 const { useLocaleStore } = await import('../state/localeStore');
 const { useSessionStore } = await import('../state/sessionStore');
 const { catalog } = await import('../i18n/catalog');
 const { LinkDeviceServerError } = await import('../sync/linkDevice');
+const { OtpCodeRejectedError, OtpRateLimitedError, OtpVerifyFailedError } = await import('../sync/otpPolicy');
+const { ToastHost, clearToasts } = await import('../components/ui/Toast');
 const { default: RoleSelectScreen } = await import('../app/(auth)/role-select');
 const { default: RegisterScreen } = await import('../app/(auth)/register');
 const { default: OtpVerifyScreen } = await import('../app/(auth)/otp-verify');
@@ -100,6 +98,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  clearToasts();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -200,6 +199,19 @@ describe('Registration', () => {
     expect(deps.push).not.toHaveBeenCalled();
   });
 
+  it('names a rate limit instead of a generic failure, and stays put', async () => {
+    deps.sendOtp.mockRejectedValueOnce(new OtpRateLimitedError());
+    render(createElement(RegisterScreen));
+    fireEvent.change(screen.getByLabelText('Shop Name'), { target: { value: 'Rahim Pharmacy' } });
+    fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '1812345678' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    });
+    expect(await screen.findByText(catalog.en.otpRateLimited)).toBeTruthy();
+    expect(screen.queryByText(catalog.en.otpSendFailed)).toBeNull();
+    expect(deps.push).not.toHaveBeenCalled();
+  });
+
   it('keeps production fields only: no owner name, no pre-OTP account check, no fake links', () => {
     render(createElement(RegisterScreen));
     expect(screen.queryByText(/Your Name/i)).toBeNull();
@@ -243,8 +255,33 @@ describe('OTP verification', () => {
     expect(deps.markShopCloudLinked).toHaveBeenCalledWith('shop-new');
   });
 
+  it.each(['en', 'bn'] as const)(
+    'tells the owner to check their messages, never that an SMS was sent (%s)',
+    (locale) => {
+      // The hook may have answered success for a send whose outcome nobody
+      // knows yet (pending, ambiguous); the screen cannot tell, so it never says.
+      useLocaleStore.setState({ locale });
+      render(createElement(OtpVerifyScreen));
+      expect(screen.getByText(catalog[locale].otpCheckMessages)).toBeTruthy();
+    },
+  );
+
+  it('confirms a resend as requested — never as sent', async () => {
+    vi.useFakeTimers();
+    render(createElement(Fragment, null, createElement(OtpVerifyScreen), createElement(ToastHost)));
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: catalog.en.otpResend }));
+    });
+    expect(deps.resendOtp).toHaveBeenCalledWith('+8801712345678');
+    expect(screen.getByText(catalog.en.otpResendRequested)).toBeTruthy();
+    expect(screen.getByText(catalog.en.otpCheckMessages)).toBeTruthy();
+  });
+
   it('says a wrong code is wrong, clears it, and keeps going', async () => {
-    deps.verifyOtp.mockRejectedValueOnce(new Error('Token has invalid format'));
+    deps.verifyOtp.mockRejectedValueOnce(new OtpCodeRejectedError());
     render(createElement(OtpVerifyScreen));
     await act(async () => {
       fireEvent.change(otpField(), { target: { value: '111111' } });
@@ -254,20 +291,89 @@ describe('OTP verification', () => {
     expect(deps.createShopAndOwner).not.toHaveBeenCalled();
   });
 
-  it('counts the resend down in the active language, then resends', async () => {
+  // H-5. Supabase refuses a wrong code and an expired one identically, so the
+  // screen tells them apart by when the code was sent.
+  it('calls a refused code expired once its five-minute lifetime has passed', async () => {
+    vi.useFakeTimers();
+    deps.verifyOtp.mockRejectedValueOnce(new OtpCodeRejectedError());
+    render(createElement(OtpVerifyScreen));
+    act(() => {
+      vi.advanceTimersByTime(300_000);
+    });
+    await act(async () => {
+      fireEvent.change(otpField(), { target: { value: '111111' } });
+    });
+    expect(screen.getByText(catalog.en.otpExpired)).toBeTruthy();
+    expect(screen.queryByText(catalog.en.otpIncorrect)).toBeNull();
+  });
+
+  it('never calls a code wrong when it could not be checked at all', async () => {
+    deps.verifyOtp.mockRejectedValueOnce(new OtpVerifyFailedError());
+    render(createElement(OtpVerifyScreen));
+    await act(async () => {
+      fireEvent.change(otpField(), { target: { value: '123456' } });
+    });
+    expect(await screen.findByText(catalog.en.otpVerifyFailed)).toBeTruthy();
+    expect(screen.queryByText(catalog.en.otpIncorrect)).toBeNull();
+    expect(deps.createShopAndOwner).not.toHaveBeenCalled();
+  });
+
+  it('names a verification rate limit', async () => {
+    deps.verifyOtp.mockRejectedValueOnce(new OtpRateLimitedError());
+    render(createElement(OtpVerifyScreen));
+    await act(async () => {
+      fireEvent.change(otpField(), { target: { value: '123456' } });
+    });
+    expect(await screen.findByText(catalog.en.otpRateLimited)).toBeTruthy();
+  });
+
+  it('counts the one-minute resend down in the active language, then resends', async () => {
     vi.useFakeTimers();
     useLocaleStore.setState({ locale: 'bn' });
     render(createElement(OtpVerifyScreen));
-    expect(screen.getByText(`৩০${catalog.bn.otpSecondsSuffix}`)).toBeTruthy();
+    expect(screen.getByText(`৬০${catalog.bn.otpSecondsSuffix}`)).toBeTruthy();
 
     act(() => {
-      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(59_000);
+    });
+    expect(screen.queryByRole('button', { name: catalog.bn.otpResend })).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(1_000);
     });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: catalog.bn.otpResend }));
     });
     expect(deps.resendOtp).toHaveBeenCalledWith('+8801712345678');
-    expect(screen.getByText(`৩০${catalog.bn.otpSecondsSuffix}`)).toBeTruthy();
+    expect(screen.getByText(`৬০${catalog.bn.otpSecondsSuffix}`)).toBeTruthy();
+  });
+
+  it('restarts the wait when a resend is rate-limited', async () => {
+    vi.useFakeTimers();
+    deps.resendOtp.mockRejectedValueOnce(new OtpRateLimitedError());
+    render(createElement(OtpVerifyScreen));
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: catalog.en.otpResend }));
+    });
+    expect(screen.getByText(catalog.en.otpRateLimited)).toBeTruthy();
+    expect(screen.getByText(`60${catalog.en.otpSecondsSuffix}`)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: catalog.en.otpResend })).toBeNull();
+  });
+
+  it('says a refused resend failed, without restarting the wait', async () => {
+    vi.useFakeTimers();
+    deps.resendOtp.mockRejectedValueOnce(new Error('network'));
+    render(createElement(OtpVerifyScreen));
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: catalog.en.otpResend }));
+    });
+    expect(screen.getByText(catalog.en.otpResendFailed)).toBeTruthy();
+    expect(screen.getByRole('button', { name: catalog.en.otpResend })).toBeTruthy();
   });
 
   it('sends the owner back for a NEW code when the proof went stale before setup finished', async () => {
@@ -332,12 +438,21 @@ describe('OTP verification', () => {
     await waitFor(() => expect(deps.sendOtp).toHaveBeenCalledWith('+8801712345678'));
   });
 
+  it("names a rate limit on a resumed registration's code and keeps the resend waiting", async () => {
+    deps.sendOtp.mockRejectedValueOnce(new OtpRateLimitedError());
+    deps.params = { phone: '01712345678', resumeShopId: 'shop-1', resumeOwnerUserId: 'owner-1' };
+    render(createElement(OtpVerifyScreen));
+    expect(await screen.findByText(catalog.en.otpRateLimited)).toBeTruthy();
+    expect(screen.getByText(`60${catalog.en.otpSecondsSuffix}`)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: catalog.en.otpResend })).toBeNull();
+  });
+
   it('resends to the canonical number', async () => {
     vi.useFakeTimers();
     deps.params = { phone: '01712345678', shopName: 'Rahim Pharmacy' };
     render(createElement(OtpVerifyScreen));
     act(() => {
-      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(60_000);
     });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: catalog.en.otpResend }));

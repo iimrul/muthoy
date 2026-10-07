@@ -83,6 +83,12 @@ export default defineConfig({
         process.cwd(),
         "apps/mobile/db/test/react-native-svg.ts",
       ),
+      // H-5. Deno's npm: specifier for bcryptjs, which Node cannot resolve,
+      // mapped to the same major the mobile app ships. It is what lets
+      // session-revocation.pgtest.ts EXECUTE recoverPin.ts — the suites that
+      // could only read it as text are how a sign-out that GoTrue refused on
+      // every call shipped green.
+      "npm:bcryptjs@3": resolve(process.cwd(), "apps/mobile/node_modules/bcryptjs/index.js"),
     },
   },
   test: {
@@ -108,11 +114,9 @@ export default defineConfig({
       "apps/mobile/components/expenses/*.test.ts",
       "apps/mobile/components/expenses/*.test.tsx",
       "apps/mobile/components/suppliers/*.test.tsx",
-      // dev/ holds production-disabled instrumentation (auth timing, runtime
-      // diagnostics — both inert unless __DEV__) plus the temporary DEV
-      // registration harness, which metro.config.js keeps out of every non-dev
-      // bundle and H-5 deletes. devOnlyResolver.test.ts proves that boundary;
-      // see dev/README.md.
+      // dev/ holds production-disabled instrumentation only (auth timing,
+      // runtime diagnostics — both inert unless __DEV__); H-5 deleted the DEV
+      // registration harness that also lived there. See dev/README.md.
       "apps/mobile/dev/*.test.ts",
       "apps/mobile/db/cash.sqlite.test.ts",
       "apps/mobile/db/b4-commercial-cache.sqlite.test.ts",
@@ -349,6 +353,22 @@ export default defineConfig({
       // neither heals itself, cross-shop isolation, the Owner/Manager role
       // line, and the table lockdown.
       "backend/supabase/pgtest/a23-device-registry.pgtest.ts",
+      // H-5. The Send SMS hook's dispatch ledger: one provider call per code
+      // (replays and GoTrue retries refused), the per-number daily cap, single
+      // settlement, and a table no API role can reach.
+      "backend/supabase/pgtest/h5-sms-dispatch.pgtest.ts",
+      // H-5 review P1: the same ledger on a PostgreSQL SERVER, every claim its
+      // own backend — the lock observed in pg_locks, a lock-stripped negative
+      // control, and barrier-released stampedes. Skips (and says so) where no
+      // initdb/pg_ctl/psql exists; ubuntu-latest has them.
+      "backend/supabase/pgtest/h5-sms-dispatch.concurrency.pgtest.ts",
+      // H-5 (DEV, 2026-10-05). Session revocation, executed: the by-id
+      // revocation function on real auth tables, and recoverPin, the
+      // auth-account rebind and signOutAppUser run against them through the
+      // real supabase-js clients and a GoTrue double.
+      "backend/supabase/pgtest/session-revocation.pgtest.ts",
+      "backend/supabase/pgtest/dev-harness-cleanup.pgtest.ts",
+      "backend/supabase/pgtest/dev-harness-12-cleanup.pgtest.ts",
       "backend/supabase/pgtest/restore-baseline.pgtest.ts",
       "backend/supabase/functions/sync/grants.test.ts",
       // H-7: anonymous callers are refused by verifyCallerJwt itself, not by
@@ -392,6 +412,14 @@ export default defineConfig({
       "backend/supabase/functions/sync/billing.test.ts",
       "backend/supabase/functions/sync/onboarding.test.ts",
       "backend/supabase/functions/sync/linkDevice.test.ts",
+      // H-5. Supabase Auth's Send SMS hook (auth-send-sms). Every module is
+      // runtime-neutral — Web Crypto, fetch and Request/Response — so the code
+      // these execute under Node is the code Deno deploys; only index.ts, the
+      // Deno.serve wiring, stays out.
+      "backend/supabase/functions/auth-send-sms/signature.test.ts",
+      "backend/supabase/functions/auth-send-sms/dispatch.test.ts",
+      "backend/supabase/functions/auth-send-sms/reve.test.ts",
+      "backend/supabase/functions/auth-send-sms/handler.test.ts",
       // apps/admin's pure logic + service-role exposure guards. Framework-free:
       // nothing here imports Next or opens a Supabase connection.
       "apps/admin/lib/**/*.test.ts",

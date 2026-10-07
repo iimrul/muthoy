@@ -4,15 +4,13 @@ import { router } from 'expo-router';
 import type { RegisterInput } from '@muthoy/validation';
 import { AuthBrandBlock, CloudReadyChip } from '../../components/auth/AuthBrandBlock';
 import { AuthButton } from '../../components/auth/AuthButton';
+import { otpSendErrorKey } from '../../components/auth/authMessages';
 import { AuthNotice } from '../../components/auth/AuthNotice';
 import { AuthShell } from '../../components/auth/AuthShell';
 import { AuthTitleBlock } from '../../components/auth/AuthTitleBlock';
 import { RegistrationForm } from '../../components/forms/RegistrationForm';
 import { LanguageToggle } from '../../components/ui/LanguageToggle';
-// Resolves to an inert stub in every non-dev bundle (metro.config.js), so this
-// screen needs no __DEV__ conditional of its own and a release build contains
-// no harness code at all. Removed with the harness by H-5.
-import { DevRegistrationHarness } from '../../dev/devRegistrationHarness';
+import type { CatalogKey } from '../../i18n/catalog';
 import { useI18n } from '../../state/localeStore';
 import { sendOtp } from '../../sync/otp';
 
@@ -28,19 +26,19 @@ import { sendOtp } from '../../sync/otp';
 export default function RegisterScreen() {
   const { t } = useI18n();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [sendFailed, setSendFailed] = useState(false);
+  const [sendProblem, setSendProblem] = useState<CatalogKey | null>(null);
 
   const handleSubmit = useCallback(async (input: RegisterInput) => {
     setIsSubmitting(true);
-    setSendFailed(false);
+    setSendProblem(null);
     try {
       await sendOtp(input.phone);
       router.push({
         pathname: '/otp-verify',
         params: { phone: input.phone, shopName: input.shopName },
       });
-    } catch {
-      setSendFailed(true);
+    } catch (cause) {
+      setSendProblem(otpSendErrorKey(cause));
     } finally {
       setIsSubmitting(false);
     }
@@ -51,15 +49,12 @@ export default function RegisterScreen() {
       variant="brand"
       cornerStart={<LanguageToggle tone="auth" />}
       cornerEnd={<CloudReadyChip />}
-      // The DEV-only harness keeps its own slot at the foot of the page, so the
-      // production layout never depends on it being there.
-      footer={<DevRegistrationHarness />}
     >
       <AuthBrandBlock variant="full" />
       <View className="mt-12 gap-6">
         <AuthTitleBlock tone="brand" title={t('registerTitle')} body={t('registerSubtitle')} />
         <RegistrationForm onSubmit={handleSubmit} isSubmitting={isSubmitting} />
-        {sendFailed ? <AuthNotice tone="brandError" message={t('otpSendFailed')} /> : null}
+        {sendProblem ? <AuthNotice tone="brandError" message={t(sendProblem)} /> : null}
         <View className="pt-4">
           <AuthButton
             variant="link"

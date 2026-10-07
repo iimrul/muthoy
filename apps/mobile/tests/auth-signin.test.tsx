@@ -75,6 +75,8 @@ const { useSessionStore } = await import('../state/sessionStore');
 const { recordSignOutNotice, clearSignOutNotice, peekSignOutNotice } = await import('../state/signOutNotice');
 const { PinAccountRefusedError, PinLockedOutError } = await import('../db/errors');
 const { DeviceLoginError } = await import('../sync/deviceAuth');
+const { OtpCodeRejectedError, OtpRateLimitedError, OtpSendFailedError, OtpVerifyFailedError } =
+  await import('../sync/otpPolicy');
 const { catalog } = await import('../i18n/catalog');
 const { default: PinLoginScreen } = await import('../app/(auth)/pin-login');
 const { default: DeviceLoginScreen } = await import('../app/(auth)/device-login');
@@ -182,6 +184,15 @@ describe('Device Login', () => {
     render(createElement(DeviceLoginScreen));
     expect(screen.getByText(catalog.en.deviceLoginRelinkNotice)).toBeTruthy();
     expect(screen.getByText('Muthoy Staff')).toBeTruthy();
+  });
+
+  // H-5. Arriving from Forgot PIN's pin_changed_login_required hand-off: the
+  // new PIN already works here, this screen just says so.
+  it.each(['en', 'bn'] as const)('%s: confirms the new PIN works on normal sign-in after partial recovery', (locale) => {
+    useLocaleStore.setState({ locale });
+    deps.params = { role: 'owner', reason: 'pin-recovered' };
+    render(createElement(DeviceLoginScreen));
+    expect(screen.getByText(catalog[locale].authErrorPinChangedLoginRequired)).toBeTruthy();
   });
 
   it('shows an enrolment hold as "waiting for approval", in the active language', async () => {
@@ -327,6 +338,81 @@ describe('Forgot PIN', () => {
     expect(deps.replace).not.toHaveBeenCalled();
   });
 
+  // H-5. The one recover-pin refusal that is not a refusal: the server has
+  // already committed the new PIN, only the automatic sign-in that was
+  // supposed to follow could not finish. Nothing on THIS screen can be
+  // retried, so it hands off to normal phone+PIN sign-in instead of showing
+  // an error on a step that has nothing left to do.
+  it.each(['en', 'bn'] as const)('%s: routes to normal sign-in when the server confirms the PIN changed', async (locale) => {
+    useLocaleStore.setState({ locale });
+    deps.params = { phone: '+8801712345678' };
+    deps.sendOtp.mockResolvedValue(undefined);
+    deps.verifyOtp.mockResolvedValue({});
+    deps.recoverOwnerPin.mockRejectedValueOnce(
+      new DeviceLoginError('PIN changed successfully. Sign in with your new PIN.', false, 'pin_changed_login_required'),
+    );
+    render(createElement(ForgotPinScreen));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: catalog[locale].forgotPinSendCode }));
+    });
+    const otp = screen.getAllByLabelText(catalog[locale].otpInputA11y).find((node) => node.tagName === 'INPUT')!;
+    await act(async () => {
+      fireEvent.change(otp, { target: { value: '123456' } });
+    });
+    pressPin('2468', locale);
+    await paintAndSubmit();
+    pressPin('2468', locale);
+    await paintAndSubmit();
+
+    expect(deps.replace).toHaveBeenCalledWith({
+      pathname: '/device-login',
+      params: { role: 'owner', reason: 'pin-recovered' },
+    });
+  });
+
+  // H-5 (DEV, 2026-10-05). Every refusal used to read "Could not reach the
+  // server" right after the owner had paid for the SMS. Each is now its own
+  // message, and only a request that got no answer is a network failure.
+  it.each([
+    ['en', 'pin_in_use', 'authErrorPinInUse'],
+    ['bn', 'pin_in_use', 'authErrorPinInUse'],
+    ['en', 'recovery_failed', 'authErrorRecoveryFailed'],
+    ['bn', 'recovery_failed', 'authErrorRecoveryFailed'],
+    ['en', 'recovery_refused', 'authErrorRecoveryRefused'],
+    ['bn', 'recovery_refused', 'authErrorRecoveryRefused'],
+    ['en', 'network', 'authErrorNetwork'],
+    // No response at all. Unlike every other case here, the write may
+    // already have landed — see deviceAuth.ts's toRecoverPinError — so this
+    // reads distinctly from the confident-retry `network` message above.
+    ['en', 'recovery_uncertain', 'authErrorRecoveryUncertain'],
+    ['bn', 'recovery_uncertain', 'authErrorRecoveryUncertain'],
+  ] as const)('%s: a %s refusal shows its own message and stays on the new-PIN step', async (locale, code, key) => {
+    useLocaleStore.setState({ locale });
+    deps.params = { phone: '+8801712345678' };
+    deps.sendOtp.mockResolvedValue(undefined);
+    deps.verifyOtp.mockResolvedValue({});
+    deps.recoverOwnerPin.mockRejectedValueOnce(new DeviceLoginError('English fallback', false, code));
+    render(createElement(ForgotPinScreen));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: catalog[locale].forgotPinSendCode }));
+    });
+    const otp = screen.getAllByLabelText(catalog[locale].otpInputA11y).find((node) => node.tagName === 'INPUT')!;
+    await act(async () => {
+      fireEvent.change(otp, { target: { value: '123456' } });
+    });
+    pressPin('2468', locale);
+    await paintAndSubmit();
+    pressPin('2468', locale);
+    await paintAndSubmit();
+
+    expect(await screen.findByText(catalog[locale][key])).toBeTruthy();
+    if (code !== 'network') expect(screen.queryByText(catalog[locale].authErrorNetwork)).toBeNull();
+    expect(screen.queryByText('English fallback')).toBeNull();
+    // Still choosing a PIN — a PIN already in use is fixed by choosing another.
+    expect(screen.getByText(catalog[locale].forgotPinNewTitle)).toBeTruthy();
+    expect(deps.replace).not.toHaveBeenCalled();
+  });
+
   it('shows progress inline instead of replacing the screen', async () => {
     let finishSend!: () => void;
     deps.sendOtp.mockReturnValueOnce(new Promise<void>((resolve) => { finishSend = resolve; }));
@@ -338,6 +424,116 @@ describe('Forgot PIN', () => {
     expect(screen.getByText(catalog.en.forgotPinSending)).toBeTruthy();
     expect(screen.getByText(catalog.en.forgotPinTitle)).toBeTruthy();
     await act(async () => finishSend());
+  });
+
+  // H-5. Typed OTP failures, never message text.
+  describe('OTP failures', () => {
+    function codeField(): HTMLInputElement {
+      return screen.getAllByLabelText(catalog.en.otpInputA11y).find((node) => node.tagName === 'INPUT') as HTMLInputElement;
+    }
+
+    async function reachCodeStep(): Promise<void> {
+      deps.params = { phone: '+8801712345678' };
+      deps.sendOtp.mockResolvedValue(undefined);
+      render(createElement(ForgotPinScreen));
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: catalog.en.forgotPinSendCode }));
+      });
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('names a rate limit and stays on the number', async () => {
+      deps.params = { phone: '+8801712345678' };
+      deps.sendOtp.mockRejectedValueOnce(new OtpRateLimitedError());
+      render(createElement(ForgotPinScreen));
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: catalog.en.forgotPinSendCode }));
+      });
+      expect(screen.getByText(catalog.en.otpRateLimited)).toBeTruthy();
+      expect(screen.getByRole('button', { name: catalog.en.forgotPinSendCode })).toBeTruthy();
+    });
+
+    it.each(['en', 'bn'] as const)(
+      'after a send, shows the same neutral prompt as registration, whoever the number belongs to (%s)',
+      async (locale) => {
+        // Nothing here knows whether an owner has this number, or whether the
+        // SMS went out — so the prompt says neither.
+        useLocaleStore.setState({ locale });
+        deps.params = { phone: '+8801712345678' };
+        deps.sendOtp.mockResolvedValue(undefined);
+        render(createElement(ForgotPinScreen));
+        await act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: catalog[locale].forgotPinSendCode }));
+        });
+        expect(screen.getByText(catalog[locale].otpCheckMessages)).toBeTruthy();
+      },
+    );
+
+    it('gives every other send failure one message, whoever the number belongs to', async () => {
+      deps.params = { phone: '+8801712345678' };
+      deps.sendOtp.mockRejectedValueOnce(new OtpSendFailedError());
+      render(createElement(ForgotPinScreen));
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: catalog.en.forgotPinSendCode }));
+      });
+      expect(screen.getByText(catalog.en.otpSendFailed)).toBeTruthy();
+    });
+
+    it('calls a refused code incorrect while it can still be valid', async () => {
+      await reachCodeStep();
+      deps.verifyOtp.mockRejectedValueOnce(new OtpCodeRejectedError());
+      await act(async () => {
+        fireEvent.change(codeField(), { target: { value: '111111' } });
+      });
+      expect(screen.getByText(catalog.en.otpIncorrect)).toBeTruthy();
+      expect(deps.recoverOwnerPin).not.toHaveBeenCalled();
+    });
+
+    it('calls a refused code expired once its five-minute lifetime has passed', async () => {
+      vi.useFakeTimers();
+      await reachCodeStep();
+      act(() => {
+        vi.advanceTimersByTime(300_000);
+      });
+      deps.verifyOtp.mockRejectedValueOnce(new OtpCodeRejectedError());
+      await act(async () => {
+        fireEvent.change(codeField(), { target: { value: '111111' } });
+      });
+      expect(screen.getByText(catalog.en.otpExpired)).toBeTruthy();
+    });
+
+    it('never calls a code wrong when it could not be checked', async () => {
+      await reachCodeStep();
+      deps.verifyOtp.mockRejectedValueOnce(new OtpVerifyFailedError());
+      await act(async () => {
+        fireEvent.change(codeField(), { target: { value: '123456' } });
+      });
+      expect(screen.getByText(catalog.en.otpVerifyFailed)).toBeTruthy();
+      expect(screen.queryByText(catalog.en.otpIncorrect)).toBeNull();
+    });
+
+    it('waits a full minute before offering a resend, and restarts the wait on a rate limit', async () => {
+      vi.useFakeTimers();
+      await reachCodeStep();
+      expect(screen.getByText(`60${catalog.en.otpSecondsSuffix}`)).toBeTruthy();
+      act(() => {
+        vi.advanceTimersByTime(59_000);
+      });
+      expect(screen.queryByRole('button', { name: catalog.en.otpResend })).toBeNull();
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+
+      deps.resendOtp.mockRejectedValueOnce(new OtpRateLimitedError());
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: catalog.en.otpResend }));
+      });
+      expect(screen.getByText(catalog.en.otpRateLimited)).toBeTruthy();
+      expect(screen.getByText(`60${catalog.en.otpSecondsSuffix}`)).toBeTruthy();
+    });
   });
 });
 
