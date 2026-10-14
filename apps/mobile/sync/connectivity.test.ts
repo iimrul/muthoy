@@ -38,6 +38,7 @@ vi.mock('@react-native-community/netinfo', () => ({
 }));
 vi.mock('./supabaseClient', () => ({
   isSupabaseConfigured: true,
+  ensureCloudStartupAllowed: async () => undefined,
   supabaseUrl: 'https://project-ref.supabase.co',
 }));
 
@@ -132,9 +133,10 @@ describe('reconnect edges', () => {
     }
   };
 
-  it('fires when leaving a confident offline, so hydration retries with no manual Sync', () => {
+  it('fires when leaving a confident offline, so hydration retries with no manual Sync', async () => {
     const onReconnect = vi.fn();
     subscribeToReconnect(onReconnect);
+    await vi.waitFor(() => expect(netInfo.listeners.size).toBe(1));
 
     emit(false, false);
     expect(onReconnect).not.toHaveBeenCalled();
@@ -143,9 +145,10 @@ describe('reconnect edges', () => {
     expect(onReconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('does not fire for a mere probe recovery, which never blocked anything', () => {
+  it('does not fire for a mere probe recovery, which never blocked anything', async () => {
     const onReconnect = vi.fn();
     subscribeToReconnect(onReconnect);
+    await vi.waitFor(() => expect(netInfo.listeners.size).toBe(1));
 
     emit(true, false); // unknown — requests were still being attempted
     emit(true, true);  // online

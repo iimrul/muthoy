@@ -7,9 +7,26 @@ node_modules/
 
 # Env
 .env
+.env.*
 .env.local
 .env.*.local
 !.env.example
+
+# Signing credentials and private H-9 evidence (never source inputs).
+credentials.json
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.p8
+*.pem
+*.key
+*.mobileprovision
+*.dump
+*.backup
+h9-private/
+private-exports/
+audit-artifacts/
 
 # Build artifacts
 dist/

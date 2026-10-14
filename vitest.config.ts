@@ -11,6 +11,8 @@ export default defineConfig({
   define: { __DEV__: false },
   resolve: {
     alias: {
+      "expo-constants": resolve(process.cwd(), "apps/mobile/db/test/expo-constants.ts"),
+      "expo-application": resolve(process.cwd(), "apps/mobile/db/test/expo-application.ts"),
       "./client": resolve(process.cwd(), "apps/mobile/db/test/client.ts"),
       "expo-sqlite": resolve(
         process.cwd(),
@@ -94,6 +96,12 @@ export default defineConfig({
   test: {
     server: { deps: { inline: ["expo-sqlite", "expo-crypto"] } },
     include: [
+      "apps/mobile/db/environment-binding.test.ts",
+      "apps/mobile/tests/environment-policy.test.ts",
+      // H-9 archive controls on a real Git revision; the EAS CLI 21.8.0 half
+      // runs EAS's own copy/workflow code when that pinned CLI is installed.
+      "apps/mobile/tests/eas-archive.test.ts",
+      "apps/mobile/tests/environment-gate.render.test.tsx",
       "apps/mobile/domain/**/*.test.ts",
       "apps/mobile/native/*.test.ts",
       "apps/mobile/services/*.test.ts",

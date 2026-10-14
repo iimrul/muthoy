@@ -1,5 +1,6 @@
 import NetInfo, { type NetInfoState, type NetInfoSubscription } from '@react-native-community/netinfo';
-import { isSupabaseConfigured, supabaseUrl } from './supabaseClient';
+import { ensureCloudStartupAllowed, isSupabaseConfigured, supabaseUrl } from './supabaseClient';
+import { EnvironmentRefusalError } from '../config/environmentPolicy';
 
 /**
  * Three states, not two. The middle one is the whole point.
@@ -25,6 +26,7 @@ export type Reachability = 'online' | 'offline' | 'unknown';
  * proof of reach — a 401 from our own project still means the packets made the
  * round trip, which is exactly the question being asked.
  */
+let probeAllowed = false;
 if (isSupabaseConfigured) {
   try {
     NetInfo.configure({
@@ -34,7 +36,7 @@ if (isSupabaseConfigured) {
       reachabilityShortTimeout: 5_000,
       reachabilityLongTimeout: 60_000,
       reachabilityRequestTimeout: 10_000,
-      reachabilityShouldRun: () => true,
+      reachabilityShouldRun: () => probeAllowed,
       shouldFetchWiFiSSID: false,
       // Android's native signal is NET_CAPABILITY_VALIDATED, which it derives
       // from its own Google probe — the same blind spot one layer down.
@@ -47,6 +49,28 @@ if (isSupabaseConfigured) {
 }
 
 type ReachabilityInput = Pick<NetInfoState, 'isConnected' | 'isInternetReachable'>;
+
+let probeOpening: Promise<void> | null = null;
+
+/** Opens the health probe once the environment gate allows cloud contact. */
+function allowProbe(): Promise<void> {
+  probeOpening ??= ensureCloudStartupAllowed().then(async () => {
+    probeAllowed = true;
+    // While the gate was closed NetInfo cached `isInternetReachable: false`,
+    // and fetch() only ever returns that cache until the network changes.
+    // Re-evaluate once now that the probe may run; callers share this wait.
+    try {
+      await NetInfo.refresh();
+    } catch {
+      // Best effort: fetch() still answers, and the next network change probes.
+    }
+  }, (error: unknown) => {
+    // A refusal can be retried after an explicit startup retry; never latch it here.
+    probeOpening = null;
+    throw error;
+  });
+  return probeOpening;
+}
 
 /**
  * The single decision every caller shares. Only a definite "no transport" is a
@@ -63,6 +87,7 @@ export function classifyNetInfoState(state: ReachabilityInput): Reachability {
 }
 
 export async function networkReachability(): Promise<Reachability> {
+  await allowProbe();
   try {
     return classifyNetInfoState(await NetInfo.fetch());
   } catch {
@@ -82,13 +107,19 @@ export async function hasNetworkConnection(): Promise<boolean> {
 
 export function subscribeToReconnect(onReconnect: () => void): NetInfoSubscription {
   let previous: Reachability | null = null;
-  return NetInfo.addEventListener((state) => {
-    const next = classifyNetInfoState(state);
-    // Leaving a confident offline is the reconnect edge. `unknown -> online`
-    // is not: nothing was ever blocked on `unknown`.
-    if (previous === 'offline' && next !== 'offline') onReconnect();
-    previous = next;
-  });
+  let disposed = false;
+  let unsubscribe: NetInfoSubscription | undefined;
+  void allowProbe().then(() => {
+    if (disposed) return;
+    unsubscribe = NetInfo.addEventListener((state) => {
+      const next = classifyNetInfoState(state);
+      // Leaving a confident offline is the reconnect edge. `unknown -> online`
+      // is not: nothing was ever blocked on `unknown`.
+      if (previous === 'offline' && next !== 'offline') onReconnect();
+      previous = next;
+    });
+  }).catch(() => undefined);
+  return () => { disposed = true; unsubscribe?.(); };
 }
 
 export interface NetworkDiagnostics {
@@ -102,6 +133,7 @@ export interface NetworkDiagnostics {
 /** The real NetInfo state, for diagnosing a device that disagrees with itself. */
 export async function readNetworkDiagnostics(): Promise<NetworkDiagnostics> {
   try {
+    await allowProbe();
     const state = await NetInfo.fetch();
     return {
       reachability: classifyNetInfoState(state),
@@ -110,7 +142,8 @@ export async function readNetworkDiagnostics(): Promise<NetworkDiagnostics> {
       type: state.type,
       probeHostConfigured: isSupabaseConfigured,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof EnvironmentRefusalError) throw error;
     return {
       reachability: 'unknown', isConnected: null, isInternetReachable: null,
       type: 'unknown', probeHostConfigured: isSupabaseConfigured,

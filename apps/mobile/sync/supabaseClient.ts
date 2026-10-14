@@ -1,97 +1,82 @@
 import type { AppStateStatus } from 'react-native';
 import { createMMKV } from 'react-native-mmkv';
 import { createClient, type SupportedStorage } from '@supabase/supabase-js';
+import { publicEnvironment } from '../config/publicEnvironment';
+import { EnvironmentRefusalError } from '../config/environmentPolicy';
+import { readEnvironmentConfiguration } from '../native/environmentIdentity';
+import { ensureEnvironmentAllowed, ENVIRONMENT_STORE_IDS } from '../db/environmentBinding';
 
-// These two are read as literal `process.env.EXPO_PUBLIC_*` member expressions
-// ON PURPOSE: babel-preset-expo inlines EXPO_PUBLIC_* at TRANSFORM time, and it
-// only recognises this exact shape. Destructuring `process.env`, computing the
-// key, or reading it behind a helper all yield undefined in a built bundle.
-/** The project host this build talks to. Exported so the connectivity layer can
- *  probe the one host that actually matters instead of a third party's. */
-export const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ?? '';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? '';
-
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
-
-/** Exactly which variables are absent — so the failure names itself. */
+export const supabaseUrl = publicEnvironment.url;
 export const missingSupabaseConfigKeys: readonly string[] = [
   ...(supabaseUrl ? [] : ['EXPO_PUBLIC_SUPABASE_URL']),
-  ...(supabaseAnonKey ? [] : ['EXPO_PUBLIC_SUPABASE_ANON_KEY']),
+  ...(publicEnvironment.publicKey ? [] : ['EXPO_PUBLIC_SUPABASE_ANON_KEY']),
 ];
+export const isSupabaseConfigured = (() => {
+  try { readEnvironmentConfiguration(); return true; } catch { return false; }
+})();
 
-/** Safe configuration description: host only, never any part of the key. */
 export function describeSupabaseConfig(): string {
-  if (missingSupabaseConfigKeys.length > 0) {
-    return `NOT CONFIGURED — missing ${missingSupabaseConfigKeys.join(' and ')}`;
-  }
-  let host: string;
-  try {
-    host = new URL(supabaseUrl).host;
-  } catch {
-    host = 'unparseable URL';
-  }
-  return `host=${host}`;
+  if (missingSupabaseConfigKeys.length > 0) return `NOT CONFIGURED — missing ${missingSupabaseConfigKeys.join(' and ')}`;
+  if (!isSupabaseConfigured) return 'NOT CONFIGURED — environment check refused';
+  return `host=${new URL(supabaseUrl).host}`;
 }
-
-// One line at boot when the build is broken. An unconfigured build is the one
-// failure that no amount of retrying or reconnecting can fix, so it says so
-// immediately and names the remedy, rather than resurfacing later as a
-// mysterious "offline". This line survives into release deliberately: it prints
-// variable NAMES only — never the host, the key, or any identifier — and
-// `app/_layout.tsx` shows the same list on screen.
-//
-// The healthy-build line is the opposite case. It names the project host, which
-// is a config internal with no production audience, so it is DEV-only. The B4
-// `[muthoy-runtime]` build-marker line beside it was a temporary
-// physical-debugging aid and is gone; nothing reads a build marker at runtime.
 if (missingSupabaseConfigKeys.length > 0) {
-  console.warn(
-    `[muthoy] Supabase ${describeSupabaseConfig()}. `
-    + 'Start Metro from apps/mobile so .env loads, and reload with --clear; '
-    + 'for EAS builds set these as EAS environment variables.',
-  );
+  console.warn(`[muthoy] Supabase ${describeSupabaseConfig()}. Check apps/mobile configuration and the selected EAS environment.`);
 } else if (__DEV__) {
-  console.log(`[muthoy] Supabase config loaded — ${describeSupabaseConfig()}`);
+  if (isSupabaseConfigured) console.log(`[muthoy] Supabase config loaded — ${describeSupabaseConfig()}`);
 }
 
-const authStorage = createMMKV({ id: 'muthoy-supabase-auth' });
+export async function ensureCloudStartupAllowed(): Promise<void> {
+  requireSupabaseConfiguration();
+  await ensureEnvironmentAllowed();
+}
+const storage = () => createMMKV({ id: ENVIRONMENT_STORE_IDS.auth });
 const mmkvAuthStorage: SupportedStorage = {
-  getItem: (key) => authStorage.getString(key) ?? null,
-  setItem: (key, value) => {
-    authStorage.set(key, value);
+  async getItem(key) {
+    try { await ensureCloudStartupAllowed(); } catch (error) {
+      // An inert session avoids SDK initial-session rejection loops. The shared
+      // environment gate still reports the refusal; persisted bytes are unread.
+      if (error instanceof EnvironmentRefusalError) return null;
+      throw error;
+    }
+    return storage().getString(key) ?? null;
   },
-  removeItem: (key) => {
-    authStorage.remove(key);
-  },
+  async setItem(key, value) { await ensureCloudStartupAllowed(); storage().set(key, value); },
+  async removeItem(key) { await ensureCloudStartupAllowed(); storage().remove(key); },
 };
 
-// Inert values avoid crashing unrelated screens when local env is absent.
 export const supabase = createClient(
-  supabaseUrl || 'http://127.0.0.1:1',
-  supabaseAnonKey || 'supabase-not-configured',
+  isSupabaseConfigured ? supabaseUrl : 'http://127.0.0.1:1',
+  isSupabaseConfigured ? publicEnvironment.publicKey : 'supabase-not-configured',
   {
-    auth: {
-      storage: mmkvAuthStorage,
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: false,
+    auth: { storage: mmkvAuthStorage, persistSession: true, autoRefreshToken: false, detectSessionInUrl: false },
+    global: {
+      async fetch(input, init) {
+        await ensureCloudStartupAllowed();
+        try {
+          const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+          if (url.origin !== supabaseUrl || url.username || url.password) throw new Error();
+        } catch { throw new EnvironmentRefusalError('configuration-invalid'); }
+        const response = await globalThis.fetch(input, { ...init, redirect: 'error' });
+        // React Native's fetch (whatwg-fetch over XHR/OkHttp) ignores `redirect`
+        // and follows redirects; only the final URL shows it happened. Never
+        // hand the SDK a response that came from another origin.
+        if (response.url && !response.url.startsWith(`${supabaseUrl}/`)) throw new EnvironmentRefusalError('configuration-invalid');
+        return response;
+      },
     },
   },
 );
 
 export function requireSupabaseConfiguration(): void {
-  if (!isSupabaseConfigured) {
-    throw new Error('Supabase is not configured. Add the mobile app environment variables first.');
-  }
+  if (!isSupabaseConfigured) throw new EnvironmentRefusalError('configuration-invalid');
 }
-
+let refreshGeneration = 0;
 export function handleAppStateChangeForAuthRefresh(status: AppStateStatus): void {
-  if (!isSupabaseConfigured) {
-    return;
-  }
-  if (status === 'active') {
-    supabase.auth.startAutoRefresh();
-  } else {
-    supabase.auth.stopAutoRefresh();
-  }
+  const generation = ++refreshGeneration;
+  if (status !== 'active') { supabase.auth.stopAutoRefresh(); return; }
+  if (!isSupabaseConfigured) return;
+  void ensureCloudStartupAllowed().then(() => {
+    if (generation === refreshGeneration) supabase.auth.startAutoRefresh();
+  }).catch(() => undefined); // Root/database gate surfaces the typed refusal.
 }

@@ -13,8 +13,8 @@ vi.mock('react-native-mmkv', () => ({
 }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ auth: {} }) }));
 
-const FAKE_URL = 'https://demo-ref.supabase.co';
-const FAKE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo-not-a-real-key';
+const FAKE_URL = 'https://btfprhticjgeihcngpif.supabase.co';
+const FAKE_KEY = `e30.${Buffer.from(JSON.stringify({ role: 'anon', ref: 'btfprhticjgeihcngpif' })).toString('base64url')}.fabricated`;
 
 async function loadWith(env: { url?: string; key?: string }) {
   vi.resetModules();
@@ -59,7 +59,7 @@ describe('Supabase configuration reporting', () => {
     const client = await loadWith({ url: FAKE_URL, key: FAKE_KEY });
     const description = client.describeSupabaseConfig();
 
-    expect(description).toContain('demo-ref.supabase.co');
+    expect(description).toContain('btfprhticjgeihcngpif.supabase.co');
     // The whole point: safe to paste into a bug report or a screenshot.
     expect(description).not.toContain(FAKE_KEY);
     expect(description).not.toContain('eyJhbGciOi');

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { EnvironmentRefusalError } from '../config/environmentPolicy';
 
 const mocks = vi.hoisted(() => ({
   ensure: vi.fn(),
@@ -60,6 +61,15 @@ beforeEach(() => {
 });
 
 describe('headless encrypted database initialization', () => {
+  test.each(['unclassified-data', 'binding-mismatch', 'native-identity-invalid'] as const)('environment refusal %s stops before headless authority or database reads', async code => {
+    mocks.ensure.mockRejectedValueOnce(new EnvironmentRefusalError(code));
+
+    await expect(runNotificationChecks('shop-1')).resolves.toBeUndefined();
+
+    expect(mocks.ensure).toHaveBeenCalledOnce();
+    expect(mocks.authority).not.toHaveBeenCalled();
+    expect(mocks.listMedicines).not.toHaveBeenCalled();
+  });
   test('does no database work when initialization fails', async () => {
     mocks.ensure.mockRejectedValueOnce(new Error('locked'));
 

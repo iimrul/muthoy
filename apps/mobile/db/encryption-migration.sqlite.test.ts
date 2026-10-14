@@ -431,7 +431,10 @@ afterAll(() => {
   rmSync(templateDirectory, { recursive: true, force: true });
 });
 
-beforeEach(() => {
+beforeEach(async () => {
+  // node:sqlite and fs are synchronous in this suite. Give the worker an
+  // event-loop turn between tests to service Vitest progress RPC replies.
+  await new Promise<void>((resolve) => setImmediate(resolve));
   workspace = mkdtempSync(join(tmpdir(), 'muthoy-h3-'));
   events = [];
   hasKeyFlag = false;

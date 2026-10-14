@@ -9,7 +9,7 @@
 
 import { createElement } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 vi.mock('react-native', async () =>
   (await import('./support/reactNativeMock')).createReactNativeMock(),
@@ -71,9 +71,11 @@ vi.mock('../sync/deviceRegistry', () => {
 vi.mock('../state/switchUser', () => ({ switchUser: deps.switchUser }));
 
 const { useLocaleStore } = await import('../state/localeStore');
-const { useSessionStore } = await import('../state/sessionStore');
+const { readLastShopIdSync, useSessionStore } = await import('../state/sessionStore');
 const { recordSignOutNotice, clearSignOutNotice, peekSignOutNotice } = await import('../state/signOutNotice');
 const { PinAccountRefusedError, PinLockedOutError } = await import('../db/errors');
+const { PIN_FREE_ATTEMPTS, clearPinAttemptsAfterOwnerRecovery, pinAttemptScope, recordPinAttemptFailure } =
+  await import('../db/pinAttemptLock');
 const { DeviceLoginError } = await import('../sync/deviceAuth');
 const { OtpCodeRejectedError, OtpRateLimitedError, OtpSendFailedError, OtpVerifyFailedError } =
   await import('../sync/otpPolicy');
@@ -122,6 +124,15 @@ async function paintAndSubmit(): Promise<void> {
   await act(async () => frameQueue.shift()?.(16));
 }
 
+// A wall clock whose millisecond advances on every read: the boundary a
+// lockout countdown must not straddle, made deterministic instead of waiting
+// for machine load to land it between two reads.
+function tickOnEveryRead(): void {
+  let now = Date.UTC(2026, 9, 9, 6);
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now++);
+  onTestFinished(() => clock.mockRestore());
+}
+
 describe('PIN Login', () => {
   it('says a correct-but-refused PIN is refused, not incorrect', async () => {
     deps.verifyPin.mockRejectedValueOnce(new PinAccountRefusedError('staff_limit'));
@@ -146,6 +157,41 @@ describe('PIN Login', () => {
     expect(await screen.findByText(catalog.bn.pinLockedTitle)).toBeTruthy();
     expect(screen.getByText(/৪ মি ০৫ সে পরে/)).toBeTruthy();
     expect(screen.queryByText(/attempt|চেষ্টা বাকি/i)).toBeNull();
+  });
+
+  it('counts a refused lockout down from its exact length even when the clock ticks between reads', async () => {
+    tickOnEveryRead();
+    useLocaleStore.setState({ locale: 'bn' });
+    deps.verifyPin.mockRejectedValueOnce(new PinLockedOutError(245_000));
+    render(createElement(PinLoginScreen));
+    pressPin('1111', 'bn');
+    await paintAndSubmit();
+
+    expect(await screen.findByText(catalog.bn.pinLockedTitle)).toBeTruthy();
+    expect(screen.getByText(/৪ মি ০৫ সে পরে/)).toBeTruthy();
+    expect(screen.queryByText(/৪ মি ০৬ সে/)).toBeNull();
+  });
+
+  it('counts a lockout the wrong PIN just started from its exact length even when the clock ticks between reads', async () => {
+    tickOnEveryRead();
+    useLocaleStore.setState({ locale: 'bn' });
+    const scope = pinAttemptScope(readLastShopIdSync());
+    onTestFinished(() => clearPinAttemptsAfterOwnerRecovery(scope));
+    // The rejection spends the budget, as db/auth.ts records it — stamped ahead
+    // of this clock, so the screen's own status read re-anchors the lock to the
+    // whole first cooldown (db/pinAttemptLock.ts rollback rule): exactly 30 s.
+    const ahead = Date.now() + 60 * 60_000;
+    deps.verifyPin.mockImplementationOnce(async () => {
+      for (let failure = 0; failure < PIN_FREE_ATTEMPTS; failure += 1) recordPinAttemptFailure(scope, ahead);
+      return null;
+    });
+    render(createElement(PinLoginScreen));
+    pressPin('9999', 'bn');
+    await paintAndSubmit();
+
+    expect(await screen.findByText(catalog.bn.pinLockedTitle)).toBeTruthy();
+    expect(screen.getByText(/৩০ সে পরে/)).toBeTruthy();
+    expect(screen.queryByText(/৩১ সে/)).toBeNull();
   });
 
   it('shows the one-time sign-out notice by category, then forgets it', () => {

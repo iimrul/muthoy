@@ -17,7 +17,7 @@ import {
   HindSiliguri_700Bold,
 } from '@expo-google-fonts/hind-siliguri';
 import { DMMono_400Regular, DMMono_500Medium } from '@expo-google-fonts/dm-mono';
-import { AppState, Text, View } from 'react-native';
+import { AppState } from 'react-native';
 import { useDatabaseMigrations } from '../db';
 import {
   registerNotificationBackgroundTaskAsync,
@@ -28,7 +28,6 @@ import { useSessionStore } from '../state/sessionStore';
 import {
   handleAppStateChangeForAuthRefresh,
   isSupabaseConfigured,
-  missingSupabaseConfigKeys,
 } from '../sync/supabaseClient';
 import { startSyncEngine, stopSyncEngine } from '../sync';
 import { startBillingHydration, stopBillingHydration } from '../sync/billingHydration';
@@ -53,6 +52,7 @@ import { AuthorityBlockedScreen } from '../components/auth/AuthorityBlockedScree
 import { AuthStatusScreen } from '../components/auth/AuthStatusScreen';
 import { BrandLoader } from '../components/auth/BrandLoader';
 import type { AuthorityBlockReason } from '../components/auth/authorityGateCopy';
+import { EnvironmentRefusalError } from '../config/environmentPolicy';
 
 const FOREGROUND_CHECK_DEBOUNCE_MS = 60_000;
 const AUTHORITY_RETRY_DELAY_MS = 5_000;
@@ -305,6 +305,15 @@ export default function RootLayout() {
   // into a silently broken app (Volume 4's "no empty catch blocks that
   // swallow failures").
   if (databaseError) {
+    if (databaseError instanceof EnvironmentRefusalError) {
+      if (databaseError.code === 'inspection-failed') {
+        // The provenance read failed; nothing was classified or changed. Retry
+        // re-runs every probe — never a reset, sign-out or recovery action.
+        return <AuthStatusScreen icon="cloud-alert-outline" title={t('startupFailedTitle')} body={t('startupFailedBody')} actions={[{ label: t('retry'), onPress: retryDatabase }]} />;
+      }
+      const existingData = ['unclassified-data', 'binding-mismatch', 'binding-write-failed'].includes(databaseError.code);
+      return <AuthStatusScreen icon="cloud-alert-outline" title={t(existingData ? 'environmentDataBlockedTitle' : 'appNotConfiguredTitle')} body={t(existingData ? 'environmentDataBlockedBody' : 'environmentConfigurationBlockedBody')} />;
+    }
     const canRestore =
       databaseError instanceof DatabaseKeyUnrecoverableError ||
       databaseError instanceof DatabaseRecoveryPendingError;
@@ -328,23 +337,8 @@ export default function RootLayout() {
       <AuthStatusScreen
         icon="cloud-alert-outline"
         title={t('appNotConfiguredTitle')}
-        body={t('appNotConfiguredBody')}
-      >
-        {/* Technical literals for whoever builds the app, deliberately left
-            untranslated: variable names and where they are read from. Plus
-            Jakarta Sans, not DM Mono — CLAUDE.md rule 6 keeps DM Mono for
-            money. */}
-        <View className="gap-2">
-          <Text className="font-sans text-center text-xs text-secure-ink">
-            {missingSupabaseConfigKeys.join('\n')}
-          </Text>
-          <Text className="font-sans text-center text-xs text-secure-body">
-            Dev builds read these from apps/mobile/.env — start Metro from that
-            folder and reload. Cloud builds need them as EAS environment
-            variables.
-          </Text>
-        </View>
-      </AuthStatusScreen>
+        body={t('environmentConfigurationBlockedBody')}
+      />
     );
   }
 

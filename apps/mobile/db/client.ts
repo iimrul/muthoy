@@ -17,6 +17,7 @@ import {
 } from './encryptionMigration';
 import { DatabaseInitializationError, DatabaseNotReadyError } from './errors';
 import * as schema from './schema';
+import { ensureEnvironmentAllowed, assertEnvironmentAllowed } from './environmentBinding';
 
 /**
  * The local SQLite database file. This is the app's ONLY source of truth
@@ -68,6 +69,7 @@ export async function ensureDatabaseReady(): Promise<void> {
 }
 
 async function initializeDatabase(): Promise<InitializedDatabase> {
+  await ensureEnvironmentAllowed();
   const environment = createEncryptionEnvironment(logEncryptionEvent);
   const preparation = await prepareEncryptedDatabase(environment, {
     hasKey: hasDatabaseKey,
@@ -152,6 +154,7 @@ function installDatabase(
 
 /** Recovery-only: point db/ at an authenticated, isolated target file. */
 export function initializeDatabaseFileForRecovery(fileName: string, keyHex: string): void {
+  assertEnvironmentAllowed();
   closeDatabaseForRecovery();
   let connection: SQLiteDatabase;
   try {

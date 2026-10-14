@@ -11,6 +11,7 @@ import {
 import { verifyHydratedDatabase } from './encryptionVerify';
 import { preserveUnsyncedPlaintextBackup } from './encryptionMigration';
 import { DatabaseEncryptionMigrationError } from './errors';
+import { ensureEnvironmentAllowed } from './environmentBinding';
 import {
   closeDatabaseInitializationForRecovery,
   initializeRecoveryDatabase,
@@ -91,6 +92,7 @@ export type RecoveryDatabaseState = 'needs-hydration' | 'promoted';
 export async function openDatabaseRecoveryTarget(
   keyHex: string,
 ): Promise<RecoveryDatabaseState> {
+  await ensureEnvironmentAllowed();
   const lockedExists = usableFileExists(LOCKED_DATABASE_BACKUP_FILE_NAME);
   const mainExists = usableFileExists(DATABASE_FILE_NAME);
   const recoveryExists = usableFileExists(RECOVERY_DATABASE_FILE_NAME);
@@ -124,6 +126,7 @@ export async function openDatabaseRecoveryTarget(
 
 /** Promote only a closed, fully hydrated, independently verified target. */
 export async function promoteHydratedRecoveryDatabase(keyHex: string): Promise<void> {
+  await ensureEnvironmentAllowed();
   verifyCurrentRecoveryDatabase();
   const checkpoint = sqliteConnection.getFirstSync<{
     busy: number;
@@ -162,6 +165,7 @@ export async function promoteHydratedRecoveryDatabase(keyHex: string): Promise<v
 
 /** Called only after exact-user validation and session activation succeed. */
 export async function releaseLockedRecoveryDatabase(keyHex: string): Promise<void> {
+  await ensureEnvironmentAllowed();
   deleteDatabase(LOCKED_DATABASE_BACKUP_FILE_NAME);
 
   // The pre-encryption plaintext original is NEVER deleted here. Server

@@ -5,7 +5,9 @@ const mocks = vi.hoisted(() => ({
   migrate: vi.fn(),
   initializeRecovery: vi.fn(),
   closeRecovery: vi.fn(),
+  allow: vi.fn(),
 }));
+vi.mock('./environmentBinding', () => ({ ensureEnvironmentAllowed: mocks.allow }));
 
 vi.mock('./client', () => ({
   db: { kind: 'db' },
@@ -19,10 +21,20 @@ beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   mocks.ready.mockResolvedValue(undefined);
+  mocks.allow.mockResolvedValue({ appVariant: 'development', nativeApplicationId: 'com.muthoy.pos.dev', supabaseProjectRef: 'btfprhticjgeihcngpif', version: 1 });
   mocks.migrate.mockResolvedValue(undefined);
 });
 
 describe('production schema initialization single-flight', () => {
+  test('recovery environment refusal preserves current handles and schema', async () => {
+    const { EnvironmentRefusalError } = await import('../config/environmentPolicy');
+    mocks.allow.mockRejectedValueOnce(new EnvironmentRefusalError('binding-mismatch'));
+    const init = await import('./test/production-init-entry');
+    await expect(init.initializeRecoveryDatabase('muthoy.restore.db', 'ab'.repeat(32))).rejects.toBeInstanceOf(EnvironmentRefusalError);
+    expect(mocks.closeRecovery).not.toHaveBeenCalled();
+    expect(mocks.initializeRecovery).not.toHaveBeenCalled();
+    expect(mocks.migrate).not.toHaveBeenCalled();
+  });
   test('concurrent UI/headless initialization runs migrations once', async () => {
     let resolveReady!: () => void;
     mocks.ready.mockReturnValueOnce(new Promise<void>((resolve) => {

@@ -226,7 +226,7 @@ afterEach(() => {
 });
 
 describe('a build with no Supabase configuration fails visibly', () => {
-  it('names the missing variables and starts nothing', () => {
+  it('shows localized configuration refusal and starts nothing', () => {
     config.isSupabaseConfigured = false;
 
     const view = render(createElement(RootLayout));
@@ -234,13 +234,10 @@ describe('a build with no Supabase configuration fails visibly', () => {
     // Without these the entitlement can never be verified, so every owner would
     // silently read as Free. Say so loudly rather than downgrading them.
     expect(view.container.textContent).toContain('App is not configured');
-    expect(view.container.textContent).toContain('EXPO_PUBLIC_SUPABASE_URL');
-    expect(view.container.textContent).toContain('EXPO_PUBLIC_SUPABASE_ANON_KEY');
-    // Naming the variables is not enough on its own — the screen has to say
-    // where they are read from, or the founder is left guessing which of Metro,
-    // .env, or EAS is at fault.
-    expect(view.container.textContent).toContain('apps/mobile/.env');
-    expect(view.container.textContent).toContain('EAS');
+    expect(view.container.textContent).toContain(catalog.en.environmentConfigurationBlockedBody);
+    expect(view.container.textContent).not.toContain('EXPO_PUBLIC');
+    expect(view.container.textContent).not.toContain('apps/mobile/.env');
+    expect(view.queryByRole('button', { name: /reset|restore|sign out/i })).toBeNull();
 
     act(() => useSessionStore.getState().login(OWNER));
     expect(native.startSyncEngine).not.toHaveBeenCalled();

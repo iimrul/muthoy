@@ -18,6 +18,7 @@
     "@supabase/supabase-js": "^2.112.3",
     "drizzle-orm": "^0.45.2",
     "expo": "~57.0.15",
+    "expo-application": "57.0.2",
     "expo-background-task": "~57.0.12",
     "expo-camera": "~57.0.4",
     "expo-constants": "~57.0.13",
@@ -71,10 +72,15 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
-    "web": "expo start --web",
+    "start": "node ../../scripts/validate-mobile-environment.mjs --local --start",
+    "android": "node ../../scripts/validate-mobile-environment.mjs --local --android",
+    "ios": "node ../../scripts/validate-mobile-environment.mjs --local --ios",
+    "export": "node ../../scripts/validate-mobile-environment.mjs --local --export",
+    "env:check": "node ../../scripts/validate-mobile-environment.mjs --local",
+    "env:check:eas": "node ../../scripts/validate-mobile-environment.mjs --eas",
+    "archive:inspect": "node ../../scripts/validate-mobile-environment.mjs --archive",
+    "build:eas": "node ../../scripts/validate-mobile-environment.mjs --eas-build",
+    "eas-build-pre-install": "node ../../scripts/validate-mobile-environment.mjs --worker",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate"

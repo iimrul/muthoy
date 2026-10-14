@@ -7,7 +7,9 @@ const mocks = vi.hoisted(() => ({
   close: vi.fn(),
   verify: vi.fn(),
   checkpoint: vi.fn(),
+  allow: vi.fn(),
 }));
+vi.mock('./environmentBinding', () => ({ ensureEnvironmentAllowed: mocks.allow }));
 
 vi.mock('./encryptionEnvironment', () => ({
   createEncryptionEnvironment: () => ({
@@ -50,6 +52,7 @@ const {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.allow.mockResolvedValue({ appVariant: 'development', nativeApplicationId: 'com.muthoy.pos.dev', supabaseProjectRef: 'btfprhticjgeihcngpif', version: 1 });
   mocks.files.clear();
   mocks.operations.length = 0;
   mocks.verify.mockImplementation(() => {
@@ -63,6 +66,20 @@ beforeEach(() => {
 });
 
 describe('recovery file-state handling', () => {
+  test('unclassified recovery data is untouched by every recovery mutation entrypoint', async () => {
+    const { EnvironmentRefusalError } = await import('../config/environmentPolicy');
+    const { releaseLockedRecoveryDatabase } = await import('./databaseRecovery');
+    mocks.files.add(DATABASE_FILE_NAME);
+    mocks.files.add(RECOVERY_DATABASE_FILE_NAME);
+    mocks.allow.mockRejectedValue(new EnvironmentRefusalError('unclassified-data'));
+    for (const operation of [openDatabaseRecoveryTarget, promoteHydratedRecoveryDatabase, releaseLockedRecoveryDatabase]) {
+      await expect(operation('ab'.repeat(32))).rejects.toBeInstanceOf(EnvironmentRefusalError);
+    }
+    expect(mocks.operations).toEqual([]);
+    expect([...mocks.files]).toEqual([DATABASE_FILE_NAME, RECOVERY_DATABASE_FILE_NAME]);
+    expect(mocks.initialize).not.toHaveBeenCalled();
+    expect(mocks.close).not.toHaveBeenCalled();
+  });
   test('restarts a stranded pre-promotion target without touching locked main', async () => {
     mocks.files.add(DATABASE_FILE_NAME);
     mocks.files.add(RECOVERY_DATABASE_FILE_NAME);

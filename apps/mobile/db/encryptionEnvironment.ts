@@ -13,6 +13,12 @@ import { atomicRenameDatabaseFileNative } from '../modules/muthoy-db-key';
 import { buildKeyPragma } from './databaseKey';
 import {
   classifyDatabaseHeader,
+  DATABASE_FILE_NAME,
+  CANDIDATE_FILE_NAME,
+  PLAINTEXT_BACKUP_FILE_NAME,
+  RECOVERY_DATABASE_FILE_NAME,
+  LOCKED_DATABASE_BACKUP_FILE_NAME,
+  PRESERVED_PLAINTEXT_FILE_NAME,
   SQLITE_PLAINTEXT_HEADER,
   type DatabaseFileClass,
 } from './encryptionPlan';
@@ -55,6 +61,12 @@ function databaseDirectory(): Directory {
 
 function databaseFile(fileName: string): File {
   return new File(databaseDirectory(), fileName);
+}
+
+/** H-9 read-only provenance probe. A zero-byte file is still existing data. */
+export function hasExistingEnvironmentDatabaseArtifacts(): boolean {
+  const names = [DATABASE_FILE_NAME, CANDIDATE_FILE_NAME, PLAINTEXT_BACKUP_FILE_NAME, RECOVERY_DATABASE_FILE_NAME, LOCKED_DATABASE_BACKUP_FILE_NAME, PRESERVED_PLAINTEXT_FILE_NAME];
+  return names.some(name => ['', '-wal', '-shm', '-journal'].some(suffix => databaseFile(`${name}${suffix}`).exists));
 }
 
 /**

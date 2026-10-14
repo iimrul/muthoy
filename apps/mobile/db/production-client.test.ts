@@ -8,7 +8,11 @@ const mocks = vi.hoisted(() => ({
   releaseRecovery: vi.fn(),
   open: vi.fn(),
   environment: {},
+  allow: vi.fn(),
+  assertAllowed: vi.fn(),
 }));
+
+vi.mock('./environmentBinding', () => ({ ensureEnvironmentAllowed: mocks.allow, assertEnvironmentAllowed: mocks.assertAllowed }));
 
 vi.mock('./databaseKey', () => ({
   getDatabaseKeyHex: vi.fn(),
@@ -36,6 +40,7 @@ function connection() {
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  mocks.allow.mockResolvedValue({ appVariant: 'development', nativeApplicationId: 'com.muthoy.pos.dev', supabaseProjectRef: 'btfprhticjgeihcngpif', version: 1 });
   mocks.prepare.mockResolvedValue({
     keyHex: 'ab'.repeat(32),
     outcome: 'already-encrypted',
@@ -45,6 +50,22 @@ beforeEach(() => {
 });
 
 describe('production database initialization path', () => {
+  test('environment refusal precedes all encryption, key and file work', async () => {
+    const { EnvironmentRefusalError } = await import('../config/environmentPolicy');
+    mocks.allow.mockRejectedValue(new EnvironmentRefusalError('unclassified-data'));
+    const client = await import('./test/production-client-entry');
+    await expect(client.ensureDatabaseReady()).rejects.toBeInstanceOf(EnvironmentRefusalError);
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(mocks.release).not.toHaveBeenCalled();
+  });
+  test('direct recovery refuses before closing or opening any database', async () => {
+    const { EnvironmentRefusalError } = await import('../config/environmentPolicy');
+    mocks.assertAllowed.mockImplementationOnce(() => { throw new EnvironmentRefusalError('binding-mismatch'); });
+    const client = await import('./test/production-client-entry');
+    expect(() => client.initializeDatabaseFileForRecovery('muthoy.restore.db', 'ab'.repeat(32))).toThrow(EnvironmentRefusalError);
+    expect(mocks.open).not.toHaveBeenCalled();
+  });
   test('concurrent UI/headless callers share one initialization attempt', async () => {
     let resolvePreparation!: (value: object) => void;
     mocks.prepare.mockReturnValueOnce(
@@ -57,7 +78,7 @@ describe('production database initialization path', () => {
     const ui = client.ensureDatabaseReady();
     const headless = client.ensureDatabaseReady();
     const another = client.ensureDatabaseReady();
-    expect(mocks.prepare).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mocks.prepare).toHaveBeenCalledTimes(1));
 
     resolvePreparation({
       keyHex: 'ab'.repeat(32),

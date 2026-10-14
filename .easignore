@@ -1,0 +1,83 @@
+# H-9 EAS archive allowlist. EAS CLI 21.8.0 reads .easignore only from the Git
+# toplevel and, while it exists, ignores EVERY .gitignore (nested and global),
+# so this file must stand alone.
+#
+# Root entries are denied by default and re-included explicitly. Directory
+# patterns carry no trailing slash on purpose: EAS tests the bare directory
+# path, so `dir/` would skip only the children and still upload an empty shell.
+# `/*` also matches `.git`, the one condition under which EAS deletes the cloned
+# repository metadata (and every excluded file's Git objects) from the upload.
+/*
+!/package.json
+!/pnpm-lock.yaml
+!/pnpm-workspace.yaml
+!/.npmrc
+!/.nvmrc
+!/.easignore
+!/scripts
+/scripts/*
+!/scripts/validate-mobile-environment.mjs
+!/packages
+!/apps
+/apps/*
+!/apps/mobile
+
+# Generated native projects: EAS must run managed Prebuild from app.config.js so
+# SQLCipher and Android backup protection come from the reviewed config plugins.
+/apps/mobile/android
+/apps/mobile/ios
+
+# Generated, cached and local-only material (mirrors apps/mobile/.gitignore and
+# the root .gitignore, neither of which EAS reads while this file exists).
+node_modules
+.expo
+.turbo
+.eas
+.kotlin
+.next
+dist
+web-build
+build
+out
+coverage
+*.tsbuildinfo
+next-env.d.ts
+expo-env.d.ts
+*.orig.*
+.metro-health-check*
+*.log
+*.stackdump
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+Thumbs.db
+.idea
+*.swp
+/apps/mobile/**/example
+
+# Env files, signing material and private evidence.
+.env*
+!.env.example
+credentials.json
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.p8
+*.pem
+*.key
+*.mobileprovision
+*.dump
+*.backup
+*capture*
+*dump*
+h9-private
+private-exports
+audit-artifacts
+
+# Tests and test support are not build inputs.
+*.test.ts
+*.test.tsx
+/apps/mobile/db/test
+/apps/mobile/tests

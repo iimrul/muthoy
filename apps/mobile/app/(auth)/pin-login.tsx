@@ -177,8 +177,11 @@ export default function PinLoginScreen() {
         setError(false);
         setRevoked(null);
         setRefused(null);
-        setNowMs(Date.now());
-        setLockedUntilMs(Date.now() + caught.retryAfterMs);
+        // One clock reading for both, so the countdown starts at exactly
+        // retryAfterMs: two reads a millisecond apart showed 4m 06s for 4m 05s.
+        const now = Date.now();
+        setNowMs(now);
+        setLockedUntilMs(now + caught.retryAfterMs);
         return;
       }
       if (!result) {
@@ -191,8 +194,9 @@ export default function PinLoginScreen() {
         // rather than re-deriving the rule on this side of the boundary.
         const status = pinAttemptStatus(pinAttemptScope(readLastShopIdSync()));
         if (status.isLocked) {
-          setNowMs(Date.now());
-          setLockedUntilMs(Date.now() + status.retryAfterMs);
+          const now = Date.now();
+          setNowMs(now);
+          setLockedUntilMs(now + status.retryAfterMs);
         }
         return;
       }

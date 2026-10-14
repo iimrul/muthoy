@@ -8,6 +8,7 @@ import {
 } from './client';
 import { DatabaseRecoveryPendingError } from './errors';
 import migrations from './migrations/migrations';
+import { ensureEnvironmentAllowed } from './environmentBinding';
 
 export interface DatabaseInitState {
   /** True once the schema is present and the app may safely read/write. */
@@ -68,6 +69,7 @@ export async function initializeRecoveryDatabase(
   fileName: string,
   keyHex: string,
 ): Promise<void> {
+  await ensureEnvironmentAllowed();
   closeDatabaseInitializationForRecovery();
   isRecoveryMode = true;
   try {
