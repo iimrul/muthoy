@@ -9,6 +9,8 @@ Supabase cloud mirror and Edge Functions.
   `BYPASSRLS` is not a `GRANT`.
 - `functions/sync/`: authenticated sync, canonical onboarding/device linking,
   billing status/initiation, and multi-shop orchestration.
+- `deploy/`: the H-9 runbook — DEV rehearsal and production order, gates,
+  stop conditions and rollback. Prepared 2026-10-14; not executed.
 
 - `pgtest/`: the migrations, RLS policies, permission functions and access-token
   hook EXECUTED against a real Postgres (PGlite — Postgres compiled to Wasm, no

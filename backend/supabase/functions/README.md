@@ -41,3 +41,17 @@ build does). DECISIONS.md, 2026-10-05.
 `payment-webhook` source exists, but SSLCommerz
 credentials/live validation are not configured; payment fails closed and is
 not production-ready.
+
+**H-9 (2026-10-14; local, not deployed).** `sync` keeps gateway
+`verify_jwt = true`, now declared in `config.toml`. Its routes and their
+authorization live in `sync/handler.ts` — `index.ts` is `Deno.serve` wiring
+only — and `handler-authorization.test.ts` executes every route against
+key-only, forged, expired, foreign and revoked credentials. All three
+functions share `_shared/supabaseAdmin.ts`, which resolves keys once through
+`_shared/supabaseKeys.ts`: `MUTHOY_SUPABASE_PROJECT_REF` is required, and
+`MUTHOY_SUPABASE_KEY_MODE` is `modern` by default (the `default` entries of
+`SUPABASE_PUBLISHABLE_KEYS` / `SUPABASE_SECRET_KEYS`) or `legacy` (the
+anon/service_role pair, rollback only). A missing or wrong setting refuses
+every function at cold start — `auth-send-sms` too — so set both before
+deploying, then deploy `auth-send-sms` first and `sync` second. supabase-js is
+pinned to `2.112.3`. Order, gates and rollback: [../deploy/README.md](../deploy/README.md).

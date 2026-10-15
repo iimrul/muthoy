@@ -23,9 +23,9 @@ Wave-2 state. Treat this as the plan it is until that rehearsal signs it off.
 > document stops matching it.
 
 <!-- rollback-classification:start -->
-**A: 6 · B: 17 · C: 8 — of 31.**
+**A: 7 · B: 18 · C: 8 — of 33.**
 
-PostgreSQL classifications: `20260813000000_initial_schema` (C) · `20260817000000_admin_read_grants` (A) · `20260817000100_sync_roles_read_grant` (A) · `20260818000000_inventory_movement_ledger` (B) · `20260818000100_sync_batches_stock_server_derived` (B) · `20260819000000_staff_device_login` (C) · `20260821000000_phase_b1_navigation_roles` (B) · `20260821010000_phase_b2_sales_inventory_sync` (C) · `20260822000000_owner_dashboard_credit_period` (A) · `20260822010000_b3_group1_shop_settings` (B) · `20260823000000_b3_group2_payment_note` (A) · `20260823010000_b3_group2_cash_reconcile` (A) · `20260823020000_b3_group2_sync_completion` (B) · `20260823030000_b3_group3_expense_category_taxonomy` (C) · `20260823040000_b3_groups456_schema_additions` (B) · `20260823050000_b3_groups456_sync_completion` (B) · `20260824000000_b3_group7_purchase_return_sync` (B) · `20260825000000_inventory_add_purchase_sync` (B) · `20260827000000_b3_group8_report_indexes` (C) · `20260827010000_b3_group9_sale_tax_snapshot` (B) · `20260831000000_b4_commercial_platform` (C) · `20260905000000_b4_canonical_onboarding` (B) · `20260907000000_h7_security_hardening` (B) · `20260907010000_h7_revoke_api_role_truncate` (A) · `20260907020000_h7_fix_pass_b` (C) · `20260909000000_h7_actor_binding_staff_reactivation` (B) · `20260923000000_a23_device_registry` (B) · `20260926000000_a23_persistent_enrollment_holds` (B) · `20261001000000_h5_auth_sms_dispatch` (B) · `20261004000000_h5_sms_dispatch_claim_owner` (C) · `20261005000000_h5_revoke_auth_user_sessions` (B)
+PostgreSQL classifications: `20260813000000_initial_schema` (C) · `20260817000000_admin_read_grants` (A) · `20260817000100_sync_roles_read_grant` (A) · `20260818000000_inventory_movement_ledger` (B) · `20260818000100_sync_batches_stock_server_derived` (B) · `20260819000000_staff_device_login` (C) · `20260821000000_phase_b1_navigation_roles` (B) · `20260821010000_phase_b2_sales_inventory_sync` (C) · `20260822000000_owner_dashboard_credit_period` (A) · `20260822010000_b3_group1_shop_settings` (B) · `20260823000000_b3_group2_payment_note` (A) · `20260823010000_b3_group2_cash_reconcile` (A) · `20260823020000_b3_group2_sync_completion` (B) · `20260823030000_b3_group3_expense_category_taxonomy` (C) · `20260823040000_b3_groups456_schema_additions` (B) · `20260823050000_b3_groups456_sync_completion` (B) · `20260824000000_b3_group7_purchase_return_sync` (B) · `20260825000000_inventory_add_purchase_sync` (B) · `20260827000000_b3_group8_report_indexes` (C) · `20260827010000_b3_group9_sale_tax_snapshot` (B) · `20260831000000_b4_commercial_platform` (C) · `20260905000000_b4_canonical_onboarding` (B) · `20260907000000_h7_security_hardening` (B) · `20260907010000_h7_revoke_api_role_truncate` (A) · `20260907020000_h7_fix_pass_b` (C) · `20260909000000_h7_actor_binding_staff_reactivation` (B) · `20260923000000_a23_device_registry` (B) · `20260926000000_a23_persistent_enrollment_holds` (B) · `20261001000000_h5_auth_sms_dispatch` (B) · `20261004000000_h5_sms_dispatch_claim_owner` (C) · `20261005000000_h5_revoke_auth_user_sessions` (B) · `20261008000000_h9_enrollment_hold_constraint_normalization` (B) · `20261008000100_h9_sync_staging_cleanup_schedule` (A)
 
 SQLite migration-time data writes: `0001` · `0002` · `0006` · `0007` · `0009` · `0010` · `0011` · `0012` · `0018` · `0024` · `0029`
 
@@ -73,7 +73,7 @@ Two rules sit above the table:
   and writes it there, and no `DROP COLUMN` gives those values back. A constant
   or stable default writes no row and stays class A.
 
-**A: 6 · B: 17 · C: 8 — of 31.**
+**A: 7 · B: 18 · C: 8 — of 33.**
 
 The "why" column is the migration's own migration-time statement counts, with
 function and trigger bodies excluded.
@@ -111,6 +111,22 @@ function and trigger bodies excluded.
 | `20261001000000_h5_auth_sms_dispatch` | B | 2 function, 1 table, 3 index, 2 GRANT, 3 REVOKE — the SMS dispatch ledger: a new table with no grants, read and written only through its two service-role functions. Reverting is a redeploy; dropping the table loses only send history |
 | `20261004000000_h5_sms_dispatch_claim_owner` | **C** | 1 volatile DEFAULT, 2 DROP FUNCTION, 2 function, 1 ADD COLUMN, 2 GRANT, 2 REVOKE — every dispatch claim names its owner, and both ledger functions are recreated with an owner parameter. The new column's `gen_random_uuid()` default writes a fresh owner into every existing row before it is dropped, so this migration writes data: forward-only. Those owners are held by no invocation, but the way back is still the data backup or a new forward migration, never a hand-written reverse. Applied with DEV's Phone provider paused — never the Send SMS hook — and the matching `auth-send-sms` deployed straight after (README.md, H-5 rollout) |
 | `20261005000000_h5_revoke_auth_user_sessions` | B | 1 function, 1 GRANT, 1 REVOKE — one SECURITY DEFINER function, service_role only, that deletes ONE auth user's sessions (their refresh tokens and AMR claims cascade) for the two sync paths holding no JWT of that user: the auth-account rebind and `signOutAppUser`. The migration writes no data; reverting is `drop function`, and only together with the `sync` build that calls it — without it the rebind fails closed and `signOutAppUser` reports a failure |
+| `20261008000000_h9_enrollment_hold_constraint_normalization` | B | 3 DROP CONSTRAINT — all inside one guarded DO block, which runs at migration time and which the classifier reads (its `$h9_normalize$` tag carries a digit, so the body-stripping pattern leaves it visible). Two of the three are the migration's own temporary NOT VALID probes; the third is the unnamed `device_enrollment_holds_check1`, dropped only after its stored parse tree proves it is the same rule as `device_enrollment_holds_consumption_check` (fresh bootstrap only; absent on DEV). Every other shape aborts the whole migration. It writes no data. Way back: none needed — the dropped constraint was an exact duplicate, so recreating it would change no behaviour |
+| `20261008000100_h9_sync_staging_cleanup_schedule` | A | Nothing the classifier counts — scheduling goes through `cron.schedule`, which is not a counted statement — so A, where the master plan (§8.4) expected B. Without pg_cron it only raises a notice. With pg_cron it verifies, or creates through `cron.schedule`, the single `muthoy-b2-sync-staging-cleanup` job the B2 migration already schedules, and aborts on any mismatch instead of overwriting. It writes no application data. Way back, under approval: `select cron.unschedule('muthoy-b2-sync-staging-cleanup');` — staging graphs the job has already deleted are not recreated |
+
+> **Open finding — H-9 Batch A, 2026-10-14 (not acted on here).** The
+> classifier strips every dollar-quoted body whose tag is letters or
+> underscores only, and that includes `DO` blocks, which run at migration
+> time. (The two H-9 migrations use digit-bearing tags, so their `DO` bodies
+> stay visible; that is why migration 32 counts as B.) Measured by exposing
+> every `DO` body in memory: exactly one existing classification changes —
+> `20260818000000_inventory_movement_ledger`, whose top-level `BACKFILL` `DO`
+> block writes synthetic movement rows for any pre-ledger batch, would be
+> **C**, not B. The "backfills nothing" note in the table below predates that
+> check. Correcting the classifier changes this signed-off H-11 tool and its
+> test, so it awaits the founder's approval as separate work. Until then,
+> plan any recovery past 0818 as forward-only — in practice it already is,
+> behind the class C `20260819000000` and `20260821010000`.
 
 ### What changed from the first audit
 

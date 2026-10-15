@@ -31,7 +31,9 @@
     "20260926000000_a23_persistent_enrollment_holds.sql": "B",
     "20261001000000_h5_auth_sms_dispatch.sql": "B",
     "20261004000000_h5_sms_dispatch_claim_owner.sql": "C",
-    "20261005000000_h5_revoke_auth_user_sessions.sql": "B"
+    "20261005000000_h5_revoke_auth_user_sessions.sql": "B",
+    "20261008000000_h9_enrollment_hold_constraint_normalization.sql": "B",
+    "20261008000100_h9_sync_staging_cleanup_schedule.sql": "A"
   },
   "postgresDeclaredOverrides": [
     "20260813000000_initial_schema.sql"

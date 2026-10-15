@@ -22,7 +22,7 @@ import {
 // credential-proving flow bound it to. There is no parameter here a caller can
 // influence — the request body is not consulted at all.
 //
-// ONE guard, ONE call site (index.ts), with the action classification living
+// ONE guard, ONE call site (handler.ts), with the action classification living
 // in deviceRegistryPolicy.ts where a test parses the router back against it.
 // The shape this replaced — a check each route was supposed to remember to
 // call — is how pull ended up gated and push did not.

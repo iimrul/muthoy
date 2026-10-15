@@ -27,7 +27,12 @@ import {
 const SOURCE = readFileSync(
   resolve('backend/supabase/functions/sync/deviceRegistry.ts'), 'utf8',
 );
-const INDEX = readFileSync(
+// H-9: the dispatch moved verbatim from index.ts into handler.ts; index.ts is
+// now Deno.serve wiring only, and a test below keeps it that way.
+const DISPATCH = readFileSync(
+  resolve('backend/supabase/functions/sync/handler.ts'), 'utf8',
+);
+const ENTRY = readFileSync(
   resolve('backend/supabase/functions/sync/index.ts'), 'utf8',
 );
 const BINDING = readFileSync(
@@ -326,8 +331,18 @@ describe('no sync route can drift out of the gate', () => {
    * understood only one would silently skip routes and then report a clean
    * sweep, which is worse than not checking at all.
    */
-  const routed = [...INDEX.matchAll(/body\.action === (?:"([a-z-]+)"|'([a-z-]+)')/g)]
+  const routed = [...DISPATCH.matchAll(/body\.action === (?:"([a-z-]+)"|'([a-z-]+)')/g)]
     .map((match) => (match[1] ?? match[2]) as string);
+
+  it('keeps index.ts to Deno wiring, so no route can be added outside handler.ts', () => {
+    // H-9. This sweep reads handler.ts; a route written in index.ts would
+    // escape it. Comments are stripped so prose can neither satisfy nor trip it.
+    const code = ENTRY.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)).toEqual([
+      'import { handleSyncRequest } from "./handler.ts";',
+      'Deno.serve(handleSyncRequest);',
+    ]);
+  });
 
   it('finds the routes at all, in both quote styles', () => {
     expect(new Set(routed).size).toBeGreaterThan(15);
@@ -385,16 +400,16 @@ describe('no sync route can drift out of the gate', () => {
   });
 
   it('runs the gate once, after JWT verification and before every handler', () => {
-    const verifyIndex = INDEX.indexOf('verifyCallerJwt(request)');
-    const gateIndex = INDEX.indexOf('await assertDeviceAuthority(caller)');
-    const firstHandler = INDEX.indexOf('body.action === "push"');
+    const verifyIndex = DISPATCH.indexOf('verifyCallerJwt(request)');
+    const gateIndex = DISPATCH.indexOf('await assertDeviceAuthority(caller)');
+    const firstHandler = DISPATCH.indexOf('body.action === "push"');
     expect(gateIndex).toBeGreaterThan(verifyIndex);
     expect(gateIndex).toBeLessThan(firstHandler);
     // Exactly one call site. A second would be the start of per-route drift.
-    expect(INDEX.match(/assertDeviceAuthority\(/g) ?? []).toHaveLength(1);
+    expect(DISPATCH.match(/assertDeviceAuthority\(/g) ?? []).toHaveLength(1);
     // And it is handed the CALLER only — never the body, which is the entire
     // difference between this design and the one it replaced.
-    expect(INDEX).not.toMatch(/assertDeviceAuthority\(caller,\s*body\)/);
+    expect(DISPATCH).not.toMatch(/assertDeviceAuthority\(caller,\s*body\)/);
   });
 });
 
@@ -427,7 +442,7 @@ describe('source contracts the runner cannot execute', () => {
     expect(SOURCE).toContain('GLOBAL_ABUSE_KEY');
     expect(SOURCE).toMatch(/clientIp \? `a23-abuse:\$\{clientIp\}` : GLOBAL_ABUSE_KEY/);
     // And the router has to actually supply it.
-    expect(INDEX).toContain('deviceActorSwitch(body, clientIp(request))');
+    expect(DISPATCH).toContain('deviceActorSwitch(body, clientIp(request))');
   });
 
   it('answers every lockout with the same refusal it answers a wrong PIN with', () => {
@@ -501,8 +516,8 @@ describe('source contracts the runner cannot execute', () => {
   });
 
   it('routes the actor switch BEFORE JWT verification, and everything else after', () => {
-    const switchIndex = INDEX.indexOf('body.action === "device-actor-switch"');
-    const verifyIndex = INDEX.indexOf('verifyCallerJwt(request)');
+    const switchIndex = DISPATCH.indexOf('body.action === "device-actor-switch"');
+    const verifyIndex = DISPATCH.indexOf('verifyCallerJwt(request)');
     // Unauthenticated by necessity: a handover may hold an expired token or
     // none at all. It authenticates by device secret + PIN instead.
     expect(switchIndex).toBeGreaterThan(-1);
@@ -511,7 +526,7 @@ describe('source contracts the runner cannot execute', () => {
     // deliberately absent from this list and from the router entirely — see
     // "has NO enrolment route left to exempt" above.
     for (const action of ['device-authority', 'device-list', 'device-access']) {
-      const index = INDEX.indexOf(`body.action === "${action}"`);
+      const index = DISPATCH.indexOf(`body.action === "${action}"`);
       expect(index, `${action} must be authenticated`).toBeGreaterThan(verifyIndex);
     }
   });
@@ -556,8 +571,8 @@ describe('the requester address', () => {
   });
 
   it('is the ONLY thing the router consults', () => {
-    expect(INDEX).toContain('requesterIp((name) => request.headers.get(name))');
-    expect(INDEX).not.toContain('x-forwarded-for');
+    expect(DISPATCH).toContain('requesterIp((name) => request.headers.get(name))');
+    expect(DISPATCH).not.toContain('x-forwarded-for');
   });
 });
 

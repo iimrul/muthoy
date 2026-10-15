@@ -1,4 +1,4 @@
-import type { User } from "npm:@supabase/supabase-js@2";
+import type { User } from "npm:@supabase/supabase-js@2.112.3";
 import { supabaseAdmin } from "./supabaseAdmin.ts";
 
 export class HttpError extends Error {

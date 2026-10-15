@@ -81,6 +81,11 @@
   `b4_mutate_owned_shop(...)` function rather than broad table-write grants.
 - PostgreSQL migration parity is verified through
   `20260905000000_b4_canonical_onboarding.sql`; deployed `sync` is v10 ACTIVE.
+- Edge Functions pin `npm:@supabase/supabase-js@2.112.3` (the mobile lockfile's
+  version) and resolve API keys once per cold start: modern publishable/secret
+  keys by default, the legacy anon/service_role pair only as an explicit
+  rollback (`MUTHOY_SUPABASE_KEY_MODE`). `sync` keeps gateway JWT
+  verification. H-9; see `backend/supabase/deploy/README.md`.
 - SSLCommerz is the first planned provider. The provider abstraction and webhook
   source exist, but real credentials/live validation are not configured; payment
   fails closed and is not production-ready.

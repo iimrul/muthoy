@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // verifyCallerJwt is the single chokepoint for EVERY authenticated action —
 // push, pull, push-group, refund-claim, link-device, recover-pin, billing-*
 // and every shop-* multi-shop action are all dispatched through it in
-// index.ts. Testing it here therefore covers all of them at once; only
+// handler.ts. Testing it here therefore covers all of them at once; only
 // device-login bypasses it, and it authenticates by phone + PIN instead.
 
 const mocks = vi.hoisted(() => ({ getUser: vi.fn() }));

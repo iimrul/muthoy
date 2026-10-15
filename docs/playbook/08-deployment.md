@@ -6,6 +6,11 @@ CI on every PR/push to `dev`: lint, typecheck, run the unit test suite. Merge to
 `main` triggers the release workflow (EAS build for mobile, Vercel deploy for
 admin once it exists).
 
+> **Current state (H-9, 2026-10-14):** CI runs lint, typecheck and tests only;
+> there is no release workflow. EAS builds and every Supabase change are
+> manual, gated steps — one approval per step — in
+> `backend/supabase/deploy/README.md`.
+
 ## EXPO EAS
 `eas.json` profiles: `development` (Day 1's dev client), `internal`
 (Day 15's pilot build, and ongoing internal testing), `production` (Play Store

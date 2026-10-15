@@ -189,7 +189,7 @@ describe('multi-shop server authority', () => {
   });
 
   it('does not create a shop outside the shared guard classification', async () => {
-    // The handler itself remains focused on commercial ownership; index.ts
+    // The handler itself remains focused on commercial ownership; handler.ts
     // executes this list before dispatch. This assertion executes the exact
     // predicate used by the router rather than searching source text.
     expect(new Set(DEVICE_GUARDED_ACTIONS).has('shop-create')).toBe(true);

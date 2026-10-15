@@ -5,6 +5,7 @@ import { publicEnvironment } from '../config/publicEnvironment';
 import { EnvironmentRefusalError } from '../config/environmentPolicy';
 import { readEnvironmentConfiguration } from '../native/environmentIdentity';
 import { ensureEnvironmentAllowed, ENVIRONMENT_STORE_IDS } from '../db/environmentBinding';
+import { withoutPublishableKeyBearer } from './sessionlessSyncTransport';
 
 export const supabaseUrl = publicEnvironment.url;
 export const missingSupabaseConfigKeys: readonly string[] = [
@@ -57,7 +58,10 @@ export const supabase = createClient(
           const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
           if (url.origin !== supabaseUrl || url.username || url.password) throw new Error();
         } catch { throw new EnvironmentRefusalError('configuration-invalid'); }
-        const response = await globalThis.fetch(input, { ...init, redirect: 'error' });
+        // H-9 §4.2: a sessionless sync call never carries the publishable key
+        // as its bearer; every other request is passed through unchanged.
+        const transport = withoutPublishableKeyBearer(input, init, supabaseUrl, publicEnvironment.publicKey);
+        const response = await globalThis.fetch(input, { ...transport, redirect: 'error' });
         // React Native's fetch (whatwg-fetch over XHR/OkHttp) ignores `redirect`
         // and follows redirects; only the final URL shows it happened. Never
         // hand the SDK a response that came from another origin.

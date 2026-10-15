@@ -164,7 +164,8 @@ export function describeRegistryFailure(code: string | null | undefined): Regist
  * value, which would be the same hole under another name.
  *
  * Lives here, taking a plain getter, so it can be TESTED rather than
- * asserted about: index.ts cannot be imported by the Node runner.
+ * asserted about; handler.ts, its one caller, is itself executed by
+ * handler-authorization.test.ts.
  */
 export function requesterIp(header: (name: string) => string | null): string | null {
   const connecting = header("cf-connecting-ip")?.trim();
@@ -408,7 +409,7 @@ export const DEVICE_REENROLMENT_CODES = ["device_session_unbound"] as const;
  *
  * ONE guard with ONE call site, and this table decides which actions it
  * covers — so a route added later cannot quietly arrive ungated. A test parses
- * index.ts and fails if any routed action is missing from all three lists.
+ * handler.ts and fails if any routed action is missing from all three lists.
  */
 export const DEVICE_GUARDED_ACTIONS = [
   "pull",

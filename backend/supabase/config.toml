@@ -11,3 +11,12 @@ verify_jwt = false
 # before anything else runs — see functions/auth-send-sms/signature.ts.
 [functions.auth-send-sms]
 verify_jwt = false
+
+# H-9. The gateway keeps JWT verification for sync — declared, not defaulted.
+# device-login and device-actor-switch pass it with the public key alone (a
+# modern publishable key in `apikey` with no Authorization header, or the
+# legacy anon JWT as the bearer) and prove a credential inside the handler;
+# every other action is verified again by verifyCallerJwt in
+# functions/sync/handler.ts. Never deploy with --no-verify-jwt as a workaround.
+[functions.sync]
+verify_jwt = true

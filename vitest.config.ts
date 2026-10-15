@@ -91,6 +91,13 @@ export default defineConfig({
       // could only read it as text are how a sign-out that GoTrue refused on
       // every call shipped green.
       "npm:bcryptjs@3": resolve(process.cwd(), "apps/mobile/node_modules/bcryptjs/index.js"),
+      // H-9. The Edge runtime's pinned supabase-js, mapped to the identical
+      // version the mobile lockfile installs, so supabase-key-transport.test.ts
+      // executes the real supabaseAdmin.ts and the real SDK it ships with.
+      "npm:@supabase/supabase-js@2.112.3": resolve(
+        process.cwd(),
+        "apps/mobile/node_modules/@supabase/supabase-js/dist/index.mjs",
+      ),
     },
   },
   test: {
@@ -102,6 +109,9 @@ export default defineConfig({
       // runs EAS's own copy/workflow code when that pinned CLI is installed.
       "apps/mobile/tests/eas-archive.test.ts",
       "apps/mobile/tests/environment-gate.render.test.tsx",
+      // H-9 Phase 4. The read-only production preflight, driven against a
+      // scratch Git revision and a fake Management API; it never runs live.
+      "apps/mobile/tests/h9-prod-preflight.test.ts",
       "apps/mobile/domain/**/*.test.ts",
       "apps/mobile/native/*.test.ts",
       "apps/mobile/services/*.test.ts",
@@ -378,7 +388,18 @@ export default defineConfig({
       "backend/supabase/pgtest/dev-harness-cleanup.pgtest.ts",
       "backend/supabase/pgtest/dev-harness-12-cleanup.pgtest.ts",
       "backend/supabase/pgtest/restore-baseline.pgtest.ts",
+      // H-9. The two forward migrations: A2.3 consumption-CHECK normalization
+      // across fresh and historical chains, and the guarded pg_cron schedule
+      // (with a test-only pg_cron stub) plus the cleanup function it runs.
+      "backend/supabase/pgtest/h9-environment-parity.pgtest.ts",
+      "backend/supabase/pgtest/h9-cron-cleanup.pgtest.ts",
       "backend/supabase/functions/sync/grants.test.ts",
+      // H-9. The Edge key resolver, the real supabaseAdmin.ts + SDK request
+      // construction in both key modes, and every sync route driven through
+      // handler.ts against forged, foreign and key-only credentials.
+      "backend/supabase/functions/sync/_shared/supabaseKeys.test.ts",
+      "backend/supabase/functions/sync/supabase-key-transport.test.ts",
+      "backend/supabase/functions/sync/handler-authorization.test.ts",
       // H-7: anonymous callers are refused by verifyCallerJwt itself, not by
       // the hosted Auth provider toggle alone.
       "backend/supabase/functions/sync/anonymous.test.ts",

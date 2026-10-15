@@ -3496,3 +3496,50 @@ and three install fake ones); multi-shop-entitlement freezes the Date, no
 timers, nine days after its `T0`, checks that each denial is for the plan
 itself (`free` / `trial_ended`) rather than a stale cache, and adds a test
 pinning the 30-day ceiling to the millisecond.
+
+**H-9 Batch A — Phase 2–4 local work, 2026-10-14 (uncommitted; nothing hosted,
+deployed, built or installed; no SMS):**
+- *Phase 1* is on main as `a407c83` (signed off, CI green). Plan:
+  `docs/plans/H-9-production-environment-eas-secrets.md`; results:
+  `docs/plans/h9-verification-report.md`.
+- *Edge keys.* `functions/sync/_shared/supabaseKeys.ts` resolves keys once per
+  cold start. `MUTHOY_SUPABASE_PROJECT_REF` is required and must match
+  `https://<ref>.supabase.co` exactly; `MUTHOY_SUPABASE_KEY_MODE` is `modern`
+  (default: the `default` entry of each JSON dictionary, never the first value)
+  or `legacy` (explicit rollback). No downgrade, no mixed pair, fixed refusal
+  codes that never echo input. supabase-js pinned to 2.112.3 in Edge code.
+- *Transport.* `sync` keeps gateway `verify_jwt = true`, now declared. The
+  mobile fetch adapter removes only `Bearer <the publishable key>` on this
+  project's `/functions/v1/sync` (SDK 2.112.3 already omits it); user JWTs,
+  the legacy bearer and all Auth/REST/Storage traffic pass unchanged.
+- *Dispatch.* `sync/handler.ts` holds the verbatim route table; `index.ts` is
+  wiring only. A matrix test executes every route against key-only, forged,
+  expired, foreign, revoked and anonymous credentials.
+- *Migrations 32/33.* 32 converges the A2.3 consumption CHECK by stored parse
+  tree (drops only the fresh-bootstrap duplicate `_check1`; aborts on any other
+  shape). 33 verifies or creates the B2 staging-cleanup cron job only where
+  pg_cron exists — DEV gets a notice and no change. Classes: 32 B, 33 A
+  (`A 7 · B 18 · C 8 — of 33`).
+- *Finding, not acted on.* The H-11 classifier strips `DO` bodies, which run
+  at migration time; exposing them reclassifies `20260818000000` from B to C
+  (its backfill block). Fixing the tool needs separate approval.
+- *Phase 3/4 prepared, not run.* Runbook `backend/supabase/deploy/README.md`;
+  read-only checks `backend/supabase/checks/h9_postmigration_checks.sql`;
+  `scripts/h9-prod-preflight.mjs` refuses while the production policy is unset
+  and its GET-only `--remote` mode has never run. Phase 4 was prepared before
+  G2 on the founder's instruction and must be re-validated after it.
+- *Codex fix pass, 2026-10-15 (FIX REQUIRED → fixed locally, re-review
+  pending).* (1) Migration 33 and the **cron** check now require the job's
+  `nodename`/`nodeport` to be this server's own pg_cron target —
+  `current_setting('cron.host')` and `current_setting('port')`, the values
+  `cron.schedule` records; no endpoint literal. A job aimed elsewhere
+  (`foreign-db.invalid:6543`) aborts; an unset/empty `cron.host` aborts as
+  "target cannot be established". (2) `--remote` refuses Auth settings that do
+  not report every security field (`auth-metadata-missing`); `sms_test_otp`
+  passes only as `''`. `null` refuses as `test-otp-map-unverifiable`, because it
+  cannot prove there is no map (Codex final P1). Any other type is malformed.
+  (3) The preflight requires the checkout's
+  `apps/mobile/config/environmentPolicy.js` to equal the approved revision's
+  blob byte for byte (`policy-matches-revision`), so an edited, later-committed
+  or re-encoded policy cannot pass with a valid backend revision; a refused
+  manifest's revision no longer reaches git at all (self-review hardening).

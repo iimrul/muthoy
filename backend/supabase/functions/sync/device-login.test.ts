@@ -32,7 +32,9 @@ const DEVICE_LOGIN = readFileSync(resolve(FUNCTIONS, 'deviceLogin.ts'), 'utf8');
 const DEVICE_LOGIN_POLICY = readFileSync(resolve(FUNCTIONS, 'deviceLoginPolicy.ts'), 'utf8');
 const RECOVER_PIN = readFileSync(resolve(FUNCTIONS, 'recoverPin.ts'), 'utf8');
 const IDENTITY = readFileSync(resolve(FUNCTIONS, '_shared/identity.ts'), 'utf8');
-const INDEX = readFileSync(resolve(FUNCTIONS, 'index.ts'), 'utf8');
+// H-9: the dispatch moved verbatim from index.ts (now Deno wiring only) into
+// handler.ts; deviceRegistryPolicy.test.ts keeps index.ts route-free.
+const DISPATCH = readFileSync(resolve(FUNCTIONS, 'handler.ts'), 'utf8');
 const PUSH = readFileSync(resolve(FUNCTIONS, 'push.ts'), 'utf8');
 const PULL = readFileSync(resolve(FUNCTIONS, 'pull.ts'), 'utf8');
 const SHARED_AUTH = readFileSync(resolve(FUNCTIONS, '_shared/auth.ts'), 'utf8');
@@ -52,7 +54,7 @@ function syncRowPermittedBody(): string {
 
 describe('device-login is the only unauthenticated action', () => {
   test('it is dispatched before verifyCallerJwt, and every other action after', () => {
-    const body = code(INDEX);
+    const body = code(DISPATCH);
     const deviceLoginAt = body.indexOf('"device-login"');
     const verifyAt = body.indexOf('verifyCallerJwt(request)');
 
@@ -212,7 +214,7 @@ describe('owner PIN recovery is the only surviving OTP path', () => {
     // recoverPin's own-account logout) and a just-minted session's own token
     // (local, for recoverPin's post-write cleanup — see below). A revocation
     // by a BARE user id goes through h5_revoke_auth_user_sessions instead.
-    const sources = [RECOVER_PIN, IDENTITY, PUSH, PULL, INDEX, DEVICE_LOGIN].map(code).join('\n');
+    const sources = [RECOVER_PIN, IDENTITY, PUSH, PULL, DISPATCH, DEVICE_LOGIN].map(code).join('\n');
     expect(sources).not.toMatch(/admin\.signOut\(/);
     const auth = code(SHARED_AUTH);
     expect(auth.match(/admin\.signOut\(/g)).toHaveLength(2);

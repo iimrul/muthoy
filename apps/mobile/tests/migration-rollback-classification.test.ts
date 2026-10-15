@@ -135,11 +135,11 @@ describe('a volatile ADD COLUMN default is a backfill', () => {
 
 describe('the corrected PostgreSQL classification', () => {
   it('covers every migration on disk exactly once', () => {
-    expect(pg.length).toBe(31);
-    expect(new Set(pg.map((row) => row.name)).size).toBe(31);
+    expect(pg.length).toBe(33);
+    expect(new Set(pg.map((row) => row.name)).size).toBe(33);
   });
 
-  it('is A 6 / B 16 / C 8 — not the 14 forward-only the first audit claimed', () => {
+  it('is A 7 / B 18 / C 8 — not the 14 forward-only the first audit claimed', () => {
     // Hardcoded on purpose. A migration that changes class has to change this
     // number too, which is the point at which somebody looks at it.
     // A2.3 added the registry plus its persistent-hold hotfix: function and
@@ -148,7 +148,12 @@ describe('the corrected PostgreSQL classification', () => {
     // Its claim-owner follow-up is C: the new column's gen_random_uuid()
     // default writes a fresh value into every existing row — a backfill, and
     // first counted as B until review caught it (2026-10-05).
-    expect(classCounts(pg)).toEqual({ A: 6, B: 17, C: 8 });
+    // H-9 (2026-10-14): the constraint normalization is B — its DO block's
+    // three DROP CONSTRAINTs are migration-time and visible to the classifier
+    // — and the guarded pg_cron schedule is A: cron.schedule is not a counted
+    // statement. Neither writes data. See ROLLBACK.md's open finding on DO
+    // bodies before trusting this number for 20260818000000.
+    expect(classCounts(pg)).toEqual({ A: 7, B: 18, C: 8 });
   });
 
   it('declares its one judgement instead of inferring it', () => {
@@ -170,7 +175,7 @@ describe('the corrected PostgreSQL classification', () => {
   );
 
   it('states the corrected headline count in the document itself', () => {
-    expect(ROLLBACK_DOC).toContain('**A: 6 · B: 17 · C: 8 — of 31.**');
+    expect(ROLLBACK_DOC).toContain('**A: 7 · B: 18 · C: 8 — of 33.**');
   });
 
   it('carries no OTHER headline anywhere in any of the three documents', () => {

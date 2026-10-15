@@ -1,27 +1,30 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.112.3";
+import { resolveSupabaseKeys } from "./supabaseKeys.ts";
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL");
-const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+// H-9. One resolver decides which key generation this deployment uses, and
+// refuses — with a fixed code, never a value — an unknown mode, a malformed or
+// wrong-prefix key, or a URL for any project other than
+// MUTHOY_SUPABASE_PROJECT_REF. The refusal throws here, at module load, so a
+// misconfigured function serves nothing; sync, auth-send-sms and
+// payment-webhook all share this one initializer. See supabaseKeys.ts.
+const keys = resolveSupabaseKeys((name) => Deno.env.get(name));
 
-if (!supabaseUrl || !serviceRoleKey || !anonKey) {
-  throw new Error("Missing Supabase Edge Function environment variables");
-}
-
-export const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+export const supabaseAdmin = createClient(keys.url, keys.adminKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
 /**
  * A NON-privileged client, used for exactly one thing: exchanging an
- * admin-generated link's token_hash for a real session in deviceLogin.ts.
+ * admin-generated link's token_hash for a real session in deviceLogin.ts. It
+ * holds the public key — modern publishable, or the anon JWT in explicit
+ * legacy mode — never the admin key.
  *
  * verifyOtp is a public auth endpoint, and calling it through the admin client
- * would send the service-role key as the caller's Authorization header. That is
+ * would send the privileged key as the caller's Authorization header. That is
  * wrong in principle — a session is being minted FOR an end user, not for the
  * service — and unreliable in practice, since the resulting session would be
  * shaped by the wrong caller identity.
  */
-export const supabaseAnon = createClient(supabaseUrl, anonKey, {
+export const supabaseAnon = createClient(keys.url, keys.publicKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
