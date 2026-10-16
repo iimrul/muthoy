@@ -207,6 +207,41 @@ alter default privileges in schema public grant all on sequences to anon, authen
 export const HOSTED_FUNCTION_EXECUTE_MODEL =
   'revoke execute on all functions in schema public from public;';
 
+/** H-9 migration 34 (F12): the API roles' table, sequence and default privileges in public. */
+export const API_ROLE_PRIVILEGES_MIGRATION = '20261015000000_h9_api_role_table_privileges.sql';
+
+/**
+ * GRANT statements that give anon/authenticated back exactly the table-wide, sequence and
+ * default privileges they hold in public right now (column-level grants are left alone because
+ * migration 34 preserves them).
+ *
+ * Migration 34 brings any project to production's model: the API roles hold no table-wide
+ * SELECT/INSERT/UPDATE/DELETE/TRUNCATE at all. The H-9 rehearsal measured 2026-10-15 that a
+ * project created with today's platform defaults does NOT start there (anon/authenticated got
+ * SELECT on 32 tables, INSERT/UPDATE on 9) while DEV does. createHarness() runs 34 for real and
+ * then uses this to restore the deliberately wider TABLES model described above, so every RLS
+ * suite keeps testing a policy rather than a privilege error. Only that model is restored —
+ * nothing a pre-34 database did not already have.
+ */
+const API_ROLE_TABLE_GRANTS = `
+  select format('grant %s on %s %s to %I;', string_agg(a.privilege_type, ', ' order by a.privilege_type),
+                case c.relkind when 'S' then 'sequence' else 'table' end, c.oid::regclass, r.rolname) as statement
+    from pg_class c
+   cross join lateral aclexplode(c.relacl) a
+    join pg_roles r on r.oid = a.grantee
+   where c.relnamespace = 'public'::regnamespace and r.rolname in ('anon', 'authenticated')
+   group by c.oid, c.relkind, r.rolname
+  union all
+  select format('alter default privileges in schema public grant %s on %s to %I;',
+                string_agg(a.privilege_type, ', ' order by a.privilege_type),
+                case d.defaclobjtype when 'r' then 'tables' when 'S' then 'sequences' else 'functions' end, r.rolname)
+    from pg_default_acl d
+   cross join lateral aclexplode(d.defaclacl) a
+    join pg_roles r on r.oid = a.grantee
+   where d.defaclnamespace = 'public'::regnamespace and d.defaclrole = 'postgres'::regrole
+     and d.defaclobjtype in ('r', 'S', 'f') and r.rolname in ('anon', 'authenticated')
+   group by d.defaclobjtype, r.rolname`;
+
 export interface Harness {
   db: PGlite;
   /** Runs `fn` as the given Postgres role with the given JWT claims. */
@@ -232,7 +267,7 @@ export function migrationSql(name: string): string {
 function wrap(db: PGlite): Harness {
   return {
     db,
-    async as<T>(role, claims, fn) {
+    async as<T>(role: string, claims: Record<string, unknown> | null, fn: () => Promise<T>): Promise<T> {
       await db.exec(`set role ${role}`);
       await db.query(`select set_config('request.jwt.claims', $1, false)`, [
         claims ? JSON.stringify(claims) : '',
@@ -267,7 +302,21 @@ export async function createHarness(): Promise<Harness> {
   const db = await PGlite.create();
   await db.exec(PLATFORM_BOOTSTRAP);
   for (const name of migrationFiles()) {
+    if (name !== API_ROLE_PRIVILEGES_MIGRATION) {
+      await db.exec(migrationSql(name));
+      continue;
+    }
+    // 34 runs for real and must take effect; then the API roles get back exactly what they
+    // held before it (see API_ROLE_TABLE_GRANTS) — before any later migration runs.
+    const wider = await db.query<{ statement: string }>(API_ROLE_TABLE_GRANTS);
     await db.exec(migrationSql(name));
+    const narrowed = await db.query<{ allowed: boolean }>(
+      `select has_table_privilege('anon', 'public.shops', 'select') as allowed`,
+    );
+    if (narrowed.rows[0]?.allowed !== false) {
+      throw new Error(`${name} left anon with SELECT on public.shops; the harness would hide that`);
+    }
+    await db.exec(wider.rows.map((row) => row.statement).join('\n'));
   }
   await db.exec(HOSTED_FUNCTION_EXECUTE_MODEL);
   return wrap(db);

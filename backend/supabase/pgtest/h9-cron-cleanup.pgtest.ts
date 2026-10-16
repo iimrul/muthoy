@@ -389,10 +389,17 @@ describe('the read-only migration-history checks', () => {
   }
 
   it('recognizes DEV\'s pre-H-9 history and refuses it as post-H-9', async () => {
-    await record(migrationFiles().slice(0, -2));
+    await record(migrationFiles().filter((name) => name < '20261008000000'));
     expect(Object.values(await readOnlyChecks(h, 'history_pre_h9'))).toEqual([true, true]);
     expect(await readOnlyChecks(h, 'history_post_h9'))
-      .toMatchObject({ history_has_33_versions: false, history_has_both_h9_versions: false });
+      .toMatchObject({ history_has_34_versions: false, history_has_all_h9_versions: false });
+  });
+
+  it('refuses a history that stops before migration 34 as post-H-9', async () => {
+    await record(migrationFiles().filter((name) => name < '20261015000000'));
+    expect(await readOnlyChecks(h, 'history_post_h9')).toEqual({
+      history_has_34_versions: false, history_has_all_h9_versions: false, history_has_nothing_after_h9: true,
+    });
   });
 
   it('recognizes the complete post-H-9 history and refuses an unexpected later version', async () => {

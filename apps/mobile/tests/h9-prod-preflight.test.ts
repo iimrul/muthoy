@@ -149,9 +149,11 @@ beforeAll(() => {
   writeFileSync(join(repo, POLICY_PATH), POLICY_BYTES);
   revision = commitBackend();
 }, 120_000);
+// Deletes a backend-tree copy for nearly every case: on Windows, beside a busy second
+// worker, that ran past Vitest's default 10 s hook budget (2026-10-16, all 82 cases green).
 afterAll(() => {
   for (const dir of scratch) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-});
+}, 120_000);
 // Every case runs synchronous git and file copies and awaits only microtasks,
 // so without a macrotask turn the whole file (53 s traced under the two-worker
 // gate) holds Vitest's onTaskUpdate replies past their 60 s RPC timeout.
@@ -272,6 +274,16 @@ describe('offline preflight', () => {
     try {
       const result = await run(options(workdir(), manifest({ approvedRevision: weakened })));
       expect(failed(result)).toEqual(['jwt-flags:jwt-flags-unexpected']);
+    } finally {
+      revision = commitBackend();
+    }
+  });
+
+  it('refuses an approved revision whose chain stops before migration 34', async () => {
+    const without34 = commitBackend((backend) => rmSync(join(backend, 'migrations/20261015000000_h9_api_role_table_privileges.sql')));
+    try {
+      const result = await run(options(workdir(), manifest({ approvedRevision: without34 })));
+      expect(failed(result)).toEqual(['migration-chain:migration-chain-unexpected']);
     } finally {
       revision = commitBackend();
     }

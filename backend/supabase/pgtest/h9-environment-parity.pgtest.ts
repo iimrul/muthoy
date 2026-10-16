@@ -31,6 +31,7 @@ import { findPostgresBin, startServerPostgres, type ServerPostgres } from './ser
 const M0923 = '20260923000000_a23_device_registry.sql';
 const M32 = '20261008000000_h9_enrollment_hold_constraint_normalization.sql';
 const M33 = '20261008000100_h9_sync_staging_cleanup_schedule.sql';
+const M34 = '20261015000000_h9_api_role_table_privileges.sql';
 const TABLE = `'public.device_enrollment_holds'::regclass`;
 const CANONICAL = 'device_enrollment_holds_consumption_check';
 const CHECK1 = 'device_enrollment_holds_check1';
@@ -152,10 +153,10 @@ async function readOnlyChecks(h: Harness, section: string): Promise<Record<strin
 }
 
 describe('the H-9 forward migrations sit after every historical migration', () => {
-  it('orders 32 and 33 last, in that order', () => {
+  it('orders 32, 33 and 34 last, in that order', () => {
     const files = migrationFiles();
-    expect(files.slice(-2)).toEqual([M32, M33]);
-    expect(files.filter((name) => name < M32)).toHaveLength(files.length - 2);
+    expect(files.slice(-3)).toEqual([M32, M33, M34]);
+    expect(files.filter((name) => name < M32)).toHaveLength(files.length - 3);
   });
 });
 

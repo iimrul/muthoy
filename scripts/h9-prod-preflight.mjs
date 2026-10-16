@@ -63,6 +63,7 @@ export const BACKEND_PATHS = Object.freeze(['config.toml', 'migrations', 'functi
 export const H9_MIGRATIONS = Object.freeze([
   '20261008000000_h9_enrollment_hold_constraint_normalization.sql',
   '20261008000100_h9_sync_staging_cleanup_schedule.sql',
+  '20261015000000_h9_api_role_table_privileges.sql',
 ]);
 
 const PROJECT_REF = /^[a-z]{20}$/;
@@ -228,7 +229,7 @@ function offline(options, deps, results) {
     if (!files) refuse('prerequisite-failed');
     const migrations = files.filter((path) => path.startsWith('supabase/migrations/') && path.endsWith('.sql'))
       .map((path) => path.slice('supabase/migrations/'.length)).sort();
-    if (migrations.length !== 33 || migrations.slice(-2).join(',') !== H9_MIGRATIONS.join(',')) refuse('migration-chain-unexpected');
+    if (migrations.length !== 34 || migrations.slice(-H9_MIGRATIONS.length).join(',') !== H9_MIGRATIONS.join(',')) refuse('migration-chain-unexpected');
   }));
   ok.push(check(results, 'jwt-flags', () => {
     const toml = readFileSync(join(workdir, 'supabase/config.toml'), 'utf8');

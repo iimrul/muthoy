@@ -3543,3 +3543,88 @@ deployed, built or installed; no SMS):**
   blob byte for byte (`policy-matches-revision`), so an edited, later-committed
   or re-encoded policy cannot pass with a valid backend revision; a refused
   manifest's revision no longer reaches git at all (self-review hardening).
+
+**H-9 F12 — migration 34, API-role table privileges, 2026-10-15 (local only,
+uncommitted; nothing hosted, no DEV change; Codex review pending).**
+- *Why.* The Phase 3 rehearsal ran the reviewed chain on a project created with
+  the platform's current default privileges: anon and authenticated ended with
+  SELECT on 32 public tables and INSERT/UPDATE on 9. DEV holds none. RLS
+  refused every row, so nothing was exposed, but PROD built from the repository
+  would not match what DEV testing proved. The founder approved a guarded
+  forward migration (2026-10-15) rather than relying on project settings.
+- *What.* `20261015000000_h9_api_role_table_privileges.sql`, one guarded DO
+  block. For anon and authenticated in public: every table-wide SELECT, INSERT,
+  UPDATE, DELETE or TRUNCATE they actually hold, revoked one by one; every
+  sequence right; and postgres's default privileges for future tables (those
+  five), sequences and functions (EXECUTE). DEV's `xtm` stays. On DEV it is a
+  no-op.
+- *Per-privilege, not blanket.* A table-wide `REVOKE INSERT/UPDATE` also strips
+  the column-level grants of that type, and 20260819000000's column grants on
+  `users` (authenticated: 13 INSERT and 12 UPDATE columns) are part of DEV's
+  baseline. So 34 revokes only what each role holds table-wide, and aborts if an
+  API-role column grant shares a type with a table-wide one.
+- *Guards and proof.* It aborts, changing nothing, unless it runs as postgres,
+  the three roles exist, every public relation is postgres-owned, every table
+  has RLS and nothing is granted to PUBLIC. It then verifies the effective end
+  state (`has_table_privilege`), and that every other ACL entry, column grant,
+  default, function ACL, the schema ACL and the RLS flags are unchanged.
+- *Deliberately not changed.* service_role stays broader on fresh projects than
+  on DEV (instruction: preserve service_role). PostgreSQL's built-in PUBLIC
+  EXECUTE on new functions stays, as on DEV. DEV's `rls_auto_enable` (F13) is
+  not replicated. The 0819 column grants stay; whether authenticated needs them
+  at all is a separate review.
+- *Consequence.* authenticated has no SELECT on `public.batches` on any
+  project, so the `postgres_changes` signal in `apps/mobile/sync/realtime.ts`
+  cannot deliver: the same as DEV today. Pull stays the data path. Restoring
+  the signal needs a separate, reviewed, RLS-scoped grant.
+- *Tests.* `h9-api-role-privileges.pgtest.ts` (24):
+  - On a fresh-project model, F12 is reproduced exactly (32/9/9) and closed by 34.
+  - The required RPCs, the access-token hook and service_role reads still work.
+  - Direct API-role table access is refused with 42501.
+  - Future objects give the API roles nothing.
+  - On the DEV model, 34 is a no-op.
+  - Each of the five guards aborts 34, and a second run is a no-op.
+  - The new read-only `api_role_privileges` check section is tested: each check fails alone on its own drift.
+
+  `createHarness` runs 34 for real, then restores the API roles' pre-34 table grants, test-only, so the RLS suites keep testing policies. Skipping that restore fails 5 RLS tests.
+- *Ripple.*
+  - Classification A (`A 8 · B 18 · C 8 — of 34`), forward-only by choice.
+  - `history_post_h9` → 34 versions.
+  - The preflight chain → 34.
+  - Runbook sections A2, A3, A6, B3, B4, B7 and B9.
+- *Hosted proof pending.* Applying 34 to the rehearsal project (A2 again) and to
+  DEV (A-D3) each needs a separate approval.
+- *Codex review, 2026-10-16: FIX REQUIRED (three P2s), fixed locally; re-review pending.*
+  Each finding was reproduced against the reviewed bytes first.
+  1. **PUBLIC column privileges.** `grant select (pin_hash) on users to public` passed 34 and every check. Once 34 had run, Staff A could read the Owner's PIN hash, because a column grant is invisible to `has_table_privilege`. Fixed in two places:
+     - 34 now refuses any relation or column granted to PUBLIC. After acting, it compares the API roles' effective column access (`has_column_privilege`, so PUBLIC and inherited memberships count) with the reviewed set.
+     - The checks gain `no_public_grants` and `api_roles_effective_column_access_exact`.
+  2. **Exact column grants.** Count-only verification passed a swapped `UPDATE(phone)` → `UPDATE(permission_version)`. 34 and the check `api_role_column_grants_exact` now require 20260819000000's 25 grants exactly, as a multiset of table, column, role, privilege and grant option. A test derives that set from the SQL of migrations 1–33 and matches it to the chain.
+  3. **Owner-only sequence.** A blanket `revoke all on all sequences` wrote out a NULL ACL, and the snapshot then saw "a privilege outside anon/authenticated changed". 34 now:
+     - revokes only privileges the API roles hold;
+     - skips default-ACL entries that already give them nothing;
+     - reads NULL ACLs as `acldefault` in its snapshot.
+
+     An owner-only sequence keeps its NULL ACL.
+- *Decision: membership without INHERIT is not exposure.* **Superseded the same day (Codex round 3, below).** The API roles are NOINHERIT, as on hosted. A plain `grant role to authenticated` passes them nothing and could be used only through SET ROLE, which no API client can issue, so it is not flagged. A membership granted `with inherit true` is flagged, by both 34 and the check.
+- *Codex round 3, 2026-10-16: FIX REQUIRED (SET ROLE, inherited grant options, PUBLIC defaults), fixed locally; re-review pending.* All three were reproduced against the reviewed round-2 bytes, and 34 applied in every case.
+  - **SET ROLE through a plain membership.** A PostgREST-style session (session user = an authenticator, SET ROLE authenticated) could SET ROLE into a member role holding `SELECT(pin_hash)` and read the Owner's PIN hash. SET ROLE into a role it is not a member of is refused.
+  - **Inherited grant option.** `UPDATE(phone) WITH GRANT OPTION`, inherited by authenticated, let it grant `UPDATE(phone)` to anon.
+  - **PUBLIC default.** A PUBLIC default on future tables gave anon SELECT on the next table postgres created.
+
+  The fix is one effective-privilege model. An API session can act as PUBLIC, as anon or authenticated, and as any role those two reach by membership — directly or transitively, by inheritance or by SET ROLE. In public, none of them may hold a data privilege, a grant option, or a default privilege that hands over future tables or sequences. The one exception is 0819's exact column grants to authenticated. 34 enforces it with three new pre-change guards, so refusal changes nothing:
+  - a PUBLIC table or sequence default of any role that can create in public;
+  - any grant option of the API roles, held directly, inherited, or in defaults;
+  - any reachable role holding such privileges or defaults. This uses a recursive walk of `pg_auth_members` with every membership option counted, so a NOINHERIT role in the middle of a chain hides nothing.
+
+  The checks section gains `no_public_default_privileges`, `api_roles_no_grant_options` and `memberships_reach_no_privileges`. Memberships, other roles' privileges and other creators' defaults are never changed.
+- *Decisions in round 3.*
+  - **Memberships are judged by what they reach, not by their existence.** Hosted evidence does not record the API roles' memberships, and the brief forbids changing required ones. So a membership of a role that holds nothing in public passes, and the read-only check reports how many roles are reachable.
+  - **Function EXECUTE for PUBLIC stays deferred.** Default entries for functions are excluded from the PUBLIC-default rule.
+  - **supabase_admin's public defaults are not enforced.** They give anon/authenticated full table rights on objects *it* creates; this is unchanged and identical on DEV and fresh projects. Enforcing it would fail on both projects and needs founder approval.
+  - **One check is now defense in depth only.** The migration's post-change effective-column check has no independent witness, because every path to an extra column privilege is refused earlier.
+
+
+## H-9 F12 R4 — local implementation, 2026-10-16
+
+Founder authorized the complete local R4 workflow and the remaining verification corrections. D1 stays exactly 48 semantic supabase_admin public default items, never modified. API roots and conservative Reach refuse six unsafe attributes; pg_roles supplies readable metadata. rolconfig is inventoried for hosted review and is outside F12 enforcement. Mandatory hosted preflight separates enforced predicates from observations and rejects unexpected platform absence/drift. B13/M15 now require real revocable grants and drift before canary activation; C11 expects checks 3 and 10. Shared RLS restoration and all prior security contracts remain. No hosted access or production authorization. C4, Data API disabling, F14 and H-11 remain out of scope. Details: [R4 implementation](docs/plans/h9-f12-r4.md). Local sign-off not yet granted; final verification evidence follows in the verification report.

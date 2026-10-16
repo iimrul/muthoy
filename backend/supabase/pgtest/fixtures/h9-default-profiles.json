@@ -1,0 +1,210 @@
+{
+  "DEV": [
+    {
+      "key": "postgres:public:S",
+      "value": "postgres=rwU/postgres"
+    },
+    {
+      "key": "postgres:public:f",
+      "value": "postgres=X/postgres"
+    },
+    {
+      "key": "postgres:public:r",
+      "value": "anon=xtm/postgres,authenticated=xtm/postgres,postgres=arwdDxtm/postgres,service_role=Dxtm/postgres"
+    },
+    {
+      "key": "postgres:storage:S",
+      "value": "anon=rwU/postgres,authenticated=rwU/postgres,postgres=rwU/postgres,service_role=rwU/postgres"
+    },
+    {
+      "key": "postgres:storage:f",
+      "value": "anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres"
+    },
+    {
+      "key": "postgres:storage:r",
+      "value": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+    },
+    {
+      "key": "supabase_admin:extensions:S",
+      "value": "postgres=r*w*U*/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:extensions:f",
+      "value": "postgres=X*/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:extensions:r",
+      "value": "postgres=a*r*w*d*D*x*t*m*/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql:S",
+      "value": "anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,postgres=rwU/supabase_admin,service_role=rwU/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql:f",
+      "value": "anon=X/supabase_admin,authenticated=X/supabase_admin,postgres=X/supabase_admin,service_role=X/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql:r",
+      "value": "anon=arwdDxtm/supabase_admin,authenticated=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql_public:S",
+      "value": "anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,postgres=rwU/supabase_admin,service_role=rwU/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql_public:f",
+      "value": "anon=X/supabase_admin,authenticated=X/supabase_admin,postgres=X/supabase_admin,service_role=X/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql_public:r",
+      "value": "anon=arwdDxtm/supabase_admin,authenticated=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:public:S",
+      "value": "anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,postgres=rwU/supabase_admin,service_role=rwU/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:public:f",
+      "value": "anon=X/supabase_admin,authenticated=X/supabase_admin,postgres=X/supabase_admin,service_role=X/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:public:r",
+      "value": "anon=arwdDxtm/supabase_admin,authenticated=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:realtime:S",
+      "value": "dashboard_user=rwU/supabase_admin,postgres=rwU/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:realtime:f",
+      "value": "dashboard_user=X/supabase_admin,postgres=X/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:realtime:r",
+      "value": "dashboard_user=arwdDxtm/supabase_admin,postgres=a*r*wdDxtm/supabase_admin"
+    },
+    {
+      "key": "supabase_auth_admin:auth:S",
+      "value": "dashboard_user=rwU/supabase_auth_admin,postgres=rwU/supabase_auth_admin"
+    },
+    {
+      "key": "supabase_auth_admin:auth:f",
+      "value": "dashboard_user=X/supabase_auth_admin,postgres=X/supabase_auth_admin"
+    },
+    {
+      "key": "supabase_auth_admin:auth:r",
+      "value": "dashboard_user=arwdDxtm/supabase_auth_admin,postgres=arwdDxtm/supabase_auth_admin"
+    }
+  ],
+  "fresh": [
+    {
+      "key": "postgres:public:S",
+      "value": "anon=rwU/postgres,authenticated=rwU/postgres,postgres=rwU/postgres,service_role=rwU/postgres"
+    },
+    {
+      "key": "postgres:public:f",
+      "value": "anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres"
+    },
+    {
+      "key": "postgres:public:r",
+      "value": "anon=arwdxtm/postgres,authenticated=arwdxtm/postgres,postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+    },
+    {
+      "key": "postgres:storage:S",
+      "value": "anon=rwU/postgres,authenticated=rwU/postgres,postgres=rwU/postgres,service_role=rwU/postgres"
+    },
+    {
+      "key": "postgres:storage:f",
+      "value": "anon=X/postgres,authenticated=X/postgres,postgres=X/postgres,service_role=X/postgres"
+    },
+    {
+      "key": "postgres:storage:r",
+      "value": "anon=arwdDxtm/postgres,authenticated=arwdDxtm/postgres,postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres"
+    },
+    {
+      "key": "supabase_admin:cron:S",
+      "value": "postgres=r*w*U*/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:cron:f",
+      "value": "postgres=X*/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:cron:r",
+      "value": "postgres=a*r*w*d*D*x*t*m*/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:extensions:S",
+      "value": "postgres=r*w*U*/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:extensions:f",
+      "value": "postgres=X*/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:extensions:r",
+      "value": "postgres=a*r*w*d*D*x*t*m*/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql:S",
+      "value": "anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,postgres=rwU/supabase_admin,service_role=rwU/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql:f",
+      "value": "anon=X/supabase_admin,authenticated=X/supabase_admin,postgres=X/supabase_admin,service_role=X/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql:r",
+      "value": "anon=arwdDxtm/supabase_admin,authenticated=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql_public:S",
+      "value": "anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,postgres=rwU/supabase_admin,service_role=rwU/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql_public:f",
+      "value": "anon=X/supabase_admin,authenticated=X/supabase_admin,postgres=X/supabase_admin,service_role=X/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:graphql_public:r",
+      "value": "anon=arwdDxtm/supabase_admin,authenticated=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:public:S",
+      "value": "anon=rwU/supabase_admin,authenticated=rwU/supabase_admin,postgres=rwU/supabase_admin,service_role=rwU/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:public:f",
+      "value": "anon=X/supabase_admin,authenticated=X/supabase_admin,postgres=X/supabase_admin,service_role=X/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:public:r",
+      "value": "anon=arwdDxtm/supabase_admin,authenticated=arwdDxtm/supabase_admin,postgres=arwdDxtm/supabase_admin,service_role=arwdDxtm/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:realtime:S",
+      "value": "dashboard_user=rwU/supabase_admin,postgres=rwU/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:realtime:f",
+      "value": "dashboard_user=X/supabase_admin,postgres=X/supabase_admin"
+    },
+    {
+      "key": "supabase_admin:realtime:r",
+      "value": "dashboard_user=arwdDxtm/supabase_admin,postgres=a*r*wdDxtm/supabase_admin"
+    },
+    {
+      "key": "supabase_auth_admin:auth:S",
+      "value": "dashboard_user=rwU/supabase_auth_admin,postgres=rwU/supabase_auth_admin"
+    },
+    {
+      "key": "supabase_auth_admin:auth:f",
+      "value": "dashboard_user=X/supabase_auth_admin,postgres=X/supabase_auth_admin"
+    },
+    {
+      "key": "supabase_auth_admin:auth:r",
+      "value": "dashboard_user=arwdDxtm/supabase_auth_admin,postgres=arwdDxtm/supabase_auth_admin"
+    }
+  ]
+}

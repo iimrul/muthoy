@@ -393,6 +393,8 @@ export default defineConfig({
       // (with a test-only pg_cron stub) plus the cleanup function it runs.
       "backend/supabase/pgtest/h9-environment-parity.pgtest.ts",
       "backend/supabase/pgtest/h9-cron-cleanup.pgtest.ts",
+      "backend/supabase/pgtest/h9-api-role-privileges.pgtest.ts",
+      "backend/supabase/pgtest/h9-api-role-hardening.pgtest.ts",
       "backend/supabase/functions/sync/grants.test.ts",
       // H-9. The Edge key resolver, the real supabaseAdmin.ts + SDK request
       // construction in both key modes, and every sync route driven through

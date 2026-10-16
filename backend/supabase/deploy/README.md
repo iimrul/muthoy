@@ -6,6 +6,27 @@ project was created, linked, read, changed or deployed while writing this, no
 key was rotated, and no SMS was sent. Part B was prepared before the Phase 3
 hosted gate (G2) on the founder's instruction: re-validate it after G2.
 
+**2026-10-15 (F12):** migration 34 (`20261015000000_h9_api_role_table_privileges`)
+was added locally after the Phase 3 rehearsal, which ran the 33-migration
+chain. A2 and A3 must run again with 34 — a separate approval — before G2.
+
+**F12 R4 local preparation (2026-10-16):** Before EVERY hosted Migration 34 application, run the mandatory read-only capture and offline evaluator in [R4 preflight](../../../docs/plans/h9-f12-r4.md#mandatory-hosted-preflight--prepared-locally-not-executed). Trusted project identity, platform-role presence, exact profile and mandatory predicates must pass; review observational ownership, memberships, publications and rolconfig separately. This includes A2, A6 step 4 and B4. No hosted application is authorized by this document update. Postmigration `api_role_privileges` now has **15 checks**.
+
+**Platform changes and PROD risk gate:** D1 authorizes local implementation only.
+Before PROD approval, obtain the separate Data API exposure-control decision and
+explicit acceptance of future supabase_admin-created public-object exposure.
+Record founder-only Owner/Admin access and read-only access for other operators.
+No extension install/upgrade/relocation, integration, platform toggle or dashboard
+DDL proceeds without its own approved rehearsal/DEV proof and before/after public
+inventory (kind, owner, ACL and extension membership), exact X2 check and all 15
+privilege checks. Repeat the inventory/checks immediately after the approved PROD
+change and after maintenance notices. A failed check or unexpected public object
+stops operations for incident review. Do not assume a non-owner REVOKE repaired
+anything: approved containment may require DROP or platform support. Schedule,
+credentials, alerting and any containment mutation each need separate approval.
+These are pending operational requirements; C4, Data API disabling and F14 are
+separate designs, and this change implements none of them.
+
 Source of truth: [docs/plans/H-9-production-environment-eas-secrets.md](../../../docs/plans/H-9-production-environment-eas-secrets.md)
 (§4.4 DEV order, §8 migrations, §10 tests, §11 production sequence, §12
 rollback). Results go to [docs/plans/h9-verification-report.md](../../../docs/plans/h9-verification-report.md).
@@ -67,7 +88,7 @@ rollback). Results go to [docs/plans/h9-verification-report.md](../../../docs/pl
 | A-R2 | DEV read-only inspection: history, catalogs, settings, function sources, schema-only dump | DEV, read-only |
 | A-D1 | DEV Phone provider OFF, later ON for the test window | DEV Auth settings |
 | A-D2 | DEV secrets `MUTHOY_SUPABASE_PROJECT_REF`, `MUTHOY_SUPABASE_KEY_MODE` | DEV Edge secrets |
-| A-D3 | DEV backup, then migrations 32 and 33 | DEV schema |
+| A-D3 | DEV backup, then migrations 32, 33 and 34 | DEV schema |
 | A-D4 | DEV deploys: `auth-send-sms`, then `sync` (legacy, then modern) | DEV functions |
 | A-D5 | DEV test-number OTP window (mapped numbers only) | DEV Auth |
 | A-D6 | Optional: tripwire ledger rows to prove the hook's modern-key RPC without REVE | DEV ledger |
@@ -82,17 +103,17 @@ migration chain**, so B2's own conditional schedule runs and migration 33
 verifies it (the PROD order). Set `MUTHOY_SUPABASE_PROJECT_REF` to the
 rehearsal ref. Delete the project once A2–A4 evidence is saved.
 
-### A2. Fresh chain — all 33 migrations
+### A2. Fresh chain — all 34 migrations
 
 ```text
 supabase --version                                        # 2.117.0
 supabase link --project-ref <REHEARSAL_REF> --workdir <REHEARSAL_WORKDIR>
-supabase db push --linked --dry-run --workdir <REHEARSAL_WORKDIR>   # exactly 33 pending, nothing else
+supabase db push --linked --dry-run --workdir <REHEARSAL_WORKDIR>   # exactly 34 pending, nothing else
 supabase db push --linked --workdir <REHEARSAL_WORKDIR>
 ```
 
-Then the read-only sections **constraints**, **cron** and
-**history_post_h9**: every row `pass = true` — including
+Then the read-only sections **constraints**, **cron**, **api_role_privileges**
+and **history_post_h9**: every row `pass = true` — including
 `staging_cleanup_job_targets_this_server`: the job's `nodename`/`nodeport`
 equal `current_setting('cron.host')` and `current_setting('port')`, the target
 `cron.schedule` records. **Rehearsal-only proof:** that the hosted `postgres`
@@ -112,9 +133,9 @@ sections unchanged.
 With A-R2: take a **schema-only** dump of DEV (no data, outside the repo),
 restore it into a second disposable database, confirm the constraint state is
 DEV's (named consumption CHECK + approval CHECK, no `_check1`), then execute
-migrations 32 and 33 there in one transaction. Compare the **constraints**
-section and the A2.3 function/ACL/RLS fingerprints with A2's fresh result —
-they must converge. B4's missing history statements stay missing: do not
+migrations 32, 33 and 34 there in one transaction. Compare the **constraints**
+and **api_role_privileges** sections and the A2.3 function/ACL/RLS fingerprints
+with A2's fresh result — they must converge. B4's missing history statements stay missing: do not
 `migration repair` or insert invented history.
 
 ### A4. A real scheduled run
@@ -132,7 +153,7 @@ Expected DEV state today: 31 history versions, the named consumption CHECK and
 the approval CHECK only, **no pg_cron**, `sync` v26 `verify_jwt = true`,
 `auth-send-sms` v6 `verify_jwt = false` (plan §1). Record, values suppressed:
 
-- **history_pre_h9** and **constraints** sections: all `pass = true`.
+- **history_pre_h9**, **constraints** and **api_role_privileges** sections: all `pass = true`. The last should already pass on DEV, which holds the baseline. It measures, before 34 ever runs, what 34 would refuse: 20260819000000's exact column grants, any role anon/authenticated reach by membership, grant options and PUBLIC defaults.
 - `select exists(select 1 from pg_extension where extname = 'pg_cron');` → `false`.
 - `supabase functions list --project-ref btfprhticjgeihcngpif` → versions and JWT flags.
 - Deployed sources downloaded to a temp directory outside the repo and hashed
@@ -148,7 +169,7 @@ the approval CHECK only, **no pg_cron**, `sync` v26 `verify_jwt = true`,
 | 1 | A5 checkpoint saved; schema **and** data backup taken (README "Required sequence") | Backup restorable, location recorded | Any A5 row differs from expected |
 | 2 | Phone provider **OFF**; verify by re-reading settings. No OTP request while OFF | `external_phone_enabled = false`; hook still enabled | Hook disabled or setting not saved |
 | 3 | `supabase secrets set MUTHOY_SUPABASE_PROJECT_REF=btfprhticjgeihcngpif MUTHOY_SUPABASE_KEY_MODE=legacy --project-ref btfprhticjgeihcngpif` | Both names listed; old functions unaffected | Any other secret changed |
-| 4 | `supabase db push --linked --dry-run --workdir backend`, then without `--dry-run` | Exactly `20261008000000` and `20261008000100` pending; 33 prints the pg_cron notice; **constraints** + **history_post_h9** pass | Anything else pending; any check false |
+| 4 | `supabase db push --linked --dry-run --workdir backend`, then without `--dry-run` | Exactly `20261008000000`, `20261008000100` and `20261015000000` pending; 33 prints the pg_cron notice; 34's notice reports `0 API-role table and sequence privileges revoked` (DEV already holds the baseline); **constraints** + **api_role_privileges** + **history_post_h9** pass | Anything else pending; 34 reports a non-zero count or aborts; any check false |
 | 5 | `supabase functions deploy auth-send-sms --project-ref btfprhticjgeihcngpif --workdir backend`, then the same for `sync` | Hosted source hashes = reviewed revision; flags hook `false`, sync `true`; unsigned `POST /functions/v1/auth-send-sms` → 401 with the dispatch-ledger count unchanged; `GET /functions/v1/sync`: no headers → 401, legacy bearer + apikey → 405 | Any boot failure, flag drift, ledger change |
 | 6 | Legacy regression (A7, legacy column) — no OTP needed | All legacy rows pass | Any failure → step 8 |
 | 7 | `secrets set MUTHOY_SUPABASE_KEY_MODE=modern`, then redeploy `auth-send-sms` and `sync` from the **same** revision | Both functions boot (modern named-default dictionaries resolve); modern rows of A7 that need no OTP pass; publishable apikey-only GET → 405 | Any boot or compatibility failure → step 8 (no automatic fallback) |
@@ -263,7 +284,7 @@ checkout and `D:\Muthoy` (it can test only the checkout it runs from). Offline i
 committed policy (it **refuses today**: `policy-unapproved`); the policy file
 is the approved revision's; the manifest pin, schema and
 evidence; the workdir is outside the repo, holds nothing but the approved
-backend files, matches the revision byte for byte and carries the 33-version
+backend files, matches the revision byte for byte and carries the 34-version
 chain; `verify_jwt` flags; the link names the target. After the link (P-A),
 add `--remote` with `SUPABASE_ACCESS_TOKEN` in the environment: GET-only reads
 of that one project's metadata, key types and publishable fingerprint, Auth
@@ -282,8 +303,8 @@ fails rather than passes.
 |---|---|---|---|
 | 4 | (P-A) Inspect the existing project — or, if founder evidence proves absence and creation is separately approved, provision it empty. Phone OFF, anonymous OFF, Email kept | Identity matches the manifest; no business data | Any data or divergent history: stop the fresh path |
 | 5 | (P-B) Backup checkpoint; restore rehearsal evidence; enable pg_cron | Checkpoint id recorded | C5 not done where data exists |
-| 6 | (P-B) `supabase db push --linked --dry-run --workdir <WORKDIR>`, then apply | 33 pending on an empty target; **constraints**, **cron**, **history_post_h9** all pass | Anything unexpected pending; any check false |
-| 7 | Verify grants, H-5 session cascades, RLS, Storage, `public.batches` publication | Matches the A2 rehearsal fingerprints | Unknown grant or difference |
+| 6 | (P-B) `supabase db push --linked --dry-run --workdir <WORKDIR>`, then apply | 34 pending on an empty target; **constraints**, **cron**, **api_role_privileges**, **history_post_h9** all pass | Anything unexpected pending; any check false |
+| 7 | Verify grants, H-5 session cascades, RLS, Storage, `public.batches` publication | Matches the A2 rehearsal fingerprints taken with migration 34 | Unknown grant or difference |
 | 8 | Access-token hook registered; Phone OFF, OTP 6/300/60, anonymous OFF, no test map; default modern keys, legacy kept | Settings re-read | Any value differs |
 | 9 | (P-C) PROD-only secrets by name; `MUTHOY_SUPABASE_PROJECT_REF=<REF>`; mode `modern` | `--remote` secret-names check passes | A forbidden name present, a required one missing |
 | 10 | Deploy `auth-send-sms`, then `sync`, with `--project-ref <REF>` from the workdir | Downloaded hosted source = manifest revision; flags hook `false`, sync `true` | Flag drift; boot refusal |
@@ -317,10 +338,11 @@ fingerprint.
 
 ### B7. Migration and rollback readiness
 
-- 33 versions in order; classes **A 7 · B 18 · C 8** (ROLLBACK.md). Migration
+- 34 versions in order; classes **A 8 · B 18 · C 8** (ROLLBACK.md). Migration
   32 is B (drops only an equivalent duplicate; nothing to reverse); migration
   33 is A (recovery: `select cron.unschedule('muthoy-b2-sync-staging-cleanup');`
-  under approval — already-deleted staging graphs are not recreated).
+  under approval — already-deleted staging graphs are not recreated); migration
+  34 is A but forward-only by choice — its inverse GRANTs would reopen F12.
 - Open finding: `20260818000000` behaves as forward-only despite its class B
   (ROLLBACK.md). Plan recovery accordingly.
 - Eight class C migrations cannot be undone by a down migration; their only way
@@ -341,6 +363,8 @@ device would be touched.
 | Modern key incompatibility | Phone OFF | `MUTHOY_SUPABASE_KEY_MODE=legacy`; redeploy `auth-send-sms`, then `sync`; legacy rows |
 | Function regression | Phone OFF | Redeploy the last compatible H-9 source whose migrations exist |
 | Migration 32 aborts | Transaction rolled back; nothing changed | Investigate the constraint shape; never delete rows to pass |
+| Migration 34 aborts | Transaction rolled back; nothing changed | Investigate the reported shape: exact 48-item X2 profile; unsafe API-role attributes; effective CREATE; all-creator defaults; owner; RLS; a relation, column or default privilege granted to PUBLIC; API-role column grants not exactly 20260819000000's; a grant option held by the API roles; a role they reach by membership holding privileges in public. Never grant, revoke, change a membership or disable RLS to pass without founder approval |
+| A client path needs a privilege 34 removed | Phone OFF if auth is affected | A new reviewed, RLS-scoped grant migration — never 34's inverse |
 | Wrong cron job | Unschedule the named job only, under approval | No extension drop, no other job touched |
 | Class C / data failure | Stop traffic | Founder-led restore per C5 and RPO/RTO |
 | Bad mobile artifact | Stop distribution | Higher-version build on the same PROD identity |

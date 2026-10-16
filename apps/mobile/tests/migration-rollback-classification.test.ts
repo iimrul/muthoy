@@ -135,11 +135,11 @@ describe('a volatile ADD COLUMN default is a backfill', () => {
 
 describe('the corrected PostgreSQL classification', () => {
   it('covers every migration on disk exactly once', () => {
-    expect(pg.length).toBe(33);
-    expect(new Set(pg.map((row) => row.name)).size).toBe(33);
+    expect(pg.length).toBe(34);
+    expect(new Set(pg.map((row) => row.name)).size).toBe(34);
   });
 
-  it('is A 7 / B 18 / C 8 — not the 14 forward-only the first audit claimed', () => {
+  it('is A 8 / B 18 / C 8 — not the 14 forward-only the first audit claimed', () => {
     // Hardcoded on purpose. A migration that changes class has to change this
     // number too, which is the point at which somebody looks at it.
     // A2.3 added the registry plus its persistent-hold hotfix: function and
@@ -153,7 +153,10 @@ describe('the corrected PostgreSQL classification', () => {
     // — and the guarded pg_cron schedule is A: cron.schedule is not a counted
     // statement. Neither writes data. See ROLLBACK.md's open finding on DO
     // bodies before trusting this number for 20260818000000.
-    expect(classCounts(pg)).toEqual({ A: 7, B: 18, C: 8 });
+    // H-9 F12 (2026-10-15): the API-role privilege normalization is A — only
+    // REVOKEs, in a DO block the classifier reads — and forward-only by
+    // choice, because its inverse GRANTs would reopen F12.
+    expect(classCounts(pg)).toEqual({ A: 8, B: 18, C: 8 });
   });
 
   it('declares its one judgement instead of inferring it', () => {
@@ -175,7 +178,7 @@ describe('the corrected PostgreSQL classification', () => {
   );
 
   it('states the corrected headline count in the document itself', () => {
-    expect(ROLLBACK_DOC).toContain('**A: 7 · B: 18 · C: 8 — of 33.**');
+    expect(ROLLBACK_DOC).toContain('**A: 8 · B: 18 · C: 8 — of 34.**');
   });
 
   it('carries no OTHER headline anywhere in any of the three documents', () => {
