@@ -1,4 +1,27 @@
 # DECISIONS.md — Muthoy POS
+
+## 2026-10-18 — H-9 F1–F8 local remediation (hosted gates pending)
+
+Founder authorized one coordinated local remediation batch. Canonical H1 tooling is
+`scripts/h9/`; the external WS1 package uses an owner-protected allowlist/hash manifest,
+native startup-environment bootstrap, pinned Node and unchanged pinned F12 evaluator/SQL.
+Role/database/read-only/fingerprint continuity and deployed-state checks now fail closed;
+source checkpoint remains pending even when local source-file hashes match: no
+local manifest can establish hosted download provenance or produce full A5 PASS.
+A2 stages 1–33 before
+fresh gated 34. A3 uses strict catalog-v1 input/comparison and exact reviewed normalization,
+not nested F12 snapshots. H5 requires real isolated PG17 restore proof; PG18 is supplemental.
+Post-deploy rollback retains DEV ref and explicit legacy mode with compatible redeploys.
+Execution/dependency details: `backend/supabase/deploy/H9-LOCAL-REMEDIATION.md` and
+`backend/supabase/checks/h9_pg17_restore.md`. D1 prefers a new Free org only after eligibility
+and $0 capacity verification; D2 password already held; D5 scratch retained. No hosted
+authorization, password retrieval, project creation, migrations, deploy/build/SMS/device
+operations, commit or push. The narrow F12 rehearsal hosted-evidence closure and
+original E2 deviation stay unchanged. The separate N0 inspection record stopped
+after CLI startup EPERM; eligibility/capacity/cost remain UNVERIFIED. This local
+remediation conveys no hosted authorization, including N0 account reads.
+Historical classifier remains separate. Final local evidence is recorded in
+`docs/plans/h9-local-remediation-report-2026-10-18.md`.
 ### A running log of real decisions made during the build, dated, with a why.
 ### Read alongside CLAUDE.md, PROJECT_CONTEXT.md, TECH_STACK.md, and
 ### DEVELOPMENT_RULES.md.
