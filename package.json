@@ -10,6 +10,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "vitest run",
+    "test:h9-remediation": "node scripts/h9/test/remediation.test.mjs",
     "build": "turbo run build",
     "format": "prettier --write ."
   },

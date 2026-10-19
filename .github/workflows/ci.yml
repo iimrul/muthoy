@@ -36,3 +36,6 @@ jobs:
 
       - name: Test
         run: pnpm turbo run test
+
+      - name: H9 offline remediation contracts
+        run: pnpm test:h9-remediation
