@@ -33,6 +33,10 @@ rollback). Results go to [docs/plans/h9-verification-report.md](../../../docs/pl
 
 ## Rules for every step
 
+**2026-10-18 local remediation:** [H1–H14 execution gates](H9-LOCAL-REMEDIATION.md)
+supersede conflicting execution examples below. F12 rehearsal closure is retained;
+the original missing-preflight deviation remains unresolved. No hosted gate is authorized.
+
 - **One approval per gate**, recorded before the step: date, approver, exact
   scope, revision, target. An approval never carries over to the next gate.
 - **Re-verify the target immediately before every command.** Pass
@@ -84,7 +88,7 @@ rollback). Results go to [docs/plans/h9-verification-report.md](../../../docs/pl
 
 | ID | Action | Touches |
 |---|---|---|
-| A-R1 | Create a disposable rehearsal project (and delete it after) | New project only |
+| A-R1 | Separately approve creation/configuration/migration of each NEW disposable project; deletion is a distinct gate | New projects only |
 | A-R2 | DEV read-only inspection: history, catalogs, settings, function sources, schema-only dump | DEV, read-only |
 | A-D1 | DEV Phone provider OFF, later ON for the test window | DEV Auth settings |
 | A-D2 | DEV secrets `MUTHOY_SUPABASE_PROJECT_REF`, `MUTHOY_SUPABASE_KEY_MODE` | DEV Edge secrets |
@@ -101,16 +105,32 @@ Not DEV, not PROD. PostgreSQL 17. Phone and anonymous sign-ins OFF. No DEV
 data, no REVE or hook secrets, no test OTP map. **pg_cron enabled before the
 migration chain**, so B2's own conditional schedule runs and migration 33
 verifies it (the PROD order). Set `MUTHOY_SUPABASE_PROJECT_REF` to the
-rehearsal ref. Delete the project once A2–A4 evidence is saved.
+rehearsal ref. Retain it until evidence is accepted. Deletion needs its own exact-ref
+approval; never automatically delete it. D1 prefers a NEW Free organization after
+N0 proves eligibility and zero-cost capacity. D1 is not creation authorization.
 
 ### A2. Fresh chain — all 34 migrations
 
 ```text
 supabase --version                                        # 2.117.0
-supabase link --project-ref <REHEARSAL_REF> --workdir <REHEARSAL_WORKDIR>
-supabase db push --linked --dry-run --workdir <REHEARSAL_WORKDIR>   # exactly 34 pending, nothing else
-supabase db push --linked --workdir <REHEARSAL_WORKDIR>
+# Confirm the independent approved disposable target; refuse DEV and the existing rehearsal.
+supabase db push --project-ref <APPROVED_NEW_A2_REF> --skip-vault --dry-run --workdir <A2_PRE34_WORKDIR>
+supabase db push --project-ref <APPROVED_NEW_A2_REF> --skip-vault --workdir <A2_PRE34_WORKDIR>
 ```
+
+`A2_PRE34_WORKDIR` contains approved migrations **1–33 only**, byte-identical to
+the pinned archive, no seed/roles/Vault settings, and no cached link. Dry-run must
+list exactly those 33 versions. Both protected refs (DEV and existing rehearsal)
+are refused by `scripts/h9/migration-gate.mjs`.
+
+**STOP before 34.** Capture fresh mandatory hosted preflight with the approved
+new target identity and same-instance read-only guard; evaluate it and review its
+observations. The separately authorized executor must call `applyMigration34`
+immediately before its write. It verifies exact 33-version history, evidence/hash,
+target, observation approval, fingerprint continuity and age **0–120 seconds**.
+Expired, missing or failed evidence invokes no write callback. Only then use the
+full approved workdir; its dry-run must list **34 alone**. Do not issue an
+unconditional full-chain push against an empty project. Re-runs need new preflight.
 
 Then the read-only sections **constraints**, **cron**, **api_role_privileges**
 and **history_post_h9**: every row `pass = true` — including
@@ -131,11 +151,22 @@ sections unchanged.
 ### A3. Historical upgrade — the recorded 0923 that DEV ran
 
 With A-R2: take a **schema-only** dump of DEV (no data, outside the repo),
-restore it into a second disposable database, confirm the constraint state is
+restore it into a second approved disposable PG17 database, confirm the constraint state is
 DEV's (named consumption CHECK + approval CHECK, no `_check1`), then execute
-migrations 32, 33 and 34 there in one transaction. Compare the **constraints**
-and **api_role_privileges** sections and the A2.3 function/ACL/RLS fingerprints
-with A2's fresh result — they must converge. B4's missing history statements stay missing: do not
+migrations 32/33 and their truthful history records in one transaction. Commit
+that stage, verify exact 33-version history, then capture/evaluate a NEW hosted
+preflight and apply 34 separately within its 120-second gate. Compare the **constraints**
+and **api_role_privileges** sections and the complete catalog-v1 capture
+with A2's retained fresh result — they must converge. Use
+`scripts/h9/catalog-fingerprint.sql` and `compare-catalogs.mjs`, not the sealed
+41-line F12 preservation snapshot as a schema comparator. The old `fpdiff.mjs`
+does not accept nested snapshots. Preserve source history rows, including original
+names, statement digests and NULLs, in a separate authentic metadata export.
+Schema-only does not contain those rows. Copy them without reconstructing or
+inventing versions/statements. Each stage uses ON_ERROR_STOP and records only
+versions actually executed successfully. Separate CLI invocations cannot share
+a transaction. Failure of 34 does not undo the committed 32/33 stage; preserve
+that actual state and stop. B4's missing history statements stay missing: do not
 `migration repair` or insert invented history.
 
 ### A4. A real scheduled run
@@ -156,20 +187,32 @@ the approval CHECK only, **no pg_cron**, `sync` v26 `verify_jwt = true`,
 - **history_pre_h9**, **constraints** and **api_role_privileges** sections: all `pass = true`. The last should already pass on DEV, which holds the baseline. It measures, before 34 ever runs, what 34 would refuse: 20260819000000's exact column grants, any role anon/authenticated reach by membership, grant options and PUBLIC defaults.
 - `select exists(select 1 from pg_extension where extname = 'pg_cron');` → `false`.
 - `supabase functions list --project-ref btfprhticjgeihcngpif` → versions and JWT flags.
-- Deployed sources downloaded to a temp directory outside the repo and hashed
-  — the rollback checkpoint for A6.
+- Deployed sources downloaded into a NEW private staging project created by
+  `scripts/h9/new-download-staging.ps1`, landing in
+  `<StagingRoot>\supabase\functions\<slug>\` — the CLI's `--workdir` is a Supabase
+  project directory, never the repository. The two downloads run sequentially, `sync`
+  then `auth-send-sms`, each bracketed by a `pre-download`/`post-download` gate, and are
+  hashed with a mandatory provenance record carrying BOTH exact commands. This is the
+  rollback checkpoint for A6.
 - `supabase secrets list --project-ref btfprhticjgeihcngpif` → **names** only.
 - Auth settings (Phone, anonymous, OTP 6/300/60, hooks, test-number scope)
   re-read and stored privately.
+
+H1 uses the protected native bootstrap and A5 package in the remediation guide.
+The inventory-only run returns **4 / CHECKPOINT PENDING**, not full A5 PASS.
+Source captures must be bracketed by unchanged metadata/instance observations;
+`source-checkpoint.mjs` takes `<StagingRoot>\supabase\functions` plus a mandatory
+provenance record, and inventories every downloaded file and both entrypoints.
+Unknown function versions/status, hook paths, Auth shapes or instance changes refuse.
 
 ### A6. DEV rollout (plan §4.4, steps 1–8)
 
 | # | Step | Expected | Stop if |
 |---|---|---|---|
-| 1 | A5 checkpoint saved; schema **and** data backup taken (README "Required sequence") | Backup restorable, location recorded | Any A5 row differs from expected |
+| 1 | A5 and A2/A3 accepted; schema/data/roles/Auth backup and isolated **PG17** restore proof accepted ([H5 procedure](../checks/h9_pg17_restore.md)) | Protected backup, fingerprints and recovery owner/RPO/RTO recorded | Any A5 drift, unproved PG17 restoration or incomplete recovery coverage |
 | 2 | Phone provider **OFF**; verify by re-reading settings. No OTP request while OFF | `external_phone_enabled = false`; hook still enabled | Hook disabled or setting not saved |
 | 3 | `supabase secrets set MUTHOY_SUPABASE_PROJECT_REF=btfprhticjgeihcngpif MUTHOY_SUPABASE_KEY_MODE=legacy --project-ref btfprhticjgeihcngpif` | Both names listed; old functions unaffected | Any other secret changed |
-| 4 | `supabase db push --linked --dry-run --workdir backend`, then without `--dry-run` | Exactly `20261008000000`, `20261008000100` and `20261015000000` pending; 33 prints the pg_cron notice; 34's notice reports `0 API-role table and sequence privileges revoked` (DEV already holds the baseline); **constraints** + **api_role_privileges** + **history_post_h9** pass | Anything else pending; 34 reports a non-zero count or aborts; any check false |
+| 4 | Verify the private workdir's DEV link against the approved ref, exact history and approved traffic pause; `--linked --dry-run` lists only 32/33 in the staged workdir. Apply 32/33, then fresh preflight and 34 alone within 120 s; retain per-file history. The disposable A2/A3 gate must never be retargeted to DEV | 33 notice-only and 34 zero revocations are measured; constraints + all 15 privileges + exact 34-version history + ledger/catalog/value checks pass | Unexpected history/state, stale preflight, nonzero revocations or any failed postcheck |
 | 5 | `supabase functions deploy auth-send-sms --project-ref btfprhticjgeihcngpif --workdir backend`, then the same for `sync` | Hosted source hashes = reviewed revision; flags hook `false`, sync `true`; unsigned `POST /functions/v1/auth-send-sms` → 401 with the dispatch-ledger count unchanged; `GET /functions/v1/sync`: no headers → 401, legacy bearer + apikey → 405 | Any boot failure, flag drift, ledger change |
 | 6 | Legacy regression (A7, legacy column) — no OTP needed | All legacy rows pass | Any failure → step 8 |
 | 7 | `secrets set MUTHOY_SUPABASE_KEY_MODE=modern`, then redeploy `auth-send-sms` and `sync` from the **same** revision | Both functions boot (modern named-default dictionaries resolve); modern rows of A7 that need no OTP pass; publishable apikey-only GET → 405 | Any boot or compatibility failure → step 8 (no automatic fallback) |
@@ -303,7 +346,7 @@ fails rather than passes.
 |---|---|---|---|
 | 4 | (P-A) Inspect the existing project — or, if founder evidence proves absence and creation is separately approved, provision it empty. Phone OFF, anonymous OFF, Email kept | Identity matches the manifest; no business data | Any data or divergent history: stop the fresh path |
 | 5 | (P-B) Backup checkpoint; restore rehearsal evidence; enable pg_cron | Checkpoint id recorded | C5 not done where data exists |
-| 6 | (P-B) `supabase db push --linked --dry-run --workdir <WORKDIR>`, then apply | 34 pending on an empty target; **constraints**, **cron**, **api_role_privileges**, **history_post_h9** all pass | Anything unexpected pending; any check false |
+| 6 | (P-B) After verifying the private workdir's approved PROD link, dry-run/apply 1–33 from a staged workdir. Capture/evaluate a NEW mandatory preflight, review observations, then dry-run/apply 34 alone within the freshness gate | 33 versions before preflight; only 34 pending afterward; **constraints**, **cron**, **api_role_privileges**, **history_post_h9** all pass | Unconditional all-34 push, unexpected history, stale/failed preflight or any check false |
 | 7 | Verify grants, H-5 session cascades, RLS, Storage, `public.batches` publication | Matches the A2 rehearsal fingerprints taken with migration 34 | Unknown grant or difference |
 | 8 | Access-token hook registered; Phone OFF, OTP 6/300/60, anonymous OFF, no test map; default modern keys, legacy kept | Settings re-read | Any value differs |
 | 9 | (P-C) PROD-only secrets by name; `MUTHOY_SUPABASE_PROJECT_REF=<REF>`; mode `modern` | `--remote` secret-names check passes | A forbidden name present, a required one missing |

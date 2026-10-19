@@ -1,0 +1,14 @@
+# Line endings are pinned for every file whose SHA-256 is recorded as H-9 evidence.
+# The A5 runtime verifies these by hash (PINNED_INPUTS, runtime-manifest.json,
+# SOURCE_SUBSCRIBER_ALLOWLIST) and docs/plans/h9-* cite those values. Without an
+# explicit eol, a clone whose local core.autocrlf is true checks them out as CRLF
+# and every recorded hash stops reproducing. These files are already LF in the index,
+# so this pins existing bytes rather than changing them.
+scripts/h9/** text eol=lf
+scripts/h9-f12-hosted-preflight.mjs text eol=lf
+backend/supabase/checks/h9_hosted_preflight.sql text eol=lf
+backend/supabase/checks/h9_postmigration_checks.sql text eol=lf
+backend/supabase/functions/sync/_shared/phone.ts text eol=lf
+backend/supabase/functions/sync/deviceLogin.ts text eol=lf
+backend/supabase/migrations/20261015000000_h9_api_role_table_privileges.sql text eol=lf
+backend/supabase/deploy/H9-LOCAL-REMEDIATION.md text eol=lf
