@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import {
   Modal,
   Pressable,
@@ -36,6 +36,7 @@ import { endShiftToPinPad } from "../../navigation/endShift";
 import { useUnreadCount } from "../../state/useUnreadCount";
 import { formatUnreadBadge } from "../../domain/dashboard";
 import { triggerSyncNow } from "../../sync";
+import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
@@ -47,6 +48,17 @@ function Metric({ label, value }: { label: string; value: string }) {
 }
 
 export function ManagerDashboard() {
+  // D11. The language toggle, menu, sync and bell all sit in this header, and
+  // without a top inset the first ~24-45px of it renders UNDER the system
+  // status bar — taps there are swallowed by system UI, so the controls look
+  // present and simply do not respond. StandardHeader already solved this with
+  // `safeAreaTop`; these hand-rolled headers never adopted it.
+  //
+  // Read through the CONTEXT rather than useSafeAreaInsets(), the same way
+  // components/auth/AuthShell.tsx does: a screen rendered outside the provider
+  // (the H-10 gate, before the navigator exists) then degrades to zero instead
+  // of throwing.
+  const topInset = useContext(SafeAreaInsetsContext)?.top ?? 0;
   const session = useSessionStore((state) => state.session);
   const { t, formatNumber, formatTime } = useI18n();
   const [data, setData] = useState<ManagerDashboardData | null>(null);
@@ -227,7 +239,7 @@ export function ManagerDashboard() {
   return (
     <View className="flex-1 bg-brand-softGreen">
       <ScrollView contentContainerClassName="gap-4 p-4 pb-28">
-        <View className="-m-4 mb-0 gap-2 bg-brand-green p-5 pb-8">
+        <View className="-m-4 mb-0 gap-2 bg-brand-green p-5 pb-8" style={{ paddingTop: topInset + 20 }}>
           <View className="flex-row items-start justify-between">
             <View className="flex-1">
               <Text className="font-sans text-xs text-white/80">

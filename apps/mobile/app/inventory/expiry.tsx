@@ -26,6 +26,7 @@ import { useSessionStore } from "../../state/sessionStore";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { usePermission } from "../../state/usePermission";
 import { triggerSyncNow } from "../../sync";
+import { useI18n } from "../../state/localeStore";
 
 // Expiry Management — Volume 0 Day 9. Every non-deleted batch for this shop,
 // nearest REAL expiry date first (CLAUDE.md rule 3 — recomputed at read
@@ -61,6 +62,7 @@ const STATUS_TEXT_CLASSES: Record<ExpiryStatus, string> = {
 };
 
 export default function ExpiryManagementScreen() {
+  const { t } = useI18n();
   const session = useSessionStore((state) => state.session);
   const { isAllowed: canManageExpiry } = usePermission("expiry_manage");
   const { isAllowed: canDiscount } = usePermission("sale_discount");
@@ -118,7 +120,7 @@ export default function ExpiryManagementScreen() {
             value={percent}
             onChangeText={setPercent}
             keyboardType="decimal-pad"
-            placeholder="Bulk %"
+            placeholder={t("bulkPercentPlaceholder")}
             className="flex-1 rounded border border-midGray bg-white p-3"
           />
           <Pressable
@@ -145,8 +147,8 @@ export default function ExpiryManagementScreen() {
                 await reload();
               } catch (caught) {
                 Alert.alert(
-                  "Cannot apply bulk promotion",
-                  caught instanceof Error ? caught.message : "Try again.",
+                  t("bulkPromotionFailedTitle"),
+                  caught instanceof Error ? caught.message : t("pleaseTryAgain"),
                 );
               }
             }}
@@ -206,7 +208,7 @@ export default function ExpiryManagementScreen() {
               value={percent}
               onChangeText={setPercent}
               keyboardType="decimal-pad"
-              placeholder="Discount percent"
+              placeholder={t("discountPercentLabel")}
               className="rounded border border-midGray p-3"
             />
             <Pressable
@@ -228,8 +230,8 @@ export default function ExpiryManagementScreen() {
                   await reload();
                 } catch (caught) {
                   Alert.alert(
-                    "Cannot promote batch",
-                    caught instanceof Error ? caught.message : "Try again.",
+                    t("promoteBatchFailedTitle"),
+                    caught instanceof Error ? caught.message : t("pleaseTryAgain"),
                   );
                 }
               }}
@@ -254,8 +256,8 @@ export default function ExpiryManagementScreen() {
                   await reload();
                 } catch (caught) {
                   Alert.alert(
-                    "Cannot reverse promotion",
-                    caught instanceof Error ? caught.message : "Try again.",
+                    t("reversePromotionFailedTitle"),
+                    caught instanceof Error ? caught.message : t("pleaseTryAgain"),
                   );
                 }
               }}

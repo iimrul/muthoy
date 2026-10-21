@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -62,6 +62,7 @@ import {
   triggerSyncNow,
 } from "../../sync";
 import { hasNetworkConnection } from "../../sync/connectivity";
+import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 
 // Owner MorningDashboard. Functional parity with the prototype screen of the
 // same name; final typography and spacing remain Phase C.
@@ -78,6 +79,17 @@ import { hasNetworkConnection } from "../../sync/connectivity";
 // duplicate it.
 
 export default function MorningDashboardScreen() {
+  // D11. The language toggle, menu, sync and bell all sit in this header, and
+  // without a top inset the first ~24-45px of it renders UNDER the system
+  // status bar — taps there are swallowed by system UI, so the controls look
+  // present and simply do not respond. StandardHeader already solved this with
+  // `safeAreaTop`; these hand-rolled headers never adopted it.
+  //
+  // Read through the CONTEXT rather than useSafeAreaInsets(), the same way
+  // components/auth/AuthShell.tsx does: a screen rendered outside the provider
+  // (the H-10 gate, before the navigator exists) then degrades to zero instead
+  // of throwing.
+  const topInset = useContext(SafeAreaInsetsContext)?.top ?? 0;
   const session = useSessionStore((state) => state.session);
   const { t, locale, formatNumber, formatTime } = useI18n();
   const unread = useUnreadCount(session?.shopId, session?.userId);
@@ -410,8 +422,8 @@ export default function MorningDashboardScreen() {
       <ScrollView contentContainerClassName="pb-28">
         {/* Header */}
         <View
-          className="h-14 flex-row items-center justify-between bg-[#047857] px-4"
-          style={{ elevation: 4 }}
+          className="flex-row items-center justify-between bg-auth-heroEnd px-4"
+          style={{ elevation: 4, paddingTop: topInset, height: 56 + topInset }}
         >
           <View className="flex-row items-center gap-3">
             <Pressable
@@ -464,7 +476,7 @@ export default function MorningDashboardScreen() {
             Prototype MorningDashboard order — the badge sits inline with the
             greeting and the shop pill sits under the date, both inside the
             green hero. */}
-        <View className="rounded-b-[18px] bg-[#047857] pb-20 pt-6">
+        <View className="rounded-b-[18px] bg-auth-heroEnd pb-20 pt-6">
           <View className="mb-6 px-4">
             <View className="flex-row flex-wrap items-center gap-2">
               <Text className="font-sans-semibold text-lg text-white">
@@ -708,7 +720,7 @@ export default function MorningDashboardScreen() {
                 onPress={() => router.push("/end-of-day")}
                 accessibilityRole="button"
                 accessibilityLabel={t("completeDay")}
-                className="items-center rounded-xl bg-[#047857] px-5 py-3"
+                className="items-center rounded-xl bg-auth-heroEnd px-5 py-3"
               >
                 <Text className="font-sans-bold text-white">
                   {t("completeDay")}
@@ -741,7 +753,7 @@ export default function MorningDashboardScreen() {
                 >
                   <View className="mb-1 flex-row items-center gap-2">
                     <View className="h-9 w-9 items-center justify-center rounded-full bg-[#D1FAE5]">
-                      <Text className="font-sans-bold text-xs text-[#047857]">
+                      <Text className="font-sans-bold text-xs text-auth-heroEnd">
                         {member.name
                           .split(/\s+/)
                           .filter(Boolean)

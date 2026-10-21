@@ -3651,3 +3651,217 @@ uncommitted; nothing hosted, no DEV change; Codex review pending).**
 ## H-9 F12 R4 — local implementation, 2026-10-16
 
 Founder authorized the complete local R4 workflow and the remaining verification corrections. D1 stays exactly 48 semantic supabase_admin public default items, never modified. API roots and conservative Reach refuse six unsafe attributes; pg_roles supplies readable metadata. rolconfig is inventoried for hosted review and is outside F12 enforcement. Mandatory hosted preflight separates enforced predicates from observations and rejects unexpected platform absence/drift. B13/M15 now require real revocable grants and drift before canary activation; C11 expects checks 3 and 10. Shared RLS restoration and all prior security contracts remain. No hosted access or production authorization. C4, Data API disabling, F14 and H-11 remain out of scope. Details: [R4 implementation](docs/plans/h9-f12-r4.md). Local sign-off not yet granted; final verification evidence follows in the verification report.
+---
+
+## 2026-10-20 — Batch 1 (nine tasks): five decisions
+
+Delivery batch, not a wave. Nine of eleven assigned tasks shipped; **W4-04 and
+W4-05 are BLOCKED — DEFERRED TO BATCH 3**, never DONE (see
+`docs/plans/muthoy-five-batch-delivery-ledger.md`). Full suite
+**243 files / 5,032 tests / 0 failures / exit 0** on
+`pnpm test --maxWorkers=2 --minWorkers=1` (1393 s, 2026-10-21). The Gate 3
+figure (238 / 4,937) is historical — Gate 5 remediation changed the tree, so
+the result was re-established by a fresh run rather than carried forward.
+Codex reviewed the plan over eight rounds (31 findings, all fixed) before any
+code was written.
+
+**1. A conflict is only recorded where it is PROVABLE.** H-6 detects two cases
+and is deliberately silent otherwise. `pull_local_pending` compares the arriving
+remote row against the **queued outbox payload**, not the local row: the row is
+merely whichever side last-write-wins happened to write, so once a remote change
+lands the disagreement looks resolved while the outbox still holds an edit that
+will overwrite it on the next push. `push_superseded` fires only on **exact**
+timestamp equality plus a difference on a client-owned field — that is
+`sync_apply_row`'s strict-`<` predicate writing nothing while still answering
+`'applied'`. `remote > pushed` is ordinary LWW and `remote < pushed` is a stale
+pull page; flagging either would queue noise an owner cannot act on. **Residual,
+stated:** if a dropped row's server timestamp never advances past this device's
+pull cursor the row is never re-sent, and no client-side mechanism can see it.
+That closes only with a server-side `'stale'` return — a migration *and* a
+function redeploy.
+
+**2. Which columns the server owns is DERIVED FROM SOURCE, not declared.** Four
+drafts of that list were wrong, every one in the same direction — excluding a
+field that is actually client-owned, which blinds the detector *silently*, since
+an absent conflict notice looks exactly like no conflict. `cash_drawer`'s
+reconcile columns are a fill-only-if-absent fallback (the client's value always
+wins, because `recordChange` always sends a complete row), and
+`users.address/email` carry the client's values through `applyUserProfileFields`
+— both are client-owned. `sales`' tax snapshot is pinned on update and
+`expenses.category` is canonicalised in TypeScript, so both are server-owned.
+`tests/server-owned-fields.test.ts` now parses `upsertRemoteRow`,
+`toSyncPayload`, the migration SQL's pin-vs-conditional forms, **and**
+`functions/sync/push.ts`, and fails on drift against any of them.
+
+**3. Monitoring DISCARDS message, cause and stack — it does not redact them.**
+Rule 8 is absolute, and a scrubber has to anticipate every shape a secret can
+take. `error.name` is caller-assignable (`e.name = pin` is legal) so it maps
+through a closed table and anything unrecognised becomes `'unknown'`; a stack's
+first line *is* the message, so Batch 1 ships **no stack capture at all**. The
+provider interface accepts only a DTO of enums and integers, which means there
+is no code path by which caller text could reach a provider. `dev/runtimeDiagnostics.ts`
+keeps its DEV-only raw context and a test asserts `monitoring/` never imports it.
+**H-8 itself stays NOT DONE** — no provider, no payment/auth/crash coverage, no
+device proof.
+
+**4. "Keep the server's copy" deletes the superseded outbox rows.** Two earlier
+designs were wrong. Routing it through `applyRemoteRow` would have been a silent
+no-op on **100% of real conflicts**, because `applyToTable` returns
+`skipped_stale` the moment the local row is newer or equal — which is true of
+every row a detector flags. Marking the outbox rows `failed` instead of deleting
+them would have re-raised the same conflict on every pull, warned the owner
+about a row they discarded on purpose, and — the security point —
+`protectedOutboxGraph` shields `pending|failed` rows from
+`purgeUnreadableTables`, which never deletes `sync_queue` rows under *any*
+status. So: a dedicated force-apply that reuses the pull path's own
+`preservedLocalFields`, then a delete whose exact bytes live in
+`conflict_queue.superseded_payloads`, which the ACL purge *does* remove. A row
+belonging to an atomic operation group refuses `keep_remote` outright — a torn
+money operation is worse than an unresolved notice.
+
+**5. A success confirmation is a Toast; a failure stays an Alert.** Only one
+Alert changed — "Refund committed" in Sales History. `components/ui/Toast.tsx`'s
+own contract says a toast is never how a failure is reported, because it
+disappears before it can be acted on, and a destructive confirmation needs a
+button. The other 26 `Alert.alert` call sites are confirmations or failures and
+were left alone.
+
+**Why W4-04 and W4-05 did not ship.** Both need a Postgres migration, and adding
+any file to `backend/supabase/migrations/` breaks three H-9 gates — including
+`backend/supabase/checks/h9_postmigration_checks.sql`, which asserts
+`count(*) = 34` and "nothing after `20261015000000`" and is **pinned
+`text eol=lf` in `.gitattributes` as hash-recorded H-9 evidence**, executed by
+`h9-cron-cleanup.pgtest.ts`. A draft that re-expressed
+`scripts/h9-prod-preflight.mjs`'s chain check to allow later migrations was
+rejected in review for weakening a signed-off invariant to unblock ourselves.
+Batch 3 owns extending the chain and its checks in one reviewed step, which is
+where the migration would be applied anyway. **Until then the admin dashboard
+still reports GROSS sales and must not be labelled net**, and no shop-location
+or permission-dependent shop-profile feature may be released.
+
+**W5-15: no exposure found.** Four passes over the tracked tree, the full public
+history, a entropy-and-proximity hunt for *partial* fragments, and the published
+surface. All six credential-shaped hits are fabricated test fixtures; all 137
+partial-fragment candidates are identifiers or SHA-256 content hashes; no token
+decodes to `role: service_role`. **No rotation performed** — it needs separate
+founder authorization and is not recommended on this evidence. Sanitized verdict
+in `docs/plans/muthoy-w5-15-dev-credential-assessment-2026-10-20.md`; no secret
+material was printed or committed.
+
+**Not claimed:** H-6's physical two-device conflict (synthetic only, with both
+devices' timestamps simulated), H-8 completion, migration `0031` on a real
+device, and any D8–D11 verification by physical tap.
+
+---
+
+## 2026-10-21 — Batch 1, Gate 5: decisions forced by the Codex final review
+
+The independent final review of the staged Batch 1 scope returned REVISE with
+11 findings. Seven of them required a decision rather than just a patch, and
+those decisions are recorded here because each one is a place where the obvious
+move would have been to overstate what shipped.
+
+**D1 — No Batch 1 task is DONE; all are CODE-COMPLETE.**
+`DEVELOPMENT_RULES.md`'s Definition of Done requires, as clause 2, a test on a
+real Android device while offline, and clause 3 a passing Validation Checklist.
+This batch is authorized for local code, tests, docs and a conditional push
+only; device work needs separate approval and the founder's Galaxy A04s install
+is off-limits. A green 5,032-test suite does not satisfy clause 2. Every task is
+therefore labelled **CODE-COMPLETE — pending device validation** in the ledger
+and the implementation record. *Why it matters:* the rule ends "AI said it works
+is NOT done", and labelling these DONE is exactly the failure it names.
+
+**D2 — W3-08 is partial, and says so.**
+The static ratchet written for this finding found real hardcoded strings that
+were then fixed — and then kept finding more. `sale/confirmation.tsx` (D8),
+`reports/sales-history.tsx` (D9) and the new `sync-conflicts.tsx` are fully
+localized and asserted as such. `inventory/batches.tsx`, `inventory/expiry.tsx`
+and `sale/held.tsx` have their **verified** defects fixed (error dialogs, empty
+states) but their wider surface — field labels, section titles, some
+placeholders — was never localized and still is not. W3-08's assigned scope was
+"D8/D9 and other **verified** hardcoded-English UI defects", so finishing those
+three is a larger pass than this batch was asked to make. *Decision:* fix the
+verified defects, pin them with a ratchet so they cannot come back, and record
+the remainder as owed work rather than loosening the test to hide it. A
+Bangla-first POS showing English field labels is a real defect; it is now
+visible instead of implied.
+
+**D3 — A corrupt queued payload records NO conflict.**
+The detector compares the remote row against the **queued payload**, not the
+local row, because once a remote change has been applied the row equals the
+remote and a real pending edit looks resolved. The first version fell back to
+the local row when the payload would not parse. That invents conflicts: the row
+is whatever last-write-wins wrote, so the difference belongs to no queued
+intent. *Decision:* an unparseable payload reports
+`sync.conflict_detector.failed` and records nothing. A missing notice we can see
+in monitoring beats a fabricated one the owner has to adjudicate.
+
+**D4 — `attempt` ships as a bucket, never a number.**
+An arbitrary integer field in a monitoring report is a channel out of the app.
+The first version proved the point against itself: its own test asserted that
+`129900` survived redaction — a paisa amount. *Decision:* `ATTEMPT_BUCKETS`
+(0/1/2/5/10). A maintainer still learns "first try" vs "retrying" vs "stuck",
+and the field can no longer carry a value. CLAUDE.md rule 8's spirit is that the
+reporter cannot leak, not that we remember not to.
+
+**D5 — No-double-charge is a database guarantee; the handler test proves its
+half of the contract.**
+`b4_apply_verified_payment` upserts the event row `on conflict (provider,
+validation_id)` and then short-circuits on `if v_order.status = 'verified' then
+… return` — so the guarantee is the ORDER STATUS, not the event key.
+`backend/supabase/pgtest/b4.pgtest.ts` proves against real Postgres that a
+replay advances `version` exactly once and leaves one event row. The handler
+test had been asserting `toHaveBeenCalledTimes(2)`, which passes even if the
+handler sends a *different* key each delivery. *Decision:* assert the outcome —
+three identical redeliveries produce one grant — and assert the mirror case,
+that two different ORDERS stay two payments, since a client-side dedup bug
+could otherwise swallow a second real purchase and bill the shop twice for one
+credit. Also assert the handler sends no amount, so a tampered callback cannot
+raise it.
+
+*Corrected after the delta review:* the first version of this entry, and the
+test it described, said the dedup key was `p_event_key` and treated two
+validations against **one** order as two payments. The database grants that case
+once. Modelling the wrong guard made the test agree with a mistake, which is the
+failure mode worth recording: a fake that is not read off the real statement
+proves whatever its author already believed.
+
+**D6 — W3-11 was extended, not narrowed.**
+The review was right that the record claimed coverage the suite did not have.
+Narrowing the claim would have been honest but would have quietly shrunk an
+assigned deliverable, since the brief named purchases, returns/refunds and
+accounting explicitly. *Decision:* extend to 18 tests — supplier invoice with a
+pending line that adds no stock until received, credit sale and the payment that
+clears it, a refund asserted in both directions (gross unchanged, net reduced),
+a purchase return, close-day with the drawer identity, and a
+failed-then-successful push replay. Cash figures are asserted against
+`getCashSummary`'s own output, never re-derived here (rule 4).
+
+**D7 — `/sync-conflicts` is reachable by every role, via an explicit opt-in.**
+The screen was only linked from owner-only Settings, so a staff member permitted
+to resolve a conflict could never reach one. The fix was NOT to relax the
+permission-less default in `visibleMoreRoutes` — that default is what keeps
+unlabelled routes hidden — but to add an explicit `allRoles` flag the route must
+set deliberately. Row-level filtering still happens in `db/conflicts.ts`, so
+reachability and authority stay separate.
+
+**D8 — No screen renders an `Error` message.**
+Three delta rounds kept finding the same leak in different places: `caught.message`
+rendered straight to the user. Every message in `db/` is written in English, so a
+Bangla-first POS showed English at exactly the moment a shopkeeper most needs to
+understand what happened — and it is the least-tested path on any screen, so it
+stayed broken while the happy path was fully translated. A literal-scanning test
+cannot see it either, because the English lives in a different file.
+
+*Decision:* `domain/errorMessages.ts` maps `error.name` to a catalog key, every
+screen calls that, and `tests/localization-and-ui-consistency.test.ts` forbids
+`.message` outright in the fully-localized screens. Names are stable where
+sentences are not, and the map is checked for completeness against the error
+classes `db/conflicts.ts` actually declares and throws. An unmapped error falls
+back to a screen-specific generic key rather than leaking the original text.
+
+A related rule came out of the same round: **our vocabularies get translated,
+the shopkeeper's do not.** `sales.status`, `expenses.category` and
+`conflict_queue.table_name` are ours, so they are mapped; `medicines.unit_of_measure`
+is free text the shopkeeper typed, so it is passed through untouched — only the
+value the schema supplies by default (`piece`) is translated.

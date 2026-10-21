@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { formatMoney } from "@muthoy/utils";
@@ -23,6 +23,7 @@ import { useSessionStore } from "../../state/sessionStore";
 import { LogoutConfirmSheet } from "../../components/auth/LogoutConfirmSheet";
 import { endShiftToPinPad } from "../../navigation/endShift";
 import { useUnreadCount } from "../../state/useUnreadCount";
+import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -41,6 +42,11 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 export default function StaffHomeScreen() {
+  // D11. Same status-bar overlap as the owner dashboard: the language toggle
+  // and bell sit in this green header, and without a top inset the top band of
+  // it is under system UI and swallows taps. Read through the context so a
+  // screen rendered outside the provider degrades to zero (AuthShell precedent).
+  const topInset = useContext(SafeAreaInsetsContext)?.top ?? 0;
   const session = useSessionStore((state) => state.session);
   const { t, formatNumber, formatTime } = useI18n();
   const [data, setData] = useState<StaffDashboardData | null>(null);
@@ -205,7 +211,7 @@ export default function StaffHomeScreen() {
   return (
     <View className="flex-1 bg-brand-softGreen">
       <ScrollView contentContainerClassName="gap-5 pb-28">
-        <View className="gap-2 bg-brand-green px-5 pb-20 pt-6">
+        <View className="gap-2 bg-brand-green px-5 pb-20" style={{ paddingTop: topInset + 24 }}>
           <View className="flex-row justify-between">
             <View className="flex-1">
               <Text className="font-sans text-xs text-white/80">

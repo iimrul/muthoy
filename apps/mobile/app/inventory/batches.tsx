@@ -23,6 +23,7 @@ import { DuplicateBatchError } from "../../db/errors";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { usePermission } from "../../state/usePermission";
 import { triggerSyncNow } from "../../sync";
+import { useI18n } from "../../state/localeStore";
 
 // Medicine detail: batch list + Add Batch — Volume 4 INVENTORY, Volume 0 Day
 // 8. This is the path that adds a batch to an EXISTING medicine, which is
@@ -32,6 +33,7 @@ import { triggerSyncNow } from "../../sync";
 // "Duplicate batch number for the same medicine shows a friendly error" —
 // rendered inline under the batch-number field below, never an Alert.
 export default function BatchDetailScreen() {
+  const { t } = useI18n();
   const { medicineId } = useLocalSearchParams<{ medicineId: string }>();
   // Mixed screen: the batch LIST is inventory-view, which Staff keeps
   // (Volume 0 Day 11). Only the Add Batch half is gated on inventory_write,
@@ -109,12 +111,12 @@ export default function BatchDetailScreen() {
           setError("batchNo", { message: err.message });
           return;
         }
-        Alert.alert("Something went wrong", "Please try again.");
+        Alert.alert(t("somethingWentWrong"), t("pleaseTryAgain"));
       } finally {
         setIsSubmitting(false);
       }
     },
-    [session, medicineId, canWriteInventory, reset, reload, setError],
+    [session, medicineId, canWriteInventory, reset, reload, setError, t],
   );
 
   if (!session || !medicineId) {
@@ -169,13 +171,13 @@ export default function BatchDetailScreen() {
               control={control}
               name="batchNo"
               label="Batch number"
-              placeholder="e.g. B-2024-02"
+              placeholder={t("batchNoPlaceholder")}
             />
             <FormField
               control={control}
               name="expiryDate"
               label="Expiry date"
-              placeholder="YYYY-MM-DD"
+              placeholder={t("expiryDatePlaceholder")}
             />
             <FormField
               control={control}

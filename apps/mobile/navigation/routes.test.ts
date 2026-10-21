@@ -45,7 +45,13 @@ describe('B1 routes', () => {
     expect(MORE_ROUTES.find((route) => route.key === 'multi-shop')?.href).toBe(MULTI_SHOP_HREF);
   });
   it('guards scan and deep links by exact permission', () => { expect(canAccessPath(cashier, '/scan')).toBe(true); expect(canAccessPath({ ...cashier, permissions: { sale_entry: false } }, '/scan')).toBe(false); expect(canAccessPath(cashier, '/reports/report')).toBe(false); expect(canAccessPath(manager, '/reports/report')).toBe(true); });
-  it('uses exact More visibility/order', () => { expect(visibleMoreRoutes(cashier).map((item) => item.key)).toEqual([]); expect(visibleMoreRoutes(manager).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','devices']); expect(visibleMoreRoutes(owner).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','devices']); expect(visibleMoreRoutes(owner, true).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','multi-shop','devices']);
+  it('uses exact More visibility/order', () => {
+    // H-6: 'sync-conflicts' is visible to EVERY role, including a cashier who
+    // otherwise sees no More entries at all. Deliberate — a conflict notice is
+    // filtered per row by the affected table's read gate, so a cashier whose
+    // own unpushed sale is in conflict has to be able to reach it. Settings is
+    // owner-only, so this is the only route by which they can.
+    expect(visibleMoreRoutes(cashier).map((item) => item.key)).toEqual(['sync-conflicts']); expect(visibleMoreRoutes(manager).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','devices','sync-conflicts']); expect(visibleMoreRoutes(owner).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','devices','sync-conflicts']); expect(visibleMoreRoutes(owner, true).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','multi-shop','devices','sync-conflicts']);
     // A2.3. Manager sees Devices and Staff does not, by ROLE — a Staff member
     // holding staff_manage must not reach it, which is why the entry is not
     // hung off that permission.

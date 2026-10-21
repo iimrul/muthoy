@@ -43,6 +43,13 @@ export const RULES: readonly {
   { prefixes: ['/settings/devices'], dataGate: 'deviceAdmin', rule: DATA_ACCESS_GATES.deviceAdmin },
   { prefixes: ['/settings'], dataGate: 'owner', rule: DATA_ACCESS_GATES.owner },
   { prefixes: ['/notifications'], dataGate: 'authenticated', rule: DATA_ACCESS_GATES.authenticated },
+  // H-6 / W3-02. 'authenticated' on purpose: the route gate is NOT where the
+  // decision is made. A conflict notice carries row payloads, so visibility is
+  // filtered PER ROW by the affected table's read gate and resolution by its
+  // write gate (db/conflicts.ts + domain/conflictTables.ts). Gating the route on
+  // a single permission would either hide conflicts a cashier legitimately owns
+  // or expose ones they must not see.
+  { prefixes: ['/sync-conflicts'], dataGate: 'authenticated', rule: DATA_ACCESS_GATES.authenticated },
 ];
 
 const AUTH_PREFIXES = ['/role-select', '/register', '/otp-verify', '/pin-setup', '/pin-login', '/forgot-pin', '/device-login'];
@@ -99,11 +106,21 @@ export function canAccessPath(session: Session | null, pathname: string): boolea
 
 export interface MoreRoute {
   key: string;
-  labelKey: 'salesHistory' | 'expiry' | 'cashDrawer' | 'endOfDay' | 'report' | 'expense' | 'supplierInvoices' | 'suppliers' | 'staff' | 'staffSales' | 'multiShop' | 'devicesTitle';
+  labelKey: 'salesHistory' | 'expiry' | 'cashDrawer' | 'endOfDay' | 'report' | 'expense' | 'supplierInvoices' | 'suppliers' | 'staff' | 'staffSales' | 'multiShop' | 'devicesTitle' | 'syncConflicts';
   href: Href;
   permission?: Permission;
   ownerOnly?: boolean;
   multiShopOnly?: boolean;
+  /**
+   * Visible to EVERY authenticated role, with no permission of its own.
+   *
+   * An explicit opt-in rather than relaxing the `: false` default below, which
+   * is the right default: a More entry with no permission should be hidden
+   * from non-owners unless somebody deliberately says otherwise. The only
+   * current user is /sync-conflicts, whose rows are filtered individually by
+   * the affected table's read gate.
+   */
+  allRoles?: boolean;
   /**
    * A2.3. Owner AND Manager, by role — never by a permission.
    *
@@ -161,6 +178,12 @@ export const MORE_ROUTES: readonly MoreRoute[] = [
   // plan does not cover.
   { key: 'multi-shop', labelKey: 'multiShop', href: MULTI_SHOP_HREF, ownerOnly: true, multiShopOnly: true },
   { key: 'devices', labelKey: 'devicesTitle', href: '/settings/devices', deviceAdminOnly: true },
+  // H-6. No permission, no ownerOnly: a conflict notice is filtered PER ROW by
+  // the affected table's read gate (db/conflicts.ts), so a cashier whose own
+  // unpushed sale is in conflict must be able to reach it. Settings is
+  // owner-only, so without this entry the screen was unreachable for every
+  // non-owner even though listConflicts would have shown them rows.
+  { key: 'sync-conflicts', labelKey: 'syncConflicts', href: '/sync-conflicts' as Href, allRoles: true },
 ];
 
 /** `multiShopAllowed` = entitled to multi-shop AND holding more than one shop. */
@@ -172,6 +195,7 @@ export function visibleMoreRoutes(session: Session, multiShopAllowed = false): r
     // third way in: no permission grant reaches this branch.
     if (route.deviceAdminOnly) return toRole(session.role) === 'manager';
     if (route.ownerOnly) return false;
+    if (route.allRoles) return true;
     return route.permission ? resolvePermission(session.role, route.permission, session.permissions) : false;
   });
 }

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { createLatestRequestGuard } from "../../domain/latestRequestGuard";
 import {
   Alert,
   FlatList,
@@ -8,7 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { daysUntilExpiry } from "@muthoy/utils";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -62,18 +63,38 @@ export default function InventoryScreen() {
     Record<string, BatchDetailRow[]>
   >({});
 
+  // D10. A tab screen is NOT remounted when you navigate back to it, so the
+  // old load-once-on-mount effect meant Add Medicine returned to a list that
+  // still read "inventory is empty" until you left and came back again. The
+  // data was always correct underneath; only the presentation was stale.
+  //
+  // useFocusEffect is the pattern nine other screens already use. The request
+  // guard is the other half: two focus events in quick succession, or a slow
+  // first read finishing after a faster second one, must not let an older
+  // result overwrite a newer one (domain/latestRequestGuard.ts exists for
+  // exactly this class of defect).
+  const loadGuard = useRef(createLatestRequestGuard());
+
   const reloadMedicines = useCallback(async () => {
     if (!session) {
       return;
     }
-    setMedicines(await listMedicines(session.shopId));
+    const requestId = loadGuard.current.start();
+    const rows = await listMedicines(session.shopId);
+    if (!loadGuard.current.isLatest(requestId)) {
+      return;
+    }
+    setMedicines(rows);
+    // Expanded batch rows are re-read on the next toggle rather than served
+    // from a cache that a just-completed edit may have invalidated.
+    setBatchesById({});
   }, [session]);
 
-  useEffect(() => {
-    // Load-once-on-mount from SQLite, same pattern as app/staff/management.tsx.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    reloadMedicines();
-  }, [reloadMedicines]);
+  useFocusEffect(
+    useCallback(() => {
+      void reloadMedicines();
+    }, [reloadMedicines]),
+  );
 
   if (!session) {
     return null;

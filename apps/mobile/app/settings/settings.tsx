@@ -52,6 +52,7 @@ import type { CatalogKey } from "../../i18n/catalog";
 import { endShiftToPinPad } from "../../navigation/endShift";
 import { triggerSyncNow } from "../../sync";
 import { MULTI_SHOP_HREF } from "../../navigation/routes";
+import { countVisibleConflicts } from "../../db/conflicts";
 
 const profileSchema = z.object({
   name: z.string().trim().min(2),
@@ -148,7 +149,7 @@ function formatClosingHour(hour: number): string {
 
 export default function SettingsScreen() {
   const session = useSessionStore((state) => state.session);
-  const { t, locale } = useI18n();
+  const { t, locale, formatNumber } = useI18n();
   const plan = usePlan();
   const multiShop = useMultiShopAccess();
   const [profile, setProfile] = useState<ShopProfile | null>(null);
@@ -161,6 +162,9 @@ export default function SettingsScreen() {
   const [pinOpen, setPinOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // H-6. Counted with the SAME visibility rule the screen itself uses, so the
+  // badge and the list can never disagree.
+  const [conflictCount, setConflictCount] = useState(0);
   const load = useCallback(async () => {
     if (!session || session.role !== "owner") return;
     try {
@@ -172,6 +176,7 @@ export default function SettingsScreen() {
       setProfile(nextProfile);
       setB2Settings(nextB2Settings);
       setTaxSettings(nextTaxSettings);
+      setConflictCount(await countVisibleConflicts(session.shopId, session.userId));
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Settings failed");
@@ -202,6 +207,20 @@ export default function SettingsScreen() {
             label={t("notifications")}
             onPress={() => setNotificationsOpen(true)}
           />
+          {/* H-6. Only shown when there is something to resolve: an always-on
+              row for a queue that is empty 99% of the time trains the owner to
+              ignore it.
+
+              `as never` matches the three existing call sites in app/: expo-router's
+              typed-route table is generated into the gitignored .expo/types, so a
+              new route is unknown to tsc until that regenerates. */}
+          {conflictCount > 0 ? (
+            <Row
+              label={t("syncConflicts")}
+              value={formatNumber(conflictCount)}
+              onPress={() => router.push("/sync-conflicts" as never)}
+            />
+          ) : null}
           <View className="flex-row items-center justify-between py-4">
             <Text className="font-sans-semibold">{t("language")}</Text>
             <LanguageToggle />

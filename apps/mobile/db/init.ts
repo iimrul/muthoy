@@ -7,6 +7,7 @@ import {
   initializeDatabaseFileForRecovery,
 } from './client';
 import { DatabaseRecoveryPendingError } from './errors';
+import { reportError, reportEvent } from '../monitoring';
 import migrations from './migrations/migrations';
 import { ensureEnvironmentAllowed } from './environmentBinding';
 
@@ -46,6 +47,10 @@ let isRecoveryMode = false;
  */
 export async function ensureDatabaseInitialized(): Promise<void> {
   if (isRecoveryMode) {
+    // H-8: a device sitting in recovery mode is the state an owner cannot
+    // diagnose and cannot escape on their own, so it is worth a breadcrumb even
+    // though it is not an error here — the throw is the documented contract.
+    reportEvent('db.recovery.pending');
     throw new DatabaseRecoveryPendingError();
   }
   if (isInitialized) {
@@ -60,6 +65,12 @@ export async function ensureDatabaseInitialized(): Promise<void> {
     await initialization;
   } catch (error) {
     initialization = null;
+    // H-8. The one failure that leaves the app with no database at all: a key
+    // that will not unwrap, or a migration that will not apply. Reported with
+    // the error KIND only (db/errors.ts class names are the closed enum) —
+    // never the message, which on a SQLite failure quotes SQL, and never the
+    // key material the SQLCipher paths handle.
+    reportError({ event: 'db.init.failed', error, route: 'startup' });
     throw error;
   }
 }

@@ -15,6 +15,7 @@ import { startForegroundScheduler } from './scheduler';
 import { notifyIfSyncIsStuck, notifySyncHalted } from './stuckNotification';
 import { isSupabaseConfigured } from './supabaseClient';
 import { recordSuccessfulSync } from './statusStore';
+import { reportError } from '../monitoring';
 import { inspectCloudActorBinding } from './authActorBinding';
 import { useSessionStore } from '../state/sessionStore';
 import { clearDeviceRelinkRequired, markDeviceRelinkRequired } from '../state/deviceRelinkStore';
@@ -242,6 +243,16 @@ async function runCycle(
       if (DEVICE_REENROLMENT_CODES.has(error.code)) {
         markDeviceRelinkRequired(shopId, localActor.userId);
       }
+      // H-8. notifySyncHalted puts a message in front of the OWNER; this puts
+      // the shape of the failure where a maintainer can see it. The error's own
+      // message is deliberately not forwarded — SyncHaltedError carries server
+      // text, and server text is not ours to classify as safe.
+      reportError({
+        event: 'sync.halted',
+        error,
+        route: 'background',
+        context: { shopId, actorUserId: localActor.userId },
+      });
       await notifySyncHalted(shopId, error.message);
     }
     throw error;
@@ -304,6 +315,10 @@ export function triggerSyncNow(shopId: string): Promise<SyncCycleResult> {
         completePendingAuthTimingStage('initial_sync', 'error', authTimingId);
       }
       console.warn('Background sync cycle failed', error);
+      // H-8. The single place every unhandled cycle failure funnels through.
+      // The returned `error` string stays as it is — it drives the in-app
+      // status surface — but only the classified KIND leaves the device.
+      reportError({ event: 'sync.cycle.failed', error, route: 'background', context: { shopId } });
       return {
         status: 'failed',
         error: error instanceof Error ? error.message : 'Sync failed',

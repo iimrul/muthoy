@@ -16,8 +16,10 @@ import { useCartStore } from "../../state/cartStore";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useSessionStore } from "../../state/sessionStore";
 import { triggerSyncNow } from "../../sync";
+import { useI18n } from "../../state/localeStore";
 
 export default function HeldSalesScreen() {
+  const { t } = useI18n();
   const session = useSessionStore((state) => state.session);
   const clear = useCartStore((state) => state.clear);
   const addItem = useCartStore((state) => state.addItem);
@@ -72,8 +74,8 @@ export default function HeldSalesScreen() {
       router.replace("/sale/cart");
     } catch (caught) {
       Alert.alert(
-        "Cannot resume",
-        caught instanceof Error ? caught.message : "Try again.",
+        t("resumeSaleFailedTitle"),
+        caught instanceof Error ? caught.message : t("pleaseTryAgain"),
       );
     }
   };
@@ -93,14 +95,14 @@ export default function HeldSalesScreen() {
     } catch (caught) {
       if (!guard.isStale())
         Alert.alert(
-          "Cannot cancel",
-          caught instanceof Error ? caught.message : "Try again.",
+          t("cancelSaleFailedTitle"),
+          caught instanceof Error ? caught.message : t("pleaseTryAgain"),
         );
     }
   };
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title="Held sales" onBackPress={() => router.back()} />
+      <StandardHeader title={t("heldSalesTitle")} onBackPress={() => router.back()} />
       <FlatList
         data={rows}
         keyExtractor={(row) => row.id}
@@ -109,7 +111,7 @@ export default function HeldSalesScreen() {
         refreshing={false}
         ListEmptyComponent={
           <EmptyState
-            title="No held sales"
+            title={t("noHeldSales")}
             message="Held carts appear here. Stock is checked only when resumed and checked out."
           />
         }

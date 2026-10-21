@@ -1323,18 +1323,65 @@ export const syncQueue = sqliteTable(
 );
 
 // ── conflict_queue (true sync conflicts, surfaced to the owner) ────────
-export const conflictQueue = sqliteTable("conflict_queue", {
-  id: text("id").primaryKey(),
-  shopId: text("shop_id").notNull(),
-  tableName: text("table_name").notNull(),
-  rowId: text("row_id").notNull(),
-  localValue: text("local_value").notNull(), // JSON
-  remoteValue: text("remote_value").notNull(), // JSON
-  resolved: integer("resolved", { mode: "boolean" }).notNull().default(false),
-  createdAt: text("created_at")
-    .notNull()
-    .default(sql`(current_timestamp)`),
-});
+//
+// H-6, migration 0031. Deliberately NO foreign keys: a conflict notice must
+// outlive the row it describes, an access purge, and hydration order. See the
+// migration header for why a CASCADE here would erase the record of a lost
+// write — the one thing this table exists to prevent.
+export const conflictQueue = sqliteTable(
+  "conflict_queue",
+  {
+    id: text("id").primaryKey(),
+    shopId: text("shop_id").notNull(),
+    tableName: text("table_name").notNull(),
+    rowId: text("row_id").notNull(),
+    localValue: text("local_value").notNull(), // JSON
+    remoteValue: text("remote_value").notNull(), // JSON
+    resolved: integer("resolved", { mode: "boolean" }).notNull().default(false),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(current_timestamp)`),
+    /**
+     * Which provable case fired. 'pull_local_pending' — a remote change arrived
+     * for a row with unpushed local work. 'push_superseded' — the server kept a
+     * row at the SAME updated_at whose content is not what this device sent,
+     * i.e. sync_apply_row's `updated_at < excluded.updated_at` predicate wrote
+     * nothing and still answered 'applied'.
+     */
+    reason: text("reason", {
+      enum: ["pull_local_pending", "push_superseded"],
+    })
+      .notNull()
+      .default("pull_local_pending"),
+    localUpdatedAt: text("local_updated_at"),
+    remoteUpdatedAt: text("remote_updated_at"),
+    /** Attribution only. Authorization is always re-derived, never read here. */
+    detectedBy: text("detected_by"),
+    /** Repeat sightings bump this rather than inserting a second notice. */
+    occurrences: integer("occurrences").notNull().default(1),
+    updatedAt: text("updated_at"),
+    resolvedAt: text("resolved_at"),
+    resolution: text("resolution", { enum: ["keep_local", "keep_remote"] }),
+    /**
+     * JSON array of the outbox rows a 'keep_remote' resolution deleted,
+     * verbatim. The audit trail for a discarded local edit, kept here so the
+     * ACL purge removes it with the conflict rather than leaving it in
+     * sync_queue, which purgeUnreadableTables never touches.
+     */
+    supersededPayloads: text("superseded_payloads"),
+  },
+  (t) => ({
+    // At most ONE unresolved conflict per row — the de-duplication mechanism.
+    unresolvedRowUnique: uniqueIndex("conflict_queue_unresolved_row_unique")
+      .on(t.shopId, t.tableName, t.rowId)
+      .where(sql`${t.resolved} = 0`),
+    shopResolvedIdx: index("conflict_queue_shop_resolved_idx").on(
+      t.shopId,
+      t.resolved,
+      t.createdAt,
+    ),
+  }),
+);
 
 // ── A2.3 device registry mirror (device-local, never synced) ───────────
 //

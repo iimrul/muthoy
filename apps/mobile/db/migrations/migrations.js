@@ -32,6 +32,7 @@ import m0027 from './0027_h7_local_access_lock.sql';
 import m0028 from './0028_shop_scoped_pin_lookup.sql';
 import m0029 from './0029_pin_reserved_while_inactive.sql';
 import m0030 from './0030_a23_device_registry_mirror.sql';
+import m0031 from './0031_h6_conflict_queue.sql';
 
 export default {
   journal,
@@ -67,5 +68,6 @@ export default {
     m0028,
     m0029,
     m0030,
+    m0031,
   },
 };

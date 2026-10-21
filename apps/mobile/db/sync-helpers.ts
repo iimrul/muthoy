@@ -1,5 +1,11 @@
-import { and, asc, count, eq, isNull, max, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNull, max, or } from "drizzle-orm";
 import { canonicalizeExpenseCategory } from "@muthoy/validation";
+import {
+  comparableFields,
+  isConflictExemptTable,
+} from "../domain/serverOwnedFields";
+import { purgeConflictsForTables, recordConflict } from "./conflicts";
+import { reportError } from "../monitoring";
 import { db, sqliteConnection } from "./client";
 import {
   auditLogs,
@@ -121,7 +127,7 @@ export const HYDRATION_TABLE_ORDER = [
   "audit_logs",
 ] as const satisfies readonly SyncTableName[];
 export type SyncOperation = "insert" | "update" | "delete";
-type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * What became of one pulled row.
@@ -633,6 +639,253 @@ function timestampMs(value: unknown, label: string): number {
   return parsed;
 }
 
+/**
+ * The fields applyToTable REFUSES to take from the wire, read off the local row.
+ *
+ * Extracted so W3-02's conflict force-apply reuses the same rule instead of a
+ * second copy that could drift. `batches.stock`/`oversoldAt` are derived from
+ * this device's own movement ledger; `users.accessLockedAt` is this device's
+ * revocation decision and the server has no such column.
+ */
+export function preservedLocalFields(
+  tx: DbTransaction,
+  tableName: SyncTableName,
+  rowId: string,
+): Record<string, unknown> {
+  if (tableName === "batches") {
+    const local = readCompleteRowOrNull(tx, tableName, rowId);
+    return local
+      ? { stock: local.stock, oversoldAt: local.oversoldAt }
+      : { stock: 0, oversoldAt: null };
+  }
+  if (tableName === "users") {
+    const local = readCompleteRowOrNull(tx, tableName, rowId);
+    return { accessLockedAt: local ? local.accessLockedAt : null };
+  }
+  return {};
+}
+
+/**
+ * H-6/W3-02. Writes a remote snapshot DELIBERATELY BYPASSING the LWW gate.
+ *
+ * applyRemoteRow cannot do this job: applyToTable returns "skipped_stale" the
+ * moment `local.updatedAt >= remote.updatedAt`, which is true of every row a
+ * conflict detector flags — so routing "keep the server's copy" through it
+ * would have been a silent no-op on 100% of real conflicts.
+ *
+ * The LWW bypass is the point, and it is safe only because an Owner has
+ * explicitly chosen this side on this row. Server-derived and device-local
+ * fields are still preserved, through the same preservedLocalFields above.
+ */
+/**
+ * H-6/W3-02. Pushes one row's `updated_at` strictly forward.
+ *
+ * The mechanism behind `keep_local`. sync_apply_row's upsert predicate is
+ * `<table>.updated_at < excluded.updated_at`, a STRICT comparison, so
+ * re-queueing a row at its existing timestamp is dropped by exactly the rule
+ * that caused the conflict — and the server still answers 'applied'. The caller
+ * computes a value above the local row, the server's copy and now; this writes
+ * it without going near the LWW gate.
+ */
+export function bumpRowUpdatedAt(
+  tx: DbTransaction,
+  tableName: SyncTableName,
+  rowId: string,
+  updatedAt: string,
+): void {
+  const existing = readCompleteRowOrNull(tx, tableName, rowId);
+  if (!existing) {
+    throw new Error(`Cannot bump a missing ${tableName} row ${rowId}`);
+  }
+  upsertRemoteRow(tx, tableName, {
+    ...existing,
+    updatedAt,
+    ...preservedLocalFields(tx, tableName, rowId),
+  });
+}
+
+export function applyConflictRemoteRow(
+  tx: DbTransaction,
+  tableName: SyncTableName,
+  snakeCaseRow: Record<string, unknown>,
+): void {
+  const row = canonicalizeRemoteRow(tableName, toCamelCaseRow(snakeCaseRow));
+  const rowId = row.id;
+  if (typeof rowId !== "string") {
+    throw new Error(`Conflict snapshot for ${tableName} has no id`);
+  }
+  upsertRemoteRow(tx, tableName, {
+    ...row,
+    ...preservedLocalFields(tx, tableName, rowId),
+  });
+}
+
+/**
+ * H-6's detector, FAIL-SOFT by construction.
+ *
+ * Called from applyToTable before its LWW decision. Never throws: a throw here
+ * would roll back the apply, and because an incremental pull does not advance
+ * its cursor on failure it would re-fetch the identical page forever. The
+ * payload it reads (`sync_queue.payload`) is unvalidated TEXT, so a legacy or
+ * corrupt value is reachable and must degrade to a reported miss rather than a
+ * wedged sync.
+ */
+function tryRecordConflict(
+  tx: DbTransaction,
+  tableName: SyncTableName,
+  rowId: string,
+  local: Record<string, unknown> | null,
+  remote: Record<string, unknown>,
+): void {
+  try {
+    if (isConflictExemptTable(tableName)) return;
+    if (!local) return;
+    const shopId = typeof local.shopId === "string"
+      ? local.shopId
+      : typeof remote.shopId === "string"
+        ? remote.shopId
+        : null;
+    // `shops` keys on id rather than shop_id; anything else without a shop is
+    // not attributable to a tenant and is left alone.
+    const tenantId = tableName === "shops" ? rowId : shopId;
+    if (!tenantId) return;
+
+    const outbox = tx
+      .select({
+        status: syncQueue.status,
+        payload: syncQueue.payload,
+        seq: syncQueue.seq,
+      })
+      .from(syncQueue)
+      .where(
+        and(
+          eq(syncQueue.shopId, tenantId),
+          eq(syncQueue.tableName, tableName),
+          eq(syncQueue.rowId, rowId),
+        ),
+      )
+      .orderBy(desc(syncQueue.seq))
+      .limit(1)
+      .all();
+    const newest = outbox[0];
+    if (!newest) return;
+
+    const remoteWire = toSnakeCasePayload(remote);
+
+    if (newest.status === "pending" || newest.status === "failed") {
+      // Unpushed local work exists. Whichever side LWW picks, the other side's
+      // change is at risk — that is the conflict, regardless of which way the
+      // timestamps fall.
+      //
+      // Compared against the QUEUED PAYLOAD, not the local row. The row is
+      // merely whichever side LWW wrote last, so once a remote change has been
+      // applied the row equals the remote and the disagreement looks resolved
+      // while the outbox still holds an edit that will overwrite it on the next
+      // push. The payload is what this device actually intends to send, which
+      // is the thing in conflict. There is deliberately NO fallback to the row
+      // when the payload is unreadable: see below.
+      const queued = safeParsePayload(newest.payload);
+      if (!queued) {
+        // Falling back to the local row here would invent a conflict: the row is
+        // whatever LWW last wrote, so comparing it against the remote produces a
+        // difference that no queued intent actually claims. A corrupt payload
+        // means the detector cannot know what this device meant to send, and the
+        // honest answer is to report that and record nothing.
+        reportError({
+          event: "sync.conflict_detector.failed",
+          syncPhase: "apply",
+          context: { tableName, rowId },
+        });
+        return;
+      }
+      if (!differsOnComparableField(tableName, queued, remoteWire)) return;
+      recordConflict(tx, {
+        shopId: tenantId,
+        tableName,
+        rowId,
+        reason: "pull_local_pending",
+        localValue: queued,
+        remoteValue: remoteWire,
+        localUpdatedAt: asIsoOrNull(queued.updated_at) ?? asIsoOrNull(local.updatedAt),
+        remoteUpdatedAt: asIsoOrNull(remote.updatedAt),
+      });
+      return;
+    }
+
+    // status === "sent". The provable silent-drop case, and ONLY that case:
+    // sync_apply_row's predicate is a strict `<`, so an EQUAL timestamp wrote
+    // nothing while the function still answered 'applied'. A remote row older
+    // than our push proves nothing (it is a pull page fetched before the push
+    // landed), and a newer one is ordinary LWW.
+    const pushed = safeParsePayload(newest.payload);
+    if (!pushed) return;
+    const pushedUpdatedAt = asIsoOrNull(pushed.updated_at);
+    const remoteUpdatedAt = asIsoOrNull(remote.updatedAt);
+    if (!pushedUpdatedAt || !remoteUpdatedAt) return;
+    if (pushedUpdatedAt !== remoteUpdatedAt) return;
+    if (!differsOnComparableField(tableName, pushed, remoteWire)) return;
+
+    recordConflict(tx, {
+      shopId: tenantId,
+      tableName,
+      rowId,
+      reason: "push_superseded",
+      localValue: pushed,
+      remoteValue: remoteWire,
+      localUpdatedAt: pushedUpdatedAt,
+      remoteUpdatedAt,
+    });
+  } catch (error) {
+    // The detector is advisory. Report its failure and let the row apply.
+    reportError({
+      event: "sync.conflict_detector.failed",
+      error,
+      syncPhase: "apply",
+      context: { tableName, rowId },
+    });
+  }
+}
+
+function asIsoOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/** Guarded read of the unvalidated TEXT payload column. */
+function safeParsePayload(value: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function differsOnComparableField(
+  tableName: SyncTableName,
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): boolean {
+  for (const field of comparableFields(tableName, left, right)) {
+    if (!Object.is(normalizeScalar(left[field]), normalizeScalar(right[field]))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * SQLite stores booleans as 0/1 and the wire carries true/false, so a raw
+ * comparison would flag every boolean column as a difference.
+ */
+function normalizeScalar(value: unknown): unknown {
+  if (value === true) return 1;
+  if (value === false) return 0;
+  if (value === undefined) return null;
+  return value;
+}
+
 function applyToTable<T extends SyncTableName>(
   tx: DbTransaction,
   tableName: T,
@@ -703,6 +956,10 @@ function applyToTable<T extends SyncTableName>(
   }
 
   const local = readCompleteRowOrNull(tx, tableName, rowId);
+  // H-6. BEFORE the LWW decision, because both outcomes can lose a write: a
+  // "skipped_stale" discards the remote change, and an "applied" overwrites a
+  // local one. Fail-soft — see tryRecordConflict.
+  tryRecordConflict(tx, tableName, rowId, local, row);
   if (
     local &&
     timestampMs(local.updatedAt, "Local") >=
@@ -724,7 +981,7 @@ function applyToTable<T extends SyncTableName>(
     // stated rather than inherited from a column that happens not to exist.
     upsertRemoteRow(tx, tableName, {
       ...row,
-      accessLockedAt: local ? local.accessLockedAt : null,
+      ...preservedLocalFields(tx, tableName, rowId),
     });
     return "applied";
   }
@@ -742,10 +999,10 @@ function applyToTable<T extends SyncTableName>(
     // local figure (0 for a batch this device has not seen) lets the movements
     // that follow build the correct sum exactly once, and keeps unpushed local
     // deltas from being erased by a server figure that cannot include them yet.
-    const preserved = local
-      ? { stock: local.stock, oversoldAt: local.oversoldAt }
-      : { stock: 0, oversoldAt: null };
-    upsertRemoteRow(tx, tableName, { ...row, ...preserved });
+    upsertRemoteRow(tx, tableName, {
+      ...row,
+      ...preservedLocalFields(tx, tableName, rowId),
+    });
     return "applied";
   }
 
@@ -1341,6 +1598,15 @@ export function purgeUnreadableTables(
   const protectedGraph = protectedOutboxGraph(shopId);
 
   db.transaction((tx) => {
+    // H-6. Conflict notices carry row PAYLOADS, so a conflict about a table the
+    // server has stopped sending is a way to read data this reconciliation is
+    // removing. Dropped for every table the caller may no longer hold — not
+    // only the purgeable ones, since a notice can exist for any LWW table.
+    const unreadable = HYDRATION_TABLE_ORDER.filter(
+      (table) => !readable.has(table),
+    );
+    purgeConflictsForTables(tx, shopId, unreadable);
+
     for (const tableName of ordered) {
       const pendingIds = protectedIdsFor(protectedGraph, tableName);
 

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -31,8 +30,80 @@ import { getDeviceId } from "../../native/deviceId";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useSessionStore } from "../../state/sessionStore";
 import { usePermission } from "../../state/usePermission";
+import { useI18n } from "../../state/localeStore";
+import type { CatalogKey } from "../../i18n/catalog";
+import { errorCatalogKey } from "../../domain/errorMessages";
+import { showToast } from "../../components/ui/Toast";
+
+/**
+ * The payment type as the owner reads it, not as the column stores it.
+ *
+ * `sales.payment_type` is an enum slug (`cash`/`credit`/`split`/`free`) and a
+ * held draft has none at all. Rendering the slug raw was D9's defect: a
+ * Bangla-first screen showing "credit" is the same bug as showing "Credit".
+ */
+const PAYMENT_TYPE_KEYS: Record<string, CatalogKey> = {
+  cash: "paymentTypeCash",
+  credit: "paymentTypeCredit",
+  split: "paymentTypeSplit",
+  free: "paymentTypeFree",
+};
+
+/**
+ * db/refunds.ts answers ineligibility with English prose, not a code.
+ *
+ * Changing that contract touches refund logic, which CLAUDE.md rule 10 puts
+ * behind an approved plan, so the mapping lives here instead. It is pinned by
+ * tests/localization-and-ui-consistency.test.ts, which reads
+ * getRefundEligibility's own literals and fails if one is not mapped — so a new
+ * reason cannot silently appear in English.
+ */
+/**
+ * The sale status as a word, not a column value.
+ *
+ * `sales.status` is an enum slug. Rendering it raw put "completed" and
+ * "refunded" on a Bangla screen — the same defect as a hardcoded English
+ * string, and one a literal-scanning test cannot see, so the test instead
+ * checks this map against the SaleHistoryStatus union itself.
+ */
+/**
+ * `medicines.unit_of_measure` is free text the shopkeeper types, so it is NOT
+ * translated — their own words are already in their language. Only the value
+ * the SCHEMA supplies by default is ours to translate, and a shop that never
+ * edits it would otherwise read "piece" on a Bangla screen forever.
+ */
+const SYSTEM_UNIT_KEYS: Record<string, CatalogKey> = {
+  piece: "unitPiece",
+};
+
+const STATUS_KEYS: Record<string, CatalogKey> = {
+  completed: "statusCompleted",
+  refunded: "statusRefunded",
+  held: "statusHeld",
+  cancelled: "statusCancelled",
+};
+
+const REFUND_REASON_KEYS: Record<string, CatalogKey> = {
+  "Sale not found": "refundReasonSaleNotFound",
+  "Sale already refunded": "refundReasonAlreadyRefunded",
+  "Refund window has expired": "refundReasonWindowExpired",
+  "Customer credit history requires reconciliation":
+    "refundReasonCreditReconcile",
+};
 
 export default function SalesHistoryScreen() {
+  const { t } = useI18n();
+  const paymentLabel = (type: string | null | undefined): string =>
+    t((type ? PAYMENT_TYPE_KEYS[type] : undefined) ?? "paymentTypeDraft");
+  const unitLabel = (unit: string | null | undefined): string => {
+    if (!unit) return "";
+    const key = SYSTEM_UNIT_KEYS[unit];
+    return key ? t(key) : unit;
+  };
+  const statusLabel = (value: string | null | undefined): string =>
+    t((value ? STATUS_KEYS[value] : undefined) ?? "statusAll");
+  const refundReasonLabel = (reason: string | null | undefined): string =>
+    reason ? t(REFUND_REASON_KEYS[reason] ?? "notRefundable") : t("notRefundable");
   const session = useSessionStore((state) => state.session);
   const { isAllowed: canRefund } = usePermission("sale_return");
   const [rows, setRows] = useState<SaleHistoryRow[]>([]);
@@ -63,10 +134,10 @@ export default function SalesHistoryScreen() {
       setError(null);
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : "Could not load sales.",
+        t(errorCatalogKey(caught) ?? "couldNotLoadSales"),
       );
     }
-  }, [fromDate, query, session, status, toDate]);
+  }, [fromDate, query, session, status, toDate, t]);
   useEffect(() => {
     const timer = setTimeout(() => void reload(), 0);
     return () => clearTimeout(timer);
@@ -88,7 +159,7 @@ export default function SalesHistoryScreen() {
       setRefundMessage(null);
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : "Could not load sale.",
+        t(errorCatalogKey(caught) ?? "couldNotLoadSale"),
       );
     }
   };
@@ -109,7 +180,7 @@ export default function SalesHistoryScreen() {
     if (!canRefund || !detail || !eligibility?.eligible || refunding) return;
     const reason = refundReason.trim();
     if (!reason) {
-      setRefundMessage("Refund reason is required.");
+      setRefundMessage(t("refundReasonRequired"));
       return;
     }
     const guard = captureSessionFor(session);
@@ -119,7 +190,7 @@ export default function SalesHistoryScreen() {
     try {
       const connected = await hasNetworkConnection();
       setOnline(connected);
-      if (!connected) throw new Error("Internet required for refund");
+      if (!connected) throw new Error(t("refundNeedsInternet"));
       const deviceId = getDeviceId();
       const claim = await claimRefundAuthority({
         shopId: session.shopId,
@@ -140,14 +211,20 @@ export default function SalesHistoryScreen() {
       triggerSyncNow(session.shopId);
       setDetail(null);
       await reload();
-      Alert.alert(
-        "Refund committed",
-        "The full-sale refund is recorded. Complete any physical payout now.",
-      );
+      // W3-10. A success confirmation is exactly what the shared Toast is for:
+      // it does not block the till on an OK tap after a refund that already
+      // committed. The failure Alert below keeps its dialog deliberately —
+      // Toast.tsx's own contract says a toast is never how a failure is
+      // reported, because it disappears before it can be acted on.
+      showToast({
+        variant: "card",
+        label: t("refundCommittedTitle"),
+        message: t("refundCommittedBody"),
+      });
     } catch (caught) {
       if (!guard.isStale())
         setRefundMessage(
-          caught instanceof Error ? caught.message : "Refund failed.",
+          t(errorCatalogKey(caught) ?? "refundFailed"),
         );
     } finally {
       setRefunding(false);
@@ -155,25 +232,25 @@ export default function SalesHistoryScreen() {
   };
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title="Sales history" onBackPress={() => router.back()} />
+      <StandardHeader title={t("salesHistoryTitle")} onBackPress={() => router.back()} />
       <View className="gap-3 p-4 pb-0">
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder="Invoice, customer, or seller"
+          placeholder={t("salesHistorySearchPlaceholder")}
           className="rounded-lg border border-midGray bg-white p-3"
         />
         <View className="flex-row gap-2">
           <TextInput
             value={fromDate}
             onChangeText={setFromDate}
-            placeholder="From YYYY-MM-DD"
+            placeholder={t("dateFromPlaceholder")}
             className="flex-1 rounded border border-midGray bg-white p-3"
           />
           <TextInput
             value={toDate}
             onChangeText={setToDate}
-            placeholder="To YYYY-MM-DD"
+            placeholder={t("dateToPlaceholder")}
             className="flex-1 rounded border border-midGray bg-white p-3"
           />
         </View>
@@ -188,7 +265,7 @@ export default function SalesHistoryScreen() {
                 className={`rounded-full px-4 py-2 ${status === value ? "bg-brand-green" : "bg-white"}`}
               >
                 <Text className={status === value ? "text-white" : ""}>
-                  {value ?? "all"}
+                  {statusLabel(value)}
                 </Text>
               </Pressable>
             ))}
@@ -205,8 +282,8 @@ export default function SalesHistoryScreen() {
         onEndReached={() => void loadMore()}
         ListEmptyComponent={
           <EmptyState
-            title="No sales found"
-            message="Completed and draft sale events appear here."
+            title={t("noSalesFound")}
+            message={t("salesHistoryEmptyBody")}
           />
         }
         renderItem={({ item }) => (
@@ -226,7 +303,7 @@ export default function SalesHistoryScreen() {
             </View>
             <Text className="text-xs text-midGray">
               {item.businessDate} · {item.sellerName} ·{" "}
-              {item.paymentType ?? "draft"}
+              {paymentLabel(item.paymentType)}
             </Text>
             <Text
               className={
@@ -235,7 +312,7 @@ export default function SalesHistoryScreen() {
                   : "text-midGray"
               }
             >
-              {item.status}
+              {statusLabel(item.status)}
             </Text>
           </Pressable>
         )}
@@ -247,7 +324,7 @@ export default function SalesHistoryScreen() {
       >
         <View className="flex-1 bg-brand-softGreen">
           <StandardHeader
-            title={detail?.invoiceNo ?? "Sale"}
+            title={detail?.invoiceNo ?? t("saleFallbackTitle")}
             onBackPress={() => setDetail(null)}
           />
           {detail ? (
@@ -256,7 +333,7 @@ export default function SalesHistoryScreen() {
                 <Text>
                   {detail.businessDate} · {detail.sellerName}
                 </Text>
-                <Text>{detail.customerName ?? "Walk-in customer"}</Text>
+                <Text>{detail.customerName ?? t("walkInCustomer")}</Text>
                 <Text className="mt-2 font-mono text-xl">
                   {formatMoney(detail.total)}
                 </Text>
@@ -268,7 +345,8 @@ export default function SalesHistoryScreen() {
                     <Text>{formatMoney(item.lineTotal)}</Text>
                   </View>
                   <Text className="text-xs text-midGray">
-                    Batch {item.batchNo} · {item.quantity} {item.unit}
+                    {t("batchLabel")} {item.batchNo} · {item.quantity}{' '}
+                    {unitLabel(item.unit)}
                   </Text>
                 </View>
               ))}
@@ -276,7 +354,7 @@ export default function SalesHistoryScreen() {
               detail.patientName ||
               detail.prescriberName ? (
                 <View className="rounded-lg bg-white p-4">
-                  <Text className="font-sans-semibold">Prescription</Text>
+                  <Text className="font-sans-semibold">{t("prescriptionLabel")}</Text>
                   <Text>
                     {detail.prescriptionNo ?? "—"} · {detail.patientName ?? "—"}{" "}
                     · {detail.prescriberName ?? "—"}
@@ -289,8 +367,8 @@ export default function SalesHistoryScreen() {
                     <TextInput
                       value={refundReason}
                       onChangeText={setRefundReason}
-                      placeholder="Refund reason (required)"
-                      accessibilityLabel="Refund reason"
+                      placeholder={t("refundReasonPlaceholder")}
+                      accessibilityLabel={t("refundReasonLabel")}
                       multiline
                       className="rounded-lg border border-midGray bg-white p-3"
                     />
@@ -298,25 +376,24 @@ export default function SalesHistoryScreen() {
                   <Pressable
                     onPress={() => void refund()}
                     disabled={!online || !eligibility?.eligible || refunding}
-                    accessibilityLabel="Full refund"
+                    accessibilityLabel={t("fullRefundLabel")}
                     className="items-center rounded-lg bg-error py-4 disabled:opacity-40"
                   >
                     <Text className="text-white">
-                      {refunding ? "Claiming authority…" : "Full refund"}
+                      {refunding ? t("refundClaimingAuthority") : t("fullRefundLabel")}
                     </Text>
                   </Pressable>
                   {!online ? (
                     <Text className="text-center text-error">
-                      Internet required for refund
+                      {t("refundNeedsInternet")}
                     </Text>
                   ) : !eligibility?.eligible ? (
                     <Text className="text-center text-error">
-                      {eligibility?.reason ?? "Not refundable."}
+                      {refundReasonLabel(eligibility?.reason)}
                     </Text>
                   ) : (
                     <Text className="text-center text-xs text-midGray">
-                      Server authority is claimed before the local refund
-                      commits.
+                      {t("refundServerAuthorityNote")}
                     </Text>
                   )}
                   {refundMessage ? (

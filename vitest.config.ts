@@ -113,6 +113,10 @@ export default defineConfig({
       // scratch Git revision and a fake Management API; it never runs live.
       "apps/mobile/tests/h9-prod-preflight.test.ts",
       "apps/mobile/domain/**/*.test.ts",
+      // W3-04 (H-8 core). The sink's bounded/offline behaviour, plus static
+      // assertions that nothing in monitoring/ reaches the network or imports
+      // dev/runtimeDiagnostics, which deliberately retains raw context.
+      "apps/mobile/monitoring/*.test.ts",
       "apps/mobile/native/*.test.ts",
       "apps/mobile/services/*.test.ts",
       "apps/mobile/i18n/**/*.test.ts",
@@ -236,6 +240,17 @@ export default defineConfig({
       // switch/cold restart, and shop-scoped PIN uniqueness.
       "apps/mobile/db/multi-shop-restart-pin.sqlite.test.ts",
       "apps/mobile/db/sync-helpers.sqlite.test.ts",
+      // H-6 (W3-01/W3-02). Detection through the real apply path, then the
+      // resolver: force-apply past the LWW gate, outbox supersession with a
+      // byte-exact audit trail, and the grouped-operation refusal.
+      "apps/mobile/db/push-replay.sqlite.test.ts",
+      "apps/mobile/db/h6-conflict-queue.sqlite.test.ts",
+      "apps/mobile/db/h6-conflict-resolution.sqlite.test.ts",
+      // W3-11. The workflows run IN SEQUENCE against shared state, with the
+      // ledger invariant and the accounting identity re-asserted after EVERY
+      // step — a composition defect hides behind a total that balances only at
+      // the end. Includes the offline outbox-group completeness check.
+      "apps/mobile/db/core-workflow-regression.sqlite.test.ts",
       "apps/mobile/db/user-switch.sqlite.test.ts",
       // Every actor-attributed db/ mutation, table-driven: stale is refused,
       // a missing liveness callback fails closed, live still commits — and
@@ -293,6 +308,21 @@ export default defineConfig({
       // broken — a wrong font renders perfectly. Read as source, the way the
       // DEV-safety suite above reads its own invariant.
       "apps/mobile/tests/font-tokens.test.ts",
+      // H-6. The field classification derived from FOUR sources (upsertRemoteRow,
+      // toSyncPayload, the migration SQL's pin vs conditional-fallback forms, and
+      // push.ts's non-SQL profile write). Over-excluding a field blinds the
+      // conflict detector silently, which is why this is a test and not a comment.
+      "apps/mobile/tests/server-owned-fields.test.ts",
+      // W3-02. The conflict screen's five UI states — empty, offline, failed
+      // resolution, read-only, and a grouped row whose keep_remote button must be
+      // ABSENT rather than disabled — in both locales.
+      "apps/mobile/tests/sync-conflicts.test.tsx",
+      // W3-08/W3-09/W3-10 ratchets, read as source: no user-visible English
+      // literal in the six fixed screens, both locales present for every key
+      // they use, the three hand-rolled headers reading the safe-area inset,
+      // no raw hex in the screens this batch authored, and D10's focus reload
+      // with its stale-result guard.
+      "apps/mobile/tests/localization-and-ui-consistency.test.ts",
       // H-11 C1. The rollback classification is generated from the SQL by
       // scripts/classify-migrations.mjs; this fails if ROLLBACK.md drifts
       // from it, which is how the first audit went wrong by seven rows.
@@ -437,6 +467,15 @@ export default defineConfig({
       "backend/supabase/functions/sync/expenses.test.ts",
       "backend/supabase/functions/sync/purchases.test.ts",
       "backend/supabase/functions/sync/sslcommerz.test.ts",
+      // W3-06. The callback PIPELINE, now that handler.ts is split out of the
+      // Deno.serve wiring: signature gate, body cap, per-IP rate limit, terminal
+      // cancel/fail, and the idempotent keyed apply. Synthetic doubles only —
+      // no merchant credential and no live endpoint.
+      "backend/supabase/functions/payment-webhook/webhook.test.ts",
+      // W3-06. Initiation and terminal reconciliation: who may start a payment,
+      // what makes a retry idempotent rather than a double charge, and that a
+      // provider failure cannot leave an order the device polls forever.
+      "backend/supabase/functions/sync/payment-integration.test.ts",
       "backend/supabase/functions/sync/multiShop.test.ts",
       // billing-status self-heal: MU032 is the only failure that may answer
       // 404; every other RPC/database error stays a 500.
