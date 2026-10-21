@@ -27,6 +27,8 @@ import { captureSessionFor } from "../../state/sessionGuard";
 import { usePermission } from "../../state/usePermission";
 import { triggerSyncNow } from "../../sync";
 import { useI18n } from "../../state/localeStore";
+import { ownKey, userFacingError } from "../../i18n/display";
+import type { CatalogKey } from "../../i18n/catalog";
 
 // Expiry Management — Volume 0 Day 9. Every non-deleted batch for this shop,
 // nearest REAL expiry date first (CLAUDE.md rule 3 — recomputed at read
@@ -35,12 +37,27 @@ import { useI18n } from "../../state/localeStore";
 // db/inventory.ts only.
 //
 // Near/Far bands use the shop's B2 settings (30/60-day defaults).
-const STATUS_LABEL: Record<ExpiryStatus, string> = {
-  expired: "Expired",
-  critical: "Critical",
-  warning: "Soon",
-  ok: "OK",
-  unknown: "No expiry",
+// The band NAMES are ours, so they are translated. Keyed off ExpiryStatus so
+// the test can prove every band the domain can produce has a label.
+// The FILTER chips use ExpiryBand ('expired' | 'near' | 'far' | 'later' |
+// 'unknown'), which is a DIFFERENT union from the ExpiryStatus bands below.
+// Both are ours, so both are translated, and both are checked against their own
+// union by tests/localization-and-ui-consistency.test.ts.
+const BAND_LABEL_KEYS: Record<string, CatalogKey> = {
+  all: 'statusAll',
+  expired: 'expiredLabel',
+  near: 'expiryBandNear',
+  far: 'expiryBandFar',
+  later: 'expiryBandLater',
+  unknown: 'noExpiryLabel',
+};
+
+const STATUS_LABEL_KEYS: Record<ExpiryStatus, CatalogKey> = {
+  expired: "expiredLabel",
+  critical: "expiryStatusCritical",
+  warning: "expiryStatusSoon",
+  ok: "expiryStatusOk",
+  unknown: "noExpiryLabel",
 };
 
 // Reuses the existing error/warning/success tokens (@muthoy/constants) —
@@ -96,7 +113,7 @@ export default function ExpiryManagementScreen() {
 
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title="Expiry" onBackPress={() => router.back()} />
+      <StandardHeader title={t("expiry")} onBackPress={() => router.back()} />
       <View className="flex-row flex-wrap gap-2 px-4 pt-4">
         {(["all", "expired", "near", "far", "later", "unknown"] as const).map(
           (value) => (
@@ -106,7 +123,7 @@ export default function ExpiryManagementScreen() {
               className={`rounded-full px-3 py-2 ${filter === value ? "bg-brand-green" : "bg-white"}`}
             >
               <Text className={filter === value ? "text-white" : ""}>
-                {value}
+                {t(ownKey(BAND_LABEL_KEYS, value) ?? 'statusAll')}
               </Text>
             </Pressable>
           ),
@@ -148,13 +165,15 @@ export default function ExpiryManagementScreen() {
               } catch (caught) {
                 Alert.alert(
                   t("bulkPromotionFailedTitle"),
-                  caught instanceof Error ? caught.message : t("pleaseTryAgain"),
+                  userFacingError(caught, "pleaseTryAgain", t),
                 );
               }
             }}
             className="justify-center rounded bg-brand-green px-4"
           >
-            <Text className="text-white">Apply to {filter}</Text>
+            <Text className="text-white">
+              {t('applyToLabel')} {t(ownKey(BAND_LABEL_KEYS, filter) ?? 'statusAll')}
+            </Text>
           </Pressable>
         </View>
       ) : null}
@@ -175,8 +194,8 @@ export default function ExpiryManagementScreen() {
         refreshing={false}
         ListEmptyComponent={
           <EmptyState
-            title="No batches yet"
-            message="Batches you add to medicines will show up here, nearest expiry first."
+            title={t("noBatchesYet")}
+            message={t("noBatchesYetBody")}
           />
         }
         renderItem={({ item }) => (
@@ -200,7 +219,7 @@ export default function ExpiryManagementScreen() {
       >
         <View className="flex-1 justify-end bg-black/40">
           <View className="gap-3 rounded-t-2xl bg-white p-5">
-            <Text className="font-sans-bold">Batch promotion</Text>
+            <Text className="font-sans-bold">{t("batchPromotionTitle")}</Text>
             <Text>
               {selected?.medicineName} · {selected?.batchNo}
             </Text>
@@ -231,13 +250,13 @@ export default function ExpiryManagementScreen() {
                 } catch (caught) {
                   Alert.alert(
                     t("promoteBatchFailedTitle"),
-                    caught instanceof Error ? caught.message : t("pleaseTryAgain"),
+                    userFacingError(caught, "pleaseTryAgain", t),
                   );
                 }
               }}
               className="items-center rounded bg-brand-green py-3"
             >
-              <Text className="text-white">Set promotion</Text>
+              <Text className="text-white">{t("setPromotionLabel")}</Text>
             </Pressable>
             <Pressable
               onPress={async () => {
@@ -257,19 +276,19 @@ export default function ExpiryManagementScreen() {
                 } catch (caught) {
                   Alert.alert(
                     t("reversePromotionFailedTitle"),
-                    caught instanceof Error ? caught.message : t("pleaseTryAgain"),
+                    userFacingError(caught, "pleaseTryAgain", t),
                   );
                 }
               }}
               className="items-center rounded border border-error py-3"
             >
-              <Text className="text-error">Reverse active promotion</Text>
+              <Text className="text-error">{t("reversePromotionLabel")}</Text>
             </Pressable>
             <Pressable
               onPress={() => setSelected(null)}
               className="items-center p-2"
             >
-              <Text>Cancel</Text>
+              <Text>{t("cancel")}</Text>
             </Pressable>
           </View>
         </View>
@@ -279,6 +298,7 @@ export default function ExpiryManagementScreen() {
 }
 
 function ExpiryRow({ row }: { row: ExpiryListRow }) {
+  const { t } = useI18n();
   return (
     <View className="gap-1 rounded-lg bg-white p-4">
       <View className="flex-row items-start justify-between gap-2">
@@ -287,7 +307,7 @@ function ExpiryRow({ row }: { row: ExpiryListRow }) {
             {row.medicineName}
           </Text>
           <Text className="font-sans text-xs text-midGray">
-            Batch {row.batchNo}
+            {t('batchLabel')} {row.batchNo}
           </Text>
         </View>
         <View
@@ -296,16 +316,16 @@ function ExpiryRow({ row }: { row: ExpiryListRow }) {
           <Text
             className={`font-sans-semibold text-xs ${STATUS_TEXT_CLASSES[row.status]}`}
           >
-            {STATUS_LABEL[row.status]}
+            {t(ownKey(STATUS_LABEL_KEYS, row.status) ?? 'noExpiryLabel')}
           </Text>
         </View>
       </View>
       <View className="flex-row items-center justify-between">
         <Text className="font-sans text-xs text-midGray">
-          {row.expiryDate ?? "No expiry date recorded"}
+          {row.expiryDate ?? t("noExpiryRecorded")}
         </Text>
         <Text className="font-sans text-sm text-richBlack">
-          {formatNumber(row.quantityAvailable)} left
+          {formatNumber(row.quantityAvailable)} {t('leftSuffix')}
         </Text>
       </View>
     </View>

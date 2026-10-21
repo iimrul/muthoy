@@ -29,9 +29,9 @@ these as DONE would be precisely the failure clause 2 exists to prevent.
 
 | Run | Result |
 |---|---|
-| Full suite, `pnpm test --maxWorkers=2 --minWorkers=1` | **243 files, 5032 tests, 0 failures, exit 0** (1393 s, 2026-10-21, post-remediation) |
+| Full suite, `pnpm test --maxWorkers=2 --minWorkers=1` | **243 files, 5062 tests, 0 failures, exit 0** (2026-10-21, post-closure) |
 | Pre-change baseline, same command | 232 files, 4859 tests, exit 0 |
-| Net new | **+11 files, +173 tests** |
+| Net new | **+11 files, +203 tests** vs the pre-Batch-1 baseline |
 | `tsc --noEmit` (apps/mobile) | clean |
 | `eslint` on every new and changed module | clean |
 
@@ -399,26 +399,55 @@ which a constant key swallows a second real payment and the shop pays twice for
 one credit. It also asserts the handler sends **no** amount, so a tampered
 callback cannot raise the credit.
 
-### Finding 8 — the localization gap that remains
+### Finding 8 — the localization gap, and its closure
 
-The static ratchet (`tests/localization-and-ui-consistency.test.ts`) found
-hardcoded strings I had missed, which were fixed. It then kept finding more, and
-that is worth stating plainly rather than burying:
+The static ratchet found hardcoded strings I had missed, which were fixed; it
+then kept finding more, which was worth stating plainly rather than burying.
+Through Batch 1 the position was:
 
-- **Fully localized and asserted as such:** `sale/confirmation.tsx` (D8),
-  `reports/sales-history.tsx` (D9), and the new `sync-conflicts.tsx`.
-- **Partially localized:** `inventory/batches.tsx`, `inventory/expiry.tsx` and
-  `sale/held.tsx`. W3-08's scope was *"D8/D9 and other **verified** hardcoded-
-  English UI defects"* — in these three that meant their error dialogs and
-  empty-state copy, which are now catalog-driven. Running the ratchet revealed
-  their **wider surface** (field labels, section titles, some placeholders) was
-  never localized either. That is a real gap, and a larger pass than this batch
-  was asked to make.
+- **Fully localized:** `sale/confirmation.tsx` (D8), `reports/sales-history.tsx`
+  (D9), `sync-conflicts.tsx`.
+- **Partially localized:** `inventory/batches.tsx`, `inventory/expiry.tsx`,
+  `sale/held.tsx` — their verified error-dialog and empty-state defects fixed,
+  their field labels and section titles still English.
 
-These three are held to the strings Batch 1 did fix — those literals cannot come
-back — and the remainder is **owed work, not done work**. A Bangla-first POS
-still showing English field labels on three screens is a genuine defect; it is
-recorded here so the decision to defer it is visible rather than implied.
+**Closed 2026-10-21.** All three are now fully localized and promoted into the
+single `FULLY_LOCALIZED_SCREENS` tier, so no screen is held to a weaker
+standard. What the closing pass added:
+
+- field labels, section titles, placeholders, button and accessibility labels;
+- the **expiry band names** (`expired`/`critical`/`warning`/`ok`/`unknown`),
+  which rendered from a dynamic expression and so were invisible to any literal
+  scan — now keyed and checked for completeness against the `ExpiryStatus`
+  union, which is composite, so the test resolves both unions;
+- the `in stock` and `d left` suffixes, which sat **between two expressions**
+  and could not be seen by the tag-text or prop passes — the detector now has
+  a pass for that shape;
+- the **batch-form field errors** (`DuplicateBatchError`,
+  `BatchExpiryMismatchError`), which reached the user through
+  react-hook-form's `setError({ message })` rather than a dialog.
+
+The detector also stopped reporting `className` template literals, which were
+two false positives — noise in a ratchet's output teaches the next reader to
+ignore it.
+
+The detector is now exercised directly rather than taken on trust: **17 planted
+shapes** must each be reported (prop literals in both quote styles, tag text,
+`??`/`||` fallbacks, both ternary branches, state-setter arguments, expression
+props, template literals, prose before/between/after an interpolation including
+across newlines, and a label that happens to be a JS keyword) and **5 planted
+non-shapes** must not be (a catalog key, an enum comparison, a `className`
+string, `} catch (`, `} else {`).
+
+That matters because two earlier versions of this file were wrong in ways no
+review caught: three regexes carried a literal `0x08` byte where `\b` was
+intended, and the between-expressions pass excluded the very separator in the
+example it cited — so it could not match `{qty} in stock · {expiry}`. A
+mutation test I described as verifying that pass had in fact exercised an older
+one. The exact-literal backstop is therefore **kept**, not retired: regex over
+source under-matches by nature, and an AST-based check is the real answer when
+this needs to scale.
+
 
 ---
 

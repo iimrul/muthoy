@@ -17,9 +17,23 @@ import { captureSessionFor } from "../../state/sessionGuard";
 import { useSessionStore } from "../../state/sessionStore";
 import { triggerSyncNow } from "../../sync";
 import { useI18n } from "../../state/localeStore";
+import { ownKey, userFacingError } from "../../i18n/display";
+import type { CatalogKey } from "../../i18n/catalog";
+
+/**
+ * A held cart's status is our vocabulary, so it is translated. The timestamp
+ * goes through formatDateTime: `toLocaleString()` follows the DEVICE locale,
+ * so a phone set to English rendered an English date on a Bangla screen.
+ */
+const DRAFT_STATUS_KEYS: Record<string, CatalogKey> = {
+  draft: 'statusDraft',
+  held: 'statusHeld',
+  cancelled: 'statusCancelled',
+  completed: 'statusCompleted',
+};
 
 export default function HeldSalesScreen() {
-  const { t } = useI18n();
+  const { t, formatNumber, formatDateTime } = useI18n();
   const session = useSessionStore((state) => state.session);
   const clear = useCartStore((state) => state.clear);
   const addItem = useCartStore((state) => state.addItem);
@@ -75,7 +89,7 @@ export default function HeldSalesScreen() {
     } catch (caught) {
       Alert.alert(
         t("resumeSaleFailedTitle"),
-        caught instanceof Error ? caught.message : t("pleaseTryAgain"),
+        userFacingError(caught, "pleaseTryAgain", t),
       );
     }
   };
@@ -96,7 +110,7 @@ export default function HeldSalesScreen() {
       if (!guard.isStale())
         Alert.alert(
           t("cancelSaleFailedTitle"),
-          caught instanceof Error ? caught.message : t("pleaseTryAgain"),
+          userFacingError(caught, "pleaseTryAgain", t),
         );
     }
   };
@@ -112,16 +126,17 @@ export default function HeldSalesScreen() {
         ListEmptyComponent={
           <EmptyState
             title={t("noHeldSales")}
-            message="Held carts appear here. Stock is checked only when resumed and checked out."
+            message={t("heldSalesEmptyBody")}
           />
         }
         renderItem={({ item }) => (
           <View className="gap-3 rounded-lg bg-white p-4">
             <Text className="font-sans-semibold">
-              {item.itemCount} items · {item.actorName}
+              {formatNumber(item.itemCount)} {t('itemsSuffix')} · {item.actorName}
             </Text>
             <Text className="text-xs text-midGray">
-              {new Date(item.updatedAt).toLocaleString()} · {item.status}
+              {formatDateTime(item.updatedAt)} ·{' '}
+              {t(ownKey(DRAFT_STATUS_KEYS, item.status) ?? 'statusDraft')}
             </Text>
             {item.canMutate ? (
               <View className="flex-row gap-2">
@@ -129,18 +144,18 @@ export default function HeldSalesScreen() {
                   onPress={() => void cancel(item.id)}
                   className="flex-1 items-center rounded border border-error py-2"
                 >
-                  <Text className="text-error">Cancel</Text>
+                  <Text className="text-error">{t("cancel")}</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => void resume(item.id)}
                   className="flex-1 items-center rounded bg-brand-green py-2"
                 >
-                  <Text className="text-white">Resume</Text>
+                  <Text className="text-white">{t("resumeLabel")}</Text>
                 </Pressable>
               </View>
             ) : (
               <Text className="text-xs text-midGray">
-                Read-only: use the origin device to resume or cancel.
+                {t("heldReadOnlyNote")}
               </Text>
             )}
           </View>

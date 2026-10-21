@@ -309,8 +309,14 @@ export default function PurchaseCreateScreen() {
     setSelectedMedicine(failedLine.medicine);
     setMedicineQuery(failedLine.medicine.name);
     reset(failedLine.fields);
+    // The error NAME, not translated text. FormField runs every field error
+    // through localizeValidationMessage, so handing it an already-translated
+    // sentence meant the lookup missed and the buyer saw the generic "invalid
+    // value" instead of which batch number or expiry date actually clashed.
+    // userFacingError stays correct for the banner above, which renders text
+    // directly; only the RHF path needs the code.
     setError(caught instanceof BatchExpiryMismatchError ? 'expiryDate' : 'batchNo', {
-      message: userFacingError(caught, 'purchaseSaveFailedLabel', t),
+      message: caught instanceof Error ? caught.name : 'purchaseSaveFailedLabel',
     });
     setStep('review');
   }, [lines, reset, setError, t]);

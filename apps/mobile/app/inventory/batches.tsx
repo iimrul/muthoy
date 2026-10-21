@@ -108,7 +108,12 @@ export default function BatchDetailScreen() {
           return;
         }
         if (err instanceof DuplicateBatchError) {
-          setError("batchNo", { message: err.message });
+          // The error NAME, not a translated sentence. FormField runs every
+          // field error through localizeValidationMessage, so handing it
+          // already-translated text meant the lookup missed and the owner saw
+          // the generic "invalid value" instead of what actually went wrong.
+          // One translation, in one place, keyed on something stable.
+          setError("batchNo", { message: err.name });
           return;
         }
         Alert.alert(t("somethingWentWrong"), t("pleaseTryAgain"));
@@ -126,7 +131,7 @@ export default function BatchDetailScreen() {
   return (
     <View className="flex-1 bg-brand-softGreen">
       <StandardHeader
-        title={medicine?.name ?? "Batches"}
+        title={medicine?.name ?? t("batchesCountLabel")}
         onBackPress={() => router.back()}
       />
       <ScrollView
@@ -143,7 +148,7 @@ export default function BatchDetailScreen() {
             }
             className="items-center rounded-lg border border-brand-green bg-white py-3"
           >
-            <Text className="text-brand-green">Edit medicine</Text>
+            <Text className="text-brand-green">{t("editMedicineLabel")}</Text>
           </Pressable>
         ) : null}
         {batches.map((batch) => (
@@ -165,36 +170,36 @@ export default function BatchDetailScreen() {
         {!canWriteInventory ? null : isAdding ? (
           <View className="gap-4 rounded-lg bg-white p-4">
             <Text className="font-sans-bold text-base text-richBlack">
-              Add batch
+              {t("addBatchLabel")}
             </Text>
             <FormField
               control={control}
               name="batchNo"
-              label="Batch number"
+              label={t("batchNumberLabel")}
               placeholder={t("batchNoPlaceholder")}
             />
             <FormField
               control={control}
               name="expiryDate"
-              label="Expiry date"
+              label={t("expiryDateLabel")}
               placeholder={t("expiryDatePlaceholder")}
             />
             <FormField
               control={control}
               name="quantity"
-              label="Quantity"
+              label={t("quantity")}
               numeric
             />
             <FormField
               control={control}
               name="purchasePrice"
-              label="Purchase price (৳)"
+              label={t("purchasePriceLabel")}
               numeric
             />
             <FormField
               control={control}
               name="salePrice"
-              label="Sale price (৳)"
+              label={t("salePriceLabel")}
               numeric
             />
             <View className="flex-row gap-4">
@@ -204,22 +209,22 @@ export default function BatchDetailScreen() {
                   setIsAdding(false);
                 }}
                 accessibilityRole="button"
-                accessibilityLabel="Cancel"
+                accessibilityLabel={t("cancel")}
                 className="flex-1 items-center rounded-lg border border-midGray py-3"
               >
                 <Text className="font-sans-medium text-base text-richBlack">
-                  Cancel
+                  {t("cancel")}
                 </Text>
               </Pressable>
               <Pressable
                 onPress={handleSubmit(onSubmit)}
                 disabled={isSubmitting}
                 accessibilityRole="button"
-                accessibilityLabel="Save batch"
+                accessibilityLabel={t("saveBatchLabel")}
                 className="flex-1 items-center rounded-lg bg-brand-green py-3"
               >
                 <Text className="font-sans-semibold text-base text-white">
-                  {isSubmitting ? "Saving…" : "Save batch"}
+                  {isSubmitting ? t("savingLabel") : t("saveBatchLabel")}
                 </Text>
               </Pressable>
             </View>
@@ -228,11 +233,11 @@ export default function BatchDetailScreen() {
           <Pressable
             onPress={() => setIsAdding(true)}
             accessibilityRole="button"
-            accessibilityLabel="Add batch"
+            accessibilityLabel={t("addBatchLabel")}
             className="items-center rounded-lg bg-brand-green py-3.5 active:opacity-80"
           >
             <Text className="font-sans-semibold text-base text-white">
-              Add batch
+              {t("addBatchLabel")}
             </Text>
           </Pressable>
         )}
@@ -248,13 +253,14 @@ function BatchRow({
   batch: BatchDetailRow;
   onEdit?: () => void;
 }) {
+  const { t } = useI18n();
   const days = daysUntilExpiry(batch.expiryDate, new Date());
   const expiryLabel =
     days === null
-      ? "No expiry"
+      ? t("noExpiryLabel")
       : days < 0
-        ? "Expired"
-        : `${formatNumber(days)}d left`;
+        ? t("expiredLabel")
+        : `${formatNumber(days)} ${t("daysLeftSuffix")}`;
 
   return (
     <Pressable
@@ -267,13 +273,13 @@ function BatchRow({
           {batch.batchNo}
         </Text>
         <Text className="font-sans text-xs text-midGray">
-          {formatNumber(batch.quantityAvailable)} in stock · {expiryLabel}
+          {formatNumber(batch.quantityAvailable)} {t("inStockSuffix")} · {expiryLabel}
         </Text>
       </View>
       <Text className="font-mono text-base text-brand-green">
         {formatMoney(batch.salePrice)}
       </Text>
-      {onEdit ? <Text className="ml-3 text-brand-green">Edit</Text> : null}
+      {onEdit ? <Text className="ml-3 text-brand-green">{t("editLabel")}</Text> : null}
     </Pressable>
   );
 }

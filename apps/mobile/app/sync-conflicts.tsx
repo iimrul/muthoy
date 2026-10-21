@@ -13,10 +13,10 @@ import {
 } from '../db/conflicts';
 import { hasNetworkConnection } from '../sync/connectivity';
 import { useI18n } from '../state/localeStore';
+import { ownKey, userFacingError } from "../i18n/display";
 import { useSessionStore } from '../state/sessionStore';
 import { colors } from '@muthoy/constants';
 import { catalog, type CatalogKey } from '../i18n/catalog';
-import { errorCatalogKey } from '../domain/errorMessages';
 
 // H-6 / W3-02 — the Owner-facing surface for a true sync conflict.
 //
@@ -98,7 +98,7 @@ function previewOf(
       const raw = String(payload[field]);
       // A payload value can be one of OUR slugs. Printing it raw is how
       // "utilities" reached a Bangla-first card.
-      const key = field === 'category' ? CATEGORY_KEYS[raw] : undefined;
+      const key = field === 'category' ? ownKey(CATEGORY_KEYS, raw) : undefined;
       return key ? t(key) : raw;
     });
   // A truncated id beats an empty card: it at least says WHICH row.
@@ -201,7 +201,7 @@ export default function SyncConflictsScreen() {
       // an error surfacing on a screen the user has since returned to would
       // describe a row they can no longer see in that state.
       if (isActive()) {
-        setError(t(errorCatalogKey(caught) ?? 'syncConflictResolveFailed'));
+        setError(userFacingError(caught, 'syncConflictResolveFailed', t));
       }
     } finally {
       // Clear only OUR spinner. An unconditional setBusyId(null) looked safe

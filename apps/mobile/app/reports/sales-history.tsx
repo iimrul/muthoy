@@ -31,8 +31,8 @@ import { captureSessionFor } from "../../state/sessionGuard";
 import { useSessionStore } from "../../state/sessionStore";
 import { usePermission } from "../../state/usePermission";
 import { useI18n } from "../../state/localeStore";
+import { ownKey, userFacingError } from "../../i18n/display";
 import type { CatalogKey } from "../../i18n/catalog";
-import { errorCatalogKey } from "../../domain/errorMessages";
 import { showToast } from "../../components/ui/Toast";
 
 /**
@@ -94,16 +94,16 @@ const REFUND_REASON_KEYS: Record<string, CatalogKey> = {
 export default function SalesHistoryScreen() {
   const { t } = useI18n();
   const paymentLabel = (type: string | null | undefined): string =>
-    t((type ? PAYMENT_TYPE_KEYS[type] : undefined) ?? "paymentTypeDraft");
+    t((type ? ownKey(PAYMENT_TYPE_KEYS, type) : undefined) ?? "paymentTypeDraft");
   const unitLabel = (unit: string | null | undefined): string => {
     if (!unit) return "";
-    const key = SYSTEM_UNIT_KEYS[unit];
+    const key = ownKey(SYSTEM_UNIT_KEYS, unit);
     return key ? t(key) : unit;
   };
   const statusLabel = (value: string | null | undefined): string =>
-    t((value ? STATUS_KEYS[value] : undefined) ?? "statusAll");
+    t((value ? ownKey(STATUS_KEYS, value) : undefined) ?? "statusAll");
   const refundReasonLabel = (reason: string | null | undefined): string =>
-    reason ? t(REFUND_REASON_KEYS[reason] ?? "notRefundable") : t("notRefundable");
+    reason ? t(ownKey(REFUND_REASON_KEYS, reason) ?? "notRefundable") : t("notRefundable");
   const session = useSessionStore((state) => state.session);
   const { isAllowed: canRefund } = usePermission("sale_return");
   const [rows, setRows] = useState<SaleHistoryRow[]>([]);
@@ -134,7 +134,7 @@ export default function SalesHistoryScreen() {
       setError(null);
     } catch (caught) {
       setError(
-        t(errorCatalogKey(caught) ?? "couldNotLoadSales"),
+        userFacingError(caught, "couldNotLoadSales", t),
       );
     }
   }, [fromDate, query, session, status, toDate, t]);
@@ -159,7 +159,7 @@ export default function SalesHistoryScreen() {
       setRefundMessage(null);
     } catch (caught) {
       setError(
-        t(errorCatalogKey(caught) ?? "couldNotLoadSale"),
+        userFacingError(caught, "couldNotLoadSale", t),
       );
     }
   };
@@ -224,7 +224,7 @@ export default function SalesHistoryScreen() {
     } catch (caught) {
       if (!guard.isStale())
         setRefundMessage(
-          t(errorCatalogKey(caught) ?? "refundFailed"),
+          userFacingError(caught, "refundFailed", t),
         );
     } finally {
       setRefunding(false);

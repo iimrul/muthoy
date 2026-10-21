@@ -203,7 +203,10 @@ describe('a resolvable conflict', () => {
     fireEvent.click(screen.getByRole('button', { name: en.syncConflictKeepLocal! }));
 
     // Inline and persistent, not a toast that vanishes before it is read.
-    expect(await screen.findByText(en.syncConflictDayClosed!)).toBeTruthy();
+    // dayClosedErrorLabel, not a conflict-specific key: ERROR_NAME_KEYS in
+    // i18n/display.ts is the single map, and DayClosedError already had a
+    // translation there long before H-6 existed.
+    expect(await screen.findByText(en.dayClosedErrorLabel!)).toBeTruthy();
     expect(screen.getByText('Local Name · 01811111111')).toBeTruthy();
   });
 });

@@ -1,6 +1,23 @@
-import type { CatalogKey } from './catalog';
+import { catalog, type CatalogKey } from './catalog';
 
 type Translate = (key: CatalogKey) => string;
+
+/**
+ * An own-property lookup in a key table.
+ *
+ * Every name passed to these helpers originates outside this module — a zod
+ * message, a thrown error's `name`, a caller's fallback code — so a bare
+ * `table[name]` would resolve `toString`, `constructor` or `valueOf` off
+ * Object.prototype and return a function where a catalog key is expected.
+ */
+export function ownKey(
+  table: Readonly<Record<string, CatalogKey>>,
+  name: string,
+): CatalogKey | undefined {
+  return Object.prototype.hasOwnProperty.call(table, name)
+    ? table[name]
+    : undefined;
+}
 
 export function paymentMethodLabel(method: string, t: Translate): string {
   const labels: Record<string, CatalogKey> = {
@@ -12,7 +29,7 @@ export function paymentMethodLabel(method: string, t: Translate): string {
     bank: 'paymentMethodBankLabel',
     other: 'paymentMethodOtherLabel',
   };
-  return t(labels[method] ?? 'paymentMethodOtherLabel');
+  return t(ownKey(labels, method) ?? 'paymentMethodOtherLabel');
 }
 
 export function purchaseSourceLabel(source: string, t: Translate): string {
@@ -37,7 +54,7 @@ const RETURN_REASON_SLUGS: Record<string, CatalogKey> = {
   other: 'reasonOtherLabel',
 };
 export function returnReasonLabel(reason: string, t: Translate): string {
-  const key = RETURN_REASON_SLUGS[reason];
+  const key = ownKey(RETURN_REASON_SLUGS, reason);
   return key ? t(key) : reason;
 }
 export function purchaseLineReturnStatusLabel(
@@ -48,6 +65,36 @@ export function purchaseLineReturnStatusLabel(
   if (status === 'fully_returned') return t('fullyReturnedLabel');
   return t('receivedStatusLabel');
 }
+
+/**
+ * Error class name -> catalog key. The single map for turning a thrown error
+ * into text a shopkeeper can read.
+ *
+ * Keyed on `name` because the messages in db/errors.ts interpolate (a batch
+ * number, a date) and so cannot be map keys, while a class name is stable. An
+ * unlisted error falls back to the caller's own key rather than leaking the
+ * original English message.
+ *
+ * Module-level and shared on purpose: `userFacingError` (dialogs and toasts)
+ * and `localizeValidationMessage` (react-hook-form field errors) both read it,
+ * so a mapping is declared once instead of diverging between the two surfaces.
+ */
+export const ERROR_NAME_KEYS: Record<string, CatalogKey> = {
+  NotAuthorizedError: 'accessDenied',
+  DayClosedError: 'dayClosedErrorLabel',
+  StaleSessionError: 'sessionChangedRetryLabel',
+  SupplierPayableOutstandingError: 'supplierOutstandingArchiveErrorLabel',
+  DuplicateBatchError: 'duplicateBatchErrorLabel',
+  BatchExpiryMismatchError: 'batchExpiryMismatchErrorLabel',
+  PurchaseLineNotReceivedError: 'lineNotReceivedForReturnLabel',
+  PurchaseReturnExceedsAvailableError: 'quantityExceedsAvailableLabel',
+  PurchaseReturnReasonRequiredError: 'reasonRequiredLabel',
+  // H-6 conflict resolution.
+  ConflictNotFoundError: 'syncConflictNotFound',
+  ConflictGroupedOperationError: 'syncConflictGroupedBlocked',
+  CommercialReadOnlyError: 'syncConflictPlanReadOnly',
+  DeviceAccessRevokedError: 'syncConflictDeviceRevoked',
+};
 
 export function localizeValidationMessage(message: string | undefined, t: Translate): string | undefined {
   if (!message) return undefined;
@@ -69,7 +116,22 @@ export function localizeValidationMessage(message: string | undefined, t: Transl
     'Verification code must be exactly 6 digits': 'authOtpSixDigits',
     'PINs do not match': 'authPinsDoNotMatch',
   };
-  const key = labels[message];
+  // Three tiers, in order: a raw zod/db sentence, an error CLASS NAME used as a
+  // stable code (db/errors.ts messages interpolate a batch number or a date, so
+  // they cannot be map keys, but the name can), then a catalog key handed
+  // straight through — which is what the purchase form does when the thrown
+  // value is not an Error at all. ERROR_NAME_KEYS is the same map
+  // `userFacingError` reads, so dialogs and field errors cannot drift apart.
+  //
+  // Every lookup is an OWN-property check. `message` comes from a thrown value,
+  // so a plain `labels[message]` resolves 'toString' or 'constructor' off
+  // Object.prototype and hands a function to `t()` where a catalog key belongs.
+  // Same reason fillTemplate below guards its slots.
+  const key = ownKey(labels, message)
+    ?? ownKey(ERROR_NAME_KEYS, message)
+    ?? (Object.prototype.hasOwnProperty.call(catalog.en, message)
+      ? (message as CatalogKey)
+      : undefined);
   return t(key ?? 'invalidFieldValueLabel');
 }
 
@@ -98,18 +160,9 @@ export function countLabel(
 export function userFacingError(error: unknown, fallback: CatalogKey, t: Translate): string {
   if (!(error instanceof Error)) return t(fallback);
 
-  const byName: Record<string, CatalogKey> = {
-    NotAuthorizedError: 'accessDenied',
-    DayClosedError: 'dayClosedErrorLabel',
-    StaleSessionError: 'sessionChangedRetryLabel',
-    SupplierPayableOutstandingError: 'supplierOutstandingArchiveErrorLabel',
-    DuplicateBatchError: 'duplicateBatchErrorLabel',
-    BatchExpiryMismatchError: 'batchExpiryMismatchErrorLabel',
-    PurchaseLineNotReceivedError: 'lineNotReceivedForReturnLabel',
-    PurchaseReturnExceedsAvailableError: 'quantityExceedsAvailableLabel',
-    PurchaseReturnReasonRequiredError: 'reasonRequiredLabel',
-  };
-  const named = byName[error.name];
+  // Own-property check: `error.name` is caller-assignable, so an error named
+  // 'constructor' would otherwise resolve a function off Object.prototype.
+  const named = ownKey(ERROR_NAME_KEYS, error.name);
   if (named) return t(named);
 
   if (error.name === 'PurchaseNotVoidableError') {
@@ -133,5 +186,5 @@ export function userFacingError(error: unknown, fallback: CatalogKey, t: Transla
     'Batch must have zero stock, no oversell, and no active promotion': 'medicineArchiveRequirementsLabel',
     'Medicine not found': 'medicineMissingLabel',
   };
-  return t(byMessage[error.message] ?? fallback);
+  return t(ownKey(byMessage, error.message) ?? fallback);
 }

@@ -3658,7 +3658,7 @@ Founder authorized the complete local R4 workflow and the remaining verification
 Delivery batch, not a wave. Nine of eleven assigned tasks shipped; **W4-04 and
 W4-05 are BLOCKED — DEFERRED TO BATCH 3**, never DONE (see
 `docs/plans/muthoy-five-batch-delivery-ledger.md`). Full suite
-**243 files / 5,032 tests / 0 failures / exit 0** on
+**243 files / 5,062 tests / 0 failures / exit 0** on
 `pnpm test --maxWorkers=2 --minWorkers=1` (1393 s, 2026-10-21). The Gate 3
 figure (238 / 4,937) is historical — Gate 5 remediation changed the tree, so
 the result was re-established by a fresh run rather than carried forward.
@@ -3853,7 +3853,9 @@ understand what happened — and it is the least-tested path on any screen, so i
 stayed broken while the happy path was fully translated. A literal-scanning test
 cannot see it either, because the English lives in a different file.
 
-*Decision:* `domain/errorMessages.ts` maps `error.name` to a catalog key, every
+*Decision (SUPERSEDED BY D10 — the module was a duplicate and is deleted; the
+map now lives in `i18n/display.ts` as `ERROR_NAME_KEYS`):*
+`domain/errorMessages.ts` maps `error.name` to a catalog key, every
 screen calls that, and `tests/localization-and-ui-consistency.test.ts` forbids
 `.message` outright in the fully-localized screens. Names are stable where
 sentences are not, and the map is checked for completeness against the error
@@ -3865,3 +3867,66 @@ the shopkeeper's do not.** `sales.status`, `expenses.category` and
 `conflict_queue.table_name` are ours, so they are mapped; `medicines.unit_of_measure`
 is free text the shopkeeper typed, so it is passed through untouched — only the
 value the schema supplies by default (`piece`) is translated.
+
+
+**D9 — W3-08's partial gap closed; and the payment provider question is a
+founder decision, not an engineering fix.**
+
+*Localization.* The three screens Batch 1 left partial are now fully localized,
+and the ratchet's two-tier list is gone — a tier that holds some screens to a
+weaker standard becomes the place defects collect. Closing it surfaced three
+shapes a literal scan structurally cannot see: an enum slug rendered from a
+dynamic expression (the expiry bands), prose sitting between two interpolations
+(`{qty} in stock · {expiry}`), and an English error delivered through
+react-hook-form's `setError({ message })`. Each now has either a
+source-derived completeness check or its own detector pass, and the detector no
+longer flags `className` strings — noise in a ratchet trains people to ignore it.
+A control-byte test was also added, because a shell heredoc turned an intended
+`\b` into a literal 0x08 SIX times in one session. The sixth was caught by
+this very guard, in the sentence of this record describing the bug — which is the
+point: inspection missed five, an assertion caught the next one, each time producing a green
+test that matched nothing. See [[batch-1-complete]].
+
+*Payments.* A bKash-only requirement was raised at closure. It is not recorded
+anywhere in the repository, and the locked 2026-08-31 B4 decision says the
+opposite: *"SSLCommerz is first provider."* W3-06's shipped tests exercise
+SSLCommerz because **no bKash gateway implementation exists** — the bKash
+references are the customer `payments.method` enum (unrelated to subscriptions)
+and the legacy `subscriptions.payment_provider` enum (`db/schema.ts:92`), while
+the path that actually creates an order types `provider` as `["sslcommerz"]`
+only (`db/schema.ts:325`). *Decision:* do NOT deactivate SSLCommerz. Doing so
+would change money code, contradict a signed-off decision, and leave no
+subscription payment path at all. The posture is already safe — absent
+credentials, the provider throws `payment_not_configured` and fails closed, so
+no money can move while this is settled. Recorded as gate E5 in the delivery
+ledger for a founder decision between keeping SSLCommerz first with bKash as a
+later provider, or making bKash exclusive and superseding the B4 decision.
+
+
+**D10 — one error-to-text map, not two. (A duplicate I introduced and then removed.)**
+
+While closing W3-08 I wrote `domain/errorMessages.ts` with an `ERROR_MESSAGE_KEYS`
+map so screens could turn a thrown error into a catalog key instead of rendering
+`caught.message`. The mechanism was right and the module was redundant:
+`i18n/display.ts` already did exactly this, via `userFacingError`, keyed on
+`error.name`, and it already had `duplicateBatchErrorLabel` and
+`batchExpiryMismatchErrorLabel` in both locales.
+
+Two maps for one job is how dialogs and field errors drift apart — and they
+already had: my version put already-translated text into react-hook-form, where
+`FormField` ran it through `localizeValidationMessage` a second time, failed to
+recognise it, and showed the generic "invalid value". **Adding a translation made
+that message worse than the English it replaced.**
+
+*Decision:* delete `domain/errorMessages.ts`. Hoist the existing map to a
+module-level `ERROR_NAME_KEYS` in `i18n/display.ts`, add the four H-6 conflict
+classes to it, and have BOTH `userFacingError` (dialogs, toasts) and
+`localizeValidationMessage` (field errors) read that one map. Screens call
+`userFacingError(err, 'fallbackKey', t)`; `batches.tsx` puts `err.name` into
+react-hook-form so the single translation happens in one place. A test asserts
+the two surfaces agree, which is what fails if a second map reappears.
+
+*Why it is worth recording:* the duplicate was not a typo. I reached for a new
+module without first checking whether the codebase already solved it, in a repo
+whose own rules say to search before writing. The review caught it; the test now
+does.
