@@ -408,6 +408,69 @@ export const medicines = sqliteTable(
 //   CREATE VIRTUAL TABLE medicines_fts USING fts5(name, generic, content='medicines', content_rowid='rowid');
 //   + triggers to keep it in sync on insert/update/delete of medicines.
 
+// ── medicine_catalog (W2-02: national reference data, NOT shop data) ───
+// Deliberately NOT spread from `base`: no shop_id (belongs to no shop, so
+// CLAUDE.md rule 7 holds structurally), no isDirty (never synced — absent from
+// HYDRATION_TABLE_ORDER), no soft-delete (a re-import replaces by deterministic
+// id), no FK (a reference row must not die by cascade from shop data). Full
+// reasoning in migrations/0032_medicine_catalog.sql's header.
+export const medicineCatalog = sqliteTable(
+  "medicine_catalog",
+  {
+    id: text("id").primaryKey(), // uuidv5 of the normalized natural key
+    brandName: text("brand_name").notNull(),
+    brandNameBn: text("brand_name_bn"),
+    genericName: text("generic_name"),
+    genericNameBn: text("generic_name_bn"),
+    manufacturer: text("manufacturer"),
+    manufacturerBn: text("manufacturer_bn"),
+    strength: text("strength"),
+    dosageForm: text("dosage_form"),
+    packSize: text("pack_size"),
+    /** @muthoy/utils' medicineSearchKeys() over every name field — one FTS
+     *  column serving English, Bangla and Banglish. Never empty. */
+    searchKey: text("search_key").notNull(),
+    source: text("source").notNull(),
+    sourceVersion: text("source_version").notNull(),
+    rowChecksum: text("row_checksum").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => ({
+    brandIdx: index("medicine_catalog_brand_idx").on(t.brandName),
+    genericIdx: index("medicine_catalog_generic_idx").on(t.genericName),
+    sourceIdx: index("medicine_catalog_source_idx").on(t.source, t.sourceVersion),
+  }),
+);
+
+// medicine_catalog_fts is an FTS5 virtual table, same reason as medicines_fts.
+// See migrations/0032_medicine_catalog.sql.
+
+/** Import provenance + resumability: a `running` row records how far a 21k-row
+ *  file got, so a re-run skips what landed instead of restarting from zero. */
+export const medicineCatalogImports = sqliteTable(
+  "medicine_catalog_imports",
+  {
+    id: text("id").primaryKey(),
+    source: text("source").notNull(),
+    sourceVersion: text("source_version").notNull(),
+    fileChecksum: text("file_checksum").notNull(),
+    rowCount: integer("row_count").notNull(),
+    importedRows: integer("imported_rows").notNull().default(0),
+    status: text("status", { enum: ["running", "completed", "failed"] }).notNull(),
+    error: text("error"),
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at"),
+  },
+  (t) => ({
+    sourceIdx: index("medicine_catalog_imports_source_idx").on(
+      t.source,
+      t.sourceVersion,
+      t.startedAt,
+    ),
+  }),
+);
+
 // ── batches (actual stock, per expiry lot) — FEFO lives here ───────────
 export const batches = sqliteTable(
   "batches",

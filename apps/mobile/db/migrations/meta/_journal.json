@@ -225,6 +225,13 @@
       "when": 1788487200000,
       "tag": "0031_h6_conflict_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1791331200000,
+      "tag": "0032_medicine_catalog",
+      "breakpoints": true
     }
   ]
 }

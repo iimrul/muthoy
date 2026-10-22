@@ -44,6 +44,7 @@ import {
   users,
 } from './schema';
 import { recordChange, stampUpdatedAt, type SyncOperationGroup } from './sync-helpers';
+import { toFtsPrefixQuery } from '../domain/ftsQuery';
 
 const SEARCH_LIMIT = 50;
 
@@ -99,11 +100,6 @@ export interface PurchaseMedicineSearchResult {
   medicineId: string;
   name: string;
   generic: string | null;
-}
-
-function toFtsPrefixQuery(query: string): string {
-  return query.trim().split(/\s+/).filter(Boolean)
-    .map((term) => `"${term.replace(/"/g, '""')}"*`).join(' AND ');
 }
 
 export async function searchMedicinesForPurchase(

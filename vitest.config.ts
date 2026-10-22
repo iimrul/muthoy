@@ -104,6 +104,7 @@ export default defineConfig({
     server: { deps: { inline: ["expo-sqlite", "expo-crypto"] } },
     include: [
       "apps/mobile/db/environment-binding.test.ts",
+      "apps/mobile/db/medicine-catalog.sqlite.test.ts",
       "apps/mobile/tests/environment-policy.test.ts",
       // H-9 archive controls on a real Git revision; the EAS CLI 21.8.0 half
       // runs EAS's own copy/workflow code when that pinned CLI is installed.

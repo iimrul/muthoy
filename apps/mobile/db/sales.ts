@@ -54,6 +54,7 @@ import { deductStock } from "./stockLedger";
 import { recordChange, stampUpdatedAt } from "./sync-helpers";
 import { markSaleDraftCompleted } from "./saleDrafts";
 import { uuidV5 } from "../domain/deterministicId";
+import { toFtsPrefixQuery } from "../domain/ftsQuery";
 import { extractInclusiveTax, normalizeTaxLabel } from "../domain/tax";
 
 const SEARCH_LIMIT = 50;
@@ -78,15 +79,6 @@ interface FtsMedicineRow {
   generic: string | null;
   manufacturer: string | null;
   requiresPrescription: boolean;
-}
-
-function toFtsPrefixQuery(query: string): string {
-  return query
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((term) => `"${term.replace(/"/g, '""')}"*`)
-    .join(" AND ");
 }
 
 export async function searchMedicinesForSale(

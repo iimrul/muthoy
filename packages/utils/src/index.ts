@@ -4,3 +4,4 @@ export * from './expiryDays';
 export * from './businessDate';
 export * from './moneyInput';
 export * from './csv';
+export * from './bengali';

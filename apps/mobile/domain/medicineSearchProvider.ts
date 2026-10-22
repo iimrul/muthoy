@@ -10,6 +10,15 @@ export interface MedicineSearchResult {
   name: string;
   generic?: string;
   manufacturer?: string;
+  // W2-02: disambiguating fields. Without them a 21k catalogue renders
+  // "Napa 500mg" and "Napa 665mg" as two identical rows reading "Napa" and the
+  // user picks blind. OPTIONAL so unavailableMedicineSearchProvider below and
+  // every existing consumer keep compiling unchanged. These are shown beside the
+  // name — never concatenated INTO it, because medicines.name must stay the
+  // brand name for medicines_fts and findExactNameMatch.
+  strength?: string;
+  dosageForm?: string;
+  packSize?: string;
 }
 
 export interface MedicineSearchProvider {
