@@ -160,6 +160,7 @@ const deps = vi.hoisted(() => ({
   listCustomers: vi.fn(),
   createSaleTransaction: vi.fn(),
   getActiveBatchForMedicine: vi.fn(),
+  searchMedicinesForSale: vi.fn(),
   holdSaleDraft: vi.fn(),
   cancelSaleDraft: vi.fn(),
   createCancelledSaleDraft: vi.fn(),
@@ -174,6 +175,7 @@ vi.mock('../../db/settings', () => ({ getTaxSettings: deps.getTaxSettings }));
 vi.mock('../../db/sales', () => ({
   createSaleTransaction: deps.createSaleTransaction,
   getActiveBatchForMedicine: deps.getActiveBatchForMedicine,
+  searchMedicinesForSale: deps.searchMedicinesForSale,
   SaleQuoteChangedError: class SaleQuoteChangedError extends Error {},
 }));
 vi.mock('../../db/saleDrafts', () => ({
@@ -248,6 +250,9 @@ beforeEach(() => {
   scanTextMock.mockResolvedValue({ recognizedText: 'Napa 500mg' });
   deps.listCustomers.mockResolvedValue([]);
   deps.getTaxSettings.mockResolvedValue({ rateBp: 0, label: 'VAT' });
+  // This suite is about the capture's lifetime, not matching: a prescription
+  // that matches nothing still exercises every path it cares about.
+  deps.searchMedicinesForSale.mockResolvedValue([]);
   deps.runNotificationChecks.mockResolvedValue(undefined);
   deps.cancelSaleDraft.mockResolvedValue(undefined);
   deps.createCancelledSaleDraft.mockResolvedValue({ draftId: 'draft-1' });

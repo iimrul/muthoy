@@ -294,6 +294,9 @@ export default defineConfig({
       "apps/mobile/tests/sale/resumed-draft-capture.test.tsx",
       // W2-01 section 6.2.3: the scan cannot reach the cart without a confirm.
       "apps/mobile/tests/sale/scan-confirm.test.tsx",
+      // W2-01 section 6.2.4: the captured prescription is read, reviewed per
+      // line, and never added to the sale on its own.
+      "apps/mobile/tests/sale/prescription-ocr.test.tsx",
       "apps/mobile/tests/sale/cartStore.test.ts",
       "apps/mobile/tests/inventory/*.test.tsx",
       // The six sibling actor-stamping write screens, driven across a real

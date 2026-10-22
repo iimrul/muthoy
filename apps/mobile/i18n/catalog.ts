@@ -593,6 +593,15 @@ export const catalog = {
     attachPrescriptionImageLabel: "Attach prescription image",
     retakePrescriptionImageLabel: "Retake prescription image",
     imageCapturedHint: "Image captured. Sale is not blocked by image upload.",
+    prescriptionLinesTitle: "From the prescription",
+    prescriptionLinesHint:
+      "Add each medicine you are selling. Nothing is added on its own.",
+    prescriptionUnreadableNotice:
+      "Couldn't read the prescription. The image is still attached.",
+    prescriptionLineNoMatchLabel: "No match in your stock",
+    prescriptionLineAddLabel: "Add",
+    prescriptionLineAddedLabel: "Added to this sale",
+    prescriptionLineSearchLabel: "Search",
     cartEmptyErrorLabel: "Cart is empty.",
     customerSearchFailedLabel: "Customer search failed.",
     invalidDiscountPercentLabel: "Enter a percentage from 0 to 100.",
@@ -1679,6 +1688,15 @@ export const catalog = {
     attachPrescriptionImageLabel: "প্রেসক্রিপশনের ছবি যুক্ত করুন",
     retakePrescriptionImageLabel: "আবার ছবি তুলুন",
     imageCapturedHint: "ছবি নেওয়া হয়েছে। ছবি না থাকলেও বিক্রয় আটকাবে না।",
+    prescriptionLinesTitle: "প্রেসক্রিপশন থেকে",
+    prescriptionLinesHint:
+      "যে ওষুধগুলো বিক্রি করছেন সেগুলো যোগ করুন। নিজে থেকে কিছু যোগ হবে না।",
+    prescriptionUnreadableNotice:
+      "প্রেসক্রিপশন পড়া যায়নি। ছবিটি যুক্ত আছে।",
+    prescriptionLineNoMatchLabel: "আপনার স্টকে মেলেনি",
+    prescriptionLineAddLabel: "যোগ করুন",
+    prescriptionLineAddedLabel: "এই বিক্রয়ে যোগ হয়েছে",
+    prescriptionLineSearchLabel: "খুঁজুন",
     cartEmptyErrorLabel: "কার্ট খালি।",
     customerSearchFailedLabel: "গ্রাহক খোঁজা যায়নি।",
     invalidDiscountPercentLabel: "০ থেকে ১০০-এর মধ্যে শতাংশ লিখুন।",

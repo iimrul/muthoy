@@ -78,6 +78,7 @@ const deps = vi.hoisted(() => ({
   listBatchesForMedicine: vi.fn(),
   createSaleTransaction: vi.fn(),
   getActiveBatchForMedicine: vi.fn(),
+  searchMedicinesForSale: vi.fn(),
   holdSaleDraft: vi.fn(),
   cancelSaleDraft: vi.fn(),
   createCancelledSaleDraft: vi.fn(),
@@ -91,6 +92,7 @@ vi.mock('../../db/inventory', () => ({ listBatchesForMedicine: deps.listBatchesF
 vi.mock('../../db/sales', () => ({
   createSaleTransaction: deps.createSaleTransaction,
   getActiveBatchForMedicine: deps.getActiveBatchForMedicine,
+  searchMedicinesForSale: deps.searchMedicinesForSale,
   SaleQuoteChangedError: class SaleQuoteChangedError extends Error {
     constructor(
       readonly refreshedTotal: number,
@@ -183,6 +185,7 @@ beforeEach(() => {
     salePrice: asPaisa(1000),
     expiryDate: null,
   });
+  deps.searchMedicinesForSale.mockResolvedValue([]);
   deps.holdSaleDraft.mockResolvedValue({ draftId: 'draft-current' });
   deps.cancelSaleDraft.mockResolvedValue(undefined);
   deps.createCancelledSaleDraft.mockResolvedValue({ draftId: 'draft-current' });

@@ -13,12 +13,14 @@ import { asPaisa, subtractPaisa, type Paisa } from "@muthoy/types";
 import { parseTakaTextToPaisa } from "@muthoy/utils";
 import { checkoutCustomerSchema } from "@muthoy/validation";
 import { MedicineTextScanner } from "../../components/scanner/MedicineTextScanner";
+import { PrescriptionLinesReview } from "../../components/sale/PrescriptionLinesReview";
 import { StandardHeader } from "../../components/ui/StandardHeader";
 import { listCustomers, type CustomerListItem } from "../../db/customers";
 import { StaleSessionError } from "../../db/errors";
 import {
   createSaleTransaction,
   getActiveBatchForMedicine,
+  searchMedicinesForSale,
   SaleQuoteChangedError,
 } from "../../db/sales";
 import {
@@ -31,6 +33,11 @@ import {
   type CheckoutDiscountType,
 } from "../../components/sale/DiscountFields";
 import { applyDiscount } from "../../domain/discounts";
+import {
+  buildPrescriptionLines,
+  type PrescriptionLine,
+} from "../../domain/prescriptionLines";
+import { createLatestRequestGuard } from "../../domain/latestRequestGuard";
 import {
   checkoutDiscountAmount,
   type CheckoutDiscount,
@@ -79,6 +86,7 @@ export default function CheckoutScreen() {
   const items = useCartStore((state) => state.items);
   const subtotal = useCartStore((state) => state.total());
   const clearCart = useCartStore((state) => state.clear);
+  const addItem = useCartStore((state) => state.addItem);
   const updateQuantity = useCartStore((state) => state.updateQuantity);
   const removeItem = useCartStore((state) => state.removeItem);
   const updateQuote = useCartStore((state) => state.updateQuote);
@@ -125,6 +133,16 @@ export default function CheckoutScreen() {
     heldSnapshot?.imageUri ?? null,
   );
   const [scannerVisible, setScannerVisible] = useState(false);
+  // W2-01 section 6.2.4. Recognised prescription text, matched against this
+  // shop's stock. State only — never persisted, and never written to the
+  // sale: the attachment is the record, this list is a working aid.
+  const [prescriptionLines, setPrescriptionLines] = useState<
+    PrescriptionLine[]
+  >([]);
+  const [prescriptionNotice, setPrescriptionNotice] = useState<string | null>(
+    null,
+  );
+  const [prescriptionGuard] = useState(() => createLatestRequestGuard());
   const [refreshedTotal, setRefreshedTotal] = useState<Paisa | null>(null);
   const [refreshedAllocation, setRefreshedAllocation] = useState<
     { batchId: string; quantity: number; unitPrice: Paisa }[] | null
@@ -464,6 +482,57 @@ export default function CheckoutScreen() {
   } catch {
     /* validate on submit */
   }
+  // The image has already gone back to setImageUri by the time this runs, so
+  // an unreadable prescription costs nothing: the capture stays attached, the
+  // sale stays completable, and this is a notice rather than an error.
+  const handlePrescriptionRecognition = async (recognizedText: string | null) => {
+    const requestId = prescriptionGuard.start();
+    if (!session || !recognizedText?.trim()) {
+      setPrescriptionLines([]);
+      setPrescriptionNotice(t("prescriptionUnreadableNotice"));
+      return;
+    }
+    // A prescription is a multi-item list, the same shape as an invoice, so
+    // domain/prescriptionLines.ts drives it through the extractor
+    // purchase-create.tsx already uses and the sale scan's exact-match rule.
+    const matched = await buildPrescriptionLines(recognizedText, (name) =>
+      searchMedicinesForSale(session.shopId, name),
+    );
+    // A second capture while this one was matching wins; this one is dropped.
+    if (!prescriptionGuard.isLatest(requestId)) return;
+    setPrescriptionLines(matched);
+    setPrescriptionNotice(
+      matched.length === 0 ? t("prescriptionUnreadableNotice") : null,
+    );
+  };
+
+  // Founder-approved (plan section 6.2.4 left it open): a confirmed line goes
+  // through the cart store's own addItem — same stock ceiling the Sale screen
+  // uses — and then resets the quote, so the total is recomputed and the sale
+  // has to be reconfirmed before it commits. No second write path.
+  const addPrescriptionLine = (line: PrescriptionLine) => {
+    if (!line.match) return;
+    const added = addItem({
+      medicineId: line.match.medicineId,
+      medicineName: line.match.name,
+      batchId: line.match.batchId,
+      batchNo: line.match.batchNo ?? undefined,
+      quantity: 1,
+      unitPrice: line.match.unitPrice,
+      expiryDate: line.match.expiryDate,
+      availableQuantity: line.match.availableQuantity,
+    });
+    if (!added) {
+      setError(t("cartQuantityAtStockLimitLabel"));
+      return;
+    }
+    setError(null);
+    resetQuote();
+    setPrescriptionLines((current) =>
+      current.map((row) => (row.id === line.id ? { ...row, isAdded: true } : row)),
+    );
+  };
+
   const resetQuote = () => {
     setRefreshedTotal(null);
     setRefreshedAllocation(null);
@@ -711,6 +780,20 @@ export default function CheckoutScreen() {
             </Text>
           ) : null}
         </View>
+        <PrescriptionLinesReview
+          lines={prescriptionLines}
+          notice={prescriptionNotice}
+          onAdd={addPrescriptionLine}
+          // push, not replace: the cart and this screen stay on the stack, so
+          // correcting one line does not discard a half-filled checkout.
+          onSearch={(line) =>
+            router.push({ pathname: "/sale", params: { q: line.rawText } })
+          }
+          onDismiss={() => {
+            setPrescriptionLines([]);
+            setPrescriptionNotice(null);
+          }}
+        />
         {error ? <Text className="font-sans text-sm text-error">{error}</Text> : null}
         <Pressable
           onPress={confirm}
@@ -765,6 +848,7 @@ export default function CheckoutScreen() {
         onClose={() => setScannerVisible(false)}
         onTextRecognized={() => undefined}
         onImageCaptured={setImageUri}
+        onCaptureRecognition={(text) => void handlePrescriptionRecognition(text)}
       />
     </View>
   );
