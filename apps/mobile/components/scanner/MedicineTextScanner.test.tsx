@@ -34,6 +34,9 @@ const captureAsyncMock = vi.fn<() => Promise<string | null>>();
 const openSettingsMock = vi.fn<() => Promise<void>>();
 const scanTextMock =
   vi.fn<(uri: string) => Promise<{ recognizedText: string } | null>>();
+// W2-01: the scanner now owns its temporary capture on the OCR path.
+const removeTemporaryCaptureMock = vi.fn<(uri: string) => Promise<boolean>>();
+const reportEventMock = vi.fn<(event: string) => void>();
 
 interface StubProps {
   children?: ReactNode;
@@ -80,6 +83,17 @@ vi.mock("../../native/scanner", () => ({
   scanText: (uri: string) => scanTextMock(uri),
 }));
 
+vi.mock("../../native/prescriptionAttachment", () => ({
+  removeTemporaryCapture: (uri: string) => removeTemporaryCaptureMock(uri),
+}));
+
+// Mocked rather than exercised: monitoring/sink.ts opens MMKV at module scope,
+// and what matters here is only that a cleanup failure is reported instead of
+// being shown to the user as a scan error.
+vi.mock("../../monitoring", () => ({
+  reportEvent: (event: string) => reportEventMock(event),
+}));
+
 const { MedicineTextScanner } = await import("./MedicineTextScanner");
 const { useLocaleStore } = await import("../../state/localeStore");
 
@@ -87,19 +101,23 @@ function renderScanner(
   overrides: {
     onClose?: () => void;
     onTextRecognized?: (text: string) => void;
+    captureOnly?: boolean;
+    onImageCaptured?: (uri: string) => void;
   } = {},
 ) {
   const onClose = overrides.onClose ?? vi.fn();
   const onTextRecognized = overrides.onTextRecognized ?? vi.fn();
+  const onImageCaptured = overrides.onImageCaptured ?? vi.fn();
   render(
     createElement(MedicineTextScanner, {
       visible: true,
       mode: "lookup",
       onClose,
       onTextRecognized,
+      ...(overrides.captureOnly ? { captureOnly: true, onImageCaptured } : {}),
     }),
   );
-  return { onClose, onTextRecognized };
+  return { onClose, onTextRecognized, onImageCaptured };
 }
 
 beforeEach(() => {
@@ -109,6 +127,8 @@ beforeEach(() => {
   captureAsyncMock.mockReset().mockResolvedValue("file:///strip.jpg");
   openSettingsMock.mockReset().mockResolvedValue(undefined);
   scanTextMock.mockReset().mockResolvedValue({ recognizedText: "Napa Extra" });
+  removeTemporaryCaptureMock.mockReset().mockResolvedValue(true);
+  reportEventMock.mockReset();
 });
 
 afterEach(() => {
@@ -282,5 +302,94 @@ describe("MedicineTextScanner — capture and OCR errors", () => {
       expect(onTextRecognized).toHaveBeenCalledWith("Napa Extra"),
     );
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── W2-01 section 6.2.2: the scanner-owned half of the capture leak ────────
+//
+// Before this, captureAsync() wrote a JPEG of a medicine strip into the cache
+// directory and nothing deleted it on any path. The scanner owns that file on
+// the OCR path only — there the URI never leaves this component — and must
+// never touch it on the captureOnly path, where the image is the artefact the
+// caller keeps and may already be a durable held-draft file (gate E9).
+describe("MedicineTextScanner — temporary capture cleanup", () => {
+  it("deletes the capture after a successful scan", async () => {
+    renderScanner();
+    fireEvent.click(await screen.findByLabelText("Capture photo"));
+
+    await waitFor(() =>
+      expect(removeTemporaryCaptureMock).toHaveBeenCalledWith("file:///strip.jpg"),
+    );
+  });
+
+  it("deletes the capture when no text is found", async () => {
+    scanTextMock.mockResolvedValueOnce(null);
+    renderScanner();
+    fireEvent.click(await screen.findByLabelText("Capture photo"));
+
+    expect(
+      await screen.findByText(
+        "No text detected on the strip. Hold it flat and steady, then retry.",
+      ),
+    ).toBeTruthy();
+    expect(removeTemporaryCaptureMock).toHaveBeenCalledWith("file:///strip.jpg");
+  });
+
+  it("deletes the capture when recognition throws", async () => {
+    scanTextMock.mockRejectedValueOnce(new Error("ml kit unavailable"));
+    renderScanner();
+    fireEvent.click(await screen.findByLabelText("Capture photo"));
+
+    await waitFor(() =>
+      expect(removeTemporaryCaptureMock).toHaveBeenCalledWith("file:///strip.jpg"),
+    );
+  });
+
+  it("deletes the capture even when the modal is closed mid-processing", async () => {
+    let finishScan: ((result: { recognizedText: string }) => void) | undefined;
+    scanTextMock.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        finishScan = resolve;
+      }),
+    );
+    renderScanner();
+    fireEvent.click(await screen.findByLabelText("Capture photo"));
+    await waitFor(() => expect(scanTextMock).toHaveBeenCalled());
+
+    // The user gives up and closes while OCR is still running.
+    fireEvent.click(screen.getByLabelText("Close scanner"));
+    expect(removeTemporaryCaptureMock).not.toHaveBeenCalled();
+
+    finishScan?.({ recognizedText: "Napa Extra" });
+    await waitFor(() =>
+      expect(removeTemporaryCaptureMock).toHaveBeenCalledWith("file:///strip.jpg"),
+    );
+  });
+
+  it("reports a failed deletion to monitoring without failing the scan", async () => {
+    removeTemporaryCaptureMock.mockResolvedValueOnce(false);
+    const { onClose, onTextRecognized } = renderScanner();
+    fireEvent.click(await screen.findByLabelText("Capture photo"));
+
+    await waitFor(() =>
+      expect(reportEventMock).toHaveBeenCalledWith("scan.capture_cleanup.failed"),
+    );
+    // The scan itself worked, so the user sees a result, not an error.
+    expect(onTextRecognized).toHaveBeenCalledWith("Napa Extra");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Couldn't read the strip. Try again.")).toBeNull();
+  });
+
+  it("never deletes anything on the captureOnly path", async () => {
+    const { onImageCaptured } = renderScanner({ captureOnly: true });
+    fireEvent.click(await screen.findByLabelText("Capture photo"));
+
+    await waitFor(() =>
+      expect(onImageCaptured).toHaveBeenCalledWith("file:///strip.jpg"),
+    );
+    // The durable copy does not exist yet, and on a resumed held draft this URI
+    // IS the durable file. Deleting it here destroys a real prescription.
+    expect(removeTemporaryCaptureMock).not.toHaveBeenCalled();
+    expect(reportEventMock).not.toHaveBeenCalled();
   });
 });

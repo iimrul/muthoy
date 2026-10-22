@@ -17,6 +17,8 @@ import {
   type ScannerCameraHandle,
 } from "../../native/ScannerCamera";
 import { scanBarcode, scanText } from "../../native/scanner";
+import { removeTemporaryCapture } from "../../native/prescriptionAttachment";
+import { reportEvent } from "../../monitoring";
 import { useI18n } from "../../state/localeStore";
 
 // components/scanner/MedicineTextScanner.tsx — polished, reusable full-screen
@@ -119,13 +121,29 @@ export function MedicineTextScanner({
     }
 
     setCaptureState("processing");
-    try {
-      if (captureOnly) {
+
+    // The captureOnly (prescription) path hands the image back and NEVER
+    // deletes it. Nothing has copied it yet — `onImageCaptured` only stores the
+    // URI in the caller's state, and the durable copy happens later at
+    // sale/hold/cancel persistence — and on a resumed held draft that URI is
+    // already durable. Cleanup here is gate E9; see native/prescriptionAttachment.ts.
+    if (captureOnly) {
+      try {
         await onImageCaptured?.(uri);
         if (keepOpenOnResult) setCaptureState("ready");
         else resetAndClose();
-        return;
+      } catch {
+        setCaptureState("error");
+        setErrorMessage(t("cameraReadFailed"));
       }
+      return;
+    }
+
+    // The OCR path: the URI never leaves this component, so the scanner owns
+    // the temporary file and removes it on every exit — success, no text
+    // found, a throw, and a close that lands mid-processing. A cleanup failure
+    // is a breadcrumb, never a scan error: the scan itself worked.
+    try {
       const result = await scanText(uri);
       if (!result) {
         setCaptureState("error");
@@ -141,6 +159,10 @@ export function MedicineTextScanner({
     } catch {
       setCaptureState("error");
       setErrorMessage(t("cameraReadFailed"));
+    } finally {
+      if (!(await removeTemporaryCapture(uri))) {
+        reportEvent("scan.capture_cleanup.failed");
+      }
     }
   }, [captureOnly, keepOpenOnResult, onImageCaptured, onTextRecognized, resetAndClose, t]);
 

@@ -37,6 +37,10 @@ export const MONITORING_EVENTS = [
   "sync.cycle.failed",
   "sync.halted",
   "sync.conflict_detector.failed",
+  // W2-01. The scanner deletes its own temporary capture on the OCR path; a
+  // failure there leaves a JPEG of a medicine strip in the cache directory, so
+  // it is worth a breadcrumb even though the scan itself succeeded.
+  "scan.capture_cleanup.failed",
 ] as const;
 
 export type MonitoringEvent = (typeof MONITORING_EVENTS)[number];

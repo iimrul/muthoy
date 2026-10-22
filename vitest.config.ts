@@ -289,6 +289,9 @@ export default defineConfig({
       "apps/mobile/state/useMultiShopAccess.test.tsx",
       "apps/mobile/state/businessDayStore.test.ts",
       "apps/mobile/tests/sale/checkout.test.tsx",
+      // W2-01 / gate E9: the resumed-held-draft boundary, driven through the
+      // real scanner and the real capture-cleanup helper.
+      "apps/mobile/tests/sale/resumed-draft-capture.test.tsx",
       "apps/mobile/tests/sale/cartStore.test.ts",
       "apps/mobile/tests/inventory/*.test.tsx",
       // The six sibling actor-stamping write screens, driven across a real
