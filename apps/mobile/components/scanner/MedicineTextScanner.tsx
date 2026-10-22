@@ -43,9 +43,40 @@ export interface MedicineTextScannerProps {
   keepOpenOnResult?: boolean;
   captureOnly?: boolean;
   onImageCaptured?: (uri: string) => void | Promise<void>;
+  /**
+   * W2-01 section 6.2.4: on the `captureOnly` path, also attempt recognition on
+   * the captured image and hand back the text, or null when nothing could be
+   * read. Opt-in BY PRESENCE, exactly like `onBarcodeRecognized` — a
+   * `captureOnly` caller that does not pass this keeps today's image-only
+   * behaviour and cannot silently acquire OCR.
+   *
+   * Receiving null is not an error. On this path the IMAGE is the primary
+   * artefact and the text is a convenience, so unreadable text must leave the
+   * capture intact and the sale completable. That is why this is separate from
+   * `onTextRecognized`, whose path treats a failure as a retryable scan error.
+   */
+  onCaptureRecognition?: (
+    recognizedText: string | null,
+  ) => void | Promise<void>;
 }
 
 type CaptureState = "ready" | "capturing" | "processing" | "error";
+
+/**
+ * Recognition that cannot fail loudly. Used only on the `captureOnly` path,
+ * where an unreadable image must still produce a usable capture: "nothing was
+ * read" and "the reader threw" are the same answer to the caller, which is free
+ * to show a non-blocking notice. The OCR path deliberately does NOT use this —
+ * there, a failure is the result and has to be retryable.
+ */
+async function recognizeQuietly(uri: string): Promise<string | null> {
+  try {
+    const result = await scanText(uri);
+    return result?.recognizedText ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export function MedicineTextScanner({
   visible,
@@ -56,6 +87,7 @@ export function MedicineTextScanner({
   keepOpenOnResult = false,
   captureOnly = false,
   onImageCaptured,
+  onCaptureRecognition,
 }: MedicineTextScannerProps) {
   const { t } = useI18n();
   const cameraRef = useRef<ScannerCameraHandle>(null);
@@ -129,7 +161,12 @@ export function MedicineTextScanner({
     // already durable. Cleanup here is gate E9; see native/prescriptionAttachment.ts.
     if (captureOnly) {
       try {
+        // The image goes back FIRST and unconditionally: recognition is an
+        // addition to this path, never a precondition for it.
         await onImageCaptured?.(uri);
+        if (onCaptureRecognition) {
+          await onCaptureRecognition(await recognizeQuietly(uri));
+        }
         if (keepOpenOnResult) setCaptureState("ready");
         else resetAndClose();
       } catch {

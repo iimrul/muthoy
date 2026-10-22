@@ -103,6 +103,7 @@ function renderScanner(
     onTextRecognized?: (text: string) => void;
     captureOnly?: boolean;
     onImageCaptured?: (uri: string) => void;
+    onCaptureRecognition?: (text: string | null) => void;
   } = {},
 ) {
   const onClose = overrides.onClose ?? vi.fn();
@@ -115,6 +116,9 @@ function renderScanner(
       onClose,
       onTextRecognized,
       ...(overrides.captureOnly ? { captureOnly: true, onImageCaptured } : {}),
+      ...(overrides.onCaptureRecognition
+        ? { onCaptureRecognition: overrides.onCaptureRecognition }
+        : {}),
     }),
   );
   return { onClose, onTextRecognized, onImageCaptured };
@@ -391,5 +395,84 @@ describe("MedicineTextScanner — temporary capture cleanup", () => {
     // IS the durable file. Deleting it here destroys a real prescription.
     expect(removeTemporaryCaptureMock).not.toHaveBeenCalled();
     expect(reportEventMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── W2-01 section 6.2.4: recognition on the captureOnly path ──────────────
+//
+// On the prescription path the camera ran, the image was stored, and the
+// image-to-text step never happened at all: the captureOnly branch returned
+// before scanText was called. It can now do both — but only when the caller
+// asks, and never at the cost of the capture.
+describe("MedicineTextScanner — captureOnly recognition", () => {
+  it("does not attempt recognition for a captureOnly caller that did not ask", async () => {
+    const { onImageCaptured } = renderScanner({ captureOnly: true });
+    fireEvent.click(await screen.findByLabelText("Capture photo"));
+
+    await waitFor(() =>
+      expect(onImageCaptured).toHaveBeenCalledWith("file:///strip.jpg"),
+    );
+    // Opt-in by presence: today's single caller keeps today's behaviour until
+    // it passes the callback, so no future caller acquires OCR silently.
+    expect(scanTextMock).not.toHaveBeenCalled();
+  });
+
+  it("hands back the image and then the recognised text", async () => {
+    const onImageCaptured = vi.fn();
+    const onCaptureRecognition = vi.fn();
+    renderScanner({ captureOnly: true, onImageCaptured, onCaptureRecognition });
+    fireEvent.click(await screen.findByLabelText("Capture photo"));
+
+    await waitFor(() =>
+      expect(onCaptureRecognition).toHaveBeenCalledWith("Napa Extra"),
+    );
+    // The image is the primary artefact, so it goes back first.
+    expect(onImageCaptured).toHaveBeenCalledWith("file:///strip.jpg");
+    expect(onImageCaptured.mock.invocationCallOrder[0]!).toBeLessThan(
+      onCaptureRecognition.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("still hands back the image when nothing can be read", async () => {
+    scanTextMock.mockResolvedValueOnce(null);
+    const onCaptureRecognition = vi.fn();
+    const { onImageCaptured, onClose } = renderScanner({
+      captureOnly: true,
+      onCaptureRecognition,
+    });
+    fireEvent.click(await screen.findByLabelText("Capture photo"));
+
+    await waitFor(() => expect(onCaptureRecognition).toHaveBeenCalledWith(null));
+    expect(onImageCaptured).toHaveBeenCalledWith("file:///strip.jpg");
+    // Null is an answer, not a failure: no retryable scan error, and the modal
+    // closes normally so the sale stays completable.
+    expect(screen.queryByText("No text detected on the strip. Hold it flat and steady, then retry.")).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("still hands back the image when the reader throws", async () => {
+    scanTextMock.mockRejectedValueOnce(new Error("ml kit unavailable"));
+    const onCaptureRecognition = vi.fn();
+    const { onImageCaptured, onClose } = renderScanner({
+      captureOnly: true,
+      onCaptureRecognition,
+    });
+    fireEvent.click(await screen.findByLabelText("Capture photo"));
+
+    await waitFor(() => expect(onCaptureRecognition).toHaveBeenCalledWith(null));
+    expect(onImageCaptured).toHaveBeenCalledWith("file:///strip.jpg");
+    expect(screen.queryByText("Couldn't read the strip. Try again.")).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("never deletes the capture, even once recognition runs on it", async () => {
+    const onCaptureRecognition = vi.fn();
+    renderScanner({ captureOnly: true, onCaptureRecognition });
+    fireEvent.click(await screen.findByLabelText("Capture photo"));
+
+    await waitFor(() => expect(onCaptureRecognition).toHaveBeenCalled());
+    // Recognition does not transfer ownership of the file to the scanner: the
+    // caller still owns it, and on a resumed held draft it is already durable.
+    expect(removeTemporaryCaptureMock).not.toHaveBeenCalled();
   });
 });
