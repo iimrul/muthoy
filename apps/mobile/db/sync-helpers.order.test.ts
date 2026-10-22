@@ -28,6 +28,14 @@ function syncedSchemaTables(): string[] {
     // be a device asserting its own access, and hydrating it onto another
     // device would be meaningless. Never in SYNCED_TABLES.
     "device_registry_state", "device_binding_state",
+    // W2-02. The medicine catalogue is national REFERENCE data, not shop data:
+    // it has no shop_id, no isDirty and no soft-delete (schema.ts:411-416), no
+    // server table exists for it, and nothing in sync/ references it. Pushing a
+    // 21,000-row catalogue from a device would be a device asserting facts about
+    // the country; hydrating it from a pull would be hydrating data no shop
+    // owns. Both are therefore local-only, and the import-provenance table with
+    // them.
+    "medicine_catalog", "medicine_catalog_imports",
   ]);
   return [...schemaSource.matchAll(/sqliteTable\(\s*["']([^"']+)["']/g)]
     .map((match) => match[1])

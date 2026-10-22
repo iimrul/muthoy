@@ -266,7 +266,9 @@ work, and these are its steps in order:
 **Operational constraint, still binding:** never run the full `vitest` suite
 concurrently with a Codex review. Under CPU contention
 `db/h7-pin-reservation.sqlite.test.ts` (5 s timeout, three bcrypt cost-10 fixtures) and
-`db/inventory-ledger.sqlite.test.ts` (250 ms budget) fail falsely; both pass in
+`db/inventory-ledger.sqlite.test.ts` (250 ms budget) fail falsely, and so does
+`backend/supabase/pgtest/h7-security.pgtest.ts` (one 5 s case, observed timing out in a
+265-file run and passing 51/51 in isolation). All three pass in
 isolation.
 
 ### 7.3 Gate 4 documentation, as written
