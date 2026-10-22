@@ -99,10 +99,53 @@ anyway.
 
 ## What each later batch still owns
 
-- **Batch 2 (9)** — scope **preserved as previously agreed**: prescription/invoice
-  **OCR**, the **21,000-medicine database**, and **Bangla / English / Banglish
-  search**. **Barcode scanning remains EXCLUDED** and is not to be reintroduced
-  into any batch without an explicit decision.
+- **Batch 2 (9)** — **IMPLEMENTED 2026-10-21 to 2026-10-22, CODE-COMPLETE, not
+  pushed and not device-verified.** Seven executable tasks shipped in code:
+  **W2-01** medicine OCR completion, **W2-02** the offline catalogue
+  mechanism, **W2-03** Bangla / English / Banglish search, **W4-06** admin
+  auth / RBAC / audit / sessions (Basic Auth retired), **W4-07** the six admin
+  management pages, **W4-08** three bounded admin write actions, and **W4-10**
+  SSLCommerz retirement. Evidence:
+  `docs/plans/muthoy-batch-2-implementation-2026-10-21.md`.
+
+  **Two of the nine are NOT implemented, by decision:**
+  - **W4-09 direct bKash — BLOCKED on E8.** Three undocumented contract
+    surfaces (the callback request contract, the `Authorization` value format,
+    the signature/IPN verification procedures). Its design and the verified
+    contract are preserved in `docs/plans/bkash-integration-runbook.md`.
+    Implementation and live acceptance move to **Batch 4**.
+  - **W5-16 barcode scanning — EXCLUDED** (Q1, founder decision).
+    **Barcode remains EXCLUDED and is not to be reintroduced into any batch
+    without an explicit decision.** OCR works independently with manual
+    confirmation; the barcode code that already shipped is neither deleted nor
+    extended.
+
+  **New gates opened by this batch:**
+  - **E7 — the medicine dataset.** The catalogue MECHANISM is complete and
+    **empty**. No licensed source exists: DGDA (authoritative) reports ~34,000
+    products behind an expired TLS certificate and publishes no bulk licence,
+    and the ~21,000 figure in the original scope line traces to an unlicensed
+    Kaggle scrape of medex.com.bd. **Zero rows ship and the 21,000 count is
+    not claimed.** See `docs/plans/medicine-catalog-provenance.md` for the
+    four conditions a verified count requires.
+  - **E8 — the bKash contract**, above.
+  - **E9 — prescription capture cleanup on the `captureOnly` path**,
+    descoped after five designs each proved unsafe. Existing durable captures
+    are preserved and no destructive cleanup was introduced.
+
+  **E5 (the payment gate Batch 1 left open) is CLOSED by founder decision:**
+  SSLCommerz is no longer approved and direct bKash is the only approved
+  subscription gateway. Since bKash is blocked, the shipped state is that the
+  product has **no active subscription payment path at all** — the safe,
+  fail-closed posture, which must not be described anywhere as a working
+  payment integration.
+
+  **Still blocked and untouched:** W4-04 and W4-05 (Batch 3), the H-9
+  migration seal (E4 — no Postgres migration was added, and
+  `backend/supabase/deploy/batch2-admin-audit.sql` stays outside the chain),
+  and shop location/map, which needs an `update` grant on `shops` that does
+  not exist. An effective-ACL pgtest now proves that absence rather than
+  assuming it.
 - **Batch 3 (21)** — H-9 hosted/recovery execution (ON HOLD, with the
   uncommitted working-tree paths and the H1/F12/N0/PG17 evidence preserved), the
   migration-chain extension, **W4-04 and W4-05 (still BLOCKED — see above)**,

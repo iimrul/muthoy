@@ -1,5 +1,13 @@
 # ML Kit Text Recognition (OCR) — Sale Entry + Add Medicine
 
+> **SUPERSEDED FOR STATUS on 2026-10-22 by**
+> [`ocr-and-multilingual-search.md`](ocr-and-multilingual-search.md), which
+> describes OCR as Batch 2 (W2-01) left it: the confirmation gates on both
+> scanners, the scanner-owned image deletion and its one descoped exception
+> (gate E9), and the per-line prescription review at checkout. Everything
+> below is kept for its history and its reasoning; where the two disagree
+> about what the code does, the newer document is right.
+
 > **Historical implementation plan — superseded for status on 2026-08-30.**
 > On-device OCR and barcode recognition are implemented. B2 Sale Entry uses
 > exact same-shop barcode candidates and an ambiguity picker; Add Medicine

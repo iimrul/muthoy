@@ -3930,3 +3930,115 @@ the two surfaces agree, which is what fails if a second map reappears.
 module without first checking whether the codebase already solved it, in a repo
 whose own rules say to search before writing. The review caught it; the test now
 does.
+
+## 2026-10-22 — Batch 2 (seven tasks): four decisions
+
+### 1. bKash supersedes SSLCommerz as the subscription provider — and that leaves no provider at all
+
+The 2026-08-31 decision recorded at line 1308 said: *"SSLCommerz is first
+provider. Verified provider data plus an exact server-side amount match are what
+grant entitlement."* That text stands as the record of what was true then, and
+the second half of it is still the rule. The first half is superseded.
+
+The founder's locked decision (2026-10-21) is that **SSLCommerz is no longer
+approved** and **direct bKash is the only approved subscription gateway**. W4-10
+therefore retires SSLCommerz from active selection and routing: `resolveProvider`
+refuses every `PAYMENT_PROVIDER` value — including `'sslcommerz'` itself — with
+503 `payment_not_configured`, and the device refuses before it writes a local
+attempt row.
+
+*The consequence, stated plainly because it must not be discovered later:* bKash
+is BLOCKED on gate E8 (three undocumented contract surfaces — the callback
+request contract, the `Authorization` value format, and the signature/IPN
+verification procedures). So after W4-10 the product has **no active
+subscription payment path at all**.
+
+*Decision:* ship the retirement anyway, and fail closed. It changes nothing
+operationally — the system already failed closed with no credentials
+configured — but it removes a provider that is no longer approved from every
+path that could select it, and it does so without touching a single historical
+payment: `payment-webhook/handler.ts` still verifies and applies a late
+callback, `_shared/sslcommerz.ts` and its 47 tests stay, no privilege is
+revoked, no payment function is dropped, and no migration was added.
+
+*Why it is worth recording:* the safe state and the complete state are not the
+same state. This is the safe one, and nothing anywhere — product copy, release
+notes, a pilot sign-off — may describe subscriptions as functional until E8 and
+E4 clear. The screen says so in both languages.
+
+### 2. The medicine catalogue does not violate rule 9 — and ships empty anyway
+
+CLAUDE.md rule 9 is *"No seed/demo data ships — every fresh shop starts
+empty."* A 21,000-row medicine catalogue looks like exactly the thing that rule
+forbids, so the reconciliation is recorded rather than assumed.
+
+*Decision:* a licensed medicine catalogue is **reference data, not seed data**,
+and rule 9 does not forbid it. The distinction is ownership: rule 9 exists so a
+new owner never sees a previous owner's *shop* data — invented sales, invented
+stock, invented customers. A catalogue of what medicines exist in Bangladesh is
+not any shop's data. It is owner-scoped on import, it creates no inventory, no
+batch and no sale, and selecting from it only **prefills a form the user then
+saves themselves**.
+
+*And it ships empty regardless*, for an unrelated reason: gate E7. No licensed
+source exists. DGDA, the authoritative registry, reports ~34,000 allopathic
+products behind an expired TLS certificate and publishes no bulk licence; the
+~21,000 figure in the original scope line traces to a Kaggle scrape of
+medex.com.bd with no stated licence. **Zero rows ship, and the count is not
+claimed.** `docs/plans/medicine-catalog-provenance.md` records the four
+conditions a verified count requires.
+
+*Why it is worth recording:* the rule-9 question and the licensing question have
+different answers, and conflating them would have produced either a wrongly
+blocked feature or a wrongly shipped scrape.
+
+### 3. The admin session is a signed stateless cookie, not a session table
+
+W4-06 needed real admin identity: per-account login, roles, logout, lockout and
+an audit trail. The obvious shape for sessions is a `admin_sessions` table with
+per-row revocation.
+
+*Decision:* use a **signed, stateless cookie** — HMAC-SHA256 over
+`{ sub, role, iat, exp, lastSeen, epoch }`, with an 8-hour absolute TTL and a
+30-minute idle TTL — and take revocation from an `ADMIN_SESSION_EPOCH`
+environment integer.
+
+The reason is the H-9 migration seal (E4). A session table is a Postgres
+migration, and adding one to the chain breaks three H-9 gates including a
+hash-pinned check file. The choice was therefore: a session table and a broken
+seal, or no table and a weaker revocation story. The weaker revocation story
+wins, because it is weaker in a way that is bounded and stateable.
+
+*The limits, which the panel's own README and `/audit` page both state:*
+revocation is all-or-nothing (no per-user revoke until the Batch 3 table) and
+environment-bound (it takes effect once the new environment is live, which on a
+host like Vercel means deployment propagation, not instantly); the two login
+throttles are per-instance module state, so N instances allow N times the
+attempts; and the in-app audit view is per-instance and non-durable, with
+**stderr as the record of account**.
+
+*Why it is worth recording:* each of those three is a real operational
+constraint that someone will otherwise discover during an incident. The sink is
+an interface precisely so the Batch 3 Postgres sink changes no call site.
+
+### 4. Barcode stays EXCLUDED, and the contradiction in the older documents is resolved here
+
+Older planning documents treat barcode scanning as part of the OCR work, and
+`docs/plans/ocr.md` describes barcode candidates and an ambiguity picker as
+shipped behaviour. The Batch 2 scope question Q1 resolved the other way:
+**barcode is EXCLUDED.**
+
+*Decision:* implement no barcode scanning and no barcode fallback. OCR must work
+independently, with manual confirmation. The barcode code that already shipped
+is **neither deleted nor extended** — deleting working shipped code to satisfy a
+scope decision would be a regression dressed as tidiness.
+
+So the confirmation gate W2-01 added covers the paths where a MISREAD can reach
+the cart, on both scanners. It deliberately does **not** cover tapping a search
+result or tapping a barcode candidate: both are explicit user choices, not a
+machine's reading of a blurry strip.
+
+*Why it is worth recording:* two documents disagreed about whether barcode was
+in scope, and the disagreement is now resolved in the place that is read first.
+`docs/plans/ocr.md` carries a header pointing at
+`docs/plans/ocr-and-multilingual-search.md` for current status.

@@ -1,8 +1,11 @@
 # Muthoy POS — Batch 2 Gate 3 handoff (local checkpoint)
 
 **Date:** 2026-10-22
-**Status:** **Gate 3 IN PROGRESS.** Gates 1–2 are CLOSED and must not be repeated.
-**Batch 2 is NOT closed.** No GitHub push, no Codex final review, no CI run yet.
+**Status:** **Gate 3 COMPLETE — all seven executable tasks are CODE-COMPLETE.**
+Gates 1–2 are CLOSED and must not be repeated. **Batch 2 is NOT closed:** the
+closing sequence (§8) is under way — documentation is written, and the Codex
+FINAL ACCEPT, the push and CI are still outstanding. `origin/main` is still
+`51c5230`.
 
 ---
 
@@ -97,18 +100,19 @@ All of W2-03, and W2-02's **data layer** — not its UI, and not its dataset.
 
 ## 4. The seven executable tasks and what remains
 
-**W2-01, W2-02, W2-03 and W4-10 are code-complete** (W2-02 is still dataset-blocked by
-E7; W4-10 is LOCAL CODE ONLY — nothing was deployed and no live provider has been
-retired). **W4-06, W4-07 and W4-08 are unbuilt.**
+**All seven executable tasks are CODE-COMPLETE.** W2-02 is still dataset-blocked by E7;
+W4-10 is LOCAL CODE ONLY (nothing deployed, no live provider retired); W4-06/07/08 are
+local code with no Vercel deployment, no provisioned account and the admin read grants
+still undeployed. **No task is DEVICE/PRODUCTION-VERIFIED.**
 
 | ID | Task | State | Remaining |
 |---|---|---|---|
 | **W2-02** | Offline medicine catalogue | **code DONE (data layer + UI); DATASET NOT DONE** | nothing in code. UI wiring landed in `2b39062`: `catalogMedicineSearchProvider` is passed from `app/inventory/add-medicine.tsx`, selection re-reads via `getCatalogEntry` before the form opens, `SearchMedicineTab.tsx` renders strength/dosage form/pack size and guards overlapping queries with `domain/latestRequestGuard.ts`, `ManualEntryForm.tsx` exposes Strength/Dosage form/Unit as editable prefills, and `addMedicineSchema` + `CreateMedicineWithPurchaseInput` carry the optional `type`. New pure mapper `domain/catalogPrefill.ts` (24 tests). **Gate E7 still blocks the feature: zero rows ship and the 21,000 count is not claimed.** Selection stays a READ; `createMedicineFromCatalog` was not built. |
 | **W2-03** | English / Bangla / Banglish search | **DONE** (data layer); its UI surface rides on W2-02's wiring | — |
 | **W2-01** | Medicine OCR completion | **DONE** (all three gaps) | nothing. `9bc08a6` scanner-owned capture cleanup; `9e7d880` the confirmation gate on BOTH scanners; `ca7a7a4` opt-in `captureOnly` recognition; `fd9b21b` the per-line prescription review at checkout, with the founder-approved behaviour that a confirmed line calls the existing `addItem` then `resetQuote()`. Barcode untouched (Q1 EXCLUDED); capture cleanup on the `captureOnly` path still descoped (E9). |
-| **W4-06** | Admin auth / RBAC / audit / sessions | **NOT STARTED** | `apps/admin/lib/{adminIdentity,adminSession,adminRoles,adminAuthz,adminAudit}.ts` + tests; `middleware.ts` exact-pathname exemption; `app/api/admin/session/route.ts`; `app/login/page.tsx`; `scripts/admin-hash-password.mjs` |
-| **W4-07** | Admin management pages | **NOT STARTED** | `lib/adminQueries.ts`; `app/shops/[id]`, `app/accounts`, `app/accounts/[id]`, `app/subscriptions`, `app/payments`, `app/audit` |
-| **W4-08** | Admin write actions | **NOT STARTED** | `lib/adminActions.ts` (three RPC-backed actions only); `lib/adminGrants.test.ts` restructure; source-level write-restriction test; `pgtest/batch2-admin-acl.pgtest.ts` |
+| **W4-06** | Admin auth / RBAC / audit / sessions | **code DONE; NOT DEPLOYED** | nothing in code. `64c5f4b`: the five lib modules plus `adminLogin.ts`, the exact-match public-path set in `middleware.ts`, the Node session route, the login page, and `scripts/admin-hash-password.mjs`. Basic Auth retired (asserted). Reference: `docs/plans/admin-auth-rbac.md`. **Remaining is deployment-side: no Vercel deploy, no account provisioned, the founder's local `.env.local` still holds the retired variables** |
+| **W4-07** | Admin management pages | **code DONE; NOT DEPLOYED** | nothing in code. `e8455e4`: all six pages plus `lib/adminQueries.ts` and the pure `lib/adminViews.ts`, the GROSS-label guard and the money/font guard. **The pages have never been loaded against live Supabase — migration `20260817000000` is still undeployed** |
+| **W4-08** | Admin write actions | **code DONE; NOT EXECUTED LIVE** | nothing in code. `a2c196a`: `lib/adminActions.ts` (two existing RPCs + one guarded `payment_orders` transition), the `adminGrants.test.ts` restructure, the source-level write restriction with two negative controls, and `pgtest/batch2-admin-acl.pgtest.ts`. **No action has run against live data** |
 | **W4-10** | SSLCommerz retirement | **code DONE; NOT DEPLOYED** | nothing in code. `103ac1a`: `functions/sync/_shared/paymentProvider.ts` is the seam — `resolveProvider` reads `PAYMENT_PROVIDER` and refuses every value (unset, empty, unknown, `bkash`, and `sslcommerz` itself) with 503 `payment_not_configured`, imports neither `createSslCommerzSession` nor `sslCommerzConfig`, and `billing.ts` no longer imports that module at all; `apps/mobile/sync/billing.ts` refuses BEFORE `getBillingAccountIdForShop` and `createPaymentAttempt`; `app/settings/plan-payment.tsx` names no provider, shows a payment-unavailable card in bn+en and disables Pay while still polling an order passed in through params. `payment-webhook/handler.ts` is comment-only; no privilege revoked, no function dropped, no migration added, `_shared/sslcommerz.ts` byte-identical. **Hosted deployment is NOT done and is not claimed** |
 
 **Not in scope, by founder decision:**
@@ -155,7 +159,7 @@ sealed H-9/F12/H1 evidence or anything in `.gitattributes`' `eol=lf` list.
 
 ## 7. The exact next implementation step
 
-**W2-01, W2-02, W2-03 and W4-10 are code-complete.** Six code checkpoints, **20**
+**All seven executable tasks are code-complete.** Nine code checkpoints, **37**
 mutation checks, every one failing the assertion it was aimed at.
 
 **Mutation-count reconciliation (2026-10-22, no new review):** an earlier revision of
@@ -165,7 +169,8 @@ has no source. The authoritative record is the commit messages themselves —
 **14**, which is what the per-checkpoint table below has always summed to. The "11"
 was a transcription slip and is corrected here. `103ac1a` adds six, giving 20.
 `63b88df`'s own checks (the transliteration fold, the migration registry key) sit
-outside this count, in §3.
+outside this count, in §3. `64c5f4b` adds six, `e8455e4` six and `a2c196a` five, so the
+running total is **37**.
 
 | Checkpoint | What landed | Verification |
 |---|---|---|
@@ -175,6 +180,9 @@ outside this count, in §3.
 | `ca7a7a4` | W2-01 §6.2.4a — `captureOnly` recognition, opt-in by presence | mobile tsc 0; 5 files / 53 tests; 2 mutations |
 | `fd9b21b` | W2-01 §6.2.4b — the per-line prescription review at checkout | mobile+admin tsc 0; 70 files / 804 tests; 2 mutations |
 | `103ac1a` | W4-10 §7.6 — the provider seam refuses every environment; the device refuses before its first write; the screen names no provider | mobile+admin tsc 0; 25 files / 490 tests; 6 mutations |
+| `64c5f4b` | W4-06 §4 — per-account login, signed stateless session, role table, audit log; Basic Auth retired | tsc 0; admin build ✓; no secret in client chunks; 21 files / 361 tests; 6 mutations |
+| `e8455e4` | W4-07 §5.1 — six read-only pages, validated drill-downs, the GROSS and font-mono guards | tsc 0; build ✓; 14 files / 331 tests; 6 mutations |
+| `a2c196a` | W4-08 §5.3/§5.5 — three bounded write actions, source-level write restriction, effective-ACL pgtest | tsc 0; lint ✓; build ✓; 17 files / 396 tests; 5 mutations |
 
 H-9 seal re-verified at every checkpoint: **34** Postgres migrations, same tail,
 `h9_postmigration_checks.sql` SHA-256 still
@@ -240,25 +248,41 @@ offers plan selection and routes to the payment screen, where the unavailable st
 what the owner meets. Gating the plans screen itself was not in the plan's file list and
 was not added.
 
-### 7.2 The exact next implementation step: W4-06
+### 7.2 Gate 3 is closed. The closing sequence is where we are now.
 
-Admin auth / RBAC / audit / sessions, from §4: `apps/admin/lib/{adminIdentity,
-adminSession,adminRoles,adminAuthz,adminAudit}.ts` + tests; `middleware.ts`
-exact-pathname exemption; `app/api/admin/session/route.ts`; `app/login/page.tsx`;
-`scripts/admin-hash-password.mjs`. Plan §5 holds the accepted design, including the
-stateless-session decision and the `basicAuth.ts` retirement that keeps
-`constantTimeEquals`. Then W4-07 -> W4-08 (largest, do last).
+There is no next implementation step: W4-06 (`64c5f4b`), W4-07 (`e8455e4`) and W4-08
+(`a2c196a`) are code-complete, which was the last of the seven. §8 is the remaining
+work, and these are its steps in order:
 
-Standing constraints that still bind: no new Postgres migration (the H-9 seal, §2.1),
-`backend/supabase/deploy/batch2-admin-audit.sql` stays OUTSIDE the chain, the 41
-pre-existing dirty paths stay unstaged, and nothing is pushed until all seven tasks are
-implemented (§8).
+| Step | State |
+|---|---|
+| focused tests | **DONE** per task, and a full-suite run is the batch-level evidence |
+| Gate 4 documentation (plan §8) | **DONE** — see §7.3 |
+| **Codex FINAL ACCEPT** | **OUTSTANDING.** Nothing may be pushed before it |
+| selective GitHub push by explicit path | **OUTSTANDING** |
+| CI PASS | **OUTSTANDING** |
+| Batch 2 delivery report | **OUTSTANDING** — written after CI, distinguishing CODE-COMPLETE, BLOCKED and DEVICE/PRODUCTION-VERIFIED |
 
-**Operational constraint:** never run the full `vitest` suite concurrently with a Codex
-review. Under CPU contention `db/h7-pin-reservation.sqlite.test.ts` (5 s timeout, three
-bcrypt cost-10 fixtures) and `db/inventory-ledger.sqlite.test.ts` (250 ms budget) fail
-falsely; both pass in isolation (34/34). Baseline is 243 files / 5062 tests.
+**Operational constraint, still binding:** never run the full `vitest` suite
+concurrently with a Codex review. Under CPU contention
+`db/h7-pin-reservation.sqlite.test.ts` (5 s timeout, three bcrypt cost-10 fixtures) and
+`db/inventory-ledger.sqlite.test.ts` (250 ms budget) fail falsely; both pass in
+isolation.
 
+### 7.3 Gate 4 documentation, as written
+
+| File | State |
+|---|---|
+| `docs/plans/muthoy-batch-2-implementation-2026-10-21.md` | **NEW** — the evidence document: per-task before/after, every commit with its test counts, the four bugs the checks found, and the gate list |
+| `docs/plans/admin-auth-rbac.md` | **NEW** — roles, permissions, session properties, the audit sink, provisioning without a plaintext password, and the three honest limits |
+| `docs/plans/medicine-catalog-provenance.md` | **NEW** — why zero rows ship, the JSONL format and its reason, and the four conditions a verified count requires |
+| `docs/plans/ocr-and-multilingual-search.md` | **NEW** — the OCR architecture as it now stands, both confirmation gates, the image-deletion guarantee and its one descoped exception |
+| `docs/plans/bkash-integration-runbook.md` | **NEW** — the verified contract, the three undocumented surfaces, the identifier problem, the fail-closed matrix and the four live-activation gates |
+| `docs/plans/muthoy-five-batch-delivery-ledger.md` | UPDATED — Batch 2 on both axes, the nine IDs, E7/E8/E9 opened, E5 closed by founder decision |
+| `DECISIONS.md` | UPDATED — appended at the END (112 lines): the bKash supersession preserving the 2026-08-31 text, the catalogue's rule-9 reconciliation, the stateless-session decision, the barcode contradiction. **The founder's uncommitted H-9 hunk at line 3651 is untouched and stays UNSTAGED** — the index was built from HEAD plus this append only |
+| `docs/plans/ocr.md` | UPDATED — status header pointing at the new document; historical text preserved |
+| `apps/admin/README.md` | UPDATED in `64c5f4b` — the new scheme, the env list, and the three honest limits |
+| `docs/plans/muthoy-batch-2-plan.md` | unchanged (revision 7 with its review log) |
 ## 8. Closing sequence (only after all seven tasks are implemented)
 
 focused tests → documentation (Gate 4's document set, plan §8) → **Codex FINAL ACCEPT**
