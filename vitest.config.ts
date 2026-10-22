@@ -389,6 +389,11 @@ export default defineConfig({
       "backend/supabase/pgtest/b3-group7-purchase-return-sync.pgtest.ts",
       "backend/supabase/pgtest/inventory-add-purchase-sync.pgtest.ts",
       "backend/supabase/pgtest/b4.pgtest.ts",
+      // W4-08. The admin panel's EFFECTIVE privileges on a real Postgres:
+      // what service_role actually holds after every GRANT, REVOKE and role
+      // membership in the chain, including the negatives (no shop UPDATE, no
+      // sales write, nothing on the device registry, nothing for anon).
+      "backend/supabase/pgtest/batch2-admin-acl.pgtest.ts",
       // One onboarding function for BOTH the real OTP flow and DEV Skip-OTP,
       // proving they reach the same rows and the same token claims — plus the
       // Multi-Shop rename/archive path that had the identical 42501.

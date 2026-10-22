@@ -4,6 +4,9 @@ import DataTable, { type DataColumn } from '../../../components/DataTable';
 import DetailList from '../../../components/DetailList';
 import ErrorNotice from '../../../components/ErrorNotice';
 import { requireAdminPermission } from '../../../lib/adminAuthz';
+import { hasPermission } from '../../../lib/adminRoles';
+import ActionButton from '../../../components/ActionButton';
+import { reconcileLimitsAction, refreshSnapshotAction } from '../../adminFormActions';
 import { getAccountDetail, type AccountDetailView } from '../../../lib/adminQueries';
 import {
   billingCycleLabel,
@@ -51,11 +54,28 @@ const MEMBER_COLUMNS: readonly DataColumn<MembershipRow>[] = [
 
 interface AccountPageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default async function AccountDetailPage({ params }: AccountPageProps) {
+const OUTCOME_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
+  refresh: 'Entitlement snapshot refreshed.',
+  reconcile: 'Plan limits reconciled.',
+});
+
+function outcomeNote(params: Record<string, string | string[] | undefined>): string | null {
+  const done = typeof params.done === 'string' ? params.done : null;
+  const failed = typeof params.failed === 'string' ? params.failed : null;
+  if (done !== null && Object.prototype.hasOwnProperty.call(OUTCOME_MESSAGES, done)) {
+    return OUTCOME_MESSAGES[done] ?? null;
+  }
+  if (failed !== null) return 'That action did not complete. The audit log and server log have the details.';
+  return null;
+}
+
+export default async function AccountDetailPage({ params, searchParams }: AccountPageProps) {
+  let session;
   try {
-    await requireAdminPermission('accounts.read');
+    session = await requireAdminPermission('accounts.read');
   } catch (error: unknown) {
     console.error('[admin] account detail denied:', error);
     return <ErrorNotice message={toDisplayMessage(error)} />;
@@ -76,11 +96,38 @@ export default async function AccountDetailPage({ params }: AccountPageProps) {
   if (detail === null) notFound();
 
   const { account, entitlement } = detail;
+  const note = outcomeNote(await searchParams);
+  const mayWrite = hasPermission(session.role, 'subscriptions.write');
 
   return (
     <>
       <h1 className="text-xl font-semibold">{account.primaryShopName}</h1>
       <p className="mt-1 text-sm text-midGray">Billing account {account.id}</p>
+
+      {note === null ? null : (
+        <p role="status" className="mt-4 rounded border border-black/10 px-3 py-2 text-sm text-midGray">
+          {note}
+        </p>
+      )}
+
+      {mayWrite ? (
+        <div className="mt-6 flex flex-wrap items-start gap-4">
+          <ActionButton
+            action={refreshSnapshotAction}
+            fieldName="accountId"
+            fieldValue={account.id}
+            label="Refresh entitlement snapshot"
+            hint="Re-derives the snapshot from this account's own subscription rows."
+          />
+          <ActionButton
+            action={reconcileLimitsAction}
+            fieldName="accountId"
+            fieldValue={account.id}
+            label="Reconcile plan limits"
+            hint="Re-applies the plan's shop and staff limits. Grants nothing."
+          />
+        </div>
+      ) : null}
 
       <div className="mt-6">
         <DetailList

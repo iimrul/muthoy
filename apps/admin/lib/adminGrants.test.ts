@@ -25,7 +25,7 @@
 // file. This one answers "is the grant present in the chain at all".
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const ADMIN_ROOT = join(import.meta.dirname, '..');
@@ -193,5 +193,123 @@ describe('admin Postgres privileges', () => {
         new RegExp(String.raw`alter\s+table\s+(?:public\.)?${table}\s+enable\s+row\s+level\s+security`, 'i'),
       );
     }
+  });
+});
+
+// W4-08 — what actually bounds admin write power.
+//
+// The GRANT text above cannot: b4_commercial_platform.sql:194 already gives
+// service_role insert and update on all seven commercial tables, so the chain
+// permits far more than the panel may do. What bounds it is the SOURCE: the
+// only direct table write allowed anywhere in apps/admin is the one guarded
+// payment_orders status update, and everything else must go through an
+// existing SECURITY DEFINER RPC.
+//
+// Two negative controls, because one proves too little. A synthetic migration
+// granting DELETE must be rejected by the grant assertions, and a synthetic
+// admin source containing a second .update( must be rejected by the source
+// assertions — each targets a different one of the two mechanisms.
+describe('admin write power is bounded at the source', () => {
+  const ADMIN_SOURCES = (function collect(directory: string): { path: string; code: string }[] {
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const absolute = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        return ['node_modules', '.next', '.turbo', 'test'].includes(entry.name)
+          ? []
+          : collect(absolute);
+      }
+      if (!/\.(ts|tsx)$/.test(entry.name) || /\.test\.tsx?$/.test(entry.name)) return [];
+      const contents = readFileSync(absolute, 'utf8');
+      return [{
+        path: relative(ADMIN_ROOT, absolute).split(sep).join('/'),
+        code: contents.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1'),
+      }];
+    });
+  })(ADMIN_ROOT);
+
+  /** The ONE approved direct write. */
+  const APPROVED_WRITE_SITE = 'lib/adminActions.ts';
+
+  /**
+   * A PostgREST write, and not a Map write. `.insert(`, `.update(` and
+   * `.upsert(` exist only on the query builder here, but `.delete(` is also
+   * Map.prototype.delete — lib/adminLogin.ts prunes its throttle maps with it,
+   * and counting that as a table write made this assertion fire on code that
+   * touches no table at all. So a delete counts only inside a .from() chain.
+   */
+  function writeCallSites(source: { path: string; code: string }): string[] {
+    const sites: string[] = [];
+    for (const match of source.code.matchAll(/\.(insert|update|upsert)\s*\(/g)) {
+      sites.push(match[1] ?? '');
+    }
+    const chainedDeletes = source.code.match(
+      /\.from\(\s*'[a-z_]+'\s*\)[\s\S]{0,300}?\.delete\s*\(/g,
+    );
+    for (let index = 0; index < (chainedDeletes?.length ?? 0); index += 1) {
+      sites.push('delete');
+    }
+    return sites;
+  }
+
+  test('finds the admin source tree', () => {
+    expect(ADMIN_SOURCES.length).toBeGreaterThan(10);
+  });
+
+  test('no admin source outside the approved call site performs a direct table write', () => {
+    const offenders = ADMIN_SOURCES
+      .filter((source) => source.path !== APPROVED_WRITE_SITE)
+      .filter((source) => writeCallSites(source).length > 0);
+
+    expect(offenders.map((source) => source.path)).toEqual([]);
+  });
+
+  test('the approved call site performs exactly ONE update and no other write', () => {
+    const approved = ADMIN_SOURCES.find((source) => source.path === APPROVED_WRITE_SITE);
+
+    expect(approved).toBeDefined();
+    expect(writeCallSites(approved ?? { path: '', code: '' })).toEqual(['update']);
+  });
+
+  test('that one update targets payment_orders and carries both guards', () => {
+    const approved = ADMIN_SOURCES.find((source) => source.path === APPROVED_WRITE_SITE);
+
+    expect(approved?.code).toContain(".from('payment_orders')");
+    expect(approved?.code).toContain(".in('status', ['created', 'pending'])");
+    expect(approved?.code).toContain(".lte('expires_at', now)");
+  });
+
+  test('every other write goes through an existing SECURITY DEFINER RPC', () => {
+    const approved = ADMIN_SOURCES.find((source) => source.path === APPROVED_WRITE_SITE);
+    const rpcNames = [...(approved?.code.matchAll(/\.rpc\('([a-z0-9_]+)'/g) ?? [])].map((match) => match[1]);
+
+    expect(rpcNames.sort()).toEqual(['b4_reconcile_plan_limits', 'b4_refresh_entitlement_snapshot']);
+    for (const name of rpcNames) {
+      expect(MIGRATIONS_SQL).toMatch(
+        new RegExp(String.raw`create or replace function ${name}\(`, 'i'),
+      );
+      expect(MIGRATIONS_SQL).toMatch(
+        new RegExp(String.raw`grant execute on function ${name}\([^)]*\) to [a-z_,\s]*service_role`, 'i'),
+      );
+    }
+  });
+
+  test('negative control A: a synthetic DELETE grant on shops would be rejected', () => {
+    const synthetic = 'grant delete on table public.shops to service_role;';
+
+    expect(grantPattern('delete', 'shops', 'service_role').test(synthetic)).toBe(true);
+    // And the real chain does not contain it.
+    expect(MIGRATIONS_SQL).not.toMatch(grantPattern('delete', 'shops', 'service_role'));
+  });
+
+  test('negative control B: a synthetic second .update( would be rejected', () => {
+    const synthetic = {
+      path: 'lib/pretendQueries.ts',
+      code: "const x = await client.from('shops').update({ name: 'nope' }).eq('id', id);",
+    };
+
+    expect(writeCallSites(synthetic)).toEqual(['update']);
+    // The real assertion would therefore fail for this file, because it is not
+    // the approved call site.
+    expect(synthetic.path).not.toBe(APPROVED_WRITE_SITE);
   });
 });

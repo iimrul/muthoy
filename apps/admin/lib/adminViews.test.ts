@@ -290,13 +290,14 @@ describe('summarizePaymentOrders', () => {
         { id: 'e2', paymentOrderId: 'o1', processingStatus: 'verified', errorCode: null, receivedAt: '2026-10-01T06:20:00.000Z' },
       ],
       accounts: accountSummaries,
+      now: Date.parse('2026-10-01T06:30:00.000Z'),
     });
 
     expect(summaries[0]).toMatchObject({ eventCount: 2, latestEventStatus: 'verified' });
   });
 
   test('an order with no event reports null, not a fabricated status', () => {
-    const summaries = summarizePaymentOrders({ orders: [order], events: [], accounts: accountSummaries });
+    const summaries = summarizePaymentOrders({ orders: [order], events: [], accounts: accountSummaries, now: Date.parse('2026-10-01T06:30:00.000Z') });
     expect(summaries[0]).toMatchObject({ eventCount: 0, latestEventStatus: null });
   });
 
@@ -305,6 +306,7 @@ describe('summarizePaymentOrders', () => {
       orders: [order],
       events: [{ id: 'e9', paymentOrderId: null, processingStatus: 'rejected', errorCode: 'x', receivedAt: '2026-10-02T06:00:00.000Z' }],
       accounts: accountSummaries,
+      now: Date.parse('2026-10-01T06:30:00.000Z'),
     });
 
     expect(summaries[0]?.eventCount).toBe(0);
@@ -315,6 +317,7 @@ describe('summarizePaymentOrders', () => {
       orders: [order, { ...order, id: 'o2', createdAt: '2026-10-05T06:00:00.000Z' }],
       events: [],
       accounts: accountSummaries,
+      now: Date.parse('2026-10-01T06:30:00.000Z'),
     });
 
     expect(summaries.map((row) => row.id)).toEqual(['o2', 'o1']);
@@ -377,5 +380,65 @@ describe('labels and formatting', () => {
 
   test('sumPaisa refuses a non-integer rather than rounding money silently', () => {
     expect(() => sumPaisa([1.5])).toThrow();
+  });
+});
+
+describe('isStaleOpen (W4-08)', () => {
+  const accountSummaries = summarizeAccounts({
+    accounts: [account(ACCOUNT_A, SHOP_A, '2026-09-01T06:00:00.000Z')],
+    shops: [shop(SHOP_A, 'Alpha Pharmacy', ACCOUNT_A)],
+    memberships: [],
+    entitlements: [],
+  });
+
+  const openOrder = {
+    id: 'o1',
+    billingAccountId: ACCOUNT_A,
+    tier: 'pro',
+    billingCycle: 'monthly',
+    amountPaisa: asPaisa(39_900),
+    status: 'pending',
+    provider: 'sslcommerz',
+    failureCode: null,
+    expiresAt: '2026-10-01T07:00:00.000Z',
+    verifiedAt: null,
+    createdAt: '2026-10-01T06:00:00.000Z',
+  };
+
+  function flagFor(overrides: Partial<typeof openOrder>, nowIso: string): boolean {
+    const [row] = summarizePaymentOrders({
+      orders: [{ ...openOrder, ...overrides }],
+      events: [],
+      accounts: accountSummaries,
+      now: Date.parse(nowIso),
+    });
+    return row?.isStaleOpen ?? false;
+  }
+
+  test('an open order past its expiry is stale', () => {
+    expect(flagFor({}, '2026-10-01T07:00:01.000Z')).toBe(true);
+    expect(flagFor({ status: 'created' }, '2026-10-01T08:00:00.000Z')).toBe(true);
+  });
+
+  test('an open order still inside its window is NOT stale', () => {
+    expect(flagFor({}, '2026-10-01T06:30:00.000Z')).toBe(false);
+  });
+
+  test('the boundary instant counts as stale, matching the update guard', () => {
+    // The action's guard is lte('expires_at', now), so the two must agree at
+    // exactly the expiry instant or the button and the write disagree.
+    expect(flagFor({}, '2026-10-01T07:00:00.000Z')).toBe(true);
+  });
+
+  test.each(['verified', 'failed', 'canceled', 'expired'])(
+    'a %s order is never stale-open, however old it is',
+    (status) => {
+      expect(flagFor({ status }, '2027-01-01T00:00:00.000Z')).toBe(false);
+    },
+  );
+
+  test('an unparseable expiry is not stale — it is not a licence to write', () => {
+    expect(flagFor({ expiresAt: 'not a date' }, '2027-01-01T00:00:00.000Z')).toBe(false);
+    expect(flagFor({ expiresAt: '' }, '2027-01-01T00:00:00.000Z')).toBe(false);
   });
 });

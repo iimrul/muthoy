@@ -236,12 +236,27 @@ export interface PaymentOrderSummary extends PaymentOrderRow {
   /** How many provider events this order has, and the latest processing status. */
   eventCount: number;
   latestEventStatus: string | null;
+  /**
+   * Still open AND already past expires_at, decided with the same instant the
+   * rows were read at. The page must not call Date.now() while rendering — a
+   * Server Component has to be pure — and the write action re-checks both
+   * conditions in its own UPDATE guard anyway, so a stale list cannot become a
+   * wrong write.
+   */
+  isStaleOpen: boolean;
+}
+
+export function isStaleOpenOrder(order: Pick<PaymentOrderRow, 'status' | 'expiresAt'>, now: number): boolean {
+  if (order.status !== 'created' && order.status !== 'pending') return false;
+  const expiresAt = Date.parse(order.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt <= now;
 }
 
 export function summarizePaymentOrders(input: {
   orders: readonly PaymentOrderRow[];
   events: readonly ProviderEventRow[];
   accounts: readonly AccountSummary[];
+  now: number;
 }): PaymentOrderSummary[] {
   const accountLabels = new Map(input.accounts.map((account) => [account.id, account.primaryShopName]));
   const eventsByOrder = new Map<string, ProviderEventRow[]>();
@@ -261,6 +276,7 @@ export function summarizePaymentOrders(input: {
         accountLabel: accountLabels.get(order.billingAccountId) ?? EMPTY_VALUE,
         eventCount: events.length,
         latestEventStatus: events[0]?.processingStatus ?? null,
+        isStaleOpen: isStaleOpenOrder(order, input.now),
       };
     })
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));

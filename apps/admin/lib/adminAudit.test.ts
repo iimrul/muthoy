@@ -184,3 +184,46 @@ describe('the in-process ring buffer', () => {
     expect(ring.entries()).toEqual([]);
   });
 });
+
+describe('the scrubber must not destroy the record it protects (W4-08)', () => {
+  test('a UUID target survives intact', () => {
+    const { sink, entries } = capture();
+    const order = '7b000000-0000-4000-8000-000000000001';
+
+    recordAdminAction(
+      { actor: 'founder', action: 'payment.expire_stale_order', target: order, outcome: 'success', now: NOW },
+      [sink],
+    );
+
+    // A looser phone pattern matched the zero run inside this id and the audit
+    // entry came out naming "...8000-[redacted]1", which is an audit log that
+    // cannot say what it changed.
+    expect(entries[0]?.target).toBe(order);
+  });
+
+  test.each([
+    ['an account id', '86666666-6666-4666-8666-666666666666'],
+    ['a zero-heavy id', '00000000-0000-4000-8000-000000000000'],
+    ['a shop id', '81111111-1111-4111-8111-111111111111'],
+  ])('%s is not mistaken for a phone number', (_label, id) => {
+    const { sink, entries } = capture();
+    recordAdminAction({ actor: 'founder', action: 'test', target: id, outcome: 'success', now: NOW, meta: { shopId: id } }, [sink]);
+
+    expect(entries[0]?.target).toBe(id);
+    expect(entries[0]?.meta.shopId).toBe(id);
+  });
+
+  test('a real BD mobile is still redacted, in every shape it arrives in', () => {
+    const { sink, entries } = capture();
+
+    recordAdminAction({
+      actor: 'founder',
+      action: 'test',
+      outcome: 'success',
+      now: NOW,
+      meta: { reason: 'called 01712345678, then 8801712345678, then +8801712345678' },
+    }, [sink]);
+
+    expect(entries[0]?.meta.reason).toBe('called [redacted], then [redacted], then [redacted]');
+  });
+});

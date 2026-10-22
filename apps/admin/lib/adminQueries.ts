@@ -256,7 +256,9 @@ export async function listSubscriptionSummaries(): Promise<SubscriptionSummary[]
   });
 }
 
-export async function listPaymentOrderSummaries(): Promise<PaymentOrderSummary[]> {
+export async function listPaymentOrderSummaries(
+  now: Date = new Date(),
+): Promise<PaymentOrderSummary[]> {
   const supabase = getSupabaseAdmin();
   const [accounts, orderRows, eventRows] = await Promise.all([
     listAccountSummaries(),
@@ -302,7 +304,7 @@ export async function listPaymentOrderSummaries(): Promise<PaymentOrderSummary[]
     receivedAt: String(row.received_at ?? ''),
   }));
 
-  return summarizePaymentOrders({ orders, events, accounts });
+  return summarizePaymentOrders({ orders, events, accounts, now: now.getTime() });
 }
 
 /**

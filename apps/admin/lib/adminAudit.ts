@@ -65,10 +65,16 @@ export const ALLOWED_META_KEYS: readonly string[] = [
 const MAX_VALUE_LENGTH = 200;
 const RING_CAPACITY = 200;
 
-// A Bangladeshi mobile number, and any long opaque token (a JWT, a service-role
-// key, a hex hash). Allowlisted keys carry free text, so the value is scrubbed
-// as well as the key being checked.
-const PHONE_PATTERN = /(?:\+?88)?0\d{9,10}/g;
+// A Bangladeshi mobile number, and any long opaque token (a JWT, a
+// service-role key, a hex hash). Allowlisted keys carry free text, so the
+// value is scrubbed as well as the key being checked.
+//
+// The phone pattern is ANCHORED between non-hex, non-dash boundaries and
+// requires the real 01 + 9-digit shape. A looser `0\d{9,10}` matched the zero
+// run inside a UUID, so an audit entry naming the payment order it changed
+// came out as "7b000000-0000-4000-8000-[redacted]1" — a scrubber that
+// destroys the record it is protecting. A test pins that now.
+const PHONE_PATTERN = /(?<![0-9A-Fa-f-])(?:\+?88)?01[0-9]{9}(?![0-9A-Fa-f-])/g;
 const LONG_TOKEN_PATTERN = /[A-Za-z0-9_\-.]{40,}/g;
 
 function scrubValue(value: string): string {
