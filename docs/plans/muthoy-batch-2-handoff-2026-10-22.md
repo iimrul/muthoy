@@ -28,6 +28,7 @@ SHA              63b88dfce8684091d5fd9635ec08bea5ab1193eb
                  9bc08a6  W2-01 scanner-owned capture cleanup (2026-10-22)
                  9e7d880  W2-01 sale-scan confirmation gate (2026-10-22)
                  ca7a7a4  W2-01 opt-in captureOnly recognition (2026-10-22)
+                 fd9b21b  W2-01 prescription OCR review at checkout (2026-10-22)
 Branch           main
 Pushed           NO — deliberately. Push happens only after all seven tasks are done.
 Parent           51c5230e622b2ff5e1ca0c859fdf541a3131cc4c
@@ -96,14 +97,14 @@ All of W2-03, and W2-02's **data layer** — not its UI, and not its dataset.
 
 ## 4. The seven executable tasks and what remains
 
-**W2-02 is code-complete and dataset-blocked. W2-01 is two-thirds done and its
-last piece needs a founder decision. W4-06, W4-07, W4-08 and W4-10 are unbuilt.**
+**W2-01, W2-02 and W2-03 are code-complete (W2-02 still dataset-blocked by E7).
+W4-10, W4-06, W4-07 and W4-08 are unbuilt.**
 
 | ID | Task | State | Remaining |
 |---|---|---|---|
 | **W2-02** | Offline medicine catalogue | **code DONE (data layer + UI); DATASET NOT DONE** | nothing in code. UI wiring landed in `2b39062`: `catalogMedicineSearchProvider` is passed from `app/inventory/add-medicine.tsx`, selection re-reads via `getCatalogEntry` before the form opens, `SearchMedicineTab.tsx` renders strength/dosage form/pack size and guards overlapping queries with `domain/latestRequestGuard.ts`, `ManualEntryForm.tsx` exposes Strength/Dosage form/Unit as editable prefills, and `addMedicineSchema` + `CreateMedicineWithPurchaseInput` carry the optional `type`. New pure mapper `domain/catalogPrefill.ts` (24 tests). **Gate E7 still blocks the feature: zero rows ship and the 21,000 count is not claimed.** Selection stays a READ; `createMedicineFromCatalog` was not built. |
 | **W2-03** | English / Bangla / Banglish search | **DONE** (data layer); its UI surface rides on W2-02's wiring | — |
-| **W2-01** | Medicine OCR completion | **2 of 3 gaps DONE; the third is BLOCKED on a founder decision** | DONE: the scanner-owned capture cleanup (`9bc08a6`), the sale-scan confirmation gate on BOTH scanners (`9e7d880`), and `captureOnly` recognition as an opt-in scanner capability (`ca7a7a4`). REMAINING: checkout's per-line prescription review — it adds cart lines on a money-path screen, so CLAUDE.md rule 10 puts it behind an explicit approval. See section 7.1 for the exact question and the proposal. `parseScannedInvoiceLines` and `onCaptureRecognition` are both in place and unused by `checkout.tsx` until then. |
+| **W2-01** | Medicine OCR completion | **DONE** (all three gaps) | nothing. `9bc08a6` scanner-owned capture cleanup; `9e7d880` the confirmation gate on BOTH scanners; `ca7a7a4` opt-in `captureOnly` recognition; `fd9b21b` the per-line prescription review at checkout, with the founder-approved behaviour that a confirmed line calls the existing `addItem` then `resetQuote()`. Barcode untouched (Q1 EXCLUDED); capture cleanup on the `captureOnly` path still descoped (E9). |
 | **W4-06** | Admin auth / RBAC / audit / sessions | **NOT STARTED** | `apps/admin/lib/{adminIdentity,adminSession,adminRoles,adminAuthz,adminAudit}.ts` + tests; `middleware.ts` exact-pathname exemption; `app/api/admin/session/route.ts`; `app/login/page.tsx`; `scripts/admin-hash-password.mjs` |
 | **W4-07** | Admin management pages | **NOT STARTED** | `lib/adminQueries.ts`; `app/shops/[id]`, `app/accounts`, `app/accounts/[id]`, `app/subscriptions`, `app/payments`, `app/audit` |
 | **W4-08** | Admin write actions | **NOT STARTED** | `lib/adminActions.ts` (three RPC-backed actions only); `lib/adminGrants.test.ts` restructure; source-level write-restriction test; `pgtest/batch2-admin-acl.pgtest.ts` |
@@ -153,81 +154,67 @@ sealed H-9/F12/H1 evidence or anything in `.gitattributes`' `eol=lf` list.
 
 ## 7. The exact next implementation step
 
-**W2-02's UI wiring and two of W2-01's three gaps are COMPLETE.** Four local
-checkpoints, nine mutation checks, every one failing the assertion it was aimed at.
+**W2-01, W2-02 and W2-03 are code-complete.** Five code checkpoints, eleven
+mutation checks, every one failing the assertion it was aimed at.
 
 | Checkpoint | What landed | Verification |
 |---|---|---|
-| `2b39062` | W2-02 catalogue UI wiring, + `domain/catalogPrefill.ts` (24 tests) | mobile+admin tsc 0; 54 files / 636 tests; 4 mutation checks |
-| `9bc08a6` | W2-01 gap 6.2.2 — the scanner deletes its own capture on the OCR path only | mobile tsc 0; 45 files / 418 tests; 3 mutation checks |
-| `9e7d880` | W2-01 gap 6.2.3 — the sale-scan confirmation sheet, on BOTH scanners | mobile tsc 0; 50 files / 614 tests; 3 mutation checks |
-| `ca7a7a4` | W2-01 gap 6.2.4 (first half) — `captureOnly` recognition, opt-in by presence | mobile tsc 0; 5 files / 53 tests; 2 mutation checks |
+| `2b39062` | W2-02 catalogue UI wiring + `domain/catalogPrefill.ts` (24 tests) | mobile+admin tsc 0; 54 files / 636 tests; 4 mutations |
+| `9bc08a6` | W2-01 §6.2.2 — the scanner deletes its own capture, OCR path only | mobile tsc 0; 45 files / 418 tests; 3 mutations |
+| `9e7d880` | W2-01 §6.2.3 — the confirmation sheet, on BOTH scanners | mobile tsc 0; 50 files / 614 tests; 3 mutations |
+| `ca7a7a4` | W2-01 §6.2.4a — `captureOnly` recognition, opt-in by presence | mobile tsc 0; 5 files / 53 tests; 2 mutations |
+| `fd9b21b` | W2-01 §6.2.4b — the per-line prescription review at checkout | mobile+admin tsc 0; 70 files / 804 tests; 2 mutations |
 
-H-9 seal re-verified: **34** Postgres migrations, same tail,
+H-9 seal re-verified at every checkpoint: **34** Postgres migrations, same tail,
 `h9_postmigration_checks.sql` SHA-256 still
-`361a400a29025f2d859b4cd3e4f826afcdcd2c134a332b3412b9a2e0af1e2bd9`. No file was
-added to `backend/supabase/migrations/`. The 41 pre-existing dirty paths are
-untouched, and `origin/main` is still `51c5230` — nothing has been pushed.
+`361a400a29025f2d859b4cd3e4f826afcdcd2c134a332b3412b9a2e0af1e2bd9`; the SQLite
+chain is still 33 files. No migration was added by any of this. The 41
+pre-existing dirty paths are untouched and `origin/main` is still `51c5230` —
+**nothing has been pushed.**
 
 ### Deviations and judgement calls, all deliberate
 
-1. **The confirmation gate went on BOTH scanners, not just `app/scan.tsx`**
-   (CLAUDE.md rule 11). Plan section 6.2.3 names only `app/scan.tsx`, but
-   `app/(tabs)/sale.tsx`'s in-screen scanner had the identical auto-add on an
-   exact match — the same defect on the busier path. "It must never be
-   skippable" cannot hold while one of two identical paths still commits on a
-   misread. Barcode is untouched (Q1/EXCLUDED); tapping a search result or a
-   barcode candidate is still a direct add, because those are explicit choices
-   of a specific medicine rather than a misread.
-2. **Manual Entry gained three visible fields** — Strength, Dosage form, Unit.
-   The catalogue prefills exactly those, and a prefilled value the user can
-   neither see nor correct must not reach the database.
-3. **"`packSize` -> `unitOfMeasure` only when it names a unit"** is an allowlist
-   of bare unit words in `domain/catalogPrefill.ts`; anything with a digit is
-   dropped. `sale_items.unit_snapshot` copies that column at sale time, so a
-   pack size like "1 x 10" must never become a unit or it lands on a receipt.
-4. **`onCaptureRecognition` is opt-in by presence**, the idiom
-   `onBarcodeRecognized` already uses, so no future `captureOnly` caller
-   acquires OCR silently. Recognition failure on that path is folded to `null`
-   and never reuses the retryable `cameraNoText` / `cameraReadFailed` branches.
+1. **The confirmation gate went on BOTH scanners** (CLAUDE.md rule 11). §6.2.3
+   names only `app/scan.tsx`, but `app/(tabs)/sale.tsx`'s in-screen scanner had
+   the identical auto-add on an exact match. "Never skippable" cannot hold with
+   one of two identical paths still committing on a misread. Barcode untouched;
+   tapping a search result or a barcode candidate is still a direct add, because
+   those are explicit choices rather than a misread.
+2. **Manual Entry gained Strength, Dosage form and Unit** — the catalogue
+   prefills exactly those, and a prefilled value the user can neither see nor
+   correct must not reach the database.
+3. **`packSize` -> `unitOfMeasure` is an allowlist of bare unit words**; anything
+   with a digit is dropped, because `sale_items.unit_snapshot` copies that column
+   and "1 x 10" would land on a receipt line. Re-check it against a real dataset.
+4. **`onCaptureRecognition` is opt-in by presence**, so no future `captureOnly`
+   caller acquires OCR silently; recognition failure there is folded to `null`
+   and never reuses the retryable scan-error branches.
+5. **A confirmed prescription line calls `addItem` then `resetQuote()`** — the
+   founder approved this on 2026-10-22 after §6.2.4 was found to leave it open.
+6. **`domain/prescriptionLines.ts` holds the matching**, not `checkout.tsx`:
+   that screen was already 866 lines, over the 800 limit, and is 950 now.
+   **Checkout is over the limit and worth a dedicated extraction pass** — not
+   done here because it is unrelated refactoring of money-path code.
 
-### 7.1 BLOCKED — W2-01's last piece needs a founder decision
+### 7.1 Next: W4-10, the SSLCommerz retirement
 
-Everything for checkout's prescription OCR is now in place: the scanner hands
-back the recognised text (`ca7a7a4`), and `domain/ocrText.ts`'s
-`parseScannedInvoiceLines` already splits a multi-item list the way
-`app/suppliers/purchase-create.tsx` proves. What is missing is the review UI,
-and plan section 6.2.4 does not say what confirming a line DOES:
+Founder constraints, given 2026-10-22 and binding:
 
-> "Lines are matched against the catalog and the shop's stock; each line is
-> confirmed individually; unmatched or ambiguous lines stay in the list with a
-> manual-search affordance and are **never** auto-added."
+- Disable **new** SSLCommerz payment initiation.
+- Do **not** break historical payments, pending callbacks, or refund processing.
+- bKash is blocked on E8, so new subscription payments **fail closed**.
+- **Do not represent the product as payment-ready.**
 
-"Never auto-added" implies confirming adds the line **to the cart** — but this
-is `app/sale/checkout.tsx`, after the cart, on the money path. Adding a line
-there changes the sale total and must invalidate the confirmed quote.
-**CLAUDE.md rule 10 therefore puts it behind its own approval.**
+The files, from §4: `functions/sync/_shared/paymentProvider.ts` (refuses
+`sslcommerz`, no bKash branch); `functions/sync/billing.ts` uses it;
+`apps/mobile/sync/billing.ts` must fail **locally, before** `createPaymentAttempt`
+writes a row (`:77` -> `:85`); `app/settings/plan-payment.tsx` gets a
+payment-unavailable state. Note `db/commercial.ts:467` writes the literal
+`provider: 'sslcommerz'` and `db/schema.ts:325` constrains that column to it, so
+the local attempt row cannot simply switch provider — which is why the refusal
+has to happen before the row is written.
 
-**The proposal, for approval:**
-
-- Confirming a prescription line calls the cart store's existing `addItem` — the
-  same path the Sale screen uses, with the same stock ceiling — and then
-  `resetQuote()`, so the total is recomputed and the sale needs reconfirmation
-  before it commits. No new write path, no second pricing implementation.
-- Lines are matched with the existing `searchMedicinesForSale` plus
-  `findExactNameMatch`. An exact single match offers Add; anything else stays in
-  the list as unmatched with a search affordance. Nothing is ever auto-added.
-- The recognised text lives only in component state and is never persisted.
-- Recognition failure shows a non-blocking notice; the captured image is kept and
-  the sale stays completable.
-- The temporary prescription capture is still NOT deleted — gate E9 stands.
-
-**If instead a confirmed line should only annotate the prescription and never
-touch the cart, say so** — that is a materially different screen, and it is not
-what "never auto-added" reads like.
-
-**After that decision**, the order is: finish W2-01, then W4-10, then
-W4-06 -> W4-07 -> W4-08 (largest, do last).
+Then W4-06 -> W4-07 -> W4-08 (largest, do last).
 
 **Operational constraint:** never run the full `vitest` suite concurrently with a Codex
 review. Under CPU contention `db/h7-pin-reservation.sqlite.test.ts` (5 s timeout, three
