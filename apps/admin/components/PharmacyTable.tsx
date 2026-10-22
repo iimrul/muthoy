@@ -1,4 +1,6 @@
+import Link from 'next/link';
 import { formatPhone, formatPlan, formatRegistrationDate, type PharmacyRow } from '../lib/platformStats';
+import { statusLabel } from '../lib/adminViews';
 
 // Imports the pure module, never lib/queries.ts — a presentational component
 // must not be able to pull a server-only module into its import graph.
@@ -7,7 +9,7 @@ interface PharmacyTableProps {
   pharmacies: readonly PharmacyRow[];
 }
 
-const COLUMN_HEADINGS = ['Shop name', 'Phone', 'Registered', 'Plan'] as const;
+const COLUMN_HEADINGS = ['Shop name', 'Phone', 'Registered', 'Plan', 'Commercial status'] as const;
 
 export default function PharmacyTable({ pharmacies }: PharmacyTableProps) {
   if (pharmacies.length === 0) {
@@ -33,10 +35,15 @@ export default function PharmacyTable({ pharmacies }: PharmacyTableProps) {
         <tbody>
           {pharmacies.map((pharmacy) => (
             <tr key={pharmacy.id} className="border-t border-black/5">
-              <td className="px-4 py-3 font-medium">{pharmacy.name}</td>
+              <td className="px-4 py-3 font-medium">
+                <Link href={`/shops/${pharmacy.id}`} className="underline">
+                  {pharmacy.name}
+                </Link>
+              </td>
               <td className="px-4 py-3">{formatPhone(pharmacy.phone)}</td>
               <td className="px-4 py-3">{formatRegistrationDate(pharmacy.registeredAt)}</td>
               <td className="px-4 py-3">{formatPlan(pharmacy.plan)}</td>
+              <td className="px-4 py-3">{statusLabel(pharmacy.commercialStatus)}</td>
             </tr>
           ))}
         </tbody>

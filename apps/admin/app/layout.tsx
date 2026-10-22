@@ -4,6 +4,7 @@ import { DM_Mono, Plus_Jakarta_Sans } from 'next/font/google';
 import Link from 'next/link';
 import './globals.css';
 import { currentAdminSession } from '../lib/adminAuthz';
+import { hasPermission } from '../lib/adminRoles';
 
 // W4-06. The shell shows WHO is signed in and offers the sign-out the shared
 // Basic Auth credential never had (a browser cannot be told to forget one).
@@ -35,9 +36,17 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+// W4-07. Each link declares the permission its page REQUIRES, and the shell
+// hides the ones this role cannot use. That is presentation, NOT the gate: the
+// page itself calls requireAdminPermission as its first statement, so typing
+// the URL directly is refused server-side regardless of what the nav shows.
 const NAV_LINKS = [
-  { href: '/', label: 'Dashboard' },
-  { href: '/pharmacies', label: 'Pharmacies' },
+  { href: '/', label: 'Dashboard', permission: 'shops.read' },
+  { href: '/pharmacies', label: 'Pharmacies', permission: 'shops.read' },
+  { href: '/accounts', label: 'Accounts', permission: 'accounts.read' },
+  { href: '/subscriptions', label: 'Subscriptions', permission: 'subscriptions.read' },
+  { href: '/payments', label: 'Payments', permission: 'payments.read' },
+  { href: '/audit', label: 'Audit', permission: 'audit.read' },
 ] as const;
 
 async function signedInAs(): Promise<{ username: string; role: string } | null> {
@@ -65,7 +74,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
           <nav className="mx-auto flex w-full max-w-5xl items-center gap-6 px-6 py-4">
             <span className="font-semibold text-brand-deepGreen">Muthoy Admin</span>
             {signedIn
-              ? NAV_LINKS.map((link) => (
+              ? NAV_LINKS.filter((link) => hasPermission(signedIn.role, link.permission)).map((link) => (
                   <Link key={link.href} href={link.href} className="text-sm text-midGray hover:text-richBlack">
                     {link.label}
                   </Link>

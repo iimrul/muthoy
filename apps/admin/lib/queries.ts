@@ -25,7 +25,8 @@ interface PageResult<T> {
 
 type PageReader<T> = (from: number, to: number) => PromiseLike<PageResult<T>>;
 
-async function readAllPages<T>(label: string, readPage: PageReader<T>): Promise<T[]> {
+/** Exported for lib/adminQueries.ts (W4-07): one bounded pager, not two. */
+export async function readAllPages<T>(label: string, readPage: PageReader<T>): Promise<T[]> {
   const rows: T[] = [];
 
   for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -55,6 +56,7 @@ interface ShopSelectRow {
   phone: string;
   created_at: string;
   plan: string;
+  commercial_status: string;
 }
 
 /** Volume 5 P0: read-only shop name / phone / registration date / plan. */
@@ -64,7 +66,7 @@ export async function listPharmacies(): Promise<PharmacyRow[]> {
   const rows = await readAllPages<ShopSelectRow>('shops', (from, to) =>
     supabase
       .from('shops')
-      .select('id,name,phone,created_at,plan')
+      .select('id,name,phone,created_at,plan,commercial_status')
       .eq('is_deleted', false)
       .order('created_at', { ascending: false })
       // Secondary key so paging is deterministic when two shops share a timestamp.
@@ -78,6 +80,7 @@ export async function listPharmacies(): Promise<PharmacyRow[]> {
     phone: row.phone,
     registeredAt: row.created_at,
     plan: row.plan,
+    commercialStatus: row.commercial_status,
   }));
 }
 

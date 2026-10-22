@@ -31,6 +31,8 @@ export interface PharmacyRow {
   /** ISO-8601 UTC timestamp of `shops.created_at`. */
   registeredAt: string;
   plan: string;
+  /** W4-07: 'active' or 'read_only' — the commercial gate the device enforces. */
+  commercialStatus: string;
 }
 
 /** The dashboard's two numbers, plus the day they were computed for. */

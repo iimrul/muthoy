@@ -6,6 +6,8 @@
 // therefore lands on the next request rather than at next login, and the stale
 // claim is only audited.
 
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const cookieStore = vi.hoisted(() => ({ value: undefined as string | undefined }));
@@ -161,5 +163,77 @@ describe('requireAdminPermission', () => {
 
     await expect(requireAdminPermission('support.write', env)).resolves.toMatchObject({ role: 'support' });
     await expect(requireAdminPermission('subscriptions.write', env)).rejects.toBeInstanceOf(AdminForbiddenError);
+  });
+});
+
+describe('every page is gated server-side (W4-07)', () => {
+  // A page whose permission check is missing looks identical in review to one
+  // that has it, and the nav hiding a link is NOT the gate: typing the URL
+  // reaches the page directly. So the gate's presence is asserted in the source
+  // of every page, with /login the one deliberate exception.
+  const APP_ROOT = join(import.meta.dirname, '..', 'app');
+  const PUBLIC_PAGES = new Set(['login/page.tsx']);
+
+  function pages(directory: string): { path: string; contents: string }[] {
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const absolute = join(directory, entry.name);
+      if (entry.isDirectory()) return pages(absolute);
+      if (entry.name !== 'page.tsx') return [];
+      return [{
+        path: relative(APP_ROOT, absolute).split(sep).join('/'),
+        contents: readFileSync(absolute, 'utf8'),
+      }];
+    });
+  }
+
+  const PAGES = pages(APP_ROOT);
+
+  test('finds every page', () => {
+    expect(PAGES.map((page) => page.path).sort()).toEqual([
+      'accounts/[id]/page.tsx',
+      'accounts/page.tsx',
+      'audit/page.tsx',
+      'login/page.tsx',
+      'page.tsx',
+      'payments/page.tsx',
+      'pharmacies/page.tsx',
+      'shops/[id]/page.tsx',
+      'subscriptions/page.tsx',
+    ]);
+  });
+
+  test.each(PAGES.filter((page) => !PUBLIC_PAGES.has(page.path)).map((page) => page.path))(
+    '%s calls requireAdminPermission',
+    (path) => {
+      const page = PAGES.find((candidate) => candidate.path === path);
+      expect(page?.contents).toMatch(/await requireAdminPermission\('[a-z.]+'\)/);
+    },
+  );
+
+  test('the gate comes BEFORE any data read on every gated page', () => {
+    for (const page of PAGES.filter((candidate) => !PUBLIC_PAGES.has(candidate.path))) {
+      const gate = page.contents.indexOf('requireAdminPermission');
+      const loaders = ['listAccountSummaries(', 'listSubscriptionSummaries(', 'listPaymentOrderSummaries(',
+        'getAccountDetail(', 'getShopDetail(', 'loadStats(', 'loadPharmacies(', 'recentAdminAudit.entries('];
+      for (const loader of loaders) {
+        const read = page.contents.indexOf(loader);
+        if (read < 0) continue;
+        expect(gate, page.path + ' reads before it authorizes').toBeLessThan(read);
+      }
+    }
+  });
+
+  test('the two drill-downs validate their route parameter', () => {
+    for (const path of ['accounts/[id]/page.tsx', 'shops/[id]/page.tsx']) {
+      const page = PAGES.find((candidate) => candidate.path === path);
+      expect(page?.contents).toMatch(/if \(!isUuid\(id\)\) notFound\(\)/);
+    }
+  });
+
+  test('the login page performs no query and needs no permission', () => {
+    const login = PAGES.find((page) => page.path === 'login/page.tsx');
+
+    expect(login?.contents).not.toMatch(/requireAdminPermission/);
+    expect(login?.contents).not.toMatch(/getSupabaseAdmin|list[A-Z]|get[A-Z][a-z]+Detail/);
   });
 });
