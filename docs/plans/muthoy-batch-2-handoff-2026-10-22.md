@@ -93,7 +93,8 @@ All of W2-03, and W2-02's **data layer** — not its UI, and not its dataset.
 
 ## 4. The seven executable tasks and what remains
 
-**W2-02's catalogue UI and all of W2-01, W4-06, W4-07, W4-08 and W4-10 are unbuilt.**
+**W2-02 is code-complete and dataset-blocked. W2-01, W4-06, W4-07, W4-08 and
+W4-10 are unbuilt.**
 
 | ID | Task | State | Remaining |
 |---|---|---|---|
