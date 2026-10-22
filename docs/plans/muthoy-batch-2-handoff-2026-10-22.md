@@ -24,6 +24,7 @@ the Gate 2 disposition. The founder authorized Gate 3 on revision 7 on 2026-10-2
 ```
 SHA              63b88dfce8684091d5fd9635ec08bea5ab1193eb
                  (+ this doc-only SHA backfill commit on top)
+                 2b39062  W2-02 catalogue UI wiring (2026-10-22)
 Branch           main
 Pushed           NO — deliberately. Push happens only after all seven tasks are done.
 Parent           51c5230e622b2ff5e1ca0c859fdf541a3131cc4c
@@ -96,7 +97,7 @@ All of W2-03, and W2-02's **data layer** — not its UI, and not its dataset.
 
 | ID | Task | State | Remaining |
 |---|---|---|---|
-| **W2-02** | Offline medicine catalogue | **data layer DONE; UI + dataset NOT DONE** | wire `catalogMedicineSearchProvider` into `app/inventory/add-medicine.tsx`; render `strength`/`dosageForm`/`packSize` in `components/inventory/SearchMedicineTab.tsx` and add stale-query protection via the existing `domain/latestRequestGuard.ts`; prefill `components/inventory/ManualEntryForm.tsx`; extend `db/inventory.ts`'s `createMedicineWithPurchase` input and `packages/validation/src/inventory.ts`; update `apps/mobile/tests/inventory/inventory-remediation.test.tsx`. **Selection READS only — Save stays the one commit path; do NOT build `createMedicineFromCatalog`.** |
+| **W2-02** | Offline medicine catalogue | **code DONE (data layer + UI); DATASET NOT DONE** | nothing in code. UI wiring landed in `2b39062`: `catalogMedicineSearchProvider` is passed from `app/inventory/add-medicine.tsx`, selection re-reads via `getCatalogEntry` before the form opens, `SearchMedicineTab.tsx` renders strength/dosage form/pack size and guards overlapping queries with `domain/latestRequestGuard.ts`, `ManualEntryForm.tsx` exposes Strength/Dosage form/Unit as editable prefills, and `addMedicineSchema` + `CreateMedicineWithPurchaseInput` carry the optional `type`. New pure mapper `domain/catalogPrefill.ts` (24 tests). **Gate E7 still blocks the feature: zero rows ship and the 21,000 count is not claimed.** Selection stays a READ; `createMedicineFromCatalog` was not built. |
 | **W2-03** | English / Bangla / Banglish search | **DONE** (data layer); its UI surface rides on W2-02's wiring | — |
 | **W2-01** | Medicine OCR completion | **NOT STARTED** | `native/prescriptionAttachment.ts` + `removeTemporaryCapture`; `MedicineTextScanner` deletes on the **OCR path only** and never when `captureOnly` is set; `components/scanner/ScanConfirmSheet.tsx`; confirmation gate before `addItem` in `app/scan.tsx`; run recognition on the prescription capture in `app/sale/checkout.tsx`; `tests/sale/resumed-draft-capture.test.tsx` |
 | **W4-06** | Admin auth / RBAC / audit / sessions | **NOT STARTED** | `apps/admin/lib/{adminIdentity,adminSession,adminRoles,adminAuthz,adminAudit}.ts` + tests; `middleware.ts` exact-pathname exemption; `app/api/admin/session/route.ts`; `app/login/page.tsx`; `scripts/admin-hash-password.mjs` |
@@ -148,38 +149,38 @@ sealed H-9/F12/H1 evidence or anything in `.gitattributes`' `eol=lf` list.
 
 ## 7. The exact next implementation step
 
-**Finish W2-02's UI wiring**, in this order — the smallest coherent unit, and its test
-file already exists:
+**W2-02's UI wiring is COMPLETE** (local checkpoint `2b39062`). Its five steps all
+landed, with four mutation checks each failing the assertion it was aimed at: the
+provider prop removed, the stale-query guard neutralized, a write inserted at
+selection time, and the dosage form dropped from the Save payload. Verification at
+that checkpoint: mobile and admin `tsc --noEmit` exit **0**, `git diff --check` exit
+**0**, **54 files / 636 tests** pass, and the H-9 seal is unchanged (34 Postgres
+migrations, same tail, `h9_postmigration_checks.sql` SHA-256 still
+`361a400a29025f2d859b4cd3e4f826afcdcd2c134a332b3412b9a2e0af1e2bd9`).
 
-1. `apps/mobile/components/inventory/SearchMedicineTab.tsx` — render the
-   `strength` / `dosageForm` / `packSize` secondary line, and replace
-   `void provider.search(text).then(setResults)` with the existing
-   `domain/latestRequestGuard.ts` so a slow early query cannot overwrite a fast later
-   one against a 21k catalogue.
-2. `apps/mobile/app/inventory/add-medicine.tsx` — pass `catalogMedicineSearchProvider`
-   from `db/medicineCatalog.ts` to `SearchMedicineTab`, replacing the default
-   `unavailableMedicineSearchProvider`. On selection call `getCatalogEntry(id)` — a
-   **read** — and hand the full row to the form.
-3. `apps/mobile/components/inventory/ManualEntryForm.tsx` — accept the mapped fields as
-   editable prefills: `brandName → name`, `genericName → generic`,
-   `manufacturer → manufacturer`, `strength → strength`, `dosageForm → type`,
-   `packSize → unitOfMeasure` only when it names a unit. **Never concatenate anything
-   into `name`** — `medicines_fts` indexes it and `findExactNameMatch` compares against it.
-4. `apps/mobile/db/inventory.ts` + `packages/validation/src/inventory.ts` — extend
-   `createMedicineWithPurchase`'s input and schema with those fields. **Save remains the
-   only commit path.**
-5. `apps/mobile/tests/inventory/inventory-remediation.test.tsx` — assert the provider
-   passed is not `unavailableMedicineSearchProvider`, that nothing is written before
-   Save, and that a fully-populated catalogue row reaches the form field-by-field.
+Two judgement calls inside it, both deliberate and recorded here:
 
-Then W2-01, then W4-10, then W4-06 → W4-07 → W4-08 (largest, do last).
+1. **Manual Entry gained three visible fields** — Strength, Dosage form and Unit.
+   Revision 7 maps catalogue values onto them, and a prefilled value the user can
+   neither see nor correct must not reach the database. Category and barcode stay
+   out of scope; nothing prefills them.
+2. **"`packSize` -> `unitOfMeasure` only when it names a unit"** is implemented as an
+   allowlist of bare unit words in `domain/catalogPrefill.ts`, and anything carrying a
+   digit is dropped. `unit_of_measure` is free text with no enumeration to validate
+   against, and `sale_items.unit_snapshot` copies it at sale time — so a pack size
+   like "1 x 10" must never become a unit, or it lands on a receipt line. When a real
+   licensed dataset arrives, check its `pack_size` format against that allowlist.
+
+**The next implementation step is W2-01 (medicine OCR completion)**, then W4-10, then
+W4-06 -> W4-07 -> W4-08 (largest, do last). W2-01's remaining work is listed in
+section 4; note gate **E9** before touching capture cleanup — the scanner-owned
+deletion ships on the **OCR path only** and never when `captureOnly` is set, and no
+destructive cleanup of an existing durable capture may be introduced.
 
 **Operational constraint:** never run the full `vitest` suite concurrently with a Codex
 review. Under CPU contention `db/h7-pin-reservation.sqlite.test.ts` (5 s timeout, three
 bcrypt cost-10 fixtures) and `db/inventory-ledger.sqlite.test.ts` (250 ms budget) fail
 falsely; both pass in isolation (34/34). Baseline is 243 files / 5062 tests.
-
----
 
 ## 8. Closing sequence (only after all seven tasks are implemented)
 
