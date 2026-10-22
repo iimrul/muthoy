@@ -2,6 +2,10 @@ import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { router } from "expo-router";
 import { MedicineTextScanner } from "../components/scanner/MedicineTextScanner";
+import {
+  ScanConfirmSheet,
+  type ScanConfirmCandidate,
+} from "../components/scanner/ScanConfirmSheet";
 import { StandardHeader } from "../components/ui/StandardHeader";
 import { searchMedicinesForSale } from "../db/sales";
 import { requirePermission } from "../db/auth";
@@ -13,6 +17,13 @@ import { useI18n } from "../state/localeStore";
 import { useCartStore } from "../state/cartStore";
 import { useSessionStore } from "../state/sessionStore";
 
+// app/scan.tsx — the dedicated scan-to-sell screen.
+//
+// W2-01 section 6.2.3: an exact OCR match used to go straight into the cart.
+// A cart line is the first step of a money path, and the founder's own recovery
+// note for this feature is "a misread got saved without confirmation — add the
+// confirmation step back, it must never be skippable". So a match now waits in
+// ScanConfirmSheet, and addItem is reachable from Confirm and nowhere else.
 export default function ScanSaleScreen() {
   const session = useSessionStore((state) => state.session);
   const addItem = useCartStore((state) => state.addItem);
@@ -23,6 +34,9 @@ export default function ScanSaleScreen() {
   const [scannerVisible, setScannerVisible] = useState(true);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingScan, setPendingScan] = useState<ScanConfirmCandidate | null>(
+    null,
+  );
   if (!session) return null;
 
   const handleRecognized = async (recognizedText: string) => {
@@ -37,18 +51,37 @@ export default function ScanSaleScreen() {
         setError(t("noExactMedicine"));
         return;
       }
-      addItem({
+      // Proposed, not recorded. Nothing reaches the cart until Confirm.
+      setError(null);
+      setFeedback(null);
+      setPendingScan({
+        recognizedText: candidate,
         medicineId: exact.medicineId,
-        medicineName: exact.name,
+        name: exact.name,
+        generic: exact.generic,
+        manufacturer: exact.manufacturer,
+        requiresPrescription: exact.requiresPrescription,
         batchId: exact.activeBatch.id,
-        quantity: 1,
+        batchNo: exact.activeBatchNo,
+        expiryDate: exact.activeBatch.expiryDate,
         unitPrice: exact.activeBatch.salePrice,
       });
-      setError(null);
-      setFeedback(`${exact.name} · ${formatNumber(cartCount + 1)}`);
     } catch {
       setError(t("scanSearchFailed"));
     }
+  };
+
+  const confirmPendingScan = (confirmed: ScanConfirmCandidate) => {
+    addItem({
+      medicineId: confirmed.medicineId,
+      medicineName: confirmed.name,
+      batchId: confirmed.batchId,
+      quantity: 1,
+      unitPrice: confirmed.unitPrice,
+    });
+    setPendingScan(null);
+    setError(null);
+    setFeedback(`${confirmed.name} · ${formatNumber(cartCount + 1)}`);
   };
 
   return (
@@ -91,6 +124,20 @@ export default function ScanSaleScreen() {
         mode="lookup"
         onClose={() => setScannerVisible(false)}
         onTextRecognized={(text) => void handleRecognized(text)}
+      />
+      <ScanConfirmSheet
+        candidate={pendingScan}
+        onConfirm={confirmPendingScan}
+        // Correction happens in the Sale screen's own search, carrying the
+        // recognised text across rather than rebuilding a second search UI here.
+        onEdit={(candidate) => {
+          setPendingScan(null);
+          router.replace({
+            pathname: "/sale",
+            params: { q: candidate.recognizedText },
+          });
+        }}
+        onDiscard={() => setPendingScan(null)}
       />
     </View>
   );

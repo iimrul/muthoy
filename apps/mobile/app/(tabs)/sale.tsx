@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Modal,
@@ -7,11 +7,15 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { asPaisa } from "@muthoy/types";
 import { daysUntilExpiry } from "@muthoy/utils";
 import { MedicineTextScanner } from "../../components/scanner/MedicineTextScanner";
+import {
+  ScanConfirmSheet,
+  type ScanConfirmCandidate,
+} from "../../components/scanner/ScanConfirmSheet";
 import { showToast } from "../../components/ui/Toast";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { StandardHeader } from "../../components/ui/StandardHeader";
@@ -53,7 +57,12 @@ export default function SaleEntryScreen() {
   const cartCount = useCartStore((state) =>
     state.items.reduce((sum, item) => sum + item.quantity, 0),
   );
-  const [query, setQuery] = useState("");
+  // app/scan.tsx hands a scan over here for correction, carrying the
+  // recognised text as a route param, so the manual search opens pre-filled
+  // rather than making the user retype what the camera already read.
+  const params = useLocalSearchParams<{ q?: string }>();
+  const handedOverQuery = typeof params.q === "string" ? params.q.trim() : "";
+  const [query, setQuery] = useState(handedOverQuery);
   const [mode, setMode] = useState<SaleInsightMode>("all");
   const [results, setResults] = useState<MedicineSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -64,6 +73,10 @@ export default function SaleEntryScreen() {
     BarcodeCandidate[]
   >([]);
   const [searchGuard] = useState(() => createLatestRequestGuard());
+  const [pendingScan, setPendingScan] = useState<ScanConfirmCandidate | null>(
+    null,
+  );
+  const hasRunHandedOverQuery = useRef(false);
 
   useEffect(() => {
     if (!session || query.trim()) return;
@@ -86,6 +99,14 @@ export default function SaleEntryScreen() {
       clearTimeout(timer);
     };
   }, [mode, query, session, t]);
+
+  useEffect(() => {
+    if (!session || !handedOverQuery || hasRunHandedOverQuery.current) return;
+    hasRunHandedOverQuery.current = true;
+    void runSearch(handedOverQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runSearch is
+    // defined after the session guard below; the ref makes this run once.
+  }, [handedOverQuery, session]);
 
   if (!session) {
     return null;
@@ -166,20 +187,40 @@ export default function SaleEntryScreen() {
     }
     const exactMatch = findExactNameMatch(candidate, matches);
     if (exactMatch) {
-      addLineAndReport({
+      // W2-01 section 6.2.3: proposed, not recorded. This used to call
+      // addLineAndReport directly, so one misread put a line in the cart with
+      // no confirmation — the defect the founder's own recovery note names.
+      setPendingScan({
+        recognizedText: candidate,
         medicineId: exactMatch.medicineId,
-        medicineName: exactMatch.name,
+        name: exactMatch.name,
         generic: exactMatch.generic,
         manufacturer: exactMatch.manufacturer,
         requiresPrescription: exactMatch.requiresPrescription,
         batchId: exactMatch.activeBatch.id,
-        batchNo: exactMatch.activeBatchNo ?? undefined,
-        quantity: 1,
-        unitPrice: exactMatch.activeBatch.salePrice,
+        batchNo: exactMatch.activeBatchNo,
         expiryDate: exactMatch.activeBatch.expiryDate,
+        unitPrice: exactMatch.activeBatch.salePrice,
         availableQuantity: exactMatch.activeBatch.quantityAvailable,
       });
     }
+  };
+
+  const confirmPendingScan = (confirmed: ScanConfirmCandidate) => {
+    addLineAndReport({
+      medicineId: confirmed.medicineId,
+      medicineName: confirmed.name,
+      generic: confirmed.generic,
+      manufacturer: confirmed.manufacturer,
+      requiresPrescription: confirmed.requiresPrescription,
+      batchId: confirmed.batchId,
+      batchNo: confirmed.batchNo ?? undefined,
+      quantity: 1,
+      unitPrice: confirmed.unitPrice,
+      expiryDate: confirmed.expiryDate,
+      availableQuantity: confirmed.availableQuantity,
+    });
+    setPendingScan(null);
   };
 
   const addBarcodeCandidate = async (candidate: BarcodeCandidate) => {
@@ -470,6 +511,15 @@ export default function SaleEntryScreen() {
         onTextRecognized={handleScanResult}
         onBarcodeRecognized={handleBarcode}
         keepOpenOnResult
+      />
+      <ScanConfirmSheet
+        candidate={pendingScan}
+        onConfirm={confirmPendingScan}
+        // Nothing to navigate to: handleScanResult already put the recognised
+        // text in this screen's own search box and ran the search, so closing
+        // the sheet leaves the user in exactly the pre-filled manual search.
+        onEdit={() => setPendingScan(null)}
+        onDiscard={() => setPendingScan(null)}
       />
       <Modal
         visible={barcodeCandidates.length > 0}
