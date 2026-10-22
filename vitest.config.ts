@@ -94,6 +94,10 @@ export default defineConfig({
       // H-9. The Edge runtime's pinned supabase-js, mapped to the identical
       // version the mobile lockfile installs, so supabase-key-transport.test.ts
       // executes the real supabaseAdmin.ts and the real SDK it ships with.
+      // W4-06. apps/admin's credential modules are marked `server-only`, whose
+      // real entry point throws unless the bundler honours the react-server
+      // export condition. See apps/admin/test/server-only.ts.
+      "server-only": resolve(process.cwd(), "apps/admin/test/server-only.ts"),
       "npm:@supabase/supabase-js@2.112.3": resolve(
         process.cwd(),
         "apps/mobile/node_modules/@supabase/supabase-js/dist/index.mjs",
@@ -511,6 +515,10 @@ export default defineConfig({
       // apps/admin's pure logic + service-role exposure guards. Framework-free:
       // nothing here imports Next or opens a Supabase connection.
       "apps/admin/lib/**/*.test.ts",
+      // W4-06. The REAL Next middleware, driven with NextRequest: the exact-match
+      // public-path set (and every near miss), the fail-closed 503, the
+      // redirect-vs-401 split, idle refresh, and denial after a role is removed.
+      "apps/admin/middleware.test.ts",
       "packages/*/src/**/*.test.ts",
     ],
     environment: "node",

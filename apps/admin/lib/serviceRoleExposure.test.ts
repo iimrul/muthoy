@@ -80,7 +80,16 @@ describe('service-role key exposure guards', () => {
     expect(readers.map((file) => file.path)).toEqual(['lib/env.ts']);
   });
 
-  test.each(['lib/env.ts', 'lib/supabaseAdmin.ts', 'lib/queries.ts'])('%s is marked server-only', (expectedPath) => {
+  // W4-06 added four credential-handling modules; each one that reads a secret
+  // or decides authorization carries the same build-time marker.
+  test.each([
+    'lib/env.ts',
+    'lib/supabaseAdmin.ts',
+    'lib/queries.ts',
+    'lib/adminIdentity.ts',
+    'lib/adminLogin.ts',
+    'lib/adminAuthz.ts',
+  ])('%s is marked server-only', (expectedPath) => {
     const file = SOURCE_FILES.find((candidate) => candidate.path === expectedPath);
 
     expect(file).toBeDefined();
@@ -91,5 +100,35 @@ describe('service-role key exposure guards', () => {
     const creators = SOURCE_FILES.filter((file) => file.code.includes('createClient('));
 
     expect(creators.map((file) => file.path)).toEqual(['lib/supabaseAdmin.ts']);
+  });
+
+  // W4-06. The same containment argument as the service-role key, applied to the
+  // credentials that now exist: each secret is read in exactly ONE module, and
+  // the password hashes are read in a module the Edge middleware cannot pull in.
+  test('the session secret is read in exactly one module', () => {
+    const readers = SOURCE_FILES.filter((file) => file.code.includes('ADMIN_SESSION_SECRET'));
+
+    expect(readers.map((file) => file.path)).toEqual(['lib/adminSession.ts']);
+  });
+
+  test('the password hashes are read in exactly one module', () => {
+    const readers = SOURCE_FILES.filter((file) => file.code.includes('ADMIN_ACCOUNTS'));
+
+    expect(readers.map((file) => file.path)).toEqual(['lib/adminIdentity.ts']);
+  });
+
+  test('the Edge middleware reaches no module that reads a password', () => {
+    const middleware = SOURCE_FILES.find((file) => file.path === 'middleware.ts');
+
+    expect(middleware).toBeDefined();
+    for (const forbidden of ['adminIdentity', 'adminLogin', 'ADMIN_ACCOUNTS', 'pbkdf2', 'node:crypto']) {
+      expect(middleware?.code).not.toContain(forbidden);
+    }
+  });
+
+  test('the KDF is called in exactly one module', () => {
+    const callers = SOURCE_FILES.filter((file) => file.code.includes('pbkdf2'));
+
+    expect(callers.map((file) => file.path)).toEqual(['lib/adminLogin.ts']);
   });
 });

@@ -4,6 +4,7 @@ import StatCard from '../components/StatCard';
 import { toDisplayMessage } from '../lib/errors';
 import type { PlatformStats } from '../lib/platformStats';
 import { getPlatformStats } from '../lib/queries';
+import { requireAdminPermission } from '../lib/adminAuthz';
 
 // Server component, read on every request: a cached build-time snapshot would
 // show a stale shop count and yesterday's sales total.
@@ -23,6 +24,15 @@ async function loadStats(): Promise<StatsResult> {
 }
 
 export default async function DashboardPage() {
+  // W4-06: authorization FIRST, server-side, before any query runs. A denial
+  // must not reach getPlatformStats, so this cannot move below the fetch.
+  try {
+    await requireAdminPermission('shops.read');
+  } catch (error: unknown) {
+    console.error('[admin] dashboard denied:', error);
+    return <ErrorNotice message={toDisplayMessage(error)} />;
+  }
+
   const result = await loadStats();
 
   if (!result.ok) {

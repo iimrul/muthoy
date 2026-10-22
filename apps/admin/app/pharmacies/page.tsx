@@ -3,6 +3,7 @@ import PharmacyTable from '../../components/PharmacyTable';
 import { toDisplayMessage } from '../../lib/errors';
 import type { PharmacyRow } from '../../lib/platformStats';
 import { listPharmacies } from '../../lib/queries';
+import { requireAdminPermission } from '../../lib/adminAuthz';
 
 // Server component, read on every request — a newly synced shop must appear
 // without a redeploy.
@@ -22,6 +23,15 @@ async function loadPharmacies(): Promise<PharmaciesResult> {
 }
 
 export default async function PharmaciesPage() {
+  // W4-06: authorization FIRST. The denial happens before the query, not
+  // after it, so a forbidden role never reaches the service-role client.
+  try {
+    await requireAdminPermission('shops.read');
+  } catch (error: unknown) {
+    console.error('[admin] pharmacy list denied:', error);
+    return <ErrorNotice message={toDisplayMessage(error)} />;
+  }
+
   const result = await loadPharmacies();
 
   if (!result.ok) {

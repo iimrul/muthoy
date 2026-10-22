@@ -55,19 +55,48 @@ privilege, and deliberately no `ALTER DEFAULT PRIVILEGES` (which would silently
 cover every future table). `lib/adminGrants.test.ts` derives the table list from
 `queries.ts` itself and fails if a query is added without a matching grant.
 
-## Access gate
+## Access gate (W4-06)
 
-`middleware.ts` puts HTTP Basic auth in front of every route and **fails
-closed**: with `ADMIN_BASIC_AUTH_USER` / `ADMIN_BASIC_AUTH_PASSWORD` unset, every
-route returns 503. Without this, a deployed admin URL would publish every
-pharmacy's name and phone number anonymously.
+Basic Auth is **retired**. A single shared credential had no identity, no
+role, no session, no logout, no lockout and no record of who looked at or
+changed anything. What replaced it, and where each part runs:
 
-**This is a temporary P0 gate, not production admin authentication.** Volume 0
-Day 14 specifies no auth at all; a single shared credential is the minimum that
-closes the hole within P0 scope. Individual admin accounts, RBAC (Volume 5's P1
-super-admin vs support-read-only split), MFA, session management and
-admin-access auditing are all future hardening — none is implemented, and Basic
-Auth should be replaced rather than extended when they land.
+| Piece | Runtime | Reads |
+| --- | --- | --- |
+| `middleware.ts` | Edge, every request | the session cookie signature and its two expiries, plus `ADMIN_ROLES`. **No password material** |
+| `app/api/admin/session/route.ts` -> `lib/adminLogin.ts` | Node, login only | `ADMIN_ACCOUNTS` (salts and hashes), verified with PBKDF2-SHA256 at 600,000 iterations |
+| `lib/adminRoles.ts` | both | the frozen role -> permission table |
+| `lib/adminAuthz.ts` | Node, per page/action | `requirePermission`, which throws and audits the denial |
+| `lib/adminAudit.ts` | both | nothing; it WRITES one JSON line per event to stderr and keeps the last 200 in memory |
+
+It still **fails closed**: with `ADMIN_SESSION_SECRET` or `ADMIN_ROLES` unset or
+malformed every route returns 503, so a deployed admin URL never publishes a
+pharmacy's name and phone anonymously.
+
+Properties worth knowing before changing any of it:
+
+- **The matcher stays broad; the two public paths are an exact-match set**
+  (`/login`, `/api/admin/session`). Adding them to the matcher regex would be a
+  PREFIX exemption and would also open `/login-anything`.
+- **`ADMIN_ROLES` is authoritative and re-read per request**, so removing a
+  username denies that account's next request even though its cookie is still
+  signed and unexpired. The cookie's own role claim grants nothing; a mismatch
+  is audited.
+- **Login does constant work.** An unknown username runs the same 600,000-
+  iteration KDF against a dummy salt, and every failure returns byte-identical
+  bytes, so the route is not a username oracle.
+- **Two throttles**: per-username backoff plus a 15-minute lockout, and a
+  per-IP budget keyed on nothing from the request body.
+
+Honest limits, all three per-instance or environment-bound:
+
+- session revocation (`ADMIN_SESSION_EPOCH`) is all-or-nothing, and takes effect
+  only once the new environment is live. Per-user revocation needs the Batch 3
+  session table.
+- both login throttles are module state, so N instances allow N times as many
+  attempts. The real rate limit belongs at the host/edge layer.
+- the `/audit` view is in-memory and per-instance. **stderr is the record of
+  account** until the Batch 3 table exists.
 
 ## Environment
 
@@ -77,9 +106,22 @@ Vercel's project settings (Volume 8). Never commit a filled-in `.env`.
 ```
 SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
-ADMIN_BASIC_AUTH_USER=
-ADMIN_BASIC_AUTH_PASSWORD=
+ADMIN_SESSION_SECRET=        # >= 32 bytes
+ADMIN_SESSION_EPOCH=         # optional integer; unset means 0
+ADMIN_ACCOUNTS=              # [{"username":"...","salt":"<32 hex>","hash":"<64 hex>"}]
+ADMIN_ROLES=                 # {"...":"super_admin|billing|support|read_only"}
+ADMIN_ORIGIN=                # optional exact origin for the login POST
 ```
+
+Provision an account without a plaintext password entering the repo, an env
+file in git, or a shell history line:
+
+```bash
+node scripts/admin-hash-password.mjs founder     # password on stdin
+```
+
+**Upgrading an existing local `.env.local`:** the two `ADMIN_BASIC_AUTH_*`
+lines are now ignored. Add the four variables above or the panel answers 503.
 
 ## Commands
 

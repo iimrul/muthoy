@@ -1,67 +1,69 @@
+// W4-06 — the retirement of Basic Auth, asserted rather than assumed, plus the
+// one primitive that outlived it.
+//
+// The shared-credential gate is gone from the code AND from the environment it
+// read. Leaving evaluateBasicAuth importable would leave a second, weaker door
+// one import away from being reopened, so its absence is a test, not a comment.
+
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { constantTimeEquals, evaluateBasicAuth } from './basicAuth';
+import * as basicAuth from './basicAuth';
+import { constantTimeEquals } from './basicAuth';
 
-const CREDENTIALS = { user: 'founder', password: 'correct-horse' };
+const ADMIN_ROOT = join(import.meta.dirname, '..');
+const IGNORED = new Set(['node_modules', '.next', '.turbo']);
 
-function basicHeader(user: string, password: string): string {
-  return `Basic ${Buffer.from(`${user}:${password}`, 'utf8').toString('base64')}`;
+// Comments are stripped, the same guard serviceRoleExposure.test.ts uses:
+// basicAuth.ts EXPLAINS what it retired, and prose about a retired variable
+// must not read as use of it.
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
-describe('evaluateBasicAuth', () => {
-  test('fails closed when no credentials are configured', () => {
-    expect(evaluateBasicAuth(basicHeader('founder', 'correct-horse'), { user: undefined, password: undefined })).toBe(
-      'not-configured',
+function sourceFiles(directory: string): { path: string; contents: string }[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const absolute = join(directory, entry.name);
+    if (entry.isDirectory()) return IGNORED.has(entry.name) ? [] : sourceFiles(absolute);
+    if (!/\.(ts|tsx|mjs)$/.test(entry.name)) return [];
+    return [{
+      path: relative(ADMIN_ROOT, absolute).split(sep).join('/'),
+      contents: stripComments(readFileSync(absolute, 'utf8')),
+    }];
+  });
+}
+
+const SOURCES = sourceFiles(ADMIN_ROOT);
+
+describe('Basic Auth is retired', () => {
+  test('finds the admin source tree', () => {
+    expect(SOURCES.length).toBeGreaterThan(5);
+  });
+
+  test('evaluateBasicAuth is no longer exported', () => {
+    expect('evaluateBasicAuth' in basicAuth).toBe(false);
+  });
+
+  test('the module exports constantTimeEquals and nothing else', () => {
+    expect(Object.keys(basicAuth).sort()).toEqual(['constantTimeEquals']);
+  });
+
+  test('no source file reads the shared Basic Auth credentials any more', () => {
+    const offenders = SOURCES.filter(
+      (file) =>
+        !file.path.endsWith('basicAuth.test.ts') &&
+        /ADMIN_BASIC_AUTH_(?:USER|PASSWORD)/.test(file.contents),
     );
+
+    expect(offenders.map((file) => file.path)).toEqual([]);
   });
 
-  test('fails closed when only the user is configured', () => {
-    expect(evaluateBasicAuth(null, { user: 'founder', password: undefined })).toBe('not-configured');
-  });
+  test('no source file sends a WWW-Authenticate challenge any more', () => {
+    const offenders = SOURCES.filter(
+      (file) => !file.path.endsWith('basicAuth.test.ts') && /WWW-Authenticate/i.test(file.contents),
+    );
 
-  test('treats a blank configured password as unconfigured, not as a valid empty password', () => {
-    expect(evaluateBasicAuth(basicHeader('founder', ''), { user: 'founder', password: '' })).toBe('not-configured');
-  });
-
-  test('rejects a request with no Authorization header', () => {
-    expect(evaluateBasicAuth(null, CREDENTIALS)).toBe('unauthorized');
-  });
-
-  test('rejects a non-Basic scheme', () => {
-    expect(evaluateBasicAuth('Bearer some-token', CREDENTIALS)).toBe('unauthorized');
-  });
-
-  test('rejects an undecodable payload', () => {
-    expect(evaluateBasicAuth('Basic !!!not-base64!!!', CREDENTIALS)).toBe('unauthorized');
-  });
-
-  test('rejects a payload with no colon separator', () => {
-    const encoded = Buffer.from('founder', 'utf8').toString('base64');
-
-    expect(evaluateBasicAuth(`Basic ${encoded}`, CREDENTIALS)).toBe('unauthorized');
-  });
-
-  test('rejects the right user with the wrong password', () => {
-    expect(evaluateBasicAuth(basicHeader('founder', 'wrong'), CREDENTIALS)).toBe('unauthorized');
-  });
-
-  test('rejects the wrong user with the right password', () => {
-    expect(evaluateBasicAuth(basicHeader('someone', 'correct-horse'), CREDENTIALS)).toBe('unauthorized');
-  });
-
-  test('accepts matching credentials', () => {
-    expect(evaluateBasicAuth(basicHeader('founder', 'correct-horse'), CREDENTIALS)).toBe('authorized');
-  });
-
-  test('accepts a lowercase scheme token', () => {
-    const header = basicHeader('founder', 'correct-horse').replace('Basic', 'basic');
-
-    expect(evaluateBasicAuth(header, CREDENTIALS)).toBe('authorized');
-  });
-
-  test('splits on the first colon only, so a password may contain colons', () => {
-    const credentials = { user: 'founder', password: 'a:b:c' };
-
-    expect(evaluateBasicAuth(basicHeader('founder', 'a:b:c'), credentials)).toBe('authorized');
+    expect(offenders.map((file) => file.path)).toEqual([]);
   });
 });
 
@@ -76,5 +78,13 @@ describe('constantTimeEquals', () => {
 
   test('rejects differing lengths', () => {
     expect(constantTimeEquals('abc', 'abcd')).toBe(false);
+  });
+
+  test('compares bytes, not code units, so multi-byte input cannot alias', () => {
+    expect(constantTimeEquals('é', 'é')).toBe(false);
+  });
+
+  test('two empty strings are equal — the callers never pass one', () => {
+    expect(constantTimeEquals('', '')).toBe(true);
   });
 });
