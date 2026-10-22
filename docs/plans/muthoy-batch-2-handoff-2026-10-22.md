@@ -22,7 +22,8 @@ the Gate 2 disposition. The founder authorized Gate 3 on revision 7 on 2026-10-2
 ## 2. Local checkpoint commit
 
 ```
-SHA              CHECKPOINT_SHA_PLACEHOLDER
+SHA              63b88dfce8684091d5fd9635ec08bea5ab1193eb
+                 (+ this doc-only SHA backfill commit on top)
 Branch           main
 Pushed           NO — deliberately. Push happens only after all seven tasks are done.
 Parent           51c5230e622b2ff5e1ca0c859fdf541a3131cc4c
