@@ -24,7 +24,7 @@ import {
   listSupplierPickerOptions,
 } from "../../db/suppliers";
 import { parseScannedMedicineStrip } from "../../domain/ocrText";
-import type { MedicineSearchResult } from "../../domain/medicineSearchProvider";
+import type { MedicinePrefill } from "../../domain/catalogPrefill";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useI18n } from "../../state/localeStore";
 import { localizeValidationMessage, userFacingError } from "../../i18n/display";
@@ -36,16 +36,21 @@ import { SupplierPickerField } from "./SupplierPickerField";
 interface ManualEntryFormProps {
   session: Session;
   onSaved: () => void;
-  initialMedicine?: MedicineSearchResult | null;
+  initialMedicine?: MedicinePrefill | null;
   scanRequest?: number;
 }
 
 // Manual Entry — the prototype-parity field set (Volume 0 Day 8's identity
 // fields, plus Supplier + Payment Method now that Add Medicine's first batch
 // is a real supplier purchase, per the founder's Sales+Inventory recovery
-// decision). Strength, Category, unit and barcode stay outside this recovery,
-// while Requires-prescription remains explicit because silently defaulting
-// every new medicine to false suppresses the production checkout warning.
+// decision), while Requires-prescription remains explicit because silently
+// defaulting every new medicine to false suppresses the production checkout
+// warning.
+//
+// W2-02 adds Strength, Dosage form and Unit, which the recovery had left out:
+// the medicine catalogue prefills exactly those three, and a prefilled value
+// the user can neither see nor correct must never reach the database. Category
+// and barcode are still out of scope — nothing prefills them.
 export function ManualEntryForm({
   session,
   onSaved,
@@ -98,6 +103,12 @@ export function ManualEntryForm({
     },
   });
 
+  // Every mapped catalogue field lands in its own editable field — never
+  // concatenated into `name`, which must stay the brand name (medicines_fts
+  // indexes it, findExactNameMatch compares it). Unit of measure is only
+  // overwritten when the catalogue actually supplied one, so an unmapped pack
+  // size leaves the "piece" default standing rather than blanking a required
+  // field (domain/catalogPrefill.ts).
   useEffect(() => {
     if (!initialMedicine) return;
     setValue("name", initialMedicine.name, { shouldDirty: true });
@@ -105,6 +116,13 @@ export function ManualEntryForm({
     setValue("manufacturer", initialMedicine.manufacturer ?? "", {
       shouldDirty: true,
     });
+    setValue("strength", initialMedicine.strength ?? "", { shouldDirty: true });
+    setValue("type", initialMedicine.type ?? "", { shouldDirty: true });
+    if (initialMedicine.unitOfMeasure) {
+      setValue("unitOfMeasure", initialMedicine.unitOfMeasure, {
+        shouldDirty: true,
+      });
+    }
   }, [initialMedicine, setValue]);
 
   useEffect(() => {
@@ -182,6 +200,10 @@ export function ManualEntryForm({
           name: input.name,
           generic: input.generic,
           manufacturer: input.manufacturer,
+          // A blank optional field is "not recorded", not an empty value: the
+          // column is nullable and an empty string would read back as present.
+          strength: input.strength?.trim() || undefined,
+          type: input.type?.trim() || undefined,
           unitOfMeasure: input.unitOfMeasure,
           requiresPrescription: input.requiresPrescription,
           threshold: input.threshold,
@@ -305,6 +327,34 @@ export function ManualEntryForm({
           )}
         />
       </View>
+
+      <View className="flex-row gap-3">
+        <View className="flex-1">
+          <FormField
+            control={control}
+            name="strength"
+            label={t("strengthLabel")}
+            placeholder={t("strengthPlaceholder")}
+            prototypeStyle
+          />
+        </View>
+        <View className="flex-1">
+          <FormField
+            control={control}
+            name="type"
+            label={t("dosageFormLabel")}
+            placeholder={t("dosageFormPlaceholder")}
+            prototypeStyle
+          />
+        </View>
+      </View>
+      <FormField
+        control={control}
+        name="unitOfMeasure"
+        label={t("unitOfMeasureLabel")}
+        placeholder={t("unitOfMeasurePlaceholder")}
+        prototypeStyle
+      />
 
       <View className="flex-row gap-3">
         <View className="flex-1">

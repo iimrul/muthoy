@@ -311,6 +311,8 @@ export interface CreateMedicineWithPurchaseInput {
   name: string;
   generic?: string;
   manufacturer?: string;
+  /** medicines.type — the dosage form. W2-02's catalogue prefills it. */
+  type?: string;
   strength?: string;
   category?: string;
   unitOfMeasure: string;
@@ -424,6 +426,7 @@ export async function createMedicineWithPurchase(
       name: input.name,
       generic: input.generic ?? null,
       manufacturer: input.manufacturer ?? null,
+      type: input.type ?? null,
       strength: input.strength ?? null,
       category: input.category ?? null,
       unitOfMeasure: input.unitOfMeasure,

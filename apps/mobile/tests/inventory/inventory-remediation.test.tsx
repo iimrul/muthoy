@@ -174,6 +174,46 @@ vi.mock("../../db/suppliers", () => ({
 }));
 vi.mock("../../sync", () => ({ triggerSyncNow: deps.triggerSyncNow }));
 
+// W2-02. The catalogue is real SQLite + FTS5 (db/medicineCatalog.ts); this
+// suite is the UI contract, so both of its reads are doubled here. Note there
+// is nothing to double for a catalogue WRITE: the module exports none, which is
+// what keeps Save the one commit path.
+const catalogDeps = vi.hoisted(() => ({
+  search: vi.fn(),
+  getCatalogEntry: vi.fn(),
+}));
+vi.mock("../../db/medicineCatalog", () => ({
+  catalogMedicineSearchProvider: { search: catalogDeps.search },
+  getCatalogEntry: catalogDeps.getCatalogEntry,
+}));
+
+/** A catalogue row with every column populated, as getCatalogEntry returns it. */
+const CATALOG_ROW = {
+  id: "catalog-1",
+  brandName: "Napa Extra",
+  brandNameBn: "নাপা এক্সট্রা",
+  genericName: "Paracetamol + Caffeine",
+  genericNameBn: "প্যারাসিটামল + ক্যাফেইন",
+  manufacturer: "Beximco Pharmaceuticals",
+  manufacturerBn: "বেক্সিমকো ফার্মাসিউটিক্যালস",
+  strength: "500mg + 65mg",
+  dosageForm: "Tablet",
+  packSize: "Strip",
+  source: "synthetic-fixture",
+  sourceVersion: "2026-10-22",
+};
+
+/** The same row as the search projection hands it to the result list. */
+const SEARCH_HIT = {
+  id: CATALOG_ROW.id,
+  name: CATALOG_ROW.brandName,
+  generic: CATALOG_ROW.genericName,
+  manufacturer: CATALOG_ROW.manufacturer,
+  strength: CATALOG_ROW.strength,
+  dosageForm: CATALOG_ROW.dosageForm,
+  packSize: CATALOG_ROW.packSize,
+};
+
 const { unavailableMedicineSearchProvider } = await import(
   "../../domain/medicineSearchProvider"
 );
@@ -214,6 +254,10 @@ beforeEach(() => {
   deps.adjustBatchStock.mockResolvedValue(undefined);
   deps.updateBatch.mockResolvedValue(undefined);
   deps.updateMedicine.mockResolvedValue(undefined);
+  // An empty catalogue is the shipped state (gate E7: no licensed dataset),
+  // so that is the default every test starts from.
+  catalogDeps.search.mockResolvedValue([]);
+  catalogDeps.getCatalogEntry.mockResolvedValue(null);
 });
 
 afterEach(() => cleanup());
@@ -224,32 +268,69 @@ function MoneyProbe() {
 }
 
 describe("Add Medicine parity recovery", () => {
-  it("prefills Manual Entry from the selected search result", async () => {
-    vi.spyOn(unavailableMedicineSearchProvider, "search").mockResolvedValueOnce([
-      {
-        id: "master-1",
-        name: "Napa Extra",
-        generic: "Paracetamol",
-        manufacturer: "Beximco",
-      },
-    ]);
+  // W2-02. The wiring test: a regression to the stub provider would make every
+  // search silently find nothing, which is indistinguishable from an empty
+  // catalogue — so it is asserted directly rather than inferred from results.
+  it("searches the real catalogue provider, never the unavailable stub", async () => {
+    const stub = vi.spyOn(unavailableMedicineSearchProvider, "search");
     render(createElement(AddMedicineScreen));
 
     fireEvent.change(screen.getByRole("textbox", { name: "Search Medicine" }), {
       target: { value: "Napa" },
     });
+
+    await waitFor(() => expect(catalogDeps.search).toHaveBeenCalledWith("Napa"));
+    expect(stub).not.toHaveBeenCalled();
+  });
+
+  it("prefills Manual Entry field-by-field from the catalogue row, writes nothing before Save, and carries strength, dosage form and unit into their own columns", async () => {
+    catalogDeps.search.mockResolvedValueOnce([SEARCH_HIT]);
+    catalogDeps.getCatalogEntry.mockResolvedValueOnce(CATALOG_ROW);
+    render(createElement(AddMedicineScreen));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search Medicine" }), {
+      target: { value: "Napa" },
+    });
+    // The disambiguating fields are on the row itself: against a 21k catalogue
+    // "Napa 500mg" and "Napa 665mg" would otherwise both read just "Napa".
     await waitFor(() => expect(screen.getByText("Napa Extra")).toBeTruthy());
-    fireEvent.click(screen.getByLabelText("Napa Extra"));
+    expect(screen.getByText("500mg + 65mg • Tablet • Strip")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getByLabelText("Napa Extra • 500mg + 65mg • Tablet • Strip"),
+      );
+    });
+
+    // Selection is a READ. getCatalogEntry ran; nothing was written.
+    expect(catalogDeps.getCatalogEntry).toHaveBeenCalledWith("catalog-1");
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+    expect(deps.updateMedicine).not.toHaveBeenCalled();
+    expect(deps.triggerSyncNow).not.toHaveBeenCalled();
 
     await waitFor(() =>
       expect(
         (screen.getByLabelText("Medicine name *") as HTMLInputElement).value,
       ).toBe("Napa Extra"),
     );
-    expect((screen.getByLabelText("Generic name *") as HTMLInputElement).value)
-      .toBe("Paracetamol");
-    expect((screen.getByLabelText("Manufacturer") as HTMLInputElement).value)
-      .toBe("Beximco");
+    // Each value in its own field — and the brand name alone in `name`, which
+    // medicines_fts indexes and findExactNameMatch compares against.
+    expect(
+      (screen.getByLabelText("Generic name *") as HTMLInputElement).value,
+    ).toBe("Paracetamol + Caffeine");
+    expect(
+      (screen.getByLabelText("Manufacturer") as HTMLInputElement).value,
+    ).toBe("Beximco Pharmaceuticals");
+    expect((screen.getByLabelText("Strength") as HTMLInputElement).value).toBe(
+      "500mg + 65mg",
+    );
+    expect(
+      (screen.getByLabelText("Dosage form") as HTMLInputElement).value,
+    ).toBe("Tablet");
+    expect((screen.getByLabelText("Unit") as HTMLInputElement).value).toBe(
+      "strip",
+    );
+
     fireEvent.change(screen.getByLabelText("Batch number *"), {
       target: { value: "NAPA-1" },
     });
@@ -271,14 +352,83 @@ describe("Add Medicine parity recovery", () => {
     await act(async () => {
       fireEvent.click(screen.getByLabelText("Save"));
     });
+
     await waitFor(() =>
       expect(deps.createMedicineWithPurchase).toHaveBeenCalledWith(
         expect.objectContaining({
+          name: "Napa Extra",
+          generic: "Paracetamol + Caffeine",
+          manufacturer: "Beximco Pharmaceuticals",
+          strength: "500mg + 65mg",
+          type: "Tablet",
+          unitOfMeasure: "strip",
           supplierId: "supplier-1",
           requiresPrescription: true,
         }),
       ),
     );
+    // Save is still the only commit path: exactly one write, through the
+    // existing atomic createMedicineWithPurchase.
+    expect(deps.createMedicineWithPurchase).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the newest query's results when two searches resolve out of order", async () => {
+    let resolveStale: ((rows: typeof SEARCH_HIT[]) => void) | undefined;
+    catalogDeps.search
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStale = resolve;
+          }),
+      )
+      .mockResolvedValueOnce([SEARCH_HIT]);
+    render(createElement(AddMedicineScreen));
+    const input = screen.getByRole("textbox", { name: "Search Medicine" });
+
+    fireEvent.change(input, { target: { value: "Na" } });
+    fireEvent.change(input, { target: { value: "Napa" } });
+    await waitFor(() => expect(screen.getByText("Napa Extra")).toBeTruthy());
+
+    // The first, slower query now lands. It must not overwrite the newer one.
+    await act(async () => {
+      resolveStale?.([
+        { ...SEARCH_HIT, id: "catalog-stale", name: "Stale Result" },
+      ]);
+    });
+
+    expect(screen.queryByText("Stale Result")).toBeNull();
+    expect(screen.getByText("Napa Extra")).toBeTruthy();
+  });
+
+  it("falls back to the result row's own values when the catalogue row cannot be re-read", async () => {
+    catalogDeps.search.mockResolvedValueOnce([SEARCH_HIT]);
+    // A re-import replaces ids by deterministic hash, so null is legitimate
+    // rather than exceptional — the user still gets what the row showed them.
+    catalogDeps.getCatalogEntry.mockResolvedValueOnce(null);
+    render(createElement(AddMedicineScreen));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search Medicine" }), {
+      target: { value: "Napa" },
+    });
+    await waitFor(() => expect(screen.getByText("Napa Extra")).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(
+        screen.getByLabelText("Napa Extra • 500mg + 65mg • Tablet • Strip"),
+      );
+    });
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("Medicine name *") as HTMLInputElement).value,
+      ).toBe("Napa Extra"),
+    );
+    expect((screen.getByLabelText("Strength") as HTMLInputElement).value).toBe(
+      "500mg + 65mg",
+    );
+    expect(
+      (screen.getByLabelText("Dosage form") as HTMLInputElement).value,
+    ).toBe("Tablet");
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
   });
 
   it("offers the search-shell scan action and opens the real scanner flow", async () => {

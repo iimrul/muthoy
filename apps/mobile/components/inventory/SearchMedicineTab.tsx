@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { useI18n } from "../../state/localeStore";
+import { createLatestRequestGuard } from "../../domain/latestRequestGuard";
 import {
   unavailableMedicineSearchProvider,
   type MedicineSearchProvider,
@@ -12,16 +13,31 @@ interface SearchMedicineTabProps {
   onSelect: (result: MedicineSearchResult) => void;
   onSwitchToManual: () => void;
   onScan: () => void;
-  /** Swappable later for a real ~21k master-database provider — see domain/medicineSearchProvider.ts. */
+  /** The real one is db/medicineCatalog.ts's catalogMedicineSearchProvider. */
   provider?: MedicineSearchProvider;
 }
 
-// Search Medicine — UI/flow shell only. No medicine master database is
-// connected yet (backend/dataset decision pending); this renders a real
-// search input and a real result-row shape so a provider can be swapped in
-// later with no redesign, but it never shows a fake or fixture match — a
-// query that finds nothing (because nothing is connected) shows an explicit
-// "not connected yet" state with a way into Manual Entry instead.
+/**
+ * Strength, dosage form and pack size on one secondary line.
+ *
+ * Without them a 21k catalogue renders "Napa 500mg" and "Napa 665mg" as two
+ * identical rows both reading "Napa", and the user picks blind. They are shown
+ * BESIDE the name, never concatenated into it — `medicines.name` must stay the
+ * brand name (medicines_fts indexes it, findExactNameMatch compares it).
+ */
+function detailLine(result: MedicineSearchResult): string {
+  return [result.strength, result.dosageForm, result.packSize]
+    .filter(Boolean)
+    .join(" • ");
+}
+
+// Search Medicine — the UI half of W2-02. The medicine reference catalogue is
+// a real table with a real FTS index now (db/medicineCatalog.ts), but it ships
+// with ZERO rows: no licensed dataset has been cleared (gate E7). So a query
+// against a fresh install finds nothing and still lands on the explicit
+// "not connected yet" state with a way into Manual Entry — this component
+// never shows a fake or fixture match, and never shows that state in place of
+// a failure it should report instead.
 export function SearchMedicineTab({
   onSelect,
   onSwitchToManual,
@@ -32,16 +48,36 @@ export function SearchMedicineTab({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MedicineSearchResult[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  // Against a 21k catalogue a slow early query can resolve after a fast later
+  // one and overwrite it, so the newest keystroke's results are the only ones
+  // allowed to land. Same guard app/(tabs)/sale.tsx's search already uses.
+  const [searchGuard] = useState(() => createLatestRequestGuard());
 
   const handleChangeText = (text: string) => {
     setQuery(text);
+    const requestId = searchGuard.start();
     if (!text.trim()) {
       setResults([]);
       setHasSearched(false);
+      setSearchError(null);
       return;
     }
     setHasSearched(true);
-    void provider.search(text).then(setResults);
+    setSearchError(null);
+    void provider
+      .search(text)
+      .then((matches) => {
+        if (searchGuard.isLatest(requestId)) {
+          setResults(matches);
+        }
+      })
+      .catch(() => {
+        if (searchGuard.isLatest(requestId)) {
+          setResults([]);
+          setSearchError(t("medicineSearchFailedRetryLabel"));
+        }
+      });
   };
 
   return (
@@ -69,29 +105,46 @@ export function SearchMedicineTab({
       </View>
       {results.length > 0 ? (
         <View className="gap-2">
-          {results.map((result) => (
-            <Pressable
-              key={result.id}
-              onPress={() => onSelect(result)}
-              accessibilityRole="button"
-              accessibilityLabel={result.name}
-              className="rounded-xl bg-[#F9FAFB] p-3 active:opacity-80"
-            >
-              <Text className="font-sans-medium text-base text-richBlack">
-                {result.name}
-              </Text>
-              {result.generic || result.manufacturer ? (
-                <Text className="font-sans text-xs text-midGray">
-                  {[result.generic, result.manufacturer]
-                    .filter(Boolean)
-                    .join(" • ")}
+          {results.map((result) => {
+            const details = detailLine(result);
+            return (
+              <Pressable
+                key={result.id}
+                onPress={() => onSelect(result)}
+                accessibilityRole="button"
+                // The details belong in the label too: a Pressable's label
+                // replaces its children for a screen reader, so without them a
+                // TalkBack user hears "Napa" for both strengths and still
+                // picks blind.
+                accessibilityLabel={
+                  details ? `${result.name} • ${details}` : result.name
+                }
+                className="rounded-xl bg-[#F9FAFB] p-3 active:opacity-80"
+              >
+                <Text className="font-sans-medium text-base text-richBlack">
+                  {result.name}
                 </Text>
-              ) : null}
-            </Pressable>
-          ))}
+                {result.generic || result.manufacturer ? (
+                  <Text className="font-sans text-xs text-midGray">
+                    {[result.generic, result.manufacturer]
+                      .filter(Boolean)
+                      .join(" • ")}
+                  </Text>
+                ) : null}
+                {details ? (
+                  <Text className="font-sans text-xs text-midGray">
+                    {details}
+                  </Text>
+                ) : null}
+              </Pressable>
+            );
+          })}
         </View>
       ) : null}
-      {hasSearched && results.length === 0 ? (
+      {searchError ? (
+        <Text className="font-sans text-sm text-error">{searchError}</Text>
+      ) : null}
+      {hasSearched && results.length === 0 && !searchError ? (
         <View className="gap-3 rounded-xl bg-white p-4">
           <Text className="font-sans-medium text-sm text-richBlack">
             {t("medicineDatabaseNotConnected")}

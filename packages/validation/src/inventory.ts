@@ -63,6 +63,10 @@ export const addMedicineSchema = z.object({
   name: z.string().trim().min(2, "Medicine name is too short"),
   generic: z.string().trim().optional(),
   manufacturer: z.string().trim().optional(),
+  // W2-02: `type` is medicines.type, the dosage form (tablet, syrup,
+  // injection...). The medicine catalogue prefills it alongside strength, so
+  // both are editable fields on the form rather than hidden writes.
+  type: z.string().trim().optional(),
   strength: z.string().trim().optional(),
   category: z.string().trim().optional(),
   unitOfMeasure: z
