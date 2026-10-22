@@ -97,8 +97,9 @@ All of W2-03, and W2-02's **data layer** — not its UI, and not its dataset.
 
 ## 4. The seven executable tasks and what remains
 
-**W2-01, W2-02 and W2-03 are code-complete (W2-02 still dataset-blocked by E7).
-W4-10, W4-06, W4-07 and W4-08 are unbuilt.**
+**W2-01, W2-02, W2-03 and W4-10 are code-complete** (W2-02 is still dataset-blocked by
+E7; W4-10 is LOCAL CODE ONLY — nothing was deployed and no live provider has been
+retired). **W4-06, W4-07 and W4-08 are unbuilt.**
 
 | ID | Task | State | Remaining |
 |---|---|---|---|
@@ -108,7 +109,7 @@ W4-10, W4-06, W4-07 and W4-08 are unbuilt.**
 | **W4-06** | Admin auth / RBAC / audit / sessions | **NOT STARTED** | `apps/admin/lib/{adminIdentity,adminSession,adminRoles,adminAuthz,adminAudit}.ts` + tests; `middleware.ts` exact-pathname exemption; `app/api/admin/session/route.ts`; `app/login/page.tsx`; `scripts/admin-hash-password.mjs` |
 | **W4-07** | Admin management pages | **NOT STARTED** | `lib/adminQueries.ts`; `app/shops/[id]`, `app/accounts`, `app/accounts/[id]`, `app/subscriptions`, `app/payments`, `app/audit` |
 | **W4-08** | Admin write actions | **NOT STARTED** | `lib/adminActions.ts` (three RPC-backed actions only); `lib/adminGrants.test.ts` restructure; source-level write-restriction test; `pgtest/batch2-admin-acl.pgtest.ts` |
-| **W4-10** | SSLCommerz retirement | **NOT STARTED** | `functions/sync/_shared/paymentProvider.ts` (refuses `sslcommerz`, no bKash branch); `functions/sync/billing.ts` uses it; **`apps/mobile/sync/billing.ts` must fail locally BEFORE `createPaymentAttempt` writes a row** (`:77`→`:85`); `app/settings/plan-payment.tsx` payment-unavailable state |
+| **W4-10** | SSLCommerz retirement | **code DONE; NOT DEPLOYED** | nothing in code. `103ac1a`: `functions/sync/_shared/paymentProvider.ts` is the seam — `resolveProvider` reads `PAYMENT_PROVIDER` and refuses every value (unset, empty, unknown, `bkash`, and `sslcommerz` itself) with 503 `payment_not_configured`, imports neither `createSslCommerzSession` nor `sslCommerzConfig`, and `billing.ts` no longer imports that module at all; `apps/mobile/sync/billing.ts` refuses BEFORE `getBillingAccountIdForShop` and `createPaymentAttempt`; `app/settings/plan-payment.tsx` names no provider, shows a payment-unavailable card in bn+en and disables Pay while still polling an order passed in through params. `payment-webhook/handler.ts` is comment-only; no privilege revoked, no function dropped, no migration added, `_shared/sslcommerz.ts` byte-identical. **Hosted deployment is NOT done and is not claimed** |
 
 **Not in scope, by founder decision:**
 
@@ -154,8 +155,17 @@ sealed H-9/F12/H1 evidence or anything in `.gitattributes`' `eol=lf` list.
 
 ## 7. The exact next implementation step
 
-**W2-01, W2-02 and W2-03 are code-complete.** Five code checkpoints, eleven
+**W2-01, W2-02, W2-03 and W4-10 are code-complete.** Six code checkpoints, **20**
 mutation checks, every one failing the assertion it was aimed at.
+
+**Mutation-count reconciliation (2026-10-22, no new review):** an earlier revision of
+this section said "eleven mutation checks" for the first five checkpoints. That figure
+has no source. The authoritative record is the commit messages themselves —
+`2b39062` four, `9bc08a6` three, `9e7d880` three, `ca7a7a4` two, `fd9b21b` two =
+**14**, which is what the per-checkpoint table below has always summed to. The "11"
+was a transcription slip and is corrected here. `103ac1a` adds six, giving 20.
+`63b88df`'s own checks (the transliteration fold, the migration registry key) sit
+outside this count, in §3.
 
 | Checkpoint | What landed | Verification |
 |---|---|---|
@@ -164,6 +174,7 @@ mutation checks, every one failing the assertion it was aimed at.
 | `9e7d880` | W2-01 §6.2.3 — the confirmation sheet, on BOTH scanners | mobile tsc 0; 50 files / 614 tests; 3 mutations |
 | `ca7a7a4` | W2-01 §6.2.4a — `captureOnly` recognition, opt-in by presence | mobile tsc 0; 5 files / 53 tests; 2 mutations |
 | `fd9b21b` | W2-01 §6.2.4b — the per-line prescription review at checkout | mobile+admin tsc 0; 70 files / 804 tests; 2 mutations |
+| `103ac1a` | W4-10 §7.6 — the provider seam refuses every environment; the device refuses before its first write; the screen names no provider | mobile+admin tsc 0; 25 files / 490 tests; 6 mutations |
 
 H-9 seal re-verified at every checkpoint: **34** Postgres migrations, same tail,
 `h9_postmigration_checks.sql` SHA-256 still
@@ -196,25 +207,52 @@ pre-existing dirty paths are untouched and `origin/main` is still `51c5230` —
    **Checkout is over the limit and worth a dedicated extraction pass** — not
    done here because it is unrelated refactoring of money-path code.
 
-### 7.1 Next: W4-10, the SSLCommerz retirement
+### 7.1 W4-10 is done in code — what landed, and its two deviations
 
-Founder constraints, given 2026-10-22 and binding:
+The founder's constraints (2026-10-22) and how each is met:
 
-- Disable **new** SSLCommerz payment initiation.
-- Do **not** break historical payments, pending callbacks, or refund processing.
-- bKash is blocked on E8, so new subscription payments **fail closed**.
-- **Do not represent the product as payment-ready.**
+| Constraint | How |
+|---|---|
+| Disable **new** SSLCommerz initiation | `resolveProvider` refuses every `PAYMENT_PROVIDER` value, `'sslcommerz'` included; `initiateBilling` calls it immediately after the owner check; `initiatePlanPayment` refuses before its first read or write. Those are the only two initiation paths (`handler.ts:105` routes `billing-init`; `plan-payment.tsx` is the one local caller) |
+| Do not break historical payments, pending callbacks or refunds | `payment-webhook/handler.ts` is comment-only and still verifies and applies a late callback; historical `payment_attempts` stay readable and reconcilable by server order; sale refunds share no module with subscription payments (asserted, and `b2-refunds.sqlite.test.ts` runs unchanged) |
+| Fail closed while bKash is blocked | no provider exists to select, so every attempt ends in 503 `payment_not_configured` on the server and `PaymentUnavailableError` carrying the same code on the device |
+| Do not represent the product as payment-ready | the screen states online payment is unavailable in bn and en, Pay is disabled, the "Secure payment · Cancel anytime" line is gone, and the commit records CODE-COMPLETE, NOT DEPLOYED |
 
-The files, from §4: `functions/sync/_shared/paymentProvider.ts` (refuses
-`sslcommerz`, no bKash branch); `functions/sync/billing.ts` uses it;
-`apps/mobile/sync/billing.ts` must fail **locally, before** `createPaymentAttempt`
-writes a row (`:77` -> `:85`); `app/settings/plan-payment.tsx` gets a
-payment-unavailable state. Note `db/commercial.ts:467` writes the literal
-`provider: 'sslcommerz'` and `db/schema.ts:325` constrains that column to it, so
-the local attempt row cannot simply switch provider — which is why the refusal
-has to happen before the row is written.
+**Two deliberate deviations from revision 7 (CLAUDE.md rule 11), both kept:**
 
-Then W4-06 -> W4-07 -> W4-08 (largest, do last).
+1. **`paymentProvider.ts` declares `providerId` + `createSession` only**, not the
+   `verify`/`matchesOrder` members §7.2 sketches. Nothing shipped calls those, and §7.2
+   is explicitly DESIGN ONLY for the blocked W4-09, so the rest of the interface stays
+   in the plan rather than becoming dead type surface here.
+2. **`PaymentProviderError` is re-exported through the seam, not moved.** Moving its
+   definition would have edited `_shared/sslcommerz.ts` — which §7.6 says stays retired
+   and untouched — and put its 47 historical tests at risk for no behavioural gain. The
+   cost is one import of the retired module for the error class alone, which
+   `payment-provider.test.ts` pins as the ONLY import, by exact import-line set.
+
+**Not retired, on purpose:** `db/schema.ts:325`'s `provider` CHECK and
+`db/commercial.ts:467`'s `'sslcommerz'` literal. Nothing writes `'bkash'`, so changing
+them is dead scope (r5) — and that CHECK is precisely why the refusal must precede the
+local write instead of switching the provider value.
+
+**Out of W4-10's scope, noted for the delivery report:** `app/settings/plans.tsx` still
+offers plan selection and routes to the payment screen, where the unavailable state is
+what the owner meets. Gating the plans screen itself was not in the plan's file list and
+was not added.
+
+### 7.2 The exact next implementation step: W4-06
+
+Admin auth / RBAC / audit / sessions, from §4: `apps/admin/lib/{adminIdentity,
+adminSession,adminRoles,adminAuthz,adminAudit}.ts` + tests; `middleware.ts`
+exact-pathname exemption; `app/api/admin/session/route.ts`; `app/login/page.tsx`;
+`scripts/admin-hash-password.mjs`. Plan §5 holds the accepted design, including the
+stateless-session decision and the `basicAuth.ts` retirement that keeps
+`constantTimeEquals`. Then W4-07 -> W4-08 (largest, do last).
+
+Standing constraints that still bind: no new Postgres migration (the H-9 seal, §2.1),
+`backend/supabase/deploy/batch2-admin-audit.sql` stays OUTSIDE the chain, the 41
+pre-existing dirty paths stay unstaged, and nothing is pushed until all seven tasks are
+implemented (§8).
 
 **Operational constraint:** never run the full `vitest` suite concurrently with a Codex
 review. Under CPU contention `db/h7-pin-reservation.sqlite.test.ts` (5 s timeout, three
