@@ -148,6 +148,10 @@ export default defineConfig({
       // Free and expired are refused, and only the account primary shop stays
       // reachable after a downgrade.
       "apps/mobile/db/b4-multi-shop-entitlement.sqlite.test.ts",
+      // W4-10. The local half of the SSLCommerz retirement: a refused payment
+      // writes no payment_attempts row and sends no request, while historical
+      // attempts, their reconciliation and the legacy writer all survive.
+      "apps/mobile/db/b4-payment-retirement.sqlite.test.ts",
       // Migration 0018's data backfill against a populated pre-migration
       // fixture — the taxonomy remap, not the CHECK-constraint rebuild the
       // plan doc originally assumed (there is none on this column).
@@ -485,6 +489,11 @@ export default defineConfig({
       // what makes a retry idempotent rather than a double charge, and that a
       // provider failure cannot leave an order the device polls forever.
       "backend/supabase/functions/sync/payment-integration.test.ts",
+      // W4-10. Provider SELECTION, which is where the retirement lives: every
+      // PAYMENT_PROVIDER value — unset, unknown, 'bkash' and 'sslcommerz'
+      // itself — refuses with 503 payment_not_configured, and billing-init
+      // reaches no payment table on a refused attempt.
+      "backend/supabase/functions/sync/payment-provider.test.ts",
       "backend/supabase/functions/sync/multiShop.test.ts",
       // billing-status self-heal: MU032 is the only failure that may answer
       // 404; every other RPC/database error stays a 500.

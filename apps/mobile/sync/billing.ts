@@ -74,11 +74,40 @@ export async function refreshBillingStatus(
   return result;
 }
 
+/** The code the server answers billing-init with, and the one this file throws. */
+export const SUBSCRIPTION_PAYMENT_UNAVAILABLE_CODE = 'payment_not_configured';
+
+/**
+ * W4-10. No new subscription payment may start: SSLCommerz is retired from
+ * selection and routing (founder decision 2026-10-21) and direct bKash is
+ * BLOCKED on E8. The server refuses billing-init for the same reason — this
+ * local gate exists so the device never writes a local attempt row for a
+ * payment the server is going to refuse.
+ */
+export class PaymentUnavailableError extends Error {
+  readonly code = SUBSCRIPTION_PAYMENT_UNAVAILABLE_CODE;
+
+  constructor() {
+    super('Subscription payment is unavailable.');
+    this.name = 'PaymentUnavailableError';
+  }
+}
+
+export function isSubscriptionPaymentAvailable(): boolean {
+  return false;
+}
+
 export async function initiatePlanPayment(input: {
   shopId: string;
   tier: Exclude<PlanTier, 'free'>;
   billingCycle: BillingCycle;
 }): Promise<{ localAttemptId: string; orderId: string; checkoutUrl: string }> {
+  // FIRST, before any read or write. createPaymentAttempt below inserts a
+  // payment_attempts row carrying provider 'sslcommerz' (db/commercial.ts) and
+  // only then calls the server, so a server-side refusal would leave that row
+  // orphaned on every attempt. Refusing here means a retired provider never
+  // reaches local storage at all.
+  if (!isSubscriptionPaymentAvailable()) throw new PaymentUnavailableError();
   const billingAccountId = await getBillingAccountIdForShop(input.shopId);
   if (!billingAccountId) throw new Error('Connect to the internet to verify plan access first');
   const amountPaisa = priceFor(input.tier, input.billingCycle) as Paisa;

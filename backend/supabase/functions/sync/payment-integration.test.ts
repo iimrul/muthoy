@@ -2,6 +2,13 @@
 //
 // SYNTHETIC ONLY: fabricated store credentials, a doubled provider, no network.
 //
+// W4-10 (2026-10-22): initiation is RETIRED in the shipped build — the real
+// provider seam refuses every environment, which payment-provider.test.ts
+// proves. These tests therefore drive a doubled provider deliberately, because
+// the order state machine they pin is what still governs historical orders and
+// what the next provider will inherit. Nothing below is evidence that a
+// payment can be started today.
+//
 // billing.test.ts covers billing-status self-heal and sslcommerz.test.ts covers
 // the provider contract. Neither touches initiateBilling or
 // finalizeBillingAttempt, which is where the money decisions actually are: who
@@ -17,7 +24,7 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   from: vi.fn(),
   createSession: vi.fn(),
-  config: vi.fn(),
+  resolveProvider: vi.fn(),
 }));
 
 vi.mock('./_shared/auth.ts', async (importOriginal) => {
@@ -27,9 +34,14 @@ vi.mock('./_shared/auth.ts', async (importOriginal) => {
 vi.mock('./_shared/supabaseAdmin.ts', () => ({
   supabaseAdmin: { rpc: mocks.rpc, from: mocks.from },
 }));
-vi.mock('./_shared/sslcommerz.ts', () => ({
-  createSslCommerzSession: mocks.createSession,
-  sslCommerzConfig: mocks.config,
+// W4-10. billing.ts takes its provider from the seam now, so the double lives
+// there. The REAL seam refuses every environment — payment-provider.test.ts
+// proves that. What this file keeps proving is the order state machine behind
+// it: idempotency, the open-order conflict, the terminal reconciliation. That
+// machine still governs every historical order, so it has to survive the
+// retirement rather than be deleted with it.
+vi.mock('./_shared/paymentProvider.ts', () => ({
+  resolveProvider: mocks.resolveProvider,
   PaymentProviderError: class PaymentProviderError extends Error {
     constructor(
       public readonly status: number,
@@ -93,9 +105,8 @@ function defaultTables(overrides: Record<string, { data: unknown; error: unknown
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.assertCallerCurrent.mockResolvedValue(OWNER);
-  mocks.config.mockReturnValue({
-    storeId: 'store', storePassword: 'secret', mode: 'sandbox',
-    callbackBaseUrl: 'https://project.functions.supabase.co/payment-webhook',
+  mocks.resolveProvider.mockReturnValue({
+    providerId: 'synthetic-double', createSession: mocks.createSession,
   });
   mocks.createSession.mockResolvedValue({
     sessionKey: 'session-key',
@@ -114,8 +125,8 @@ describe('who may start a payment', () => {
   });
 
   it('fails closed BEFORE reusing any checkout URL when the provider is unconfigured', async () => {
-    const { PaymentProviderError } = await import('./_shared/sslcommerz.ts');
-    mocks.config.mockImplementation(() => {
+    const { PaymentProviderError } = await import('./_shared/paymentProvider.ts');
+    mocks.resolveProvider.mockImplementation(() => {
       throw new PaymentProviderError(503, 'Payment provider is not configured', 'payment_not_configured');
     });
     await expect(
@@ -265,7 +276,7 @@ describe('commercial rules', () => {
 
 describe('a provider failure never leaves a stuck order', () => {
   it('flips the order to failed/init_failed and surfaces the provider status', async () => {
-    const { PaymentProviderError } = await import('./_shared/sslcommerz.ts');
+    const { PaymentProviderError } = await import('./_shared/paymentProvider.ts');
     const orders = table({ data: null, error: null });
     mocks.from.mockImplementation((name: string) =>
       name === 'payment_orders'

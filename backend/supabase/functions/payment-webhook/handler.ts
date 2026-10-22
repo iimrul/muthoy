@@ -10,6 +10,16 @@
 //
 // A pure move. No predicate, status code or branch is altered; the exports
 // below are what the tests needed to reach, not a new API surface.
+//
+// W4-10 (2026-10-22) — this pipeline stays SSLCommerz-only ON PURPOSE and is
+// unchanged but for this note. Retirement stops NEW initiation (see
+// sync/_shared/paymentProvider.ts); it does not stop settlement of payments
+// that already exist. An order created before retirement can still have a
+// callback in flight, and a merchant-side retry can arrive later, so signature
+// verification, the idempotent apply through b4_apply_verified_payment and its
+// grants must all keep working exactly as W3-06 shipped them. Nothing here is
+// revoked, dropped or re-routed, and no bKash branch is added: that contract is
+// BLOCKED on E8 and would have to be invented to write one.
 
 import { supabaseAdmin } from "../sync/_shared/supabaseAdmin.ts";
 import {

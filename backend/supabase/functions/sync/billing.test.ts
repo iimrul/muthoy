@@ -10,9 +10,13 @@ vi.mock('./_shared/auth.ts', async (importOriginal) => {
 vi.mock('./_shared/supabaseAdmin.ts', () => ({
   supabaseAdmin: { rpc: mocks.rpc, from: mocks.from },
 }));
-vi.mock('./_shared/sslcommerz.ts', () => ({
-  createSslCommerzSession: vi.fn(),
-  sslCommerzConfig: vi.fn(),
+// billing-status must never consult a payment provider — it reads and
+// reconciles state. W4-10 moved the seam to _shared/paymentProvider.ts, and
+// this double fails loudly if that ever changes.
+vi.mock('./_shared/paymentProvider.ts', () => ({
+  resolveProvider: vi.fn(() => {
+    throw new Error('billing-status must not resolve a payment provider');
+  }),
   PaymentProviderError: class extends Error {},
 }));
 

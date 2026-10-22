@@ -1,6 +1,11 @@
 import { assertCallerCurrent, type Caller, HttpError } from "./_shared/auth.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
-import { createSslCommerzSession, PaymentProviderError, sslCommerzConfig, type SslCommerzConfig } from "./_shared/sslcommerz.ts";
+// W4-10. Payment initiation goes through the provider seam, never through a
+// named provider: resolveProvider() refuses every environment while SSLCommerz
+// is retired and bKash is blocked on E8. Nothing in this file imports the
+// SSLCommerz module any more, so no new order can reach it. The webhook keeps
+// settling historical SSLCommerz orders; see payment-webhook/handler.ts.
+import { PaymentProviderError, resolveProvider, type PaymentProvider } from "./_shared/paymentProvider.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -88,10 +93,12 @@ export async function billingStatus(caller: Caller, body: Record<string, unknown
 export async function initiateBilling(caller: Caller, body: Record<string, unknown>) {
   const record = await assertCallerCurrent(caller);
   const billingAccountId = requireOwner(record);
-  // Fail before reading/reusing any checkout URL when the provider is disabled.
-  let providerConfig: SslCommerzConfig;
+  // Fail before reading/reusing any checkout URL when no provider is active.
+  // This is the first thing after the owner check for a reason: no order row,
+  // no provider call and no checkout link may exist for a refused attempt.
+  let provider: PaymentProvider;
   try {
-    providerConfig = sslCommerzConfig();
+    provider = resolveProvider();
   } catch (error) {
     if (error instanceof PaymentProviderError) throw new HttpError(error.status, error.message, error.code);
     throw error;
@@ -157,8 +164,8 @@ export async function initiateBilling(caller: Caller, body: Record<string, unkno
   if (insertError) throw new HttpError(500, "Could not create payment order");
 
   try {
-    const session = await createSslCommerzSession({
-      config: providerConfig, transactionId, orderId,
+    const session = await provider.createSession({
+      transactionId, orderId,
       amountPaisa: Number(offering.data.amount_paisa), planLabel: `Muthoy ${tier}`,
       customerName, customerEmail, customerPhone,
     });
