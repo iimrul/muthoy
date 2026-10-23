@@ -289,6 +289,7 @@ Per-commit figures are in §2. At the end of the batch:
 | `npx tsc --noEmit -p apps/mobile/tsconfig.json` | exit 0 |
 | `npx tsc --noEmit -p apps/admin/tsconfig.json` | exit 0 |
 | `pnpm --filter @muthoy/admin lint` | clean |
+| `pnpm turbo run lint typecheck` — **what CI actually runs** | exit 0, after the fix below |
 | `pnpm --filter @muthoy/admin build` | compiles; ten routes, every one dynamic; middleware 35.6 kB |
 | Client bundle secret scan | no `ADMIN_SESSION_SECRET`, `ADMIN_ACCOUNTS`, `ADMIN_ROLES`, `SUPABASE_SERVICE_ROLE_KEY`, cookie name or `pbkdf2` in `.next/static` |
 | `git diff --check` | exit 0 |

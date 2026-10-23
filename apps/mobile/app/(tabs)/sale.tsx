@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Modal,
@@ -100,13 +100,62 @@ export default function SaleEntryScreen() {
     };
   }, [mode, query, session, t]);
 
+  // Shared by manual typing and scan-to-search so both hit the exact same
+  // searchMedicinesForSale relevance path — no new matching logic invented
+  // for OCR (docs/plans/ocr.md). Returns both the matches and whether this
+  // call is still the most recent one: a scan's search can take long enough
+  // (capture + OCR + query) that a manual retype starts and finishes first,
+  // and a stale scan result must never drive an auto-add after that
+  // (docs/plans/ocr.md — Sale Entry stale-result safety).
+  //
+  // Declared HERE, above the effects and above the `!session` guard below, and
+  // wrapped in useCallback: the handed-over-query effect calls it, and an
+  // effect that reaches forward to a function declared later in the body is
+  // both a temporal-dead-zone hazard and a lint error
+  // (react-hooks/immutability). W2-01 introduced that shape; this is the fix.
+  // The session guard moves inside, since the function may now be defined
+  // before the component has decided whether it has a session.
+  const runSearch = useCallback(
+    async (
+      value: string,
+    ): Promise<{ matches: MedicineSearchResult[]; isLatest: boolean }> => {
+      if (!session) return { matches: [], isLatest: true };
+      const requestId = searchGuard.start();
+      if (!value.trim()) {
+        setResults(await listSaleInsights(session.shopId, mode));
+        setIsSearching(false);
+        return { matches: [], isLatest: searchGuard.isLatest(requestId) };
+      }
+
+      setIsSearching(true);
+      try {
+        const matches = await searchMedicinesForSale(session.shopId, value);
+        const isLatest = searchGuard.isLatest(requestId);
+        if (isLatest) {
+          setResults(matches);
+        }
+        return { matches, isLatest };
+      } catch {
+        const isLatest = searchGuard.isLatest(requestId);
+        if (isLatest) {
+          setResults([]);
+          setSearchError(t("medicineSearchFailedRetryLabel"));
+        }
+        return { matches: [], isLatest };
+      } finally {
+        if (searchGuard.isLatest(requestId)) {
+          setIsSearching(false);
+        }
+      }
+    },
+    [mode, searchGuard, session, t],
+  );
+
   useEffect(() => {
     if (!session || !handedOverQuery || hasRunHandedOverQuery.current) return;
     hasRunHandedOverQuery.current = true;
     void runSearch(handedOverQuery);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runSearch is
-    // defined after the session guard below; the ref makes this run once.
-  }, [handedOverQuery, session]);
+  }, [handedOverQuery, runSearch, session]);
 
   if (!session) {
     return null;
@@ -119,45 +168,6 @@ export default function SaleEntryScreen() {
     }
     showToast({ variant: 'card', label: t('addedToCartLabel'), message: line.medicineName });
     return true;
-  };
-
-  // Shared by manual typing and scan-to-search so both hit the exact same
-  // searchMedicinesForSale relevance path — no new matching logic invented
-  // for OCR (docs/plans/ocr.md). Returns both the matches and whether this
-  // call is still the most recent one: a scan's search can take long enough
-  // (capture + OCR + query) that a manual retype starts and finishes first,
-  // and a stale scan result must never drive an auto-add after that
-  // (docs/plans/ocr.md — Sale Entry stale-result safety).
-  const runSearch = async (
-    value: string,
-  ): Promise<{ matches: MedicineSearchResult[]; isLatest: boolean }> => {
-    const requestId = searchGuard.start();
-    if (!value.trim()) {
-      setResults(await listSaleInsights(session.shopId, mode));
-      setIsSearching(false);
-      return { matches: [], isLatest: searchGuard.isLatest(requestId) };
-    }
-
-    setIsSearching(true);
-    try {
-      const matches = await searchMedicinesForSale(session.shopId, value);
-      const isLatest = searchGuard.isLatest(requestId);
-      if (isLatest) {
-        setResults(matches);
-      }
-      return { matches, isLatest };
-    } catch {
-      const isLatest = searchGuard.isLatest(requestId);
-      if (isLatest) {
-        setResults([]);
-        setSearchError(t("medicineSearchFailedRetryLabel"));
-      }
-      return { matches: [], isLatest };
-    } finally {
-      if (searchGuard.isLatest(requestId)) {
-        setIsSearching(false);
-      }
-    }
   };
 
   const handleQueryChange = async (value: string) => {
