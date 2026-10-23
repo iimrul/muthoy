@@ -176,9 +176,11 @@ describe('a scanned exact match waits for confirmation', () => {
       manufacturer: 'Beximco',
       requiresPrescription: false,
       batchId: BATCH_ID,
+      batchNo: 'B-2401',
       expiryDate: '2099-01-01',
       availableQuantity: 10,
       quantity: 1,
+      unitPrice: 1200,
     });
     // The sheet closes, so a second confirm is impossible without a new scan.
     expect(screen.queryByText('Confirm scanned medicine')).toBeNull();
@@ -274,5 +276,34 @@ describe('the Sale tab scanner carries the same gate', () => {
     );
     expect(sheet).toContain('dismissOnBackdropPress={false}');
     expect(sheet).toContain('onClose={onDiscard}');
+  });
+});
+
+describe('a confirmed scan that the cart REFUSES', () => {
+  // R1b from the delta review: nothing drove addItem() to return false, so
+  // removing the stock-limit handling left the suite green — and this screen
+  // would then have told the seller a line existed that did not.
+  it('reports the stock limit and adds nothing when the cart is already at it', async () => {
+    // The batch has 10 available and the cart already holds all 10.
+    useCartStore.getState().addItem({
+      medicineId: MEDICINE_ID,
+      medicineName: 'Napa Extra',
+      batchId: BATCH_ID,
+      quantity: 10,
+      unitPrice: asPaisa(1200),
+      availableQuantity: 10,
+    });
+
+    render(createElement(ScanSaleScreen));
+    await scan();
+
+    await act(async () => {
+      fireEvent.click(await screen.findByLabelText('Add to cart'));
+    });
+
+    // One line, still at 10: the refusal did not quietly become an 11th unit.
+    expect(useCartStore.getState().items).toHaveLength(1);
+    expect(useCartStore.getState().items[0]?.quantity).toBe(10);
+    expect(screen.getByText('Cart quantity is already at available stock.')).toBeTruthy();
   });
 });

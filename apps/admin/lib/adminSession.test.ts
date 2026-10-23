@@ -100,11 +100,16 @@ describe('a signed session round-trips', () => {
   });
 
   test('refreshing cannot outlive the 8-hour absolute window', async () => {
+    // The refresh is the LAST legitimate one: lastSeen sits just inside exp, so
+    // nothing about this token is inconsistent — it is simply past its absolute
+    // end, and that is what must reject it. (Refreshing to a lastSeen BEYOND
+    // exp is separately refused as malformed; see the timestamp-consistency
+    // tests below.)
     const payload = newSessionPayload({ sub: 'founder', role: 'support', epoch: 0, now: NOW });
-    const past = NOW + ABSOLUTE_TTL_MS + 1;
-    const token = await signAdminSession(touchedSessionPayload(payload, past), SECRET);
+    const lastRefresh = payload.exp - 1_000;
+    const token = await signAdminSession(touchedSessionPayload(payload, lastRefresh), SECRET);
 
-    expect(await verifyAdminSession(token, { secret: SECRET, epoch: 0, now: past })).toEqual({
+    expect(await verifyAdminSession(token, { secret: SECRET, epoch: 0, now: payload.exp + 1 })).toEqual({
       ok: false,
       reason: 'expired',
     });
@@ -241,7 +246,17 @@ describe('a future-dated token cannot outlive the absolute window', () => {
   // signed with iat years ahead and exp = iat + 8h satisfied both, and
   // `now - lastSeen` went NEGATIVE so the idle check passed as well — so it
   // stayed valid for years. Found by the final acceptance review.
-  test('refuses a token whose iat is in the future', async () => {
+  test.each([
+    ['lastSeen with it', 'together'],
+    ['lastSeen left in the present', 'apart'],
+  ])('refuses a token whose iat is in the future, %s', async (_label, arrangement) => {
+    // A future iat is rejected in BOTH arrangements, which is the property that
+    // matters. Note honestly which rule does the work: with lastSeen moved
+    // forward too, the future-lastSeen rule rejects it; with lastSeen left in
+    // the present, lastSeen < iat rejects it. The explicit future-iat line in
+    // adminSession.ts is therefore defence in depth — implied by that pair, so
+    // no test can isolate it, which the code comment there states rather than
+    // pretending otherwise.
     const future = NOW + 365 * 24 * 60 * 60 * 1_000;
     const token = await signRawBody(
       base64url(JSON.stringify({
@@ -249,7 +264,7 @@ describe('a future-dated token cannot outlive the absolute window', () => {
         role: 'super_admin',
         iat: future,
         exp: future + ABSOLUTE_TTL_MS,
-        lastSeen: future,
+        lastSeen: arrangement === 'together' ? future : NOW,
         epoch: 0,
       })),
       SECRET,
@@ -261,14 +276,20 @@ describe('a future-dated token cannot outlive the absolute window', () => {
     });
   });
 
-  test('refuses a future lastSeen that would make the idle window negative', async () => {
+  test('refuses a future lastSeen, isolated from every other check', async () => {
+    // Constructed so ONLY the future-lastSeen rule can reject it: the span is
+    // inside the TTL, iat is now, lastSeen is beyond the skew but still before
+    // exp, and the session has not expired. The earlier version of this test
+    // used lastSeen = now + 48h with exp = now + 8h, which ALSO broke the span
+    // and the lastSeen <= exp rules, so removing the check under test left it
+    // green — the delta review caught that.
     const token = await signRawBody(
       base64url(JSON.stringify({
         sub: 'founder',
         role: 'billing',
-        iat: NOW - 1_000,
+        iat: NOW,
         exp: NOW + ABSOLUTE_TTL_MS,
-        lastSeen: NOW + 48 * 60 * 60 * 1_000,
+        lastSeen: NOW + 2 * CLOCK_SKEW_MS,
         epoch: 0,
       })),
       SECRET,
@@ -280,7 +301,28 @@ describe('a future-dated token cannot outlive the absolute window', () => {
     });
   });
 
-  test('refuses lastSeen earlier than iat, and exp at or before iat', async () => {
+  test('refuses a lastSeen AFTER the session ends', async () => {
+    // Inside the skew, so neither future-timestamp rule fires; not expired; the
+    // span is tiny. Only lastSeen <= exp can reject this one.
+    const token = await signRawBody(
+      base64url(JSON.stringify({
+        sub: 'founder',
+        role: 'billing',
+        iat: NOW,
+        exp: NOW + 10_000,
+        lastSeen: NOW + 30_000,
+        epoch: 0,
+      })),
+      SECRET,
+    );
+
+    expect(await verifyAdminSession(token, { secret: SECRET, epoch: 0, now: NOW })).toEqual({
+      ok: false,
+      reason: 'malformed',
+    });
+  });
+
+  test('refuses lastSeen earlier than iat', async () => {
     const backwards = await signRawBody(
       base64url(JSON.stringify({
         sub: 'founder', role: 'billing', iat: NOW, exp: NOW + ABSOLUTE_TTL_MS,
@@ -289,14 +331,36 @@ describe('a future-dated token cannot outlive the absolute window', () => {
       SECRET,
     );
     expect((await verifyAdminSession(backwards, { secret: SECRET, epoch: 0, now: NOW })).ok).toBe(false);
+  });
 
+  test('refuses exp at or before iat, isolated inside the skew window', async () => {
+    // The earlier version used iat = exp = now, which the EXPIRY check rejected
+    // first, so the exp > iat rule was never the reason. Placing iat and
+    // lastSeen just inside the forward skew keeps every other rule satisfied —
+    // not expired, both timestamps within tolerance, lastSeen >= iat — so only
+    // exp > iat can reject it.
+    // exp EQUALS iat, with lastSeen equal to both and all three just inside the
+    // forward skew. Every other rule then holds — not expired, both timestamps
+    // within tolerance, lastSeen >= iat, lastSeen <= exp, span 0 — so exp > iat
+    // is the only rule that can reject it. An earlier attempt used
+    // exp < iat < lastSeen, which the lastSeen <= exp rule caught first.
+    const instant = NOW + 30_000;
     const inverted = await signRawBody(
       base64url(JSON.stringify({
-        sub: 'founder', role: 'billing', iat: NOW, exp: NOW, lastSeen: NOW, epoch: 0,
+        sub: 'founder',
+        role: 'billing',
+        iat: instant,
+        exp: instant,
+        lastSeen: instant,
+        epoch: 0,
       })),
       SECRET,
     );
-    expect((await verifyAdminSession(inverted, { secret: SECRET, epoch: 0, now: NOW })).ok).toBe(false);
+
+    expect(await verifyAdminSession(inverted, { secret: SECRET, epoch: 0, now: NOW })).toEqual({
+      ok: false,
+      reason: 'malformed',
+    });
   });
 
   test('still tolerates ordinary clock drift within the skew', async () => {

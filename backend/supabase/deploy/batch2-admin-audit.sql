@@ -68,10 +68,18 @@ create index if not exists admin_audit_log_actor_idx
 -- an assumption (BYPASSRLS skips policies but NOT table privileges).
 alter table public.admin_audit_log enable row level security;
 
-revoke all on table public.admin_audit_log from public, anon, authenticated;
+-- service_role IS INCLUDED in the revoke, deliberately. The hosted platform's
+-- default privileges give service_role more than SELECT and INSERT on a new
+-- public table — the measured profile recorded in this repository's H-9 work is
+-- service_role=Dxtm, i.e. TRUNCATE, REFERENCES, TRIGGER and MAINTAIN — so
+-- granting without revoking first would leave TRUNCATE in place on an AUDIT
+-- table. A panel that can truncate its own audit log has no audit log. Revoking
+-- everything and then granting exactly two privileges is what makes the comment
+-- below true rather than aspirational. (Delta review finding 4.)
+revoke all on table public.admin_audit_log from public, anon, authenticated, service_role;
 
--- INSERT and SELECT only. No UPDATE and no DELETE, deliberately: an audit row
--- the panel can edit or remove is not evidence. Retention is an operator
+-- INSERT and SELECT only. No UPDATE, no DELETE and no TRUNCATE: an audit row
+-- the panel can edit or erase is not evidence. Retention is an operator
 -- decision taken outside the application, not an application privilege.
 grant insert, select on table public.admin_audit_log to service_role;
 
@@ -81,8 +89,11 @@ commit;
 --
 --   select has_table_privilege('service_role', 'public.admin_audit_log', 'insert');  -- t
 --   select has_table_privilege('service_role', 'public.admin_audit_log', 'select');  -- t
---   select has_table_privilege('service_role', 'public.admin_audit_log', 'update');  -- f
---   select has_table_privilege('service_role', 'public.admin_audit_log', 'delete');  -- f
+--   select has_table_privilege('service_role', 'public.admin_audit_log', 'update');     -- f
+--   select has_table_privilege('service_role', 'public.admin_audit_log', 'delete');     -- f
+--   select has_table_privilege('service_role', 'public.admin_audit_log', 'truncate');   -- f
+--   select has_table_privilege('service_role', 'public.admin_audit_log', 'references'); -- f
+--   select has_table_privilege('service_role', 'public.admin_audit_log', 'trigger');    -- f
 --   select has_table_privilege('anon', 'public.admin_audit_log', 'select');          -- f
 --   select has_table_privilege('authenticated', 'public.admin_audit_log', 'select'); -- f
 --   select relrowsecurity from pg_class where oid = 'public.admin_audit_log'::regclass; -- t

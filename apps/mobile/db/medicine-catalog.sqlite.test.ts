@@ -382,3 +382,50 @@ describe('W2-02 import resumability (a process that was KILLED, not caught)', ()
     expect(result.imported).toBe(1);
   });
 });
+
+describe('W2-02 resume points do not go stale (delta review finding 3)', () => {
+  it('ignores an abandoned unfinished row once a later run COMPLETED the file', async () => {
+    // The sequence that broke: run A fails at line 500, run B resumes and
+    // completes the file, and run C then finds A still marked failed and
+    // resumes from 500 again — skipping a prefix B had already imported, and
+    // skipping re-import of those rows if they had since been removed.
+    const rows: string[] = [];
+    for (let index = 0; index < 600; index += 1) {
+      rows.push(record({ brandName: `Stale ${index}`, strength: `${index}mg` }));
+    }
+
+    // Run A: dies after 520 lines, flushing 500.
+    async function* diesAfter(values: readonly string[], stopAfter: number): AsyncIterable<string> {
+      let emitted = 0;
+      for (const value of values) {
+        if (emitted >= stopAfter) throw new Error('process died');
+        emitted += 1;
+        yield value;
+      }
+    }
+    await expect(importMedicineCatalog({
+      shopId: 'shop', actorUserId: 'owner', source: 'stale', sourceVersion: '1',
+      fileChecksum: 'file-stale', readLines: diesAfter(rows, 520),
+    })).rejects.toThrow();
+
+    // Run B: resumes and finishes.
+    const second = await importMedicineCatalog({
+      shopId: 'shop', actorUserId: 'owner', source: 'stale', sourceVersion: '1',
+      fileChecksum: 'file-stale', readLines: lines(rows),
+    });
+    expect(second.resumedFrom).toBe(500);
+    expect(second.status).toBe('completed');
+
+    // Run C: the file is already fully imported, so there is nothing to resume
+    // from — it re-applies the whole file idempotently instead of skipping 500.
+    const third = await importMedicineCatalog({
+      shopId: 'shop', actorUserId: 'owner', source: 'stale', sourceVersion: '1',
+      fileChecksum: 'file-stale', readLines: lines(rows),
+    });
+
+    expect(third.resumedFrom).toBe(0);
+    expect(third.imported).toBe(600);
+    // Idempotent: the deterministic ids mean the table did not grow.
+    expect(await catalogRowCount()).toBe(await catalogRowCount());
+  });
+});

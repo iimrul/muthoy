@@ -177,9 +177,18 @@ export async function verifyAdminSession(
   // token stayed valid for years, which is exactly the absolute-lifetime
   // property this file claims to enforce. A small forward skew is allowed for
   // ordinary clock drift between the signing and verifying hosts.
+  // DEFENCE IN DEPTH, and implied today: any iat beyond the skew is already
+  // rejected by the pair below (lastSeen must be within the skew AND not before
+  // iat), so removing this line alone changes no outcome and no test can
+  // isolate it. It stays because it makes the intent explicit and survives a
+  // later edit to either of those two rules.
   if (payload.iat > options.now + CLOCK_SKEW_MS) return { ok: false, reason: 'malformed' };
   if (payload.lastSeen > options.now + CLOCK_SKEW_MS) return { ok: false, reason: 'malformed' };
   if (payload.lastSeen < payload.iat) return { ok: false, reason: 'malformed' };
+  // Last seen AFTER the session ends is not a session this deployment issued.
+  // It cannot extend anything past `exp`, but a token whose own timestamps
+  // contradict each other is nonsense, and nonsense fails closed.
+  if (payload.lastSeen > payload.exp) return { ok: false, reason: 'malformed' };
   if (payload.exp <= payload.iat) return { ok: false, reason: 'malformed' };
   if (options.now >= payload.exp) return { ok: false, reason: 'expired' };
   // An iat/exp pair wider than the absolute TTL came from someone holding the

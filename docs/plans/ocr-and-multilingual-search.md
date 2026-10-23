@@ -2,9 +2,11 @@
 
 **Shipped:** W2-01 and W2-03, Batch 2, 2026-10-22 (`9bc08a6`, `9e7d880`,
 `ca7a7a4`, `fd9b21b`, `63b88df`).
-**Status:** CODE-COMPLETE, **not device-verified**. No physical-device run was
-authorized in this batch, so the on-device camera and recognition path has not
-been exercised by a human.
+**Status:** W2-01 is CODE-COMPLETE. **W2-03 is PARTIAL** — its fold reaches the
+catalogue path only, and shop-inventory search is unchanged and single-script
+(§5 has the detail and the blocker). Neither is **device-verified**: no
+physical-device run was authorized in this batch, so the on-device camera and
+recognition path has not been exercised by a human.
 
 This supersedes the status text in `docs/plans/ocr.md`, which describes the
 original plan boundary rather than current behaviour. That document is kept for

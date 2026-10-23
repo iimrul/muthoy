@@ -57,7 +57,14 @@ H-9 seal re-verified at checkpoint: **34** Postgres migrations, tail
 
 ## 3. What is COMPLETE and tested
 
-All of W2-03, and W2-02's **data layer** — not its UI, and not its dataset.
+W2-03's **fold and query builder**, and W2-02's **data layer** — not W2-02's UI,
+and not its dataset.
+
+**W2-03 is PARTIAL, not "all of W2-03"** (corrected 2026-10-23; §4 said PARTIAL
+while this line still said all, which is the kind of disagreement that gets read
+in whichever direction suits). The fold is implemented and tested and reaches
+the CATALOGUE path only. Shop-inventory search is unchanged and single-script.
+See §4's W2-03 row for the blocker and what closing it costs.
 
 | File | State | Tests |
 |---|---|---|

@@ -331,3 +331,33 @@ features whose promised behaviour was never exercised. The lesson is the same
 one the full-suite run taught: a property is only as real as the test that would
 fail without it, and a test that was written by the same pass that wrote the
 code tends to assert what the code does rather than what it must do.
+
+---
+
+## 8. The DELTA re-review, and the six corrections it forced
+
+A second, deliberately narrow Codex review of `9617801` — scoped to the seven
+findings, their fixes and the negative evidence, with no plan review and no
+re-opening of H-9 — returned **no DELTA ACCEPT** with six remaining findings
+(four MEDIUM, two LOW). Only the logout fix (original finding 3) was accepted
+outright.
+
+The pattern is worth naming: the **production** fixes held, but several of the
+**tests** did not discriminate. A test that passes for a reason other than the
+one it names is the same failure mode this batch already hit three times.
+
+| # | Severity | What was still wrong | Correction |
+|---|---|---|---|
+| R1 | MEDIUM | The strengthened scan assertion omitted `batchNo` and `unitPrice`, so dropping either still passed; and nothing drove `addItem()` to return `false`, so removing the stock-limit handling also passed | The assertion covers all ten fields. A new test fills the cart to the batch's 10 available units, scans, confirms, and asserts the line stays at 10 **and** that the stock-limit message appears. Two mutations — drop `batchNo`, ignore the refusal — each fail |
+| R2 | MEDIUM | `lastSeen > exp` was accepted when both sat near `now`. Worse, two of the four new tests passed for the wrong reason: the future-`lastSeen` token independently broke the 8-hour span, and the `exp > iat` token was independently expired | Added `lastSeen <= exp`. Both tests rebuilt so exactly one rule can reject each: future-`lastSeen` now sits inside `exp` with a legal span, and `exp <= iat` is reached with `iat == exp == lastSeen` just inside the skew. **Five of the six timestamp rules now fail their own mutation.** The sixth — the explicit future-`iat` check — is **provably implied** by `lastSeen <= now + skew` together with `lastSeen >= iat`, so no test can isolate it. It stays as defence in depth, and both the code and the test say so rather than implying coverage that does not exist |
+| R3 | MEDIUM | A resume point went stale: after run A failed at line 500 and run B resumed and completed the file, a third run still found A and resumed from 500 — skipping a prefix B had imported, and skipping re-import of those rows if they had since been removed | A COMPLETED run for a checksum now supersedes every unfinished one, so a later import of a finished file re-applies it idempotently from zero. A test drives the A to B to C sequence; the mutation fails it |
+| R4 | MEDIUM | `batch2-admin-audit.sql` granted `insert, select` to `service_role` without revoking first. The platform default measured in this repository's H-9 work is `service_role=Dxtm`, so **TRUNCATE** would have survived on an audit table | `service_role` is now included in the `revoke all`, and the verification list covers `truncate`, `references` and `trigger`. A panel that can truncate its own audit log has no audit log |
+| R5 | LOW | The documents still contradicted themselves: the handoff said "All of W2-03" in §3 while §4 said PARTIAL, and the OCR document's header said CODE-COMPLETE before §5 called it PARTIAL | Both corrected at the top, where a reader starts, with the correction stated rather than silently applied |
+| R6 | LOW | `scripts/admin-hash-password.mjs` had no test at all, so reintroducing the EOF read, the echo, or over-length acceptance left the suite green | `apps/admin/lib/adminHashPassword.test.ts`: 14 tests running the real script through a real pipe — valid, empty, short, 256 accepted, 257 refused, a bad username, first-line-only, no password echoed — plus source assertions that it reads one line, suppresses the TTY echo, takes the password only from stdin, and pins the KDF parameters. Three mutations each fail, the first of them five times over |
+
+**What remains deliberately open after the delta round:** W2-03's scope
+exception, and nothing else. The fold covers the catalogue path; existing shop
+medicines are not folded, and closing that needs a folded-key column on
+`medicines` plus an FTS rebuild — a SQLite migration — which is Batch 3 work.
+It is recorded as the W2-03 completion blocker here, in the handoff and in the
+delivery ledger.

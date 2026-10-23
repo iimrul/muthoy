@@ -203,6 +203,21 @@ interface PreviousProgress {
  *    cursor drift further with every malformed line.
  */
 function previousProgress(fileChecksum: string): PreviousProgress {
+  // A COMPLETED run of this file supersedes every unfinished one before it.
+  // Without this, an abandoned 'failed' or 'running' row outlived the
+  // successful run that followed it, and a THIRD import of the same file
+  // resumed from the stale cursor — skipping a prefix that a later run had
+  // already imported, and would skip re-importing it if those rows had since
+  // been removed. Found by the delta review.
+  const completed = db
+    .select({ id: medicineCatalogImports.id })
+    .from(medicineCatalogImports)
+    .where(sql`${medicineCatalogImports.fileChecksum} = ${fileChecksum}
+               and ${medicineCatalogImports.status} = 'completed'`)
+    .limit(1)
+    .get();
+  if (completed) return { lineCursor: 0, importedRows: 0 };
+
   const row = db
     .select({
       lineCursor: medicineCatalogImports.rowCount,
