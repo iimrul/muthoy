@@ -1,7 +1,9 @@
 # OCR and multilingual search, as they now stand
 
-**Shipped:** W2-01 and W2-03, Batch 2, 2026-10-22 (`9bc08a6`, `9e7d880`,
-`ca7a7a4`, `fd9b21b`, `63b88df`).
+**Shipped:** W2-01 in full, and W2-03 **in part**, Batch 2, 2026-10-22
+(`9bc08a6`, `9e7d880`, `ca7a7a4`, `fd9b21b`, `63b88df`). "Shipped" here means
+the code exists and is tested — not that it is device-verified, and not that
+W2-03 is complete.
 **Status:** W2-01 is CODE-COMPLETE. **W2-03 is PARTIAL** — its fold reaches the
 catalogue path only, and shop-inventory search is unchanged and single-script
 (§5 has the detail and the blocker). Neither is **device-verified**: no

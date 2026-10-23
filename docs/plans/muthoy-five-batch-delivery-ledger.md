@@ -100,7 +100,8 @@ anyway.
 ## What each later batch still owns
 
 - **Batch 2 (9)** — **IMPLEMENTED 2026-10-21 to 2026-10-22, CODE-COMPLETE, not
-  pushed and not device-verified.** Seven executable tasks shipped in code:
+  pushed and not device-verified.** Seven executable tasks were implemented — six
+  CODE-COMPLETE and **W2-03 PARTIAL**:
   **W2-01** medicine OCR completion, **W2-02** the offline catalogue
   mechanism, **W2-03** Bangla / English / Banglish search (**PARTIAL**: the fold reaches the catalogue path only — shop-inventory search stays single-script until a Batch 3 SQLite migration), **W4-06** admin
   auth / RBAC / audit / sessions (Basic Auth retired), **W4-07** the six admin
@@ -150,6 +151,26 @@ anyway.
   uncommitted working-tree paths and the H1/F12/N0/PG17 evidence preserved), the
   migration-chain extension, **W4-04 and W4-05 (still BLOCKED — see above)**,
   and H-11's C5 restore rehearsal.
+
+  **Inherited from Batch 2, unresolved (added 2026-10-23):**
+  - **W2-03's remaining half — multilingual search over EXISTING SHOP
+    MEDICINES.** Batch 2 shipped the Bangla/English/Banglish fold and applied it
+    to the catalogue path only; `db/sales.ts` and `db/purchases.ts` still pass
+    raw input to `medicines_fts`, so shop-inventory search is single-script.
+    Closing it requires **a SQLite migration adding a folded search-key column
+    to `medicines` plus an FTS index rebuild**, over a search index every
+    existing shop depends on — so it is subject to Batch 3's approved migration
+    and device-safety gates, not to be slipped in as a patch. Until then
+    **W2-03 stays PARTIAL and multilingual medicine search is NOT accepted.**
+  - **The durable admin audit table.** SQL staged out-of-chain at
+    `backend/supabase/deploy/batch2-admin-audit.sql`, never executed, **BLOCKED
+    on E4**. Batch 2 ships the stderr and ring-buffer sinks behind the same
+    interface, so landing it changes no call site; until it lands, the in-app
+    `/audit` view is per-instance and non-durable and **stderr is the record of
+    account**.
+  - **Phase 3 of any payment-function rollout** (revoke and drop the superseded
+    5-argument `b4_apply_verified_payment` signature), which stays a separate
+    later change by design.
 - **Batch 4 (18)** — remaining pre-RC hardening, **plus the two external
   acceptance gates Batch 1 could not close**:
   - **H-6 two-device convergence.** A forced conflict between two physical

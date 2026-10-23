@@ -2,7 +2,8 @@
 
 **Work ran:** 2026-10-21 to 2026-10-22
 **Plan:** `docs/plans/muthoy-batch-2-plan.md`, revision 7 (founder-accepted)
-**Status:** all seven executable tasks **CODE-COMPLETE**. None is
+**Status:** six of the seven executable tasks are **CODE-COMPLETE**; **W2-03 is
+PARTIAL** (its fold reaches the catalogue path only — §4). None is
 **DEVICE/PRODUCTION-VERIFIED**. Nothing is pushed; `origin/main` is still
 `51c5230`.
 
@@ -19,7 +20,7 @@ execute it. **DEVICE/PRODUCTION-VERIFIED** is a different claim — a human
 running the feature on a real device or against live Supabase — and **no task
 reaches it in this batch**, because no physical-device run was authorized and
 the founder's Galaxy A04s was off-limits. `DEVELOPMENT_RULES.md` clauses 2–3 are
-therefore unmet for all seven by construction, not by oversight.
+therefore unmet for every one of them by construction, not by oversight.
 
 | ID | Task | Code | Device / production | Blocked by |
 |---|---|---|---|---|

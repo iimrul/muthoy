@@ -1,7 +1,9 @@
 # Muthoy POS — Batch 2 Gate 3 handoff (local checkpoint)
 
 **Date:** 2026-10-22
-**Status:** **Gate 3 COMPLETE — all seven executable tasks are CODE-COMPLETE.**
+**Status:** **Gate 3 COMPLETE — six of the seven executable tasks are
+CODE-COMPLETE and W2-03 is PARTIAL** (its fold covers the catalogue path only;
+existing shop medicines are not folded — §4).
 Gates 1–2 are CLOSED and must not be repeated. **Batch 2 is NOT closed:** the
 closing sequence (§8) is under way — documentation is written, and the Codex
 FINAL ACCEPT, the push and CI are still outstanding. `origin/main` is still
@@ -33,7 +35,7 @@ SHA              63b88dfce8684091d5fd9635ec08bea5ab1193eb
                  ca7a7a4  W2-01 opt-in captureOnly recognition (2026-10-22)
                  fd9b21b  W2-01 prescription OCR review at checkout (2026-10-22)
 Branch           main
-Pushed           NO — deliberately. Push happens only after all seven tasks are done.
+Pushed           NO — deliberately. Push happens only after the closing sequence (§8).
 Parent           51c5230e622b2ff5e1ca0c859fdf541a3131cc4c
 ```
 
@@ -107,7 +109,10 @@ See §4's W2-03 row for the blocker and what closing it costs.
 
 ## 4. The seven executable tasks and what remains
 
-**All seven executable tasks are CODE-COMPLETE.** W2-02 is still dataset-blocked by E7;
+**Six of the seven executable tasks are CODE-COMPLETE: W2-01, W2-02, W4-06, W4-07,
+W4-08 and W4-10. W2-03 is PARTIAL** — the Bangla/Banglish fold reaches the catalogue
+path only, so multilingual search over EXISTING SHOP MEDICINES is not delivered and is
+not claimed. W2-02 is additionally dataset-blocked by E7;
 W4-10 is LOCAL CODE ONLY (nothing deployed, no live provider retired); W4-06/07/08 are
 local code with no Vercel deployment, no provisioned account and the admin read grants
 still undeployed. **No task is DEVICE/PRODUCTION-VERIFIED.**
@@ -166,7 +171,7 @@ sealed H-9/F12/H1 evidence or anything in `.gitattributes`' `eol=lf` list.
 
 ## 7. The exact next implementation step
 
-**All seven executable tasks are code-complete.** Nine code checkpoints, **37**
+**Six executable tasks are code-complete and W2-03 is PARTIAL.** Nine code checkpoints, **37**
 mutation checks, every one failing the assertion it was aimed at.
 
 **Mutation-count reconciliation (2026-10-22, no new review):** an earlier revision of
@@ -292,7 +297,7 @@ isolation.
 | `docs/plans/ocr.md` | UPDATED — status header pointing at the new document; historical text preserved |
 | `apps/admin/README.md` | UPDATED in `64c5f4b` — the new scheme, the env list, and the three honest limits |
 | `docs/plans/muthoy-batch-2-plan.md` | unchanged (revision 7 with its review log) |
-## 8. Closing sequence (only after all seven tasks are implemented)
+## 8. Closing sequence (only after every executable task is implemented)
 
 focused tests → documentation (Gate 4's document set, plan §8) → **Codex FINAL ACCEPT**
 → selective GitHub push by explicit path → **CI PASS** → Batch 2 delivery report
