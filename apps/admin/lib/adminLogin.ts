@@ -42,6 +42,7 @@ import { recordAdminAction, type AdminAuditSink } from './adminAudit';
 import { loadAdminIdentity, type AdminAccount } from './adminIdentity';
 import {
   ADMIN_SESSION_COOKIE,
+  verifyAdminSession,
   EXPIRED_SESSION_COOKIE_OPTIONS,
   newSessionPayload,
   readSessionEpoch,
@@ -253,6 +254,35 @@ async function readFields(request: Request): Promise<Record<string, string>> {
   return fields;
 }
 
+/**
+ * The username a REQUEST can prove, or null. Reads the cookie off the request
+ * header and verifies its signature and expiries; a request that proves nothing
+ * gets null rather than whatever it claimed.
+ */
+async function verifiedActor(
+  request: Request,
+  env: AdminEnvironment,
+): Promise<string | null> {
+  const header = request.headers.get('cookie');
+  if (!header) return null;
+  const pair = header.split(';')
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(ADMIN_SESSION_COOKIE + '='));
+  if (!pair) return null;
+
+  try {
+    const verified = await verifyAdminSession(pair.slice(ADMIN_SESSION_COOKIE.length + 1), {
+      secret: readSessionSecret(env),
+      epoch: readSessionEpoch(env),
+      now: Date.now(),
+    });
+    return verified.ok ? verified.payload.sub : null;
+  } catch {
+    // An unconfigured panel cannot prove an actor either.
+    return null;
+  }
+}
+
 export async function handleAdminSessionRequest(
   request: Request,
   deps: LoginDeps = {},
@@ -282,7 +312,20 @@ export async function handleAdminSessionRequest(
 
   const fields = await readFields(request);
   if (fields.intent === 'logout') {
-    audit({ actor: (fields.username ?? '').slice(0, MAX_FIELD_LENGTH) || 'unknown', action: 'logout', outcome: 'success', now, meta: { source } }, sinks);
+    // The actor comes from the VERIFIED cookie, never from the body. Taking it
+    // from a form field let any unauthenticated caller with an accepted Origin
+    // write "founder logged out, success" into the audit log — a log that can
+    // be written by a stranger is worse than no log, because it is believed.
+    // Clearing the cookie still happens either way: a logout must work even
+    // when the session it is clearing is already invalid.
+    const actor = await verifiedActor(request, env);
+    audit({
+      actor: actor ?? 'unknown',
+      action: 'logout',
+      outcome: actor === null ? 'failure' : 'success',
+      now,
+      meta: { source, ...(actor === null ? { reason: 'no_valid_session' } : {}) },
+    }, sinks);
     return redirect(
       '/login?signedOut=1',
       serializeCookie(ADMIN_SESSION_COOKIE, '', EXPIRED_SESSION_COOKIE_OPTIONS),

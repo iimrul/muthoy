@@ -239,3 +239,146 @@ describe('W2-03 search across English, Bangla and Banglish', () => {
     await expect(searchCatalog('NEAR(')).resolves.toBeInstanceOf(Array);
   });
 });
+
+describe('W2-02 import resumability (the crash case)', () => {
+  /** 600 rows: more than one 500-row chunk, so a crash can land mid-file. */
+  function bulk(count: number, prefix: string): string[] {
+    const rows: string[] = [];
+    for (let index = 0; index < count; index += 1) {
+      rows.push(record({ brandName: `${prefix} ${index}`, strength: `${index}mg` }));
+    }
+    return rows;
+  }
+
+  /** Dies after `stopAfter` lines, the way a killed process does: no cleanup. */
+  async function* diesAfter(values: readonly string[], stopAfter: number): AsyncIterable<string> {
+    let emitted = 0;
+    for (const value of values) {
+      if (emitted >= stopAfter) throw new Error('process died');
+      emitted += 1;
+      yield value;
+    }
+  }
+
+  it('resumes a KILLED run instead of restarting from zero', async () => {
+    // The earlier version resumed only from a row marked `failed`. A killed
+    // process leaves `running` forever — nothing survives to mark it — so the
+    // one case "resumable" exists for restarted from zero. Found by the final
+    // acceptance review.
+    const rows = bulk(600, 'Crash');
+
+    await expect(importMedicineCatalog({
+      shopId: 'shop', actorUserId: 'owner', source: 'crash', sourceVersion: '1',
+      fileChecksum: 'file-crash', readLines: diesAfter(rows, 520),
+    })).rejects.toThrow();
+
+    const second = await importMedicineCatalog({
+      shopId: 'shop', actorUserId: 'owner', source: 'crash', sourceVersion: '1',
+      fileChecksum: 'file-crash', readLines: lines(rows),
+    });
+
+    // 500 rows were durably flushed before the crash, so the re-run skips
+    // exactly those lines and writes the remaining 100.
+    expect(second.resumedFrom).toBe(500);
+    expect(second.imported).toBe(100);
+    expect(second.status).toBe('completed');
+  });
+
+  it('counts the resume cursor in LINES, so rejected lines do not skew it', async () => {
+    // The cursor used to be a row COUNT compared against a line counter, so
+    // every rejected line shifted it.
+    const rows = [
+      '{"brandName":"","genericName":"rejected"}',
+      ...bulk(600, 'Mixed'),
+    ];
+
+    await expect(importMedicineCatalog({
+      shopId: 'shop', actorUserId: 'owner', source: 'mixed', sourceVersion: '1',
+      fileChecksum: 'file-mixed', readLines: diesAfter(rows, 520),
+    })).rejects.toThrow();
+
+    const second = await importMedicineCatalog({
+      shopId: 'shop', actorUserId: 'owner', source: 'mixed', sourceVersion: '1',
+      fileChecksum: 'file-mixed', readLines: lines(rows),
+    });
+
+    // 501 lines consumed for 500 written rows: the cursor tracks lines.
+    expect(second.resumedFrom).toBe(501);
+    expect(second.imported).toBe(100);
+  });
+
+  it('does not resume onto a DIFFERENT file that shares a source and version', async () => {
+    const rows = bulk(600, 'Other');
+
+    await expect(importMedicineCatalog({
+      shopId: 'shop', actorUserId: 'owner', source: 'crash', sourceVersion: '1',
+      fileChecksum: 'file-other', readLines: diesAfter(rows, 520),
+    })).rejects.toThrow();
+
+    const fresh = await importMedicineCatalog({
+      shopId: 'shop', actorUserId: 'owner', source: 'crash', sourceVersion: '1',
+      fileChecksum: 'file-completely-different', readLines: lines(bulk(3, 'Fresh')),
+    });
+
+    expect(fresh.resumedFrom).toBe(0);
+    expect(fresh.imported).toBe(3);
+  });
+});
+
+describe('W2-02 import resumability (a process that was KILLED, not caught)', () => {
+  // The distinction matters and a mutation check proved the earlier tests could
+  // not see it: when the importer CATCHES a failure it marks the row 'failed',
+  // but a process that is killed — low memory, a force-quit, a crash — leaves
+  // the row 'running' forever, because nothing survives to update it. Resuming
+  // only from 'failed' therefore restarted the one case resumability exists for.
+  it('resumes from a row left RUNNING by a dead process', async () => {
+    const rows: string[] = [];
+    for (let index = 0; index < 600; index += 1) {
+      rows.push(record({ brandName: `Killed ${index}`, strength: `${index}mg` }));
+    }
+
+    // Exactly what a killed process leaves behind: status 'running', a flushed
+    // cursor, and no finishedAt.
+    db.insert(schema.medicineCatalogImports).values({
+      id: 'dead-run',
+      source: 'killed',
+      sourceVersion: '1',
+      fileChecksum: 'file-killed',
+      rowCount: 500,
+      importedRows: 500,
+      status: 'running',
+      startedAt: '2026-10-22T06:00:00.000Z',
+    }).run();
+
+    const result = await importMedicineCatalog({
+      shopId: 'shop', actorUserId: 'owner', source: 'killed', sourceVersion: '1',
+      fileChecksum: 'file-killed', readLines: lines(rows),
+    });
+
+    expect(result.resumedFrom).toBe(500);
+    expect(result.imported).toBe(100);
+    expect(result.status).toBe('completed');
+  });
+
+  it('a COMPLETED earlier run is not a resume point — a re-import is idempotent, not skipped', async () => {
+    db.insert(schema.medicineCatalogImports).values({
+      id: 'finished-run',
+      source: 'finished',
+      sourceVersion: '1',
+      fileChecksum: 'file-finished',
+      rowCount: 400,
+      importedRows: 400,
+      status: 'completed',
+      startedAt: '2026-10-22T06:00:00.000Z',
+      finishedAt: '2026-10-22T06:05:00.000Z',
+    }).run();
+
+    const result = await importMedicineCatalog({
+      shopId: 'shop', actorUserId: 'owner', source: 'finished', sourceVersion: '1',
+      fileChecksum: 'file-finished', readLines: lines([record({ brandName: 'Fresh Again' })]),
+    });
+
+    expect(result.resumedFrom).toBe(0);
+    expect(result.imported).toBe(1);
+  });
+});

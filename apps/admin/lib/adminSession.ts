@@ -25,6 +25,8 @@ export const ABSOLUTE_TTL_MS = 8 * 60 * 60 * 1_000;
 export const IDLE_TTL_MS = 30 * 60 * 1_000;
 /** Minimum secret length, in bytes, for an HMAC-SHA256 key. */
 export const MIN_SESSION_SECRET_BYTES = 32;
+/** Forward tolerance for clock drift between the signing and verifying hosts. */
+export const CLOCK_SKEW_MS = 60 * 1_000;
 
 export interface AdminSessionPayload {
   /** The username this cookie proves. Authority comes from ADMIN_ROLES, not from here. */
@@ -168,6 +170,17 @@ export async function verifyAdminSession(
   const payload = parsePayload(body);
   if (!payload) return { ok: false, reason: 'malformed' };
   if (payload.epoch !== options.epoch) return { ok: false, reason: 'epoch' };
+  // Timestamps must be sane BEFORE any window is measured against them.
+  // Checking only `now >= exp` and `exp - iat <= TTL` left a hole: a token
+  // signed with iat years in the future and exp = iat + 8h satisfies both, and
+  // `now - lastSeen` is then negative, so the idle check passes too. Such a
+  // token stayed valid for years, which is exactly the absolute-lifetime
+  // property this file claims to enforce. A small forward skew is allowed for
+  // ordinary clock drift between the signing and verifying hosts.
+  if (payload.iat > options.now + CLOCK_SKEW_MS) return { ok: false, reason: 'malformed' };
+  if (payload.lastSeen > options.now + CLOCK_SKEW_MS) return { ok: false, reason: 'malformed' };
+  if (payload.lastSeen < payload.iat) return { ok: false, reason: 'malformed' };
+  if (payload.exp <= payload.iat) return { ok: false, reason: 'malformed' };
   if (options.now >= payload.exp) return { ok: false, reason: 'expired' };
   // An iat/exp pair wider than the absolute TTL came from someone holding the
   // secret, or from a broken clock. Either way it is not a session this

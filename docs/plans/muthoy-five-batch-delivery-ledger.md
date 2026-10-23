@@ -102,7 +102,7 @@ anyway.
 - **Batch 2 (9)** — **IMPLEMENTED 2026-10-21 to 2026-10-22, CODE-COMPLETE, not
   pushed and not device-verified.** Seven executable tasks shipped in code:
   **W2-01** medicine OCR completion, **W2-02** the offline catalogue
-  mechanism, **W2-03** Bangla / English / Banglish search, **W4-06** admin
+  mechanism, **W2-03** Bangla / English / Banglish search (**PARTIAL**: the fold reaches the catalogue path only — shop-inventory search stays single-script until a Batch 3 SQLite migration), **W4-06** admin
   auth / RBAC / audit / sessions (Basic Auth retired), **W4-07** the six admin
   management pages, **W4-08** three bounded admin write actions, and **W4-10**
   SSLCommerz retirement. Evidence:

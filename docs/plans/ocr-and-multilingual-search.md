@@ -114,9 +114,22 @@ W2-03 needed a third caller, so it moved to `domain/ftsQuery.ts` and all three
 import it — `DEVELOPMENT_RULES.md` forbids duplicating shared logic, and a third
 copy is how three subtly different search behaviours appear.
 
-Search works on whatever rows exist, so it is **not** gated on the catalogue
-dataset (E7). With an empty catalogue it searches the shop's own inventory,
-exactly as before.
+**Where the fold actually reaches, corrected 2026-10-23 after the final
+acceptance review.** An earlier version of this section implied the fold applied
+to shop-inventory search. It does not:
+
+- `db/medicineCatalog.ts` folds both the stored key and the query, so catalogue
+  search IS multilingual;
+- `db/sales.ts` and `db/purchases.ts` pass the raw query to `medicines_fts`,
+  which indexes names as typed, so shop-inventory search is **single-script,
+  unchanged by this batch**.
+
+Since the catalogue ships empty (E7), multilingual search has no data to act on
+in the shipped build. The fold itself is implemented and tested; its only reader
+is the catalogue path. **W2-03 is PARTIAL:** plan §11.2 expected `db/sales.ts` to
+use folded search keys too, which needs a folded-key column on `medicines` and an
+FTS rebuild — a SQLite migration touching a search index every shop depends on,
+undoable to validate on a device in this batch. Recorded as Batch 3 work.
 
 ---
 
@@ -131,5 +144,8 @@ None of the following is claimed, and each needs a human with a phone:
    OCR scan.
 4. A held draft's durable prescription surviving a retake, a cancel, and an app
    restart.
-5. Bangla, English and Banglish queries each finding the same medicine, with the
-   device offline.
+5. Bangla, English and Banglish queries each finding the same **catalogue**
+   medicine with the device offline — which needs a licensed dataset first
+   (E7). Shop-inventory search stays single-script until the Batch 3 migration
+   above, so a device run must NOT be read as proving multilingual inventory
+   search.

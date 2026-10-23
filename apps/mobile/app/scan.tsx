@@ -65,6 +65,7 @@ export default function ScanSaleScreen() {
         batchNo: exact.activeBatchNo,
         expiryDate: exact.activeBatch.expiryDate,
         unitPrice: exact.activeBatch.salePrice,
+        availableQuantity: exact.activeBatch.quantityAvailable,
       });
     } catch {
       setError(t("scanSearchFailed"));
@@ -72,14 +73,33 @@ export default function ScanSaleScreen() {
   };
 
   const confirmPendingScan = (confirmed: ScanConfirmCandidate) => {
-    addItem({
+    // Every field the cart uses for SAFETY travels with the line:
+    // requiresPrescription drives the prescription warning, and
+    // availableQuantity is the stock ceiling addItem enforces. This screen used
+    // to pass five fields, so a line added here had neither — the in-screen
+    // scanner in app/(tabs)/sale.tsx always passed all of them, and the two
+    // paths must not disagree about what a confirmed scan means.
+    const added = addItem({
       medicineId: confirmed.medicineId,
       medicineName: confirmed.name,
+      generic: confirmed.generic,
+      manufacturer: confirmed.manufacturer,
+      requiresPrescription: confirmed.requiresPrescription,
       batchId: confirmed.batchId,
+      batchNo: confirmed.batchNo ?? undefined,
+      expiryDate: confirmed.expiryDate,
+      availableQuantity: confirmed.availableQuantity,
       quantity: 1,
       unitPrice: confirmed.unitPrice,
     });
     setPendingScan(null);
+    if (!added) {
+      // addItem refuses at the stock ceiling. Reporting success here would tell
+      // the seller a line exists that does not.
+      setFeedback(null);
+      setError(t("cartQuantityAtStockLimitLabel"));
+      return;
+    }
     setError(null);
     setFeedback(`${confirmed.name} · ${formatNumber(cartCount + 1)}`);
   };

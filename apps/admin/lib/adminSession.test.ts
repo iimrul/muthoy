@@ -12,6 +12,7 @@ import { AdminConfigError } from './errors';
 import {
   ABSOLUTE_TTL_MS,
   ADMIN_SESSION_COOKIE,
+  CLOCK_SKEW_MS,
   EXPIRED_SESSION_COOKIE_OPTIONS,
   IDLE_TTL_MS,
   newSessionPayload,
@@ -232,5 +233,81 @@ describe('cookie attributes', () => {
     expect(EXPIRED_SESSION_COOKIE_OPTIONS.maxAge).toBe(0);
     expect(EXPIRED_SESSION_COOKIE_OPTIONS.sameSite).toBe('strict');
     expect(EXPIRED_SESSION_COOKIE_OPTIONS.httpOnly).toBe(true);
+  });
+});
+
+describe('a future-dated token cannot outlive the absolute window', () => {
+  // The verifier used to check only `now >= exp` and `exp - iat <= 8h`. A token
+  // signed with iat years ahead and exp = iat + 8h satisfied both, and
+  // `now - lastSeen` went NEGATIVE so the idle check passed as well — so it
+  // stayed valid for years. Found by the final acceptance review.
+  test('refuses a token whose iat is in the future', async () => {
+    const future = NOW + 365 * 24 * 60 * 60 * 1_000;
+    const token = await signRawBody(
+      base64url(JSON.stringify({
+        sub: 'founder',
+        role: 'super_admin',
+        iat: future,
+        exp: future + ABSOLUTE_TTL_MS,
+        lastSeen: future,
+        epoch: 0,
+      })),
+      SECRET,
+    );
+
+    expect(await verifyAdminSession(token, { secret: SECRET, epoch: 0, now: NOW })).toEqual({
+      ok: false,
+      reason: 'malformed',
+    });
+  });
+
+  test('refuses a future lastSeen that would make the idle window negative', async () => {
+    const token = await signRawBody(
+      base64url(JSON.stringify({
+        sub: 'founder',
+        role: 'billing',
+        iat: NOW - 1_000,
+        exp: NOW + ABSOLUTE_TTL_MS,
+        lastSeen: NOW + 48 * 60 * 60 * 1_000,
+        epoch: 0,
+      })),
+      SECRET,
+    );
+
+    expect(await verifyAdminSession(token, { secret: SECRET, epoch: 0, now: NOW })).toEqual({
+      ok: false,
+      reason: 'malformed',
+    });
+  });
+
+  test('refuses lastSeen earlier than iat, and exp at or before iat', async () => {
+    const backwards = await signRawBody(
+      base64url(JSON.stringify({
+        sub: 'founder', role: 'billing', iat: NOW, exp: NOW + ABSOLUTE_TTL_MS,
+        lastSeen: NOW - 60_000, epoch: 0,
+      })),
+      SECRET,
+    );
+    expect((await verifyAdminSession(backwards, { secret: SECRET, epoch: 0, now: NOW })).ok).toBe(false);
+
+    const inverted = await signRawBody(
+      base64url(JSON.stringify({
+        sub: 'founder', role: 'billing', iat: NOW, exp: NOW, lastSeen: NOW, epoch: 0,
+      })),
+      SECRET,
+    );
+    expect((await verifyAdminSession(inverted, { secret: SECRET, epoch: 0, now: NOW })).ok).toBe(false);
+  });
+
+  test('still tolerates ordinary clock drift within the skew', async () => {
+    // A verifying host whose clock is a few seconds behind the signer must not
+    // reject a legitimate fresh session.
+    const token = await signAdminSession(
+      newSessionPayload({ sub: 'founder', role: 'billing', epoch: 0, now: NOW + 5_000 }),
+      SECRET,
+    );
+
+    expect((await verifyAdminSession(token, { secret: SECRET, epoch: 0, now: NOW })).ok).toBe(true);
+    expect(CLOCK_SKEW_MS).toBeGreaterThan(5_000);
   });
 });

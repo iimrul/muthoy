@@ -11,7 +11,7 @@
 
 import { beforeEach, describe, expect, test } from 'vitest';
 import { recentAdminAudit } from './adminAudit';
-import { ADMIN_SESSION_COOKIE, verifyAdminSession } from './adminSession';
+import { ADMIN_SESSION_COOKIE, newSessionPayload, signAdminSession, verifyAdminSession } from './adminSession';
 import {
   createLoginThrottles,
   derivePasswordHash,
@@ -370,7 +370,7 @@ describe('throttling', () => {
 describe('logout, configuration and the real KDF', () => {
   test('logout clears the cookie and says so', async () => {
     const response = await handleAdminSessionRequest(
-      loginRequest({ intent: 'logout', username: 'founder' }),
+      loginRequest({ intent: 'logout' }),
       deps(),
     );
 
@@ -378,7 +378,51 @@ describe('logout, configuration and the real KDF', () => {
     expect(response.headers.get('location')).toBe('/login?signedOut=1');
     expect(response.headers.get('set-cookie')).toContain('Max-Age=0');
     expect(calls).toHaveLength(0);
-    expect(recentAdminAudit.entries()).toMatchObject([{ action: 'logout', outcome: 'success' }]);
+  });
+
+  test('an UNAUTHENTICATED logout cannot forge a successful record for anyone', async () => {
+    // The actor used to come from the form body, so any caller with an accepted
+    // Origin could write "founder logged out, success" into the audit log.
+    // Found by the final acceptance review.
+    await handleAdminSessionRequest(
+      loginRequest({ intent: 'logout', username: 'founder' }),
+      deps(),
+    );
+
+    expect(recentAdminAudit.entries()).toMatchObject([{
+      actor: 'unknown',
+      action: 'logout',
+      outcome: 'failure',
+      meta: { reason: 'no_valid_session' },
+    }]);
+    expect(JSON.stringify(recentAdminAudit.entries())).not.toContain('founder');
+  });
+
+  test("an AUTHENTICATED logout records the cookie subject, not the body one", async () => {
+    const token = await signAdminSession(
+      newSessionPayload({ sub: 'founder', role: 'billing', epoch: 0, now: Date.now() }),
+      SECRET,
+    );
+    const request = new Request(ORIGIN + '/api/admin/session', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: ORIGIN,
+        'x-forwarded-for': '203.0.113.7',
+        cookie: ADMIN_SESSION_COOKIE + '=' + token,
+      },
+      // The body claims someone else entirely.
+      body: new URLSearchParams({ intent: 'logout', username: 'someone-else' }).toString(),
+    });
+
+    const response = await handleAdminSessionRequest(request, deps());
+
+    expect(response.headers.get('set-cookie')).toContain('Max-Age=0');
+    expect(recentAdminAudit.entries()).toMatchObject([{
+      actor: 'founder',
+      action: 'logout',
+      outcome: 'success',
+    }]);
   });
 
   test('an unconfigured panel answers 503, never a session', async () => {

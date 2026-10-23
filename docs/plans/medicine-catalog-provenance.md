@@ -91,13 +91,36 @@ of the feature is "the catalogue mechanism is complete and empty".
 
 ---
 
-## 5. What this does NOT block
+## 5. What E7 DOES block, including something this document first got wrong
 
-Multilingual search (W2-03) works on whatever rows exist, including the shop's
-own inventory, and is not gated on E7. The Add Medicine screen behaves exactly
-as it did before when the catalogue is empty: the provider finds nothing and the
-existing "not connected yet" state is what the user sees. That degradation was
-tested, not assumed.
+**Corrected 2026-10-23, after the final acceptance review.** An earlier version
+of this section said multilingual search "works on whatever rows exist,
+including the shop's own inventory, and is not gated on E7". That was false, and
+it mattered, so the truth is recorded rather than quietly edited:
+
+- The Bangla / Banglish **fold** (`medicineSearchKey`) is applied in exactly one
+  place: `db/medicineCatalog.ts`, both when the importer builds a row's search
+  key and when a query is matched against it.
+- Shop-inventory search (`db/sales.ts`, `db/purchases.ts`) passes the raw query
+  to `medicines_fts`, which indexes names as they were typed in. It is
+  therefore **single-script**, exactly as it was before this batch.
+- So with zero catalogue rows, **multilingual search has no data to act on at
+  all.** Bangla / English / Banglish matching is implemented and tested
+  (`packages/utils/src/bengali.ts`, 21 tests) but reaches only the catalogue
+  path, and the catalogue is empty.
+
+The plan intended more than this: §11.2 lists `apps/mobile/db/sales.ts` as
+gaining "search keys via medicineSearchKeys", and that part was not built. **W2-03
+is therefore PARTIAL, not done.** Extending the fold to shop inventory needs a
+folded-key column on `medicines` plus an FTS rebuild — a SQLite migration that
+rewrites a search index every existing shop depends on — and it cannot be
+device-validated in this batch. It is named as Batch 3 work rather than rushed
+in at a closing gate.
+
+What IS unaffected: the Add Medicine screen degrades exactly as it did before
+when the catalogue is empty — the provider finds nothing and the existing "not
+connected yet" state is what the user sees. That degradation was tested, not
+assumed.
 
 ---
 

@@ -25,7 +25,7 @@ therefore unmet for all seven by construction, not by oversight.
 |---|---|---|---|---|
 | W2-01 | Medicine OCR completion | COMPLETE | NOT VERIFIED | — (E9 descopes one path) |
 | W2-02 | Offline medicine catalogue | COMPLETE (data layer + UI) | NOT VERIFIED | **E7 — no licensed dataset; zero rows ship** |
-| W2-03 | English / Bangla / Banglish search | COMPLETE | NOT VERIFIED | — |
+| W2-03 | English / Bangla / Banglish search | **PARTIAL** — the fold reaches the catalogue path only | NOT VERIFIED | shop-inventory folding needs a SQLite migration (Batch 3); and the catalogue it does serve is empty (E7) |
 | W4-06 | Admin auth, RBAC, audit, sessions | COMPLETE | NOT VERIFIED | — (no Vercel deploy, no account provisioned) |
 | W4-07 | Admin management pages | COMPLETE | NOT VERIFIED | admin read grants still undeployed |
 | W4-08 | Admin write actions | COMPLETE | NOT VERIFIED | same |
@@ -128,10 +128,22 @@ new migration-registration test was created because
 `db/h7-access-lock.sqlite.test.ts:200-216` already asserts journal ≡ registry ≡
 files for the whole directory.
 
-### W2-03 — English / Bangla / Banglish search
+### W2-03 — English / Bangla / Banglish search — **PARTIAL**
 
 `packages/utils/src/bengali.ts` with 21 tests, and one shared FTS query builder.
 A mutation removing the transliteration fold fails four tests.
+
+**What it does NOT do, found by the final acceptance review (finding 5).** The
+fold is applied in exactly one place, `db/medicineCatalog.ts`. Shop-inventory
+search (`db/sales.ts`, `db/purchases.ts`) passes the raw query to
+`medicines_fts` and is therefore single-script, unchanged by this batch. Plan
+§11.2 expected `db/sales.ts` to use folded keys as well, and that was not built.
+Combined with E7 (the catalogue ships empty), **multilingual search has no data
+to act on in the shipped build.** Extending it needs a folded-key column on
+`medicines` plus an FTS rebuild — a SQLite migration over a search index every
+existing shop depends on, with no device validation available here — so it is
+named as Batch 3 work rather than rushed in at a closing gate. Two documents
+that claimed otherwise are corrected.
 
 ### W4-10 — SSLCommerz retirement
 
@@ -286,3 +298,36 @@ Per-commit figures are in §2. At the end of the batch:
 fixtures) and `db/inventory-ledger.sqlite.test.ts` (250 ms budget) fail falsely, and so does
 `backend/supabase/pgtest/h7-security.pgtest.ts` (one 5 s case, observed timing out in a
 265-file run and passing 51/51 in isolation). All three pass in isolation.
+
+---
+
+## 7. The final acceptance review, and what it changed
+
+An independent Codex review (`gpt-5.6-sol`, read-only, all 18 commits against
+`origin/main`) returned **REVISE** with seven findings. All seven of the batch's
+hard constraints passed — the sealed migration chain, no hosted write, the
+W4-10 refusal ordering, no invented bKash behaviour, the credential-auth
+properties, the single guarded admin write, and the 41 untouched dirty paths
+including the uncommitted H-9 hunk in `DECISIONS.md`.
+
+Every finding was verified against the code before it was accepted. All seven
+are addressed below; none was argued away.
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| 1 | HIGH | `app/scan.tsx` added a confirmed line with five fields, dropping `generic`, `manufacturer`, `requiresPrescription`, `batchNo`, `expiryDate` and `availableQuantity` — so a scanned sale had **no prescription warning and no stock ceiling**. The test asserted four fields and could not see it | **FIXED.** All ten fields now travel, `addItem`'s refusal at the stock limit is surfaced, and the assertion checks every field. **Pre-existing** (the pre-batch auto-add passed the same five), but W2-01 rewrote this exact path and carried it forward, and the in-screen scanner always did it correctly — the two must not disagree about what a confirmed scan means |
+| 2 | HIGH | A signed token with `iat` in the future and `exp = iat + 8h` passed every check: `now >= exp` was false, `exp - iat` was within the TTL, and `now - lastSeen` went NEGATIVE so the idle window passed too. It stayed valid for **years**, defeating the absolute-lifetime property this file claims | **FIXED.** The verifier now requires `iat <= now + skew`, `lastSeen <= now + skew`, `lastSeen >= iat` and `exp > iat`, with a 60-second drift tolerance. Four tests, including one that a legitimate fresh session from a slightly-ahead clock still verifies |
+| 3 | HIGH | Logout ran **before** any session was verified and recorded the caller-supplied `username` as the actor, so any unauthenticated request with an accepted Origin could write "founder logged out, success" into the audit log | **FIXED.** The actor comes from the verified cookie or is `unknown` with outcome `failure`; the cookie is still cleared either way, because a logout must work on an already-invalid session. Two tests: the unauthenticated forgery attempt, and a request whose body names someone else while its cookie names `founder` |
+| 4 | MEDIUM | The importer resumed only from a row marked `failed`. A **killed** process leaves `running` forever, so the one case resumability exists for restarted from zero. The cursor also compared a row count against a line count | **FIXED**, and the fix exposed a worse bug: the failure path recorded lines *read* rather than lines *durably flushed*, so a resume would have **silently skipped 20 unwritten rows** in the 600-row crash test. Both fixed; five tests added (caught failure, killed process, rejected-line cursor, a different file, a completed run); three mutation checks kill |
+| 5 | MEDIUM | The Bangla/Banglish fold reaches the **catalogue path only** — shop-inventory search passes raw input to `medicines_fts`. With the catalogue empty (E7), multilingual search has no data to act on. Two documents claimed otherwise | **DOCUMENTED, NOT BUILT.** W2-03 is now recorded as **PARTIAL** here, in the handoff and in the ledger, and both false claims are corrected in place with the correction stated rather than quietly edited. Extending the fold needs a folded-key column on `medicines` plus an FTS rebuild — a SQLite migration over a search index every existing shop depends on, with no device validation available at a closing gate — so it is named as Batch 3 work |
+| 6 | MEDIUM | `scripts/admin-hash-password.mjs` read stdin to EOF while the instructions said "press Enter", so an interactive terminal waited forever and echoed the password in clear text. It also accepted passwords longer than the 256 characters login truncates at | **FIXED.** It reads one line, with terminal echo suppressed, and refuses anything over 256 characters with the reason. Piped use still works. Fixing it surfaced a second defect in my own first attempt: `rl.close()` fires `close` synchronously, so closing before resolving let the empty-input fallback win and **every** password read as empty — verified against piped, short, over-length and empty-pipe input |
+| 7 | LOW | `backend/supabase/deploy/batch2-admin-audit.sql` was named in the plan and in this document but **did not exist** | **FIXED.** Written, staged OUTSIDE the migration chain, and explicitly not executed: the proposed `admin_audit_log` table with RLS enabled, no policy, API roles revoked, and `insert, select` only for `service_role` — no UPDATE and no DELETE, because an audit row the panel can edit is not evidence. **BLOCKED on E4**, with the verification queries to run when it lands as a Batch 3 migration |
+
+**What this says about the batch's own process, recorded rather than excused:**
+three of these seven (1, 2, 3) are defects in security or safety properties that
+this batch's own documentation claimed to enforce, and the tests written
+alongside them were too narrow to catch any of them. Two more (4, 6) were
+features whose promised behaviour was never exercised. The lesson is the same
+one the full-suite run taught: a property is only as real as the test that would
+fail without it, and a test that was written by the same pass that wrote the
+code tends to assert what the code does rather than what it must do.

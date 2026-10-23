@@ -165,10 +165,19 @@ describe('a scanned exact match waits for confirmation', () => {
     });
 
     expect(cartLines()).toBe(1);
+    // EVERY field, not a sample. The four-field version of this assertion could
+    // not see that this screen dropped generic, manufacturer,
+    // requiresPrescription, batchNo, expiryDate and availableQuantity — and the
+    // last two of those are the prescription warning and the stock ceiling.
     expect(useCartStore.getState().items[0]).toMatchObject({
       medicineId: MEDICINE_ID,
       medicineName: 'Napa Extra',
+      generic: 'Paracetamol + Caffeine',
+      manufacturer: 'Beximco',
+      requiresPrescription: false,
       batchId: BATCH_ID,
+      expiryDate: '2099-01-01',
+      availableQuantity: 10,
       quantity: 1,
     });
     // The sheet closes, so a second confirm is impossible without a new scan.

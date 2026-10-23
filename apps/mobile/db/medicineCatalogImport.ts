@@ -178,19 +178,43 @@ function writeChunk(rows: readonly PreparedRow[]): void {
   });
 }
 
+interface PreviousProgress {
+  /** Nonblank LINES the earlier run durably consumed. */
+  lineCursor: number;
+  /** Rows it durably wrote. Smaller than the cursor when lines were rejected. */
+  importedRows: number;
+}
+
 /**
  * How far an earlier interrupted run of the SAME file got, so a re-run resumes
  * instead of restarting a 21k-row file from zero. Keyed on the file checksum, so
  * a different file sharing a source/version cannot resume onto a stale offset.
+ *
+ * Two things this gets right that an earlier version did not:
+ *
+ *  - it counts a `running` row as a resume point. A process KILLED mid-import
+ *    leaves `running` forever, because nothing survives to mark it failed — and
+ *    that is the whole case "resumable" is supposed to cover. Only an
+ *    unfinished run of this exact file can match, and a live run would be this
+ *    process itself, which has not written a cursor yet;
+ *  - it reads `row_count` (lines consumed), not `imported_rows` (rows written).
+ *    The loop below skips by LINE, so resuming on a row count would re-read
+ *    every rejected line's worth of offset. Harmless but wrong, and it made the
+ *    cursor drift further with every malformed line.
  */
-function previousProgress(fileChecksum: string): number {
+function previousProgress(fileChecksum: string): PreviousProgress {
   const row = db
-    .select({ value: sql<number>`coalesce(max(imported_rows), 0)` })
+    .select({
+      lineCursor: medicineCatalogImports.rowCount,
+      importedRows: medicineCatalogImports.importedRows,
+    })
     .from(medicineCatalogImports)
     .where(sql`${medicineCatalogImports.fileChecksum} = ${fileChecksum}
-               and ${medicineCatalogImports.status} = 'failed'`)
+               and ${medicineCatalogImports.status} in ('failed','running')`)
+    .orderBy(sql`${medicineCatalogImports.rowCount} desc`)
+    .limit(1)
     .get();
-  return row?.value ?? 0;
+  return { lineCursor: row?.lineCursor ?? 0, importedRows: row?.importedRows ?? 0 };
 }
 
 /**
@@ -213,7 +237,7 @@ export async function importMedicineCatalog(input: {
   // reference data for the whole installation; staff must not trigger it.
   await requireOwner(input.shopId, input.actorUserId);
 
-  const resumedFrom = previousProgress(input.fileChecksum);
+  const resumed = previousProgress(input.fileChecksum);
   const importId = generateId();
 
   db.insert(medicineCatalogImports)
@@ -222,15 +246,20 @@ export async function importMedicineCatalog(input: {
       source: input.source,
       sourceVersion: input.sourceVersion,
       fileChecksum: input.fileChecksum,
-      rowCount: 0,
-      importedRows: resumedFrom,
+      rowCount: resumed.lineCursor,
+      importedRows: resumed.importedRows,
       status: "running",
       startedAt: new Date().toISOString(),
     })
     .run();
 
   let seen = 0;
-  let imported = resumedFrom;
+  let imported = resumed.importedRows;
+  // The last line that is DURABLY written, which is not the same as the last
+  // line read: the lines after it sit in the pending chunk. Recording `seen`
+  // as the cursor on failure would skip them on resume — 20 rows silently lost
+  // in the 600-row crash test, which is how this was found.
+  let flushedLines = resumed.lineCursor;
   let rejected = 0;
   let chunk: PreparedRow[] = [];
 
@@ -239,8 +268,9 @@ export async function importMedicineCatalog(input: {
     imported += chunk.length;
     // Only the chunk is ever retained: 21k rows never coexist in memory.
     chunk = [];
+    flushedLines = seen;
     db.update(medicineCatalogImports)
-      .set({ importedRows: imported, rowCount: seen })
+      .set({ importedRows: imported, rowCount: flushedLines })
       .where(sql`${medicineCatalogImports.id} = ${importId}`)
       .run();
     input.onProgress?.(imported);
@@ -251,7 +281,7 @@ export async function importMedicineCatalog(input: {
       const trimmed = line.trim();
       if (!trimmed) continue;
       seen += 1;
-      if (seen <= resumedFrom) continue; // already written by the earlier run
+      if (seen <= resumed.lineCursor) continue; // already consumed by the earlier run
 
       let parsed: unknown;
       try {
@@ -278,21 +308,27 @@ export async function importMedicineCatalog(input: {
     db.update(medicineCatalogImports)
       .set({
         status: "completed",
-        rowCount: seen,
+        rowCount: flushedLines,
         importedRows: imported,
         finishedAt: new Date().toISOString(),
       })
       .where(sql`${medicineCatalogImports.id} = ${importId}`)
       .run();
 
-    return { importId, imported: imported - resumedFrom, resumedFrom, rejected, status: "completed" };
+    return {
+      importId,
+      imported: imported - resumed.importedRows,
+      resumedFrom: resumed.lineCursor,
+      rejected,
+      status: "completed",
+    };
   } catch (error: unknown) {
     // A failure keeps `imported_rows` so the next run resumes from here rather
     // than re-reading everything.
     db.update(medicineCatalogImports)
       .set({
         status: "failed",
-        rowCount: seen,
+        rowCount: flushedLines,
         importedRows: imported,
         error: error instanceof Error ? error.message.slice(0, 500) : "import failed",
         finishedAt: new Date().toISOString(),
