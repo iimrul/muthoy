@@ -99,9 +99,9 @@ anyway.
 
 ## What each later batch still owns
 
-- **Batch 2 (9)** — **IMPLEMENTED 2026-10-21 to 2026-10-22, CODE-COMPLETE, not
-  pushed and not device-verified.** Seven executable tasks were implemented — six
-  CODE-COMPLETE and **W2-03 PARTIAL**:
+- **Batch 2 (9)** — **IMPLEMENTED 2026-10-21 to 2026-10-22; six tasks
+  CODE-COMPLETE and W2-03 PARTIAL; not pushed and not device-verified.** Seven
+  executable tasks were implemented:
   **W2-01** medicine OCR completion, **W2-02** the offline catalogue
   mechanism, **W2-03** Bangla / English / Banglish search (**PARTIAL**: the fold reaches the catalogue path only — shop-inventory search stays single-script until a Batch 3 SQLite migration), **W4-06** admin
   auth / RBAC / audit / sessions (Basic Auth retired), **W4-07** the six admin

@@ -15,8 +15,10 @@ does not claim anything a test did not show.
 
 ## 1. The two columns, kept apart
 
-Every row below is **CODE-COMPLETE**: the code exists, it typechecks, and tests
-execute it. **DEVICE/PRODUCTION-VERIFIED** is a different claim — a human
+Every row below was **implemented**, and the Code column says how far: six are
+**CODE-COMPLETE** — the code exists, it typechecks, and tests execute it — and
+**W2-03 is PARTIAL**, because its fold reaches the catalogue path only and
+multilingual search over existing shop medicines was not built. **DEVICE/PRODUCTION-VERIFIED** is a different claim — a human
 running the feature on a real device or against live Supabase — and **no task
 reaches it in this batch**, because no physical-device run was authorized and
 the founder's Galaxy A04s was off-limits. `DEVELOPMENT_RULES.md` clauses 2–3 are

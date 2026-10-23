@@ -262,9 +262,12 @@ was not added.
 
 ### 7.2 Gate 3 is closed. The closing sequence is where we are now.
 
-There is no next implementation step: W4-06 (`64c5f4b`), W4-07 (`e8455e4`) and W4-08
-(`a2c196a`) are code-complete, which was the last of the seven. §8 is the remaining
-work, and these are its steps in order:
+There is no next implementation step **within the accepted scope**: W4-06
+(`64c5f4b`), W4-07 (`e8455e4`) and W4-08 (`a2c196a`) are code-complete, and they
+were the last tasks awaiting implementation. **W2-03 remains PARTIAL by decision**
+— its remaining half is a SQLite migration assigned to Batch 3 (§4), not work this
+batch left half-finished by accident. §8 is the remaining work, and these are its
+steps in order:
 
 | Step | State |
 |---|---|
@@ -297,7 +300,8 @@ isolation.
 | `docs/plans/ocr.md` | UPDATED — status header pointing at the new document; historical text preserved |
 | `apps/admin/README.md` | UPDATED in `64c5f4b` — the new scheme, the env list, and the three honest limits |
 | `docs/plans/muthoy-batch-2-plan.md` | unchanged (revision 7 with its review log) |
-## 8. Closing sequence (only after every executable task is implemented)
+## 8. Closing sequence (entered once every task reached its accepted scope — six
+code-complete, W2-03 PARTIAL with its remainder assigned to Batch 3)
 
 focused tests → documentation (Gate 4's document set, plan §8) → **Codex FINAL ACCEPT**
 → selective GitHub push by explicit path → **CI PASS** → Batch 2 delivery report
