@@ -34,10 +34,12 @@
     "20261005000000_h5_revoke_auth_user_sessions.sql": "B",
     "20261008000000_h9_enrollment_hold_constraint_normalization.sql": "B",
     "20261008000100_h9_sync_staging_cleanup_schedule.sql": "A",
-    "20261015000000_h9_api_role_table_privileges.sql": "A"
+    "20261015000000_h9_api_role_table_privileges.sql": "A",
+    "20261023000000_e4_batch3_admin_platform.sql": "C"
   },
   "postgresDeclaredOverrides": [
-    "20260813000000_initial_schema.sql"
+    "20260813000000_initial_schema.sql",
+    "20261023000000_e4_batch3_admin_platform.sql"
   ],
   "sqliteDataWrites": [
     "0001", "0002", "0006", "0007", "0009", "0010", "0011", "0012", "0018", "0024", "0029"

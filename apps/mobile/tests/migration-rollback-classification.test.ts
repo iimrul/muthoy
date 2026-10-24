@@ -47,7 +47,14 @@ describe('single machine-readable rollback authority', () => {
   it('detects a mutated count/reference in each generated document', () => {
     const blocks = generatedBlocks();
     for (const [key, body] of Object.entries(blocks)) {
-      const mutated = body.replace('C: 8', 'C: 9').replace('`0001`', '`9999`');
+      // COUNT-AGNOSTIC on purpose. This was `.replace('C: 8', 'C: 9')`, which
+      // silently stopped mutating anything the moment the real count became 9
+      // (E4, migration 35) — so the "mutation" was a no-op and the check could
+      // no longer detect what it claims to detect. Incrementing whatever count
+      // is actually there cannot go stale the next time a class changes.
+      const mutated = body
+        .replace(/C: (\d+)/, (_match, count: string) => `C: ${Number(count) + 1}`)
+        .replace('`0001`', '`9999`');
       const sources = {
         rollback: ROLLBACK_DOC,
         backend: readFileSync(resolve('backend/supabase/migrations/README.md'), 'utf8'),
@@ -135,8 +142,8 @@ describe('a volatile ADD COLUMN default is a backfill', () => {
 
 describe('the corrected PostgreSQL classification', () => {
   it('covers every migration on disk exactly once', () => {
-    expect(pg.length).toBe(34);
-    expect(new Set(pg.map((row) => row.name)).size).toBe(34);
+    expect(pg.length).toBe(35);
+    expect(new Set(pg.map((row) => row.name)).size).toBe(35);
   });
 
   it('is A 8 / B 18 / C 8 — not the 14 forward-only the first audit claimed', () => {
@@ -156,14 +163,32 @@ describe('the corrected PostgreSQL classification', () => {
     // H-9 F12 (2026-10-15): the API-role privilege normalization is A — only
     // REVOKEs, in a DO block the classifier reads — and forward-only by
     // choice, because its inverse GRANTs would reopen F12.
-    expect(classCounts(pg)).toEqual({ A: 8, B: 18, C: 8 });
+    // E4 (2026-10-23): the Batch 3 admin platform migration is the 35th and the
+    // first since H-9 sealed the chain at 34. It ships three functions, five
+    // tables, five indexes and 25 privilege statements, and writes NO data, so
+    // the mechanical rule scores it B. It is class C by DECLARED override —
+    // see the second entry below.
+    expect(classCounts(pg)).toEqual({ A: 8, B: 18, C: 9 });
   });
 
-  it('declares its one judgement instead of inferring it', () => {
-    // The baseline performs no DML, so the mechanical rule alone would call
-    // it reversible — but the reverse of "create the whole schema" is a
-    // restore. That is an override, and it is named in the source.
-    expect([...FORWARD_ONLY_OVERRIDES]).toEqual(['20260813000000_initial_schema.sql']);
+  it('declares its two judgements instead of inferring them', () => {
+    // Both overrides exist because the mechanical rule, which only asks
+    // "did this migration write data", cannot see why the reverse is
+    // unacceptable.
+    //
+    //   - the baseline performs no DML, so the rule alone would call it
+    //     reversible — but the reverse of "create the whole schema" is a
+    //     restore;
+    //   - E4 performs no DML either, and its reverse would drop
+    //     admin_audit_log. An audit log you roll back by deleting is not
+    //     evidence, so forward-only is the honest class rather than the
+    //     convenient one.
+    //
+    // Each is named in the source, not inferred here.
+    expect([...FORWARD_ONLY_OVERRIDES]).toEqual([
+      '20260813000000_initial_schema.sql',
+      '20261023000000_e4_batch3_admin_platform.sql',
+    ]);
   });
 
   it.each(pg.map((row) => [row.name, row.class]))(
@@ -178,7 +203,7 @@ describe('the corrected PostgreSQL classification', () => {
   );
 
   it('states the corrected headline count in the document itself', () => {
-    expect(ROLLBACK_DOC).toContain('**A: 8 · B: 18 · C: 8 — of 34.**');
+    expect(ROLLBACK_DOC).toContain('**A: 8 · B: 18 · C: 9 — of 35.**');
   });
 
   it('carries no OTHER headline anywhere in any of the three documents', () => {

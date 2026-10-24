@@ -12,3 +12,11 @@ backend/supabase/functions/sync/_shared/phone.ts text eol=lf
 backend/supabase/functions/sync/deviceLogin.ts text eol=lf
 backend/supabase/migrations/20261015000000_h9_api_role_table_privileges.sql text eol=lf
 backend/supabase/deploy/H9-LOCAL-REMEDIATION.md text eol=lf
+
+# E4 (Batch 3, migration 35). Same rule and the same reason as the block above:
+# these two files' SHA-256 values are recorded as E4 evidence in
+# audit-artifacts/e4/e4-source-hashes.json, so a clone whose core.autocrlf is
+# true must not check them out as CRLF. Adding them here is additive — no
+# existing pin is changed.
+backend/supabase/migrations/20261023000000_e4_batch3_admin_platform.sql text eol=lf
+backend/supabase/checks/e4_postmigration_checks.sql text eol=lf
