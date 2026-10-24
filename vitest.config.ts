@@ -406,6 +406,9 @@ export default defineConfig({
       // correct about which history, and the substitution the older count-plus-
       // bounds check cannot see.
       "backend/supabase/pgtest/e4-chain-succession.pgtest.ts",
+      // W4-05. Both barriers proven INDEPENDENTLY — the owner gate with the pin
+      // bypassed, the pin with the gate bypassed — plus the seven working paths.
+      "backend/supabase/pgtest/w405-shop-identity.pgtest.ts",
       // One onboarding function for BOTH the real OTP flow and DEV Skip-OTP,
       // proving they reach the same rows and the same token claims — plus the
       // Multi-Shop rename/archive path that had the identical 42501.

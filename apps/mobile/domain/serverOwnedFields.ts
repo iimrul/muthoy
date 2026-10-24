@@ -38,11 +38,19 @@ export const SERVER_OWNED_FIELDS: Partial<
   // 20260831000000 (B4) pins the six commercial fields; toSyncPayload strips
   // cloud_linked_at, which is a device-local marker.
   //
-  // NOT listed: name, name_en, phone, latitude, longitude, thana, district,
-  // location_captured_at. W4-05's wrapper WOULD pin those for a non-owner
-  // caller, but W4-05 is deferred to Batch 3 and no wrapper pins them today, so
-  // they are client-owned and comparable. When W4-05 lands, the guard test
-  // fails until they are moved here — that failure is the reminder.
+  // W4-05 LANDED in Batch 3 (migration 35, 20261023000000), so the eight shop
+  // IDENTITY fields are now pinned too and have moved here out of the
+  // comparable set. The wrapper overwrites them from the stored row whenever
+  // the caller is not the shop's owner.
+  //
+  // Listed UNCONDITIONALLY even though the pin is conditional on the actor.
+  // The outbox records WHICH rows changed, not which actor pushed them, so a
+  // device cannot tell locally whether its own push was an owner's. Treating
+  // them as always server-owned costs the detector an equal-timestamp conflict
+  // on the Owner's own shop-profile edit; treating them as always client-owned
+  // would raise a false conflict on every non-owner shop push. Of the two
+  // errors this one is quieter and does not cry wolf, and it is the choice
+  // Batch 1's plan recorded when it specified the wrapper.
   shops: [
     "plan",
     "trial_ends_at",
@@ -51,6 +59,14 @@ export const SERVER_OWNED_FIELDS: Partial<
     "commercial_reason",
     "archived_at",
     "cloud_linked_at",
+    "name",
+    "name_en",
+    "phone",
+    "latitude",
+    "longitude",
+    "thana",
+    "district",
+    "location_captured_at",
   ],
 
   // Six stripped by toSyncPayload, then the five the staff-device wrapper and

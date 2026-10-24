@@ -223,6 +223,16 @@ const HELPERS = 'sync-helpers';
  * would still pass, which is the precise hole the delta review named.
  */
 const B4_SHOPS_BRANCH = ["if p_table='shops' and p_op<>'delete' then", "if p_table='users'"] as const;
+
+/** W4-05, migration 35: the shop identity pin. */
+const E4 = '20261023000000_e4_batch3_admin_platform.sql';
+// Scoped to the pin block itself, so a mention of a column name anywhere else
+// in that migration — the DDL, a comment, the owner predicate — cannot satisfy
+// a needle. The block runs from the non-owner guard to the delegation.
+const E4_SHOPS_PIN = [
+  "if p_table = 'shops' and p_op <> 'delete'",
+  'return sync_apply_row_pre_w405(',
+] as const;
 const STAFF_USERS_BRANCH = ["if p_table = 'users' then", 'if p_table <> '] as const;
 const TAX_SALES_BRANCH = ["if p_table='sales' and p_op<>'delete' then", 'if v_result='] as const;
 
@@ -269,6 +279,21 @@ const EVIDENCE: Record<string, Record<string, Evidence>> = {
       source: HELPERS,
       scope: SHOPS_STRIP,
       needle: 'delete payload.cloudLinkedAt',
+    },
+    // W4-05 (migration 35) pins the eight identity fields from the stored row
+    // whenever the caller is not the shop's owner. Each needle is the actual
+    // overlay line, inside the pin block.
+    name: { source: E4, scope: E4_SHOPS_PIN, needle: "'name', v_shop.name" },
+    name_en: { source: E4, scope: E4_SHOPS_PIN, needle: "'name_en', v_shop.name_en" },
+    phone: { source: E4, scope: E4_SHOPS_PIN, needle: "'phone', v_shop.phone" },
+    latitude: { source: E4, scope: E4_SHOPS_PIN, needle: "'latitude', v_shop.latitude" },
+    longitude: { source: E4, scope: E4_SHOPS_PIN, needle: "'longitude', v_shop.longitude" },
+    thana: { source: E4, scope: E4_SHOPS_PIN, needle: "'thana', v_shop.thana" },
+    district: { source: E4, scope: E4_SHOPS_PIN, needle: "'district', v_shop.district" },
+    location_captured_at: {
+      source: E4,
+      scope: E4_SHOPS_PIN,
+      needle: "'location_captured_at', v_shop.location_captured_at",
     },
   },
   users: {
@@ -394,7 +419,9 @@ describe('every server-owned declaration names real, specific evidence', () => {
   it('and nothing outside the evidence table is treated as server-owned', () => {
     for (const [table, field] of [
       ['batches', 'sale_price'],
-      ['shops', 'name'],
+      // Was ['shops', 'name'], which W4-05 made server-owned in Batch 3.
+      // owner_id replaces it: a shops column pinned by no wrapper.
+      ['shops', 'owner_id'],
       ['users', 'name'],
       ['sales', 'total'],
       ['expenses', 'amount'],
@@ -408,30 +435,53 @@ describe('every server-owned declaration names real, specific evidence', () => {
   });
 });
 
-describe('the W4-05 forcing function', () => {
-  it('shop identity fields are comparable while no wrapper pins them', () => {
-    // W4-05 is deferred to Batch 3 (docs/plans/muthoy-batch-1-plan.md §14).
-    // Nothing pins these today, so excluding them would cost an equal-timestamp
-    // blind spot on the Owner's own shop-profile edit and buy nothing.
-    for (const field of [
-      'name', 'name_en', 'phone', 'latitude', 'longitude',
-      'thana', 'district', 'location_captured_at',
-    ]) {
-      expect(isComparableField('shops', field)).toBe(true);
+const SHOP_IDENTITY_FIELDS = [
+  'name', 'name_en', 'phone', 'latitude', 'longitude',
+  'thana', 'district', 'location_captured_at',
+] as const;
+
+describe('W4-05, now applied', () => {
+  // This block was "the W4-05 forcing function", and its job was to fail the
+  // moment the wrapper entered the chain so the eight identity fields got
+  // reclassified. W4-05 landed in Batch 3, so it is inverted here: the same
+  // relationship, asserted in the direction that is now true.
+  //
+  // IT DID NOT ACTUALLY FIRE, and that is worth recording. Its detector was
+  //   MIGRATIONS.includes("'location_captured_at',v_shop.location_captured_at")
+  // — no space after the comma, matching B4's formatting. Migration 35 writes
+  // the same overlay with a space, so the needle missed, the assertion passed,
+  // and the reclassification it exists to force was never demanded. A forcing
+  // function that depends on whitespace is worse than none, because the batch
+  // proceeds believing the reminder will catch it. The detection below is
+  // whitespace-insensitive for that reason.
+  const squeezed = MIGRATIONS.replace(/\s+/g, '');
+
+  it('detects the wrapper regardless of how the SQL is formatted', () => {
+    const applied = squeezed.includes("'location_captured_at',v_shop.location_captured_at")
+      && squeezed.includes('sync_apply_row_pre_w405');
+    expect(applied, 'W4-05 should be in the migration chain from Batch 3 onward').toBe(true);
+  });
+
+  it('would still detect the wrapper if it were written without spaces', () => {
+    // Non-vacuity for the fix itself: the squeeze must be what makes the match
+    // work, not an accident of the current formatting.
+    const spaced = "'location_captured_at', v_shop.location_captured_at";
+    const tight = "'location_captured_at',v_shop.location_captured_at";
+    expect(MIGRATIONS).toContain(spaced);
+    expect(MIGRATIONS).not.toContain(tight);
+    expect(spaced.replace(/\s+/g, '')).toBe(tight);
+  });
+
+  it('treats all eight shop identity fields as server-owned', () => {
+    for (const field of SHOP_IDENTITY_FIELDS) {
+      expect(isComparableField('shops', field), `shops.${field}`).toBe(false);
     }
   });
 
-  it('fails the moment W4-05 enters the migration chain, forcing the reclassification', () => {
-    // The whole point: when the wrapper lands, this assertion flips and the
-    // declaration above MUST move those eight fields to server-owned. The
-    // reminder is mechanical rather than a note in a document.
-    const w405Applied = MIGRATIONS.includes('w405_shop_identity')
-      || MIGRATIONS.includes("'location_captured_at',v_shop.location_captured_at");
-    expect(
-      w405Applied,
-      'W4-05 is now in the migration chain: move the eight shops identity fields '
-      + 'into SERVER_OWNED_FIELDS.shops and update this test.',
-    ).toBe(false);
+  it('keeps a genuinely client-owned shops column comparable', () => {
+    // The negative control that stops the above from being "shops is excluded
+    // wholesale". owner_id is set at registration and pinned by nothing.
+    expect(isComparableField('shops', 'owner_id')).toBe(true);
   });
 });
 
