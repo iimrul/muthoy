@@ -32,6 +32,8 @@ const M0923 = '20260923000000_a23_device_registry.sql';
 const M32 = '20261008000000_h9_enrollment_hold_constraint_normalization.sql';
 const M33 = '20261008000100_h9_sync_staging_cleanup_schedule.sql';
 const M34 = '20261015000000_h9_api_role_table_privileges.sql';
+/** E4 / Batch 3 — migration 35, the only file added after the H-9 block. */
+const E4_MIGRATION = '20261023000000_e4_batch3_admin_platform.sql';
 const TABLE = `'public.device_enrollment_holds'::regclass`;
 const CANONICAL = 'device_enrollment_holds_consumption_check';
 const CHECK1 = 'device_enrollment_holds_check1';
@@ -153,10 +155,26 @@ async function readOnlyChecks(h: Harness, section: string): Promise<Record<strin
 }
 
 describe('the H-9 forward migrations sit after every historical migration', () => {
-  it('orders 32, 33 and 34 last, in that order', () => {
+  // The invariant here is that the three H-9 migrations are CONTIGUOUS and sit
+  // after every historical migration. `slice(-3)` expressed that only while
+  // H-9 was also the chain's tail, which stopped being true when E4 added
+  // migration 35 — so the assertion is restated as what it was always about,
+  // plus the one file that is now allowed to follow it.
+  //
+  // This is the FIFTH gate pinning the chain's shape, and the one the Batch 3
+  // plan's inventory of four missed: it never mentions the number 34, so a
+  // search for that literal does not find it. Recorded here so the next
+  // extension finds all five.
+  it('keeps 32, 33 and 34 contiguous after every historical migration, with only E4 after them', () => {
     const files = migrationFiles();
-    expect(files.slice(-3)).toEqual([M32, M33, M34]);
-    expect(files.filter((name) => name < M32)).toHaveLength(files.length - 3);
+    const start = files.indexOf(M32);
+    expect(start).toBeGreaterThan(0);
+    // Contiguous, and in order.
+    expect(files.slice(start, start + 3)).toEqual([M32, M33, M34]);
+    // Every historical migration sorts before the block, and none inside it.
+    expect(files.filter((name) => name < M32)).toHaveLength(start);
+    // And exactly one thing follows: E4. Anything else appended fails here.
+    expect(files.slice(start + 3)).toEqual([E4_MIGRATION]);
   });
 });
 

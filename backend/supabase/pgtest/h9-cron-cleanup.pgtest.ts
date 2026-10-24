@@ -11,6 +11,14 @@ import {
   seedShops,
   type Harness,
 } from './harness';
+import {
+  E4_CHECK_FILE,
+  H9_CHECK_FILE,
+  checkSectionFrom,
+  h9BaselineMigrationFiles,
+  readOnlyDetailFrom,
+  readOnlySectionFrom,
+} from './checkFile';
 
 // H-9 §8.4 — forward migration 33 and the cleanup it schedules, executed.
 //
@@ -93,11 +101,11 @@ const APPROVED_JOB: Job = {
   database: 'postgres', username: 'postgres', active: true,
 };
 
+// Delegates to the shared reader so the H-9 and E4 check files have ONE parser
+// between them. The signature is unchanged, so every call site below — and
+// there are many — keeps its exact shape.
 function checkSection(section: string): string {
-  const text = readFileSync(resolve('backend/supabase/checks/h9_postmigration_checks.sql'), 'utf8');
-  const body = text.split(/^-- section: /m).find((part) => part.split(/\r?\n/, 1)[0] === section);
-  if (!body) throw new Error(`missing check section ${section}`);
-  return body.slice(body.indexOf('\n') + 1);
+  return checkSectionFrom(H9_CHECK_FILE, section);
 }
 
 /** One section of the runbook's read-only checks, run in a READ ONLY transaction. */
@@ -402,11 +410,71 @@ describe('the read-only migration-history checks', () => {
     });
   });
 
+  // RE-SCOPED for E4, and this is the whole point of the successor design.
+  //
+  // This recorded `migrationFiles()` — the whole directory — and expected
+  // history_post_h9 to be all-true. That was a correct test for exactly as long
+  // as the directory WAS the H-9 baseline. E4 adds migration 35, so the
+  // directory and the baseline are no longer the same set, and the section
+  // under test describes the baseline: `count(*) = 34`, nothing after
+  // 20261015000000.
+  //
+  // So the test records the BASELINE, which is the history this section was
+  // written for and the state an A2/A3 rehearsal reproduces. The section's SQL
+  // is untouched and its file is still byte-identical.
   it('recognizes the complete post-H-9 history and refuses an unexpected later version', async () => {
-    await record(migrationFiles());
+    await record(h9BaselineMigrationFiles());
     expect(Object.values(await readOnlyChecks(h, 'history_post_h9'))).toEqual([true, true, true]);
     expect(await readOnlyChecks(h, 'history_pre_h9')).toMatchObject({ history_has_31_versions: false });
     await h.exec(`insert into supabase_migrations.schema_migrations (version, name) values ('20261231000000', 'unexpected')`);
     expect(await readOnlyChecks(h, 'history_post_h9')).toMatchObject({ history_has_nothing_after_h9: false });
+  });
+
+  // The two tests below are ADDED, not substituted. Re-scoping the one above
+  // would otherwise mean the H-9 section silently stopped being exercised
+  // against the live chain, and nobody could tell from the suite whether that
+  // was deliberate or an oversight. These make the drift explicit: the H-9
+  // section fails on the live chain, on EXACTLY two assertions and no others,
+  // and the successor passes on the same history.
+  it('shows exactly how the H-9 section drifts once the chain is extended', async () => {
+    await record(migrationFiles());
+    expect(await readOnlyChecks(h, 'history_post_h9')).toEqual({
+      // The count moved, and there is now something after migration 34.
+      history_has_34_versions: false,
+      history_has_nothing_after_h9: false,
+      // The H-9 trio itself is untouched, which is the invariant that matters.
+      history_has_all_h9_versions: true,
+    });
+  });
+
+  it('hands the live chain to the E4 successor, which accepts it', async () => {
+    await record(migrationFiles());
+    const live = await readOnlySectionFrom(h, E4_CHECK_FILE, 'history_e4');
+    expect(Object.values(live).every(Boolean), JSON.stringify(live)).toBe(true);
+  });
+
+  // The defect a count-plus-bounds check cannot see. Swap one pre-H-9 version
+  // for an unknown one of the same length: the COUNT is unchanged, nothing new
+  // appears after migration 34, so h9's section still passes — while the chain
+  // is demonstrably not the chain it claims to be. The successor fails in both
+  // directions and names both versions.
+  it('catches a same-count substitution that the H-9 section cannot', async () => {
+    const substituted = migrationFiles()
+      .filter((name) => !name.startsWith('20260817000100'))
+      .concat(['20260817000199_impostor.sql']);
+    await record(substituted);
+
+    expect(await readOnlyChecks(h, 'history_post_h9')).toMatchObject({
+      history_has_34_versions: false,
+      history_has_all_h9_versions: true,
+    });
+
+    const live = await readOnlySectionFrom(h, E4_CHECK_FILE, 'history_e4');
+    expect(live.history_has_no_missing_version).toBe(false);
+    expect(live.history_has_no_extra_version).toBe(false);
+
+    const detail = await readOnlyDetailFrom(h, E4_CHECK_FILE, 'history_e4');
+    expect(detail.history_has_no_missing_version).toBe('20260817000100');
+    expect(detail.history_has_no_extra_version).toBe('20260817000199');
   });
 });

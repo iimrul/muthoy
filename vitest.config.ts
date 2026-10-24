@@ -117,6 +117,9 @@ export default defineConfig({
       // H-9 Phase 4. The read-only production preflight, driven against a
       // scratch Git revision and a fake Management API; it never runs live.
       "apps/mobile/tests/h9-prod-preflight.test.ts",
+      // E4 / Batch 3. The evidence manifest, verified against the tree rather
+      // than trusted: H-9's static equivalent has already drifted.
+      "apps/mobile/tests/e4-evidence-manifest.test.ts",
       "apps/mobile/domain/**/*.test.ts",
       // W3-04 (H-8 core). The sink's bounded/offline behaviour, plus static
       // assertions that nothing in monitoring/ reaches the network or imports
@@ -394,6 +397,15 @@ export default defineConfig({
       // membership in the chain, including the negatives (no shop UPDATE, no
       // sales write, nothing on the device registry, nothing for anon).
       "backend/supabase/pgtest/batch2-admin-acl.pgtest.ts",
+      // E4 / Batch 3. The admin platform migration's effective privileges and
+      // BEHAVIOUR: the declarative acceptance sections, plus the writes those
+      // privileges must actually refuse. A catalogue that looks right and a
+      // table whose audit rows can still be edited are different things.
+      "backend/supabase/pgtest/e4-admin-platform.pgtest.ts",
+      // E4 / Batch 3. The succession between the two check files: which one is
+      // correct about which history, and the substitution the older count-plus-
+      // bounds check cannot see.
+      "backend/supabase/pgtest/e4-chain-succession.pgtest.ts",
       // One onboarding function for BOTH the real OTP flow and DEV Skip-OTP,
       // proving they reach the same rows and the same token claims — plus the
       // Multi-Shop rename/archive path that had the identical 42501.

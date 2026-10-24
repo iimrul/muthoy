@@ -288,6 +288,66 @@ describe('offline preflight', () => {
       revision = commitBackend();
     }
   });
+
+  // E4 raised the chain from 34 to 35, and the check went from "length 34 plus
+  // the H-9 trio is the tail" to exact membership plus contiguity plus
+  // E4-alone-after. These four prove the new predicate refuses each way the
+  // chain can be wrong — the last of them being the one the OLD check could not
+  // see at all.
+  const E4_FILE = 'migrations/20261023000000_e4_batch3_admin_platform.sql';
+
+  it('refuses a chain carrying an extra unknown migration', async () => {
+    const extra = commitBackend((backend) => writeFileSync(
+      join(backend, 'migrations/20261231000000_unknown.sql'), 'select 1;\n',
+    ));
+    try {
+      const result = await run(options(workdir(), manifest({ approvedRevision: extra })));
+      expect(failed(result)).toEqual(['migration-chain:migration-chain-unexpected']);
+    } finally {
+      revision = commitBackend();
+    }
+  });
+
+  it('refuses a chain with the E4 migration missing', async () => {
+    const withoutE4 = commitBackend((backend) => rmSync(join(backend, E4_FILE)));
+    try {
+      const result = await run(options(workdir(), manifest({ approvedRevision: withoutE4 })));
+      expect(failed(result)).toEqual(['migration-chain:migration-chain-unexpected']);
+    } finally {
+      revision = commitBackend();
+    }
+  });
+
+  it('refuses a chain whose E4 migration has been renumbered', async () => {
+    const renumbered = commitBackend((backend) => {
+      const body = readFileSync(join(backend, E4_FILE), 'utf8');
+      rmSync(join(backend, E4_FILE));
+      writeFileSync(join(backend, 'migrations/20261024000000_e4_batch3_admin_platform.sql'), body);
+    });
+    try {
+      const result = await run(options(workdir(), manifest({ approvedRevision: renumbered })));
+      expect(failed(result)).toEqual(['migration-chain:migration-chain-unexpected']);
+    } finally {
+      revision = commitBackend();
+    }
+  });
+
+  // THE ONE THE OLD CHECK MISSED. Swap a pre-H-9 migration for an unknown file:
+  // the count is still 35, the H-9 trio is still contiguous, and E4 is still
+  // the only thing after it. `migrations.length !== 34` plus a tail comparison
+  // would have passed this.
+  it('refuses a same-count substitution of a pre-H-9 migration', async () => {
+    const substituted = commitBackend((backend) => {
+      rmSync(join(backend, 'migrations/20260817000100_sync_roles_read_grant.sql'));
+      writeFileSync(join(backend, 'migrations/20260817000199_impostor.sql'), 'select 1;\n');
+    });
+    try {
+      const result = await run(options(workdir(), manifest({ approvedRevision: substituted })));
+      expect(failed(result)).toEqual(['migration-chain:migration-chain-unexpected']);
+    } finally {
+      revision = commitBackend();
+    }
+  });
 });
 
 describe('the enforced policy is the approved revision\'s file, byte for byte', () => {

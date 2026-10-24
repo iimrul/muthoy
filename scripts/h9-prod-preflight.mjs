@@ -65,6 +65,57 @@ export const H9_MIGRATIONS = Object.freeze([
   '20261008000100_h9_sync_staging_cleanup_schedule.sql',
   '20261015000000_h9_api_role_table_privileges.sql',
 ]);
+// E4 / Batch 3 — the only migration added since H-9 sealed the chain at 34.
+export const E4_MIGRATIONS = Object.freeze([
+  '20261023000000_e4_batch3_admin_platform.sql',
+]);
+// The chain, pinned by NAME rather than by count.
+//
+// This was `migrations.length !== 34` plus "the H-9 trio is the tail". A length
+// plus a tail cannot see a SUBSTITUTION: swap one pre-H-9 file for an unknown
+// one and both predicates still hold. And once E4 exists the two predicates
+// contradict each other outright — the H-9 trio cannot be the tail of a chain
+// that has something after it.
+//
+// So the pin is the explicit set, asserted three ways below: exact membership,
+// the H-9 trio contiguous, and E4 alone after it. Hardcoded deliberately: this
+// list is the independent expectation the preflight checks a workdir AGAINST,
+// so deriving it from that workdir would make the check circular.
+export const EXPECTED_CHAIN = Object.freeze([
+  '20260813000000_initial_schema.sql',
+  '20260817000000_admin_read_grants.sql',
+  '20260817000100_sync_roles_read_grant.sql',
+  '20260818000000_inventory_movement_ledger.sql',
+  '20260818000100_sync_batches_stock_server_derived.sql',
+  '20260819000000_staff_device_login.sql',
+  '20260821000000_phase_b1_navigation_roles.sql',
+  '20260821010000_phase_b2_sales_inventory_sync.sql',
+  '20260822000000_owner_dashboard_credit_period.sql',
+  '20260822010000_b3_group1_shop_settings.sql',
+  '20260823000000_b3_group2_payment_note.sql',
+  '20260823010000_b3_group2_cash_reconcile.sql',
+  '20260823020000_b3_group2_sync_completion.sql',
+  '20260823030000_b3_group3_expense_category_taxonomy.sql',
+  '20260823040000_b3_groups456_schema_additions.sql',
+  '20260823050000_b3_groups456_sync_completion.sql',
+  '20260824000000_b3_group7_purchase_return_sync.sql',
+  '20260825000000_inventory_add_purchase_sync.sql',
+  '20260827000000_b3_group8_report_indexes.sql',
+  '20260827010000_b3_group9_sale_tax_snapshot.sql',
+  '20260831000000_b4_commercial_platform.sql',
+  '20260905000000_b4_canonical_onboarding.sql',
+  '20260907000000_h7_security_hardening.sql',
+  '20260907010000_h7_revoke_api_role_truncate.sql',
+  '20260907020000_h7_fix_pass_b.sql',
+  '20260909000000_h7_actor_binding_staff_reactivation.sql',
+  '20260923000000_a23_device_registry.sql',
+  '20260926000000_a23_persistent_enrollment_holds.sql',
+  '20261001000000_h5_auth_sms_dispatch.sql',
+  '20261004000000_h5_sms_dispatch_claim_owner.sql',
+  '20261005000000_h5_revoke_auth_user_sessions.sql',
+  ...H9_MIGRATIONS,
+  ...E4_MIGRATIONS,
+]);
 
 const PROJECT_REF = /^[a-z]{20}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -229,7 +280,19 @@ function offline(options, deps, results) {
     if (!files) refuse('prerequisite-failed');
     const migrations = files.filter((path) => path.startsWith('supabase/migrations/') && path.endsWith('.sql'))
       .map((path) => path.slice('supabase/migrations/'.length)).sort();
-    if (migrations.length !== 34 || migrations.slice(-H9_MIGRATIONS.length).join(',') !== H9_MIGRATIONS.join(',')) refuse('migration-chain-unexpected');
+    // Three assertions, because one alone is defeatable:
+    //   1. exact membership — catches a substitution the old length check let
+    //      through, and catches any addition or removal;
+    //   2. the H-9 trio is CONTIGUOUS — catches a migration inserted between
+    //      the signed-off three, which would mean the block was reopened
+    //      rather than extended;
+    //   3. E4 alone follows it — catches anything appended after E4.
+    if (migrations.join(',') !== EXPECTED_CHAIN.join(',')) refuse('migration-chain-unexpected');
+    const h9Start = migrations.indexOf(H9_MIGRATIONS[0]);
+    if (h9Start < 0
+      || migrations.slice(h9Start, h9Start + H9_MIGRATIONS.length).join(',') !== H9_MIGRATIONS.join(',')
+    ) refuse('migration-chain-unexpected');
+    if (migrations.slice(h9Start + H9_MIGRATIONS.length).join(',') !== E4_MIGRATIONS.join(',')) refuse('migration-chain-unexpected');
   }));
   ok.push(check(results, 'jwt-flags', () => {
     const toml = readFileSync(join(workdir, 'supabase/config.toml'), 'utf8');
