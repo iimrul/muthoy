@@ -18,7 +18,6 @@ import { redirect } from 'next/navigation';
 import {
   expireStalePaymentOrder,
   reconcilePlanLimits,
-  refreshEntitlementSnapshot,
 } from '../lib/adminActions';
 
 /** 'done' or 'failed' plus the action name, so the page can say what happened. */
@@ -26,11 +25,11 @@ function outcomeQuery(action: string, ok: boolean): string {
   return '?' + (ok ? 'done=' : 'failed=') + action;
 }
 
-export async function refreshSnapshotAction(formData: FormData): Promise<void> {
-  const accountId = String(formData.get('accountId') ?? '');
-  const result = await refreshEntitlementSnapshot(accountId);
-  redirect('/accounts/' + accountId + outcomeQuery('refresh', result.ok));
-}
+// E11: `refreshSnapshotAction` was HERE and is deliberately gone. It was the
+// HTTP surface of the withdrawn entitlement refresh — see the explanation in
+// lib/adminActions.ts. Removing the export removes the POST endpoint, which is
+// the part that mattered: a disabled button with a live server action behind it
+// is not a removed capability.
 
 export async function reconcileLimitsAction(formData: FormData): Promise<void> {
   const accountId = String(formData.get('accountId') ?? '');

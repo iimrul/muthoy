@@ -6,7 +6,7 @@ import ErrorNotice from '../../../components/ErrorNotice';
 import { requireAdminPermission } from '../../../lib/adminAuthz';
 import { hasPermission } from '../../../lib/adminRoles';
 import ActionButton from '../../../components/ActionButton';
-import { reconcileLimitsAction, refreshSnapshotAction } from '../../adminFormActions';
+import { reconcileLimitsAction } from '../../adminFormActions';
 import { getAccountDetail, type AccountDetailView } from '../../../lib/adminQueries';
 import {
   billingCycleLabel,
@@ -110,15 +110,22 @@ export default async function AccountDetailPage({ params, searchParams }: Accoun
         </p>
       )}
 
+      {/* E11. The "Refresh entitlement snapshot" button was here. It is gone,
+          along with its server action and its POST endpoint — not disabled, which
+          would have left the capability live behind a greyed-out control. */}
+      <p className="mt-6 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] p-4 text-sm text-[#92400E]">
+        <strong>Entitlement refresh is not an admin action.</strong>{' '}
+        It stamped <code>verified_at</code>, which is the anchor of a device&apos;s
+        offline grace window — so pressing it asserted &ldquo;this account was
+        verified just now&rdquo; when no verification had happened, and reset the
+        window of a device that should have been made to check in. A device
+        refreshes its own snapshot whenever it comes online. This never granted or
+        extended paid access: the RPC does not touch tier, status, paid-through or
+        trial dates.
+      </p>
+
       {mayWrite ? (
         <div className="mt-6 flex flex-wrap items-start gap-4">
-          <ActionButton
-            action={refreshSnapshotAction}
-            fieldName="accountId"
-            fieldValue={account.id}
-            label="Refresh entitlement snapshot"
-            hint="Re-derives the snapshot from this account's own subscription rows."
-          />
           <ActionButton
             action={reconcileLimitsAction}
             fieldName="accountId"

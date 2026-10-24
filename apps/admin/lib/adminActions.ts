@@ -70,35 +70,52 @@ function audit(
   recordAdminAction(entry);
 }
 
-/** Refreshes one account's entitlement snapshot from its own subscription rows. */
-export async function refreshEntitlementSnapshot(
-  accountId: string,
-  deps: AdminActionDeps = {},
-): Promise<AdminActionResult> {
-  // Permission FIRST: a denial is audited by requirePermission and nothing
-  // below it runs, so no client is constructed and no RPC is reached.
-  const session = await requireAdminPermission('subscriptions.write', deps.env);
+// ─────────────────────────────────────────────────────────────────────────────
+// E11 — WITHDRAWN. `refreshEntitlementSnapshot` used to live here, calling
+// b4_refresh_entitlement_snapshot(uuid). It is removed, and the RPC is named in
+// FORBIDDEN_ADMIN_RPCS below so re-adding it fails the build rather than a
+// review.
+//
+// WHAT THE RPC DOES, precisely, because the narrow truth is what makes the
+// decision obvious (20260831000000:620):
+//
+//     update entitlement_snapshots
+//     set verified_at = now(), version = version + 1, updated_at = now()
+//     where billing_account_id = p_billing_account_id;
+//
+// It rederives nothing. It does NOT touch tier, status, paid_through or
+// trial_ends_at, so it cannot create entitlement and cannot extend one past the
+// date that bounds it — apps/mobile/domain/entitlements.ts checks those dates as
+// well as the staleness ceiling.
+//
+// WHAT IT DOES AFFECT: `verified_at` anchors that ceiling
+// (entitlements.ts:143) — `verifiedAt + MAX_OFFLINE_VERIFICATION_DAYS` is how
+// long a device keeps honouring a snapshot while offline. The ceiling exists so
+// a device cannot trust an old snapshot indefinitely without checking in.
+//
+// WHY THE SERVER MAY CALL IT AND THE PANEL MAY NOT: the legitimate caller is
+// functions/sync/billing.ts:60, inside `billingStatus` — the device's ONLINE
+// billing check. There, stamping verified_at = now() is simply true: the device
+// just verified against the server, so it has earned a fresh offline window.
+//
+// An admin pressing a button is not that event. It asserts "this account was
+// verified just now" when no verification happened, resetting the offline grace
+// window of a device that should have been made to check in. That is the whole
+// of the defect, and it is a CALLER problem rather than an RPC problem — which
+// is why no SQL change is needed and E11 closes here instead of waiting on a
+// migration.
+//
+// The capability is not lost: a device refreshes its own snapshot every time it
+// comes online and calls billing-status.
+// ─────────────────────────────────────────────────────────────────────────────
 
-  if (!isUuid(accountId)) {
-    audit({ actor: session.username, role: session.role, action: 'subscription.refresh_snapshot', target: 'invalid', outcome: 'failure', reason: 'invalid_id' }, deps.sinks);
-    throw new AdminDataError('account is not a valid id');
-  }
-
-  const client = deps.client ?? getSupabaseAdmin();
-  const { error } = await client.rpc('b4_refresh_entitlement_snapshot', {
-    p_billing_account_id: accountId,
-  });
-
-  if (error) {
-    console.error('[admin] refresh snapshot failed:', error.message);
-    audit({ actor: session.username, role: session.role, action: 'subscription.refresh_snapshot', target: accountId, outcome: 'failure', reason: 'rpc_failed' }, deps.sinks);
-    return { ok: false, message: 'Could not refresh the entitlement snapshot. The server log has the details.' };
-  }
-
-  audit({ actor: session.username, role: session.role, action: 'subscription.refresh_snapshot', target: accountId, outcome: 'success' }, deps.sinks);
-  (deps.revalidate ?? revalidatePath)('/accounts/' + accountId);
-  return { ok: true, message: 'Entitlement snapshot refreshed.' };
-}
+/**
+ * RPCs no admin module may call, by name.
+ *
+ * lib/adminGrants.test.ts asserts this against the parsed sources, so a future
+ * change that re-adds one fails the suite instead of passing review.
+ */
+export const FORBIDDEN_ADMIN_RPCS: readonly string[] = ['b4_refresh_entitlement_snapshot'];
 
 /** Re-applies the account's plan limits to its shops and staff. */
 export async function reconcilePlanLimits(

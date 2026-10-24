@@ -30,7 +30,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 const { recentAdminAudit } = await import('./adminAudit');
 const { newSessionPayload, signAdminSession } = await import('./adminSession');
 const { AdminForbiddenError, AdminDataError } = await import('./errors');
-const { expireStalePaymentOrder, reconcilePlanLimits, refreshEntitlementSnapshot } =
+const { expireStalePaymentOrder, reconcilePlanLimits } =
   await import('./adminActions');
 
 const SECRET = 'a'.repeat(32);
@@ -122,15 +122,13 @@ beforeEach(() => {
 
 describe('permission comes first', () => {
   test.each([
-    ['read_only', 'refreshEntitlementSnapshot'],
-    ['support', 'refreshEntitlementSnapshot'],
     ['read_only', 'reconcilePlanLimits'],
     ['support', 'reconcilePlanLimits'],
   ])('%s cannot run %s, and no RPC is reached', async (role, _action) => {
     await signInAs(role as 'support');
     const { client, rpcCalls } = createClient();
 
-    await expect(refreshEntitlementSnapshot(ACCOUNT, deps(role as 'support', client)))
+    await expect(reconcilePlanLimits(ACCOUNT, deps(role as 'support', client)))
       .rejects.toBeInstanceOf(AdminForbiddenError);
     await expect(reconcilePlanLimits(ACCOUNT, deps(role as 'support', client)))
       .rejects.toBeInstanceOf(AdminForbiddenError);
@@ -152,7 +150,7 @@ describe('permission comes first', () => {
     await signInAs('read_only');
     const { client } = createClient();
 
-    await expect(refreshEntitlementSnapshot(ACCOUNT, deps('read_only', client))).rejects.toThrow();
+    await expect(reconcilePlanLimits(ACCOUNT, deps('read_only', client))).rejects.toThrow();
 
     expect(recentAdminAudit.entries()).toMatchObject([{
       actor: 'founder',
@@ -166,7 +164,7 @@ describe('permission comes first', () => {
   test('no session at all is refused before any client is built', async () => {
     const { client, rpcCalls, updateCalls } = createClient();
 
-    await expect(refreshEntitlementSnapshot(ACCOUNT, deps('super_admin', client))).rejects.toThrow();
+    await expect(reconcilePlanLimits(ACCOUNT, deps('super_admin', client))).rejects.toThrow();
     await expect(expireStalePaymentOrder(ORDER, deps('super_admin', client))).rejects.toThrow();
 
     expect(rpcCalls).toEqual([]);
@@ -177,77 +175,31 @@ describe('permission comes first', () => {
     await signInAs('billing');
     const { client, rpcCalls } = createClient();
 
-    await expect(refreshEntitlementSnapshot(ACCOUNT, deps('billing', client))).resolves.toMatchObject({ ok: true });
+    await expect(reconcilePlanLimits(ACCOUNT, deps('billing', client))).resolves.toMatchObject({ ok: true });
     // Same cookie, ADMIN_ROLES now says support.
-    await expect(refreshEntitlementSnapshot(ACCOUNT, deps('support', client)))
+    await expect(reconcilePlanLimits(ACCOUNT, deps('support', client)))
       .rejects.toBeInstanceOf(AdminForbiddenError);
 
     expect(rpcCalls).toHaveLength(1);
   });
 });
 
-describe('refreshEntitlementSnapshot', () => {
-  test('calls the existing SECURITY DEFINER RPC with the account id and nothing else', async () => {
-    await signInAs('billing');
-    const { client, rpcCalls } = createClient();
-
-    const result = await refreshEntitlementSnapshot(ACCOUNT, deps('billing', client));
-
-    expect(result).toMatchObject({ ok: true });
-    expect(rpcCalls).toEqual([
-      { name: 'b4_refresh_entitlement_snapshot', args: { p_billing_account_id: ACCOUNT } },
-    ]);
+// E11 — the dedicated describe for refreshEntitlementSnapshot was HERE and is
+// deliberately gone with the action itself. In its place, the assertion that
+// matters now: the export must not come back. See lib/adminActions.ts for why
+// the RPC is fine and its admin caller was not.
+describe('E11: the entitlement refresh action stays withdrawn', () => {
+  test('lib/adminActions.ts exports no entitlement refresh', async () => {
+    const actions = await import('./adminActions');
+    expect('refreshEntitlementSnapshot' in actions).toBe(false);
   });
 
-  test('is idempotent: the second call is the same single call', async () => {
-    await signInAs('billing');
-    const { client, rpcCalls } = createClient();
-
-    await refreshEntitlementSnapshot(ACCOUNT, deps('billing', client));
-    await refreshEntitlementSnapshot(ACCOUNT, deps('billing', client));
-
-    expect(rpcCalls).toEqual([rpcCalls[0], rpcCalls[0]]);
+  test('and names the RPC as forbidden, so re-adding it fails the build', async () => {
+    const { FORBIDDEN_ADMIN_RPCS } = await import('./adminActions');
+    expect([...FORBIDDEN_ADMIN_RPCS]).toEqual(['b4_refresh_entitlement_snapshot']);
   });
 
-  test('audits the success with actor, role and target', async () => {
-    await signInAs('super_admin');
-    const { client } = createClient();
-
-    await refreshEntitlementSnapshot(ACCOUNT, deps('super_admin', client));
-
-    expect(recentAdminAudit.entries()).toMatchObject([{
-      actor: 'founder',
-      role: 'super_admin',
-      action: 'subscription.refresh_snapshot',
-      target: ACCOUNT,
-      outcome: 'success',
-    }]);
-  });
-
-  test('an RPC failure is audited, reported safely, and never thrown raw', async () => {
-    await signInAs('billing');
-    const { client } = createClient({ rpcError: 'permission denied for function' });
-
-    const result = await refreshEntitlementSnapshot(ACCOUNT, deps('billing', client));
-
-    expect(result).toMatchObject({ ok: false });
-    expect(result.message).not.toContain('permission denied');
-    expect(recentAdminAudit.entries()).toMatchObject([{ outcome: 'failure', meta: { reason: 'rpc_failed' } }]);
-  });
-
-  test.each([
-    ['a bare word', 'founder'],
-    ['a PostgREST filter', 'eq.' + ACCOUNT],
-    ['an empty string', ''],
-  ])('refuses %s without calling the RPC', async (_label, id) => {
-    await signInAs('billing');
-    const { client, rpcCalls } = createClient();
-
-    await expect(refreshEntitlementSnapshot(id, deps('billing', client))).rejects.toBeInstanceOf(AdminDataError);
-    expect(rpcCalls).toEqual([]);
-  });
 });
-
 describe('reconcilePlanLimits', () => {
   test('passes the account id and an explicit timestamp', async () => {
     await signInAs('billing');

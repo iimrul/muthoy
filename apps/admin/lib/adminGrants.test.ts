@@ -307,7 +307,12 @@ describe('admin write power is bounded at the source', () => {
     const approved = ADMIN_SOURCES.find((source) => source.path === APPROVED_WRITE_SITE);
     const rpcNames = [...(approved?.code.matchAll(/\.rpc\('([a-z0-9_]+)'/g) ?? [])].map((match) => match[1]);
 
-    expect(rpcNames.sort()).toEqual(['b4_reconcile_plan_limits', 'b4_refresh_entitlement_snapshot']);
+    // E11: b4_refresh_entitlement_snapshot is GONE from this list, and that is
+    // the assertion. It stamps entitlement_snapshots.verified_at, which anchors a
+    // device's offline grace window — legitimate for the device's own online
+    // billing check (functions/sync/billing.ts:60), never for an admin asserting
+    // a verification that did not happen.
+    expect(rpcNames.sort()).toEqual(['b4_reconcile_plan_limits']);
     for (const name of rpcNames) {
       expect(MIGRATIONS_SQL).toMatch(
         new RegExp(String.raw`create or replace function ${name}\(`, 'i'),
@@ -318,6 +323,30 @@ describe('admin write power is bounded at the source', () => {
     }
   });
 
+  // E11. The predicate is the INVOCATION, not the mention: lib/adminActions.ts
+  // names this RPC in FORBIDDEN_ADMIN_RPCS, and a denylist naming a thing is the
+  // opposite of calling it. Matching the bare name flagged the denylist itself,
+  // which is how a guard ends up being weakened to make it pass.
+  const callsForbiddenRpc = (code: string) =>
+    /\.rpc\(\s*['"]b4_refresh_entitlement_snapshot['"]/.test(code);
+
+  test('E11: no admin source invokes the forbidden entitlement-refresh RPC', () => {
+    const offenders = ADMIN_SOURCES.filter((source) => callsForbiddenRpc(source.code));
+    expect(offenders.map((source) => source.path)).toEqual([]);
+  });
+
+  test('E11: the denylist itself still names it, so the ban is discoverable', () => {
+    const actions = ADMIN_SOURCES.find((source) => source.path === 'lib/adminActions.ts');
+    expect(actions?.code).toContain('FORBIDDEN_ADMIN_RPCS');
+    expect(actions?.code).toContain('b4_refresh_entitlement_snapshot');
+    expect(callsForbiddenRpc(actions?.code ?? '')).toBe(false);
+  });
+
+  test('E11 negative control: the scan catches a reintroduced call', () => {
+    // Non-vacuity, and it exercises the real predicate rather than a substring.
+    expect(callsForbiddenRpc("await client.rpc('b4_refresh_entitlement_snapshot', { p: id });")).toBe(true);
+    expect(callsForbiddenRpc('const FORBIDDEN = ["b4_refresh_entitlement_snapshot"];')).toBe(false);
+  });
   test('negative control A: a synthetic DELETE grant on shops would be rejected', () => {
     const synthetic = 'grant delete on table public.shops to service_role;';
 
