@@ -1,11 +1,14 @@
 import 'server-only';
 
 import { AdminDataError } from './errors';
+import { netSalesPaisa } from '@muthoy/utils';
 import {
   dhakaDayRange,
+  sumRefundTotals,
   sumSaleTotals,
   type PharmacyRow,
   type PlatformStats,
+  type SaleRefundTotalRow,
   type SaleTotalRow,
 } from './platformStats';
 import { getSupabaseAdmin } from './supabaseAdmin';
@@ -84,7 +87,28 @@ export async function listPharmacies(): Promise<PharmacyRow[]> {
   }));
 }
 
-/** Volume 5 P0: two numbers — total shops, and today's sales across all shops. */
+/**
+ * Volume 5 P0's two numbers, with W4-04 applied to the money one: total shops,
+ * and today's REFUND-NET sales across all shops.
+ *
+ * BOTH SIDES ARE WINDOWED ON `business_date`, and that is the correction. This
+ * read used `created_at` for sales while refunds carry their own
+ * `business_date`, so the two windows disagreed for any row whose business date
+ * was backfilled (migration 20260827000000) or whose device clock diverged from
+ * Dhaka midnight — a sale counted on one day and its refund on another, which
+ * is a net figure wrong in both directions at once.
+ * apps/mobile/db/reports.ts already used `business_date` on both sides; the
+ * admin panel now matches it exactly, through the same shared subtraction.
+ *
+ * KNOWN ASYMMETRY, preserved deliberately. The canonical mobile definition
+ * (reports.ts:34-37) joins a refund to its sale WITHOUT filtering the sale's
+ * `is_deleted`, so a refund whose sale was later soft-deleted still counts
+ * against the day while the sale itself does not. That is odd, and it is what
+ * the device reports. Admin matches it rather than quietly diverging: two
+ * reports of one shop disagreeing is worse than either rule, and changing money
+ * semantics on both platforms is a decision, not a cleanup (CLAUDE.md rules 4
+ * and 10).
+ */
 export async function getPlatformStats(now: Date = new Date()): Promise<PlatformStats> {
   const supabase = getSupabaseAdmin();
   const day = dhakaDayRange(now);
@@ -104,15 +128,32 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
       .from('sales')
       .select('total')
       .eq('is_deleted', false)
-      .gte('created_at', day.startInclusive)
-      .lt('created_at', day.endExclusive)
+      .eq('business_date', day.businessDate)
       .order('id', { ascending: true })
       .range(from, to),
   );
 
+  // Through the same bounded pager as sales, so paging, the is_deleted filter
+  // and the AdminDataError path behave identically on both sides rather than
+  // one being assumed to match the other.
+  const refundRows = await readAllPages<SaleRefundTotalRow>('sale_refunds', (from, to) =>
+    supabase
+      .from('sale_refunds')
+      .select('total_amount')
+      .eq('is_deleted', false)
+      .eq('business_date', day.businessDate)
+      .order('id', { ascending: true })
+      .range(from, to),
+  );
+
+  const grossSalesToday = sumSaleTotals(saleRows);
+  const refundsToday = sumRefundTotals(refundRows);
+
   return {
     totalShops: count ?? 0,
-    totalSalesToday: sumSaleTotals(saleRows),
+    grossSalesToday,
+    refundsToday,
+    netSalesToday: netSalesPaisa(grossSalesToday, refundsToday),
     day,
   };
 }

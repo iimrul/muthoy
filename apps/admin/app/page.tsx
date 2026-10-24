@@ -50,12 +50,17 @@ export default async function DashboardPage() {
           hint="Registered pharmacies, excluding deleted shops"
         />
         <StatCard
-          label="Total sales today"
-          value={formatMoney(result.stats.totalSalesToday)}
-          hint={`All shops · ${result.stats.day.businessDate} (Asia/Dhaka)`}
+          label="Total sales today, net of refunds"
+          value={formatMoney(result.stats.netSalesToday)}
+          hint={`All shops · ${result.stats.day.businessDate} (Asia/Dhaka) · gross ${formatMoney(result.stats.grossSalesToday)} less refunds ${formatMoney(result.stats.refundsToday)}`}
           isMoney
         />
       </div>
+      <p className="mt-4 text-xs text-midGray">
+        Pharmacy takings, net of refunds, on the Dhaka business date — both sides
+        windowed the same way. This is what the pharmacies sold, not Muthoy&apos;s
+        own income.
+      </p>
     </>
   );
 }

@@ -59,6 +59,10 @@ const DECLARED_READ_TABLES = [
   'payment_provider_events',
   'plan_offerings',
   'sales',
+  // W4-04. The read that was held back for a whole batch because BYPASSRLS does
+  // not substitute for a table GRANT — migration 35 adds the SELECT, and the
+  // assertion below pins it to SELECT and nothing else.
+  'sale_refunds',
   'shop_memberships',
   'shops',
   'users',
@@ -135,7 +139,28 @@ describe('admin Postgres privileges', () => {
     }
   });
 
-  test('shops has no UPDATE grant for service_role — W4-05 is still a blocker', () => {
+  // W4-04. sale_refunds is a MONEY table the panel only reads. The subtlety is
+  // that 20260821010000:299's `do` block granted service_role
+  // select+insert+update+delete over a table list that INCLUDES sale_refunds,
+  // so asserting "no insert grant appears in the chain" would be false — the
+  // grant is there. Migration 35 revokes it and re-grants SELECT, so the
+  // assertion is about the REVOKE being present, and the effective privilege is
+  // measured on a real Postgres by backend/supabase/pgtest/e4-admin-platform.pgtest.ts.
+  test('sale_refunds is revoked from service_role and re-granted SELECT only', () => {
+    expect(MIGRATIONS_SQL).toMatch(
+      /revoke\s+all\s+on\s+table\s+public\.sale_refunds\s+from\s+service_role/i,
+    );
+    expect(MIGRATIONS_SQL).toMatch(
+      /grant\s+select\s+on\s+table\s+public\.sale_refunds\s+to\s+service_role/i,
+    );
+    // And the revoke comes AFTER the wide grant, or it would not undo it.
+    const wideGrant = MIGRATIONS_SQL.search(/grant select, insert, update, delete on table %I to service_role/i);
+    const revoke = MIGRATIONS_SQL.search(/revoke\s+all\s+on\s+table\s+public\.sale_refunds\s+from\s+service_role/i);
+    expect(wideGrant).toBeGreaterThan(-1);
+    expect(revoke).toBeGreaterThan(wideGrant);
+  });
+
+  test('shops has no UPDATE grant for service_role — W4-05 keeps it that way', () => {
     // A shop write from the panel would need this grant, which would be a
     // migration, which is sealed. plan §5.4: location/map stays BLOCKED.
     expect(isGranted('update', 'shops', 'service_role')).toBe(false);

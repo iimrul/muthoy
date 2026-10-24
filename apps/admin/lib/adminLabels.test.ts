@@ -60,10 +60,92 @@ describe('the GROSS boundary', () => {
     return new RegExp('(^|[^A-Za-z])' + word + '([^A-Za-z]|$)', 'i').test(code);
   }
 
-  test.each(['revenue', 'MRR', 'ARR', 'profit', 'net'])('no page describes a figure as %s', (word) => {
+  // Four of the five words stay banned outright, because nothing in the panel
+  // computes them yet. `net` is the one W4-04 earns — and it is not simply
+  // unbanned, it is TIED TO THE COMPUTATION.
+  test.each(['revenue', 'MRR', 'ARR', 'profit'])('no page describes a figure as %s', (word) => {
     const offenders = SOURCES.filter((file) => mentionsWord(file.code, word));
 
     expect(offenders.map((file) => file.path)).toEqual([]);
+  });
+
+  // The replacement has to be STRONGER than the ban, not weaker. A blanket ban
+  // stopped the word appearing; it said nothing about whether a figure called
+  // net actually was one. This says exactly that: any file using the word must
+  // also go through the one shared definition that produces the number.
+  // PROVENANCE, in two links, because a page DISPLAYS the figure and the query
+  // layer COMPUTES it. Requiring the shared helper in the displaying file would
+  // be the wrong rule — and asserting it caught that mistake here first.
+  //
+  // Link 1: the word may only attach to the one field that holds a net figure.
+  // Link 2: that field may only be produced by the shared definition.
+  // Chained, the word cannot reach a page unless the number behind it came from
+  // @muthoy/utils — which is what the blanket ban could never check.
+  const NET_FIELD = 'netSalesToday';
+
+  test('link 1: `net` appears only alongside the one net-typed field', () => {
+    const offenders = SOURCES
+      .filter((file) => mentionsWord(file.code, 'net'))
+      .filter((file) => !file.code.includes(NET_FIELD));
+
+    expect(
+      offenders.map((file) => file.path),
+      `a figure called net must be the ${NET_FIELD} field`,
+    ).toEqual([]);
+  });
+
+  test('link 2: that field is produced only by the shared netSalesPaisa', () => {
+    // DECLARING the field and ASSIGNING it are different things, and only the
+    // assignment is a provenance claim. platformStats.ts declares the type;
+    // queries.ts is the one place a value is put into it.
+    const declarers = SOURCES.filter((file) => file.code.includes(`${NET_FIELD}:`));
+    expect(declarers.map((file) => file.path).sort())
+      .toEqual(['lib/platformStats.ts', 'lib/queries.ts']);
+
+    // Literal predicates, not a lookahead. `netSalesToday:\s*(?!Paisa)` looks
+    // right and is not: \s* backtracks to zero width, the lookahead then sees
+    // " Paisa" which does not START with Paisa, and the declaration matches as
+    // though it were an assignment. Two explicit shapes instead.
+    const declaresType = (code: string) => code.includes(`${NET_FIELD}: Paisa`);
+    const assignsValue = (code: string) => code.includes(`${NET_FIELD}: netSalesPaisa(`);
+
+    expect(SOURCES.filter((file) => declaresType(file.code)).map((file) => file.path))
+      .toEqual(['lib/platformStats.ts']);
+    expect(SOURCES.filter((file) => assignsValue(file.code)).map((file) => file.path))
+      .toEqual(['lib/queries.ts']);
+    // Every declarer is one or the other, so no third shape slipped in.
+    for (const file of declarers) {
+      expect(declaresType(file.code) || assignsValue(file.code), file.path).toBe(true);
+    }
+  });
+
+  test('and the chain is not vacuous at either end', () => {
+    expect(SOURCES.filter((file) => mentionsWord(file.code, 'net')).length).toBeGreaterThan(0);
+    expect(SOURCES.filter((file) => file.code.includes('netSalesPaisa')).length).toBeGreaterThan(0);
+  });
+
+  test('mutation check: both links reject a figure that only CLAIMS to be net', () => {
+    // The guard must fail on each of these, or it checks nothing.
+    const claimsWithoutField = { code: 'const label = "Total sales today, net of refunds";' };
+    expect(mentionsWord(claimsWithoutField.code, 'net')
+      && !claimsWithoutField.code.includes(NET_FIELD)).toBe(true);
+
+    const fieldWithoutHelper = { code: `return { ${NET_FIELD}: sumSaleTotals(rows) };` };
+    expect(fieldWithoutHelper.code.includes(`${NET_FIELD}:`)
+      && !fieldWithoutHelper.code.includes('netSalesPaisa')).toBe(true);
+  });
+
+  test('the dashboard says net of refunds, and the shop drill-down still says GROSS', () => {
+    // The two must not drift into each other. A per-shop figure stays gross
+    // because sale_refunds is read platform-wide, so calling it net would be
+    // the exact error this guard exists to stop.
+    const dashboard = SOURCES.find((file) => file.path === 'app/page.tsx');
+    expect(dashboard?.code).toContain('net of refunds');
+    expect(dashboard?.code).toContain('netSalesToday');
+
+    const shopPage = SOURCES.find((file) => file.path === 'app/shops/[id]/page.tsx');
+    expect(shopPage?.code).toContain('Gross sales today');
+    expect(shopPage?.code).not.toContain('netSalesPaisa');
   });
 
   test('the dashboard still labels its figure as sales, unchanged', () => {

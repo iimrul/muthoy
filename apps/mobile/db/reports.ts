@@ -1,4 +1,5 @@
 import { asPaisa, type Paisa } from '@muthoy/types';
+import { netSalesPaisa } from '@muthoy/utils';
 import { requireOwner, requirePermission } from './auth';
 import { sqliteConnection } from './client';
 import { permissionForDataGate } from './dataAccessGates';
@@ -86,7 +87,12 @@ function signedRoundDivide(value: number, divisor: number): number {
   return result;
 }
 function totalsFromRaw(row: RawTotals, missingCogsMedicines: string[]): ReportTotals {
-  const netSales = difference(row.saleTotal, row.refundTotal);
+  // W4-04: the ONE shared definition, imported rather than re-derived. This was
+  // `difference(row.saleTotal, row.refundTotal)` — correct, but a second copy of
+  // the arithmetic the admin panel also needs, and two copies of one number are
+  // free to drift. Both sides are already windowed on business_date by the CTEs
+  // above, which is the half of W4-04 that actually matters.
+  const netSales = netSalesPaisa(asPaisa(row.saleTotal), asPaisa(row.refundTotal));
   const taxCollected = difference(row.saleTax, row.refundTax);
   const netRevenue = difference(netSales, taxCollected);
   const cogs = difference(row.saleCogs, row.refundCogs);

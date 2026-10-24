@@ -35,16 +35,32 @@ export interface PharmacyRow {
   commercialStatus: string;
 }
 
-/** The dashboard's two numbers, plus the day they were computed for. */
+/**
+ * The dashboard's figures, plus the day they were computed for.
+ *
+ * W4-04: the headline is now REFUND-NET. All three parts are carried rather
+ * than just the net one, because a founder looking at a smaller number than
+ * yesterday needs to see whether sales fell or refunds rose — and a single net
+ * figure with no composition is the kind of number people stop trusting and
+ * then stop reading.
+ */
 export interface PlatformStats {
   totalShops: number;
-  totalSalesToday: Paisa;
+  grossSalesToday: Paisa;
+  refundsToday: Paisa;
+  /** grossSalesToday − refundsToday, via the shared @muthoy/utils definition. */
+  netSalesToday: Paisa;
   day: DhakaDayRange;
 }
 
 /** A `sales` row narrowed to the only column the dashboard total needs. */
 export interface SaleTotalRow {
   total: number;
+}
+
+/** A `sale_refunds` row narrowed the same way. */
+export interface SaleRefundTotalRow {
+  total_amount: number;
 }
 
 const EMPTY_VALUE = '—';
@@ -74,6 +90,23 @@ export function dhakaDayRange(now: Date = new Date()): DhakaDayRange {
  */
 export function sumSaleTotals(rows: readonly SaleTotalRow[]): Paisa {
   return rows.reduce<Paisa>((runningTotal, row) => addPaisa(runningTotal, asPaisa(row.total)), ZERO_PAISA);
+}
+
+/**
+ * Sums `sale_refunds.total_amount` in integer paisa, the same way and with the
+ * same guard.
+ *
+ * A SEPARATE function rather than a generic summer over a column name: the two
+ * tables use different column names (`total` vs `total_amount`), and a helper
+ * that took the column as a string would let a caller sum the wrong one without
+ * the type system noticing. The duplication here is four tokens; the bug it
+ * prevents is a revenue figure that is silently gross.
+ */
+export function sumRefundTotals(rows: readonly SaleRefundTotalRow[]): Paisa {
+  return rows.reduce<Paisa>(
+    (runningTotal, row) => addPaisa(runningTotal, asPaisa(row.total_amount)),
+    ZERO_PAISA,
+  );
 }
 
 const REGISTRATION_DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {

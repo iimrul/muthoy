@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-// @ts-expect-error -- plain .mjs tooling, the same import style
+// Plain .mjs tooling, the same import style
 // migration-rollback-classification.test.ts uses for classify-migrations.mjs.
 import {
   E4_EVIDENCE_FILES,
@@ -75,23 +75,19 @@ describe('E4 evidence manifest', () => {
     // depend on the clone's core.autocrlf is a manifest that stops reproducing
     // on somebody else's machine, and .gitattributes can only pin the files it
     // lists — these include test files that are not pinned.
-    const built = buildManifest() as { files: Record<string, string> };
+    const built = buildManifest() as unknown as { files: Record<string, string> };
     const path = 'backend/supabase/pgtest/checkFile.ts';
     const raw = readFileSync(resolve(path), 'utf8');
     expect(built.files[path]).toBe(hashFile(path));
-    // Injecting CRLF into the same text must not change the recorded value.
-    expect(hashFile(path)).toBe(
-      (buildManifest() as { files: Record<string, string> }).files[path],
-    );
     expect(raw.replace(/\r\n/g, '\n').length).toBeLessThanOrEqual(raw.length);
   });
 
   it('detects a changed artifact, so it cannot pass vacuously', () => {
     // Mutation check: a manifest that would accept any tree is not evidence.
     // Flipping one recorded hash must be reported, and must name that file.
-    const built = buildManifest() as { files: Record<string, string> };
+    const built = buildManifest() as unknown as { files: Record<string, string> };
     const target = 'backend/supabase/checks/e4_postmigration_checks.sql';
-    const tampered = { ...built.files, [target]: 'f'.repeat(64) };
+    const tampered: Record<string, string> = { ...built.files, [target]: 'f'.repeat(64) };
 
     const drift = Object.entries(built.files)
       .filter(([path, hash]) => tampered[path] !== hash)
