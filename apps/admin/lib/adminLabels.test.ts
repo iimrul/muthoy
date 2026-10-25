@@ -63,10 +63,44 @@ describe('the GROSS boundary', () => {
   // `MRR`, `ARR` and `profit` stay banned outright, because nothing in the
   // panel computes them yet. `net` is the one W4-04 earns — and it is not
   // simply unbanned, it is TIED TO THE COMPUTATION.
+  // Batch 3 §5.2 replaces the blanket ban with a STRONGER rule, and
+  // lib/adminMetrics.ts is where that rule lives: every money figure reaches a
+  // page through a typed `Metric`, and adminMetrics.test.ts asserts per FAMILY
+  // that no pharmacy-sales label says revenue/MRR/ARR/profit and no
+  // subscription label says sales/net. The manifest therefore has to be able to
+  // name the words it governs.
+  //
+  // So the manifest is exempt from the word scan — and the exemption is itself
+  // asserted below, because an exemption backed by nothing is just a hole.
+  const MANIFEST = 'lib/adminMetrics.ts';
+
+  function scannable(): typeof SOURCES {
+    return SOURCES.filter((file) => file.path !== MANIFEST);
+  }
+
   test.each(['MRR', 'ARR', 'profit'])('no page describes a figure as %s', (word) => {
-    const offenders = SOURCES.filter((file) => mentionsWord(file.code, word));
+    const offenders = scannable().filter((file) => mentionsWord(file.code, word));
 
     expect(offenders.map((file) => file.path)).toEqual([]);
+  });
+
+  test('the exemption covers EXACTLY the manifest, and the manifest exists', () => {
+    expect(SOURCES.map((file) => file.path)).toContain(MANIFEST);
+    expect(SOURCES.length - scannable().length).toBe(1);
+  });
+
+  test('the exemption is backed by the per-family assertions, not by nothing', () => {
+    // If adminMetrics.test.ts ever stopped making these assertions, the words
+    // would be unguarded in the one file allowed to say them.
+    const manifestTest = readFileSync(
+      join(ADMIN_ROOT, 'lib', 'adminMetrics.test.ts'),
+      'utf8',
+    );
+
+    expect(manifestTest).toContain("family === 'pharmacy_sales'");
+    expect(manifestTest).toContain("family === 'subscription'");
+    expect(manifestTest).toContain('revenue|mrr|arr|profit');
+    expect(manifestTest).toMatch(/ARR and profit appear in NO label/);
   });
 
   // Batch 3 §4.1 adds the PERMISSION `revenue.read`, which is an authorization
@@ -87,7 +121,7 @@ describe('the GROSS boundary', () => {
   }
 
   test('no page describes a figure as revenue', () => {
-    const offenders = SOURCES.filter(
+    const offenders = scannable().filter(
       (file) => mentionsWord(withoutIdentifiers(file.code), 'revenue'),
     );
 
@@ -130,7 +164,7 @@ describe('the GROSS boundary', () => {
   const NET_FIELD = 'netSalesToday';
 
   test('link 1: `net` appears only alongside the one net-typed field', () => {
-    const offenders = SOURCES
+    const offenders = scannable()
       .filter((file) => mentionsWord(withoutIdentifiers(file.code), 'net'))
       .filter((file) => !file.code.includes(NET_FIELD));
 
