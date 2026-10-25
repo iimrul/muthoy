@@ -110,6 +110,8 @@ describe('the shared schemas are reached, not merely present', () => {
   const WRITE_MODULES: readonly string[] = [
     'lib/adminActions.ts',
     'lib/adminIdentityActions.ts',
+    'lib/adminSettingsActions.ts',
+    'lib/adminSupportActions.ts',
   ];
 
   test.each(WRITE_MODULES)('%s parses a shared schema', (path) => {
@@ -129,8 +131,22 @@ describe('the shared schemas are reached, not merely present', () => {
         .map((schema) => code.indexOf(schema + '.safeParse'))
         .filter((index) => index >= 0),
     );
-    // Every way this module can reach the database.
-    const clientCalls = ['.rpc(', '.from(', 'writeRoleAssignment(', 'getSupabaseAdmin()']
+    // Every way this module can reach the database — directly, or through the
+    // store module that owns the table. The list must grow with each new store
+    // function, or a module whose only reach is an unlisted one would score
+    // ZERO client calls and pass this test vacuously.
+    const clientCalls = [
+      '.rpc(',
+      '.from(',
+      'getSupabaseAdmin()',
+      'writeRoleAssignment(',
+      'writeSetting(',
+      'readSettings(',
+      'insertSupportCase(',
+      'updateSupportCase(',
+      'insertSupportNote(',
+      'readSupportCase(',
+    ]
       .map((needle) => code.indexOf(needle))
       .filter((index) => index >= 0);
 
@@ -257,15 +273,15 @@ describe('the identity payloads', () => {
 });
 
 describe('the support payloads', () => {
-  test('a platform-wide case needs no shop', () => {
-    const parsed = adminSupportCaseCreateSchema.safeParse({
-      category: 'billing',
+  test('a case with no shop is REFUSED — shop_id is not null in the table', () => {
+    // Revision 5 §3.4 declares `shop_id uuid not null`. A schema that accepted
+    // a shopless case would pass here and fail at the insert, which is the one
+    // failure a shared schema exists to make impossible.
+    expect(adminSupportCaseCreateSchema.safeParse({
+      category: 'payment',
       priority: 'normal',
       summary: 'Payment stuck',
-    });
-
-    expect(parsed.success).toBe(true);
-    expect(parsed.success && parsed.data.shopId).toBeNull();
+    }).success).toBe(false);
   });
 
   test('a shop-scoped case needs a real id, not a label', () => {
@@ -285,19 +301,33 @@ describe('the support payloads', () => {
   });
 
   test.each([
-    ['an unknown category', { category: 'refunds', priority: 'normal', summary: 'x' }],
-    ['an unknown priority', { category: 'billing', priority: 'critical', summary: 'x' }],
-    ['an empty summary', { category: 'billing', priority: 'normal', summary: '' }],
-    ['a whitespace summary', { category: 'billing', priority: 'normal', summary: '   ' }],
-    ['an over-long summary', { category: 'billing', priority: 'normal', summary: 'x'.repeat(501) }],
+    ['an unknown category', { shopId: UUID, category: 'refunds', priority: 'normal', summary: 'x' }],
+    // 'billing' and 'inventory' read like categories and are NOT in the CHECK;
+    // the migration's list is onboarding/sync/payment/data/device/account/other.
+    ['a plausible but unlisted category', { shopId: UUID, category: 'billing', priority: 'normal', summary: 'x' }],
+    ['an unknown priority', { shopId: UUID, category: 'payment', priority: 'critical', summary: 'x' }],
+    ['an empty summary', { shopId: UUID, category: 'payment', priority: 'normal', summary: '' }],
+    ['a whitespace summary', { shopId: UUID, category: 'payment', priority: 'normal', summary: '   ' }],
+    ['an over-long summary', { shopId: UUID, category: 'payment', priority: 'normal', summary: 'x'.repeat(2_001) }],
   ])('refuses %s', (_label, payload) => {
     expect(adminSupportCaseCreateSchema.safeParse(payload).success).toBe(false);
+  });
+
+  test('a summary at the CHECK bound is accepted, not refused one short of it', () => {
+    // The app cap and the column's cap are the same number on purpose: a
+    // tighter app cap would refuse an edit to a row the table already holds.
+    expect(adminSupportCaseCreateSchema.safeParse({
+      shopId: UUID,
+      category: 'data',
+      priority: 'low',
+      summary: 'x'.repeat(2_000),
+    }).success).toBe(true);
   });
 
   test('an unassigned case is a real state; an empty assignee becomes null', () => {
     const parsed = adminSupportCaseUpdateSchema.safeParse({
       caseId: UUID,
-      status: 'investigating',
+      status: 'pending',
       priority: 'high',
       assignee: '',
       summary: 'Still looking',
@@ -320,7 +350,9 @@ describe('the support payloads', () => {
     expect(adminSupportNoteCreateSchema.safeParse({ caseId: UUID, body: 'Called the owner.' }).success)
       .toBe(true);
     expect(adminSupportNoteCreateSchema.safeParse({ caseId: UUID, body: '  ' }).success).toBe(false);
-    expect(adminSupportNoteCreateSchema.safeParse({ caseId: UUID, body: 'x'.repeat(4_001) }).success)
+    expect(adminSupportNoteCreateSchema.safeParse({ caseId: UUID, body: 'x'.repeat(8_000) }).success)
+      .toBe(true);
+    expect(adminSupportNoteCreateSchema.safeParse({ caseId: UUID, body: 'x'.repeat(8_001) }).success)
       .toBe(false);
   });
 });
@@ -350,11 +382,14 @@ describe('the settings payload', () => {
   });
 
   test.each([
-    ['an unlisted key', { key: 'feature.everything', value: true }],
-    ['the string "false"', { key: 'feature.maps', value: 'false' }],
-    ['the string "true"', { key: 'feature.maps', value: 'true' }],
-    ['the number 1', { key: 'feature.maps', value: 1 }],
-    ['a missing value', { key: 'feature.maps' }],
+    ['an unlisted key', { key: 'flag.everything_enabled', value: true }],
+    // The pre-revision-5 spelling. It must be refused, or the drift the
+    // migration's CHECK caught could come back unnoticed.
+    ['the old feature.* spelling', { key: 'feature.maps', value: true }],
+    ['the string "false"', { key: 'flag.maps_enabled', value: 'false' }],
+    ['the string "true"', { key: 'flag.maps_enabled', value: 'true' }],
+    ['the number 1', { key: 'flag.maps_enabled', value: 1 }],
+    ['a missing value', { key: 'flag.maps_enabled' }],
     ['a prototype key', { key: '__proto__', value: true }],
   ])('refuses %s', (_label, payload) => {
     expect(adminSettingUpdateSchema.safeParse(payload).success).toBe(false);

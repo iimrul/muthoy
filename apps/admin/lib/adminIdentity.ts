@@ -134,3 +134,24 @@ export function loadAdminIdentity(env: IdentityEnvironment): AdminIdentity {
   }
   return { accounts, roles };
 }
+
+/**
+ * Batch 3 §8.11 — presence for the Settings diagnostics panel.
+ *
+ * Here for the same containment reason as lib/env.ts's and
+ * lib/adminSession.ts's: serviceRoleExposure.test.ts asserts exactly one
+ * module's source contains `ADMIN_ACCOUNTS`, and that module is this one. The
+ * panel asks; it does not look.
+ *
+ * A name and a boolean — this function never touches a salt or a hash.
+ */
+export const ACCOUNTS_ENV_NAMES = ['ADMIN_ACCOUNTS', 'ADMIN_ROLES'] as const;
+
+export function accountsEnvDiagnostics(
+  env: Record<string, string | undefined>,
+): readonly { name: string; isSet: boolean }[] {
+  return ACCOUNTS_ENV_NAMES.map((name) => ({
+    name,
+    isSet: (env[name] ?? '').trim().length > 0,
+  }));
+}

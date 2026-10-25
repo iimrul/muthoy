@@ -114,7 +114,18 @@ describe('the GROSS boundary', () => {
   // exact name rather than exempted by a shape rule such as "any snake_case
   // token", because an exemption wide enough to cover `revenue_total` would
   // stop checking the thing this guard exists for.
-  const IDENTIFIERS = /revenue\.(read|export)|subscription_revenue_and_renewals|refund_net_pharmacy_sales/g;
+  // Batch 3 §8.10 adds the two §5.2 METRIC IDS that carry the word `net`.
+  // A metric id is the same kind of thing as a report id — a lookup key passed
+  // to requireMetric(), never prose a reader sees — and the LABEL it resolves
+  // to lives in the exempt manifest, where adminMetrics.test.ts already asserts
+  // per family that it says the right thing. Listed by exact name for the same
+  // reason the report ids are: an exemption wide enough to cover
+  // `net_profit_total` would stop checking the thing this guard is for.
+  // The longer id comes FIRST: alternation is ordered, so `pharmacy_sales_net`
+  // would otherwise match the prefix of `pharmacy_sales_net_today` and leave
+  // `_today` behind.
+  const IDENTIFIERS =
+    /revenue\.(read|export)|subscription_revenue_and_renewals|refund_net_pharmacy_sales|pharmacy_sales_net_today|pharmacy_sales_net/g;
 
   function withoutIdentifiers(code: string): string {
     return code.replace(IDENTIFIERS, 'IDENTIFIER');
@@ -146,6 +157,26 @@ describe('the GROSS boundary', () => {
       "reportId: 'subscription_revenue_and_renewals'",
     ]) {
       expect(mentionsWord(withoutIdentifiers(exempt), 'revenue')).toBe(false);
+    }
+  });
+
+  test('negative control: the metric-id exemption does not blind the `net` guard', () => {
+    // A figure labelled net in any other shape is still caught, so widening
+    // the list for two metric ids did not quietly stop the check.
+    for (const planted of [
+      'const label = "Net revenue";',
+      "heading: 'Net profit',",
+      'net_total',
+      'monthly_net',
+    ]) {
+      expect(mentionsWord(withoutIdentifiers(planted), 'net')).toBe(true);
+    }
+    // And the two metric ids are the only new things that pass.
+    for (const exempt of [
+      "requireMetric('pharmacy_sales_net')",
+      "requireMetric('pharmacy_sales_net_today')",
+    ]) {
+      expect(mentionsWord(withoutIdentifiers(exempt), 'net')).toBe(false);
     }
   });
 

@@ -92,6 +92,12 @@ export const ALLOWED_META_KEYS: readonly string[] = [
   'reportId',
   'rowCount',
   'settingKey',
+  // The boolean a flag was set TO. A settings-change entry that records which
+  // key changed but not what it became says that a change happened and not what
+  // it was, which is half a record. It is a boolean, so it takes the generic
+  // scalar path and needs no value rule — and all three writable keys are
+  // flags, so there is no non-boolean settings value to record.
+  'settingValue',
   'shopId',
   'source',
   'subscriptionId',
@@ -117,12 +123,12 @@ const USERNAME_SHAPE = /^\S{1,64}$/;
  * adminReports.test.ts assert the three copies are identical.
  */
 export const AUDITABLE_SETTING_KEYS: readonly string[] = [
-  'feature.analytics',
-  'feature.maps',
-  'feature.reports_pdf',
+  'flag.analytics_enabled',
+  'flag.maps_enabled',
+  'flag.reports_pdf_enabled',
   'notification.template.trial_ending',
   'notification.template.payment_failed',
-  'notification.template.subscription_renewed',
+  'notification.template.subscription_expired',
 ];
 
 export const AUDITABLE_REPORT_IDS: readonly string[] = [

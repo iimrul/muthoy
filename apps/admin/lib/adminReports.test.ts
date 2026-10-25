@@ -1,0 +1,586 @@
+// Batch 3 §8.10 — the six reports, the k floor at its boundary, the
+// completeness gate, and what a report row may never carry.
+//
+// THE COMPLETENESS GATE IS TESTED WITH A FIXTURE LARGER THAN ONE PAGE, as the
+// plan requires: 1500 counted rows, read as 1500, pass; read as 1000 — one page
+// short — fail. A gate tested only on equal numbers would pass against code
+// that never compared them.
+//
+// THE K BOUNDARY IS TESTED AT k−1 AND k, for a count bucket and for a money
+// bucket. A floor that suppresses at 4 and shows at 5 is correct; one that
+// shows at 4 discloses a pharmacy; one that suppresses at 5 withholds data
+// nobody asked it to. Only the exact pair distinguishes the three.
+//
+// AND THE NEGATIVE: no report row carries a sale, a customer or a medicine.
+// That is asserted against the DEFINITIONS and against built output, because
+// the claim is about what the module can produce, not about one fixture.
+
+import { describe, expect, test } from 'vitest';
+import { asPaisa } from '@muthoy/types';
+import { ADMIN_REPORT_IDS, adminReportExportQuerySchema } from '@muthoy/validation';
+import { requireMetric } from './adminMetrics';
+import { SUPPRESSION_K } from './adminSuppression';
+import type { PaymentOrderRow, SubscriptionRow } from './adminViews';
+import {
+  ADMIN_REPORT_DEFINITIONS,
+  MAX_EXPORT_SOURCE_ROWS,
+  ReportCompletenessError,
+  assertCompleteRead,
+  buildReport,
+  buildReportTable,
+  exportTaka,
+  reportDefinition,
+  reportDownload,
+  reportFilename,
+  reportMetric,
+  reportToCsv,
+  reportToPdf,
+  requireReportDefinition,
+  type ReportData,
+  type ReportSaleTotalRow,
+  type ReportShopRow,
+  type SourceTally,
+} from './adminReports';
+
+function query(raw: Record<string, string>) {
+  const parsed = adminReportExportQuerySchema.safeParse(raw);
+  if (!parsed.success) throw new Error('fixture does not parse: ' + parsed.error.message);
+  return parsed.data;
+}
+
+const COMPLETE: readonly SourceTally[] = [{ label: 'shops', counted: 3, loaded: 3 }];
+
+function shop(index: number, overrides: Partial<ReportShopRow> = {}): ReportShopRow {
+  return {
+    id: 'shop-' + index,
+    name: 'Pharmacy ' + index,
+    district: 'Dhaka',
+    plan: 'free',
+    commercialStatus: 'active',
+    createdAt: '2026-10-0' + ((index % 9) + 1) + 'T06:00:00.000Z',
+    updatedAt: '2026-10-10T06:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function subscription(index: number, overrides: Partial<SubscriptionRow> = {}): SubscriptionRow {
+  return {
+    id: 'sub-' + index,
+    billingAccountId: 'account-' + index,
+    tier: 'pro',
+    billingCycle: 'monthly',
+    status: 'active',
+    startsAt: '2026-09-01T00:00:00.000Z',
+    paidThrough: '2026-11-01T00:00:00.000Z',
+    graceEndsAt: null,
+    canceledAt: null,
+    provider: 'sslcommerz',
+    createdAt: '2026-09-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function order(index: number, overrides: Partial<PaymentOrderRow> = {}): PaymentOrderRow {
+  return {
+    id: 'order-' + index,
+    billingAccountId: 'account-' + index,
+    tier: 'pro',
+    billingCycle: 'monthly',
+    amountPaisa: asPaisa(50_000),
+    status: 'verified',
+    provider: 'sslcommerz',
+    failureCode: null,
+    expiresAt: '2026-10-02T00:00:00.000Z',
+    verifiedAt: '2026-10-01T06:00:00.000Z',
+    createdAt: '2026-10-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function saleTotal(
+  shopIndex: number,
+  overrides: Partial<ReportSaleTotalRow> = {},
+): ReportSaleTotalRow {
+  return {
+    shopId: 'shop-' + shopIndex,
+    businessDate: '2026-10-01',
+    totalPaisa: asPaisa(150_000),
+    ...overrides,
+  };
+}
+
+function data(overrides: Partial<ReportData> = {}): ReportData {
+  return {
+    shops: [],
+    subscriptions: [],
+    orders: [],
+    sales: [],
+    refunds: [],
+    tallies: COMPLETE,
+    ...overrides,
+  };
+}
+
+describe('the six reports are exactly the six ids', () => {
+  test('every schema id has a definition, and every definition is a schema id', () => {
+    expect(ADMIN_REPORT_DEFINITIONS.map((entry) => entry.id).sort()).toEqual(
+      [...ADMIN_REPORT_IDS].sort(),
+    );
+  });
+
+  test('an unknown report id THROWS rather than rendering an empty table', () => {
+    expect(reportDefinition('all_the_money')).toBeUndefined();
+    expect(() => requireReportDefinition('all_the_money')).toThrow();
+  });
+
+  test('every definition can be built, so no id is a dead entry', () => {
+    for (const entry of ADMIN_REPORT_DEFINITIONS) {
+      const table = buildReportTable(
+        entry.id,
+        data(),
+        query({ reportId: entry.id, format: 'csv' }),
+      );
+
+      expect(table.reportId).toBe(entry.id);
+      expect(table.columns).toEqual(entry.columns);
+    }
+  });
+
+  test('a money column’s heading comes from the §5.2 manifest', () => {
+    const sales = requireReportDefinition('refund_net_pharmacy_sales');
+
+    expect(reportMetric(sales)?.id).toBe('pharmacy_sales_net');
+    // The heading IS the manifest's label, not a string typed beside it.
+    expect(sales.columns[1]).toContain(requireMetric('pharmacy_sales_net').label);
+  });
+
+  test('a report with no money has no metric, rather than a wrong one', () => {
+    expect(reportMetric(requireReportDefinition('pharmacy_registrations'))).toBeNull();
+    expect(reportMetric(requireReportDefinition('plan_distribution'))).toBeNull();
+  });
+
+  test('the two money reports carry the two different families', () => {
+    // Keeping the families apart is the whole of §5: one is Muthoy's money and
+    // the other is a pharmacy's.
+    expect(
+      reportMetric(requireReportDefinition('subscription_revenue_and_renewals'))?.family,
+    ).toBe('subscription');
+    expect(reportMetric(requireReportDefinition('refund_net_pharmacy_sales'))?.family).toBe(
+      'pharmacy_sales',
+    );
+  });
+});
+
+describe('the completeness gate', () => {
+  test('equal counted and loaded passes', () => {
+    expect(() =>
+      assertCompleteRead([{ label: 'shops', counted: 1500, loaded: 1500 }]),
+    ).not.toThrow();
+  });
+
+  test('a fixture LARGER THAN ONE PAGE that read short is refused', () => {
+    // 1500 counted, 1000 loaded: exactly one 1000-row page short, which is the
+    // failure a single-page fixture could never produce.
+    expect(() => assertCompleteRead([{ label: 'shops', counted: 1500, loaded: 1000 }])).toThrow(
+      ReportCompletenessError,
+    );
+  });
+
+  test('the refusal names both numbers, so the operator knows what was lost', () => {
+    try {
+      assertCompleteRead([{ label: 'sales', counted: 1500, loaded: 1000 }]);
+      expect.unreachable('the gate did not throw');
+    } catch (error: unknown) {
+      expect((error as Error).message).toContain('1000 of 1500');
+      expect((error as Error).message).toContain('has not been produced');
+    }
+  });
+
+  test('loading MORE than counted is also refused — it is not "good enough"', () => {
+    // A duplicated page is a doubled total, wrong in the direction an operator
+    // would never suspect.
+    expect(() => assertCompleteRead([{ label: 'shops', counted: 1000, loaded: 2000 }])).toThrow(
+      ReportCompletenessError,
+    );
+  });
+
+  test('a count above the explicit cap is refused with the cap named', () => {
+    expect(() =>
+      assertCompleteRead([
+        {
+          label: 'sales',
+          counted: MAX_EXPORT_SOURCE_ROWS + 1,
+          loaded: MAX_EXPORT_SOURCE_ROWS + 1,
+        },
+      ]),
+    ).toThrow(/cap of/);
+  });
+
+  test('NO tally at all is refused — a gate that can be skipped is not a gate', () => {
+    expect(() => assertCompleteRead([])).toThrow(ReportCompletenessError);
+  });
+
+  test('every tally is checked, not just the first', () => {
+    expect(() =>
+      assertCompleteRead([
+        { label: 'shops', counted: 10, loaded: 10 },
+        { label: 'sales', counted: 1500, loaded: 1000 },
+      ]),
+    ).toThrow(/sales/);
+  });
+
+  test('the gate runs BEFORE the table is built, so no partial rows exist', () => {
+    expect(() =>
+      buildReportTable(
+        'pharmacy_registrations',
+        data({ shops: [shop(1)], tallies: [{ label: 'shops', counted: 1500, loaded: 1000 }] }),
+        query({ reportId: 'pharmacy_registrations', format: 'csv' }),
+      ),
+    ).toThrow(ReportCompletenessError);
+  });
+});
+
+describe('k-anonymity at the boundary', () => {
+  /** `count` shops, all on the same plan, so they land in one bucket. */
+  function shopsOnOnePlan(count: number): ReportShopRow[] {
+    return Array.from({ length: count }, (_unused, index) => shop(index + 1, { plan: 'pro' }));
+  }
+
+  test(`k-1 (${SUPPRESSION_K - 1}) contributors: the bucket exists and its value is EMPTY`, () => {
+    const table = buildReportTable(
+      'plan_distribution',
+      data({ shops: shopsOnOnePlan(SUPPRESSION_K - 1) }),
+      query({ reportId: 'plan_distribution', format: 'csv' }),
+    );
+
+    expect(table.rows).toHaveLength(1);
+    // The key stays — the bucket's existence is not the disclosure.
+    expect(table.rows[0]?.[0]).toBe('pro');
+    // The value is empty, not zero: zero would be a lie about the data.
+    expect(table.rows[0]?.[1]).toBe('');
+    expect(table.suppressedBuckets).toBe(1);
+  });
+
+  test(`k (${SUPPRESSION_K}) contributors: the value is visible`, () => {
+    const table = buildReportTable(
+      'plan_distribution',
+      data({ shops: shopsOnOnePlan(SUPPRESSION_K) }),
+      query({ reportId: 'plan_distribution', format: 'csv' }),
+    );
+
+    expect(table.rows[0]?.[1]).toBe(String(SUPPRESSION_K));
+    expect(table.suppressedBuckets).toBe(0);
+  });
+
+  test('a MONEY bucket below k is emptied too', () => {
+    const sales = Array.from({ length: SUPPRESSION_K - 1 }, (_unused, index) =>
+      saleTotal(index + 1),
+    );
+
+    const table = buildReportTable(
+      'refund_net_pharmacy_sales',
+      data({ sales, tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }] }),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
+    );
+
+    expect(table.rows[0]?.[0]).toBe('2026-10');
+    expect(table.rows[0]?.[1]).toBe('');
+  });
+
+  test('a money bucket at k shows the refund-subtracted total', () => {
+    const sales = Array.from({ length: SUPPRESSION_K }, (_unused, index) => saleTotal(index + 1));
+    const refunds = [saleTotal(1, { totalPaisa: asPaisa(50_000) })];
+
+    const table = buildReportTable(
+      'refund_net_pharmacy_sales',
+      data({
+        sales,
+        refunds,
+        tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }],
+      }),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
+    );
+
+    // 5 x 1500.00 - 500.00 = 7000.00, through the shared subtraction.
+    expect(table.rows[0]?.[1]).toBe('7000.00');
+  });
+
+  test('MANY ROWS from ONE shop is still one contributor', () => {
+    // A hundred sales from one pharmacy is that pharmacy's figure wearing an
+    // aggregate's label. The floor is on distinct shops, not on row count.
+    const sales = Array.from({ length: 100 }, () => saleTotal(1));
+
+    const table = buildReportTable(
+      'refund_net_pharmacy_sales',
+      data({ sales, tallies: [{ label: 'sales', counted: 100, loaded: 100 }] }),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
+    );
+
+    expect(table.rows[0]?.[1]).toBe('');
+    expect(table.suppressedBuckets).toBe(1);
+  });
+
+  test('the caption says how many buckets were withheld', () => {
+    const table = buildReportTable(
+      'plan_distribution',
+      data({ shops: shopsOnOnePlan(SUPPRESSION_K - 1) }),
+      query({ reportId: 'plan_distribution', format: 'csv' }),
+    );
+
+    expect(table.subtitle).toContain('1 withheld');
+    expect(table.subtitle).toContain('fewer than ' + SUPPRESSION_K);
+  });
+
+  test('registration metadata is NOT suppressed — §8.10 permits it', () => {
+    // Suppressing a shop's own registration date would make the report empty
+    // rather than private, and §8.10 names registration metadata explicitly.
+    const table = buildReportTable(
+      'pharmacy_registrations',
+      data({ shops: [shop(1)] }),
+      query({ reportId: 'pharmacy_registrations', format: 'csv' }),
+    );
+
+    expect(table.rows).toHaveLength(1);
+    expect(table.rows[0]?.[1]).toBe('Pharmacy 1');
+    expect(table.suppressedBuckets).toBe(0);
+  });
+
+  test('an activity day is suppressed on the shops behind EITHER figure', () => {
+    // A day visible because five shops registered must not disclose that one of
+    // them made the day's only sale.
+    const shops = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      shop(index + 1, { createdAt: '2026-10-01T06:00:00.000Z' }),
+    );
+
+    const table = buildReportTable(
+      'activity_summary',
+      data({
+        shops,
+        sales: [saleTotal(1)],
+        tallies: [{ label: 'shops', counted: shops.length, loaded: shops.length }],
+      }),
+      query({ reportId: 'activity_summary', format: 'csv' }),
+    );
+
+    // Five registrations, one of those five also selling: five distinct
+    // contributors, so the bucket is visible — and the sales count it shows is
+    // the real 1, which is only safe BECAUSE five shops stand behind the row.
+    expect(table.rows[0]).toEqual(['2026-10-01', '1', String(SUPPRESSION_K)]);
+  });
+});
+
+describe('the filters', () => {
+  test('the date range excludes a registration outside it', () => {
+    const table = buildReportTable(
+      'pharmacy_registrations',
+      data({ shops: [shop(1, { createdAt: '2026-09-01T06:00:00.000Z' }), shop(2)] }),
+      query({
+        reportId: 'pharmacy_registrations',
+        format: 'csv',
+        from: '2026-10-01',
+        to: '2026-10-31',
+      }),
+    );
+
+    expect(table.rows.map((row) => row[1])).toEqual(['Pharmacy 2']);
+  });
+
+  test('a Dhaka-day range INCLUDES a registration late in its last day', () => {
+    // A `lte(created_at, '2026-10-02')` bound would drop this row.
+    const table = buildReportTable(
+      'pharmacy_registrations',
+      data({ shops: [shop(1, { createdAt: '2026-10-02T17:30:00.000Z' })] }),
+      query({
+        reportId: 'pharmacy_registrations',
+        format: 'csv',
+        from: '2026-10-01',
+        to: '2026-10-02',
+      }),
+    );
+
+    expect(table.rows).toHaveLength(1);
+  });
+
+  test('the status filter narrows the registrations', () => {
+    const table = buildReportTable(
+      'pharmacy_registrations',
+      data({ shops: [shop(1), shop(2, { commercialStatus: 'suspended' })] }),
+      query({ reportId: 'pharmacy_registrations', format: 'csv', status: 'suspended' }),
+    );
+
+    expect(table.rows.map((row) => row[1])).toEqual(['Pharmacy 2']);
+    expect(table.subtitle).toContain('status suspended');
+  });
+
+  test('the subscriptions report groups by tier, cycle and status', () => {
+    const subscriptions = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      subscription(index + 1),
+    );
+
+    const table = buildReportTable(
+      'subscriptions',
+      data({
+        subscriptions,
+        tallies: [
+          { label: 'subscriptions', counted: subscriptions.length, loaded: subscriptions.length },
+        ],
+      }),
+      query({ reportId: 'subscriptions', format: 'csv' }),
+    );
+
+    expect(table.rows).toEqual([['pro', 'monthly', 'active', String(SUPPRESSION_K)]]);
+  });
+
+  test('an UNVERIFIED payment order is not counted as collected', () => {
+    const orders = Array.from({ length: SUPPRESSION_K }, (_unused, index) => order(index + 1));
+    orders.push(order(99, { status: 'failed', verifiedAt: null }));
+
+    const table = buildReportTable(
+      'subscription_revenue_and_renewals',
+      data({
+        orders,
+        tallies: [{ label: 'orders', counted: orders.length, loaded: orders.length }],
+      }),
+      query({ reportId: 'subscription_revenue_and_renewals', format: 'csv' }),
+    );
+
+    // Five verified orders at 500.00 each; the failed one contributes nothing.
+    expect(table.rows[0]).toEqual(['2026-10', '2500.00', String(SUPPRESSION_K)]);
+  });
+});
+
+describe('no report row carries a sale, a customer or a medicine', () => {
+  const FORBIDDEN = ['sale_id', 'saleid', 'line', 'customer', 'medicine', 'batch', 'invoice'];
+
+  test('no column heading names one', () => {
+    for (const entry of ADMIN_REPORT_DEFINITIONS) {
+      for (const heading of entry.columns) {
+        for (const word of FORBIDDEN) {
+          expect(heading.toLowerCase(), entry.id + ' heading').not.toContain(word);
+        }
+      }
+    }
+  });
+
+  test('the sales input carries only a shop, a day and a total', () => {
+    // The TYPE is the guarantee: there is no field a sale line could occupy.
+    expect(Object.keys(saleTotal(1)).sort()).toEqual(['businessDate', 'shopId', 'totalPaisa']);
+  });
+
+  test('a built money report emits no identifier at all, only a month and a figure', () => {
+    const sales = Array.from({ length: SUPPRESSION_K }, (_unused, index) => saleTotal(index + 1));
+
+    const table = buildReportTable(
+      'refund_net_pharmacy_sales',
+      data({ sales, tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }] }),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
+    );
+
+    // No shop id reaches the rows, even though five of them were counted.
+    expect(JSON.stringify(table.rows)).not.toContain('shop-');
+  });
+});
+
+describe('the exports', () => {
+  function registrationsTable() {
+    return buildReportTable(
+      'pharmacy_registrations',
+      data({ shops: [shop(1, { name: 'Banani Pharmacy' })] }),
+      query({ reportId: 'pharmacy_registrations', format: 'csv' }),
+    );
+  }
+
+  test('money is a PLAIN decimal, so a spreadsheet reads it as a number', () => {
+    // Not `৳1,500.00`: the grouping commas make the cell text, and the taka
+    // sign is outside Latin-1 so the PDF would print `?`.
+    expect(exportTaka(asPaisa(150_000))).toBe('1500.00');
+    expect(exportTaka(asPaisa(-50_000))).toBe('-500.00');
+    expect(exportTaka(asPaisa(1))).toBe('0.01');
+  });
+
+  test('the CSV carries the BOM, CRLF and the headings', () => {
+    const csv = reportToCsv(registrationsTable());
+
+    expect(csv.startsWith('﻿')).toBe(true);
+    expect(csv).toContain('\r\n');
+    expect(csv).toContain('Pharmacy');
+    expect(csv).toContain('Banani Pharmacy');
+  });
+
+  test('a formula-shaped pharmacy name is neutralised on the way out', () => {
+    const table = buildReportTable(
+      'pharmacy_registrations',
+      data({ shops: [shop(1, { name: "=cmd|' /c calc'!A1" })] }),
+      query({ reportId: 'pharmacy_registrations', format: 'csv' }),
+    );
+
+    // The apostrophe goes INSIDE the quotes, where a parser reads it as text.
+    expect(reportToCsv(table)).toContain("\"'=cmd");
+  });
+
+  test('the PDF is a parseable 1.4 stream with the title', () => {
+    const pdf = reportToPdf(registrationsTable());
+
+    expect(pdf.startsWith('%PDF-1.4')).toBe(true);
+    expect(pdf).toContain('%%EOF');
+    expect(pdf).toContain('Pharmacy registrations');
+  });
+
+  test('the filename carries the report and the range, and no path', () => {
+    expect(
+      reportFilename(
+        query({
+          reportId: 'plan_distribution',
+          format: 'csv',
+          from: '2026-10-01',
+          to: '2026-10-31',
+        }),
+      ),
+    ).toBe('plan_distribution_2026-10-01_2026-10-31.csv');
+  });
+
+  test('a PDF download states the Latin-1 limit; a CSV download does not', () => {
+    const table = registrationsTable();
+
+    const pdf = reportDownload(table, query({ reportId: 'pharmacy_registrations', format: 'pdf' }));
+    expect(pdf.contentType).toBe('application/pdf');
+    expect(pdf.notice).toContain('Latin');
+
+    const csv = reportDownload(table, query({ reportId: 'pharmacy_registrations', format: 'csv' }));
+    expect(csv.contentType).toContain('charset=utf-8');
+    expect(csv.notice).toBeNull();
+  });
+
+  test('the Content-Disposition filename cannot carry a quote or a path', () => {
+    const download = reportDownload(
+      registrationsTable(),
+      query({ reportId: 'pharmacy_registrations', format: 'csv' }),
+    );
+
+    expect(download.contentDisposition).toMatch(/^attachment; filename="[A-Za-z0-9._-]+"$/);
+  });
+});
+
+describe('buildReport reads through its injected source', () => {
+  test('the query reaches the source unchanged', async () => {
+    const seen: unknown[] = [];
+    const table = await buildReport(
+      query({ reportId: 'plan_distribution', format: 'csv', from: '2026-10-01' }),
+      async (received) => {
+        seen.push(received);
+        return data({ shops: [shop(1)] });
+      },
+    );
+
+    expect(seen).toEqual([{ reportId: 'plan_distribution', format: 'csv', from: '2026-10-01' }]);
+    expect(table.reportId).toBe('plan_distribution');
+  });
+
+  test('a source whose read was incomplete propagates the refusal', async () => {
+    await expect(
+      buildReport(query({ reportId: 'plan_distribution', format: 'csv' }), async () =>
+        data({ tallies: [{ label: 'shops', counted: 1500, loaded: 1000 }] }),
+      ),
+    ).rejects.toThrow(ReportCompletenessError);
+  });
+});

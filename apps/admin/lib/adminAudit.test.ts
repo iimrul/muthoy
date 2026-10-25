@@ -214,10 +214,14 @@ describe('redaction is by allowlist', () => {
       return entries[0]?.meta ?? {};
     }
 
-    test('the eight new keys are allowed when their value fits', () => {
+    test('the nine new keys are allowed when their value fits', () => {
+      // `settingKey` is the MIGRATION's spelling, not the `feature.*` one
+      // revision 5's schemas had drifted to: an unlisted key is dropped, so
+      // using the wrong spelling here would assert the opposite of the claim.
       expect(metaFor({
         caseId: '7b000000-0000-4000-8000-000000000001',
-        settingKey: 'feature.maps',
+        settingKey: 'flag.maps_enabled',
+        settingValue: true,
         targetUsername: 'ops',
         fromRole: 'billing',
         toRole: 'support',
@@ -227,7 +231,8 @@ describe('redaction is by allowlist', () => {
         actorVerified: true,
       })).toEqual({
         caseId: '7b000000-0000-4000-8000-000000000001',
-        settingKey: 'feature.maps',
+        settingKey: 'flag.maps_enabled',
+        settingValue: true,
         targetUsername: 'ops',
         fromRole: 'billing',
         toRole: 'support',
@@ -238,9 +243,18 @@ describe('redaction is by allowlist', () => {
       });
     });
 
+    test('settingValue records FALSE, which is the state that matters most', () => {
+      // A falsy-filtered meta writer would drop exactly the entry that says a
+      // feature was turned OFF.
+      expect(metaFor({ settingValue: false })).toEqual({ settingValue: false });
+    });
+
     test.each([
       ['a caseId that is not a UUID', { caseId: 'case-7' }],
-      ['a settingKey outside the six', { settingKey: 'feature.everything' }],
+      ['a settingKey outside the six', { settingKey: 'flag.everything_enabled' }],
+      // The pre-revision-5 spelling. Dropping it is what makes the drift
+      // correction hold at the audit boundary as well as the write boundary.
+      ['the old feature.* settingKey spelling', { settingKey: 'feature.maps' }],
       ['a reportId that is not allowlisted', { reportId: 'all_the_money' }],
       ['a role that is not one of the four', { fromRole: 'owner' }],
       ['a target role that is not one of the four', { toRole: 'admin' }],

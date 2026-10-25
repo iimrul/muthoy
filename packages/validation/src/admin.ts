@@ -82,20 +82,22 @@ export type AdminPaymentOrderIdAction = z.infer<typeof adminPaymentOrderIdAction
 // Support (§8.7)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const ADMIN_SUPPORT_STATUS_VALUES = [
-  'open',
-  'investigating',
-  'waiting',
-  'resolved',
-  'closed',
-] as const;
+// THESE THREE LISTS ARE THE MIGRATION'S CHECK CONSTRAINTS, TRANSCRIBED.
+// 20261023000000_e4_batch3_admin_platform.sql:176-193 fixes the value space,
+// plan §3.4 specifies it identically, and that migration is hash-recorded in
+// the E4 evidence manifest — so it is the source of truth and this file is the
+// transcription. A schema accepting a value the CHECK refuses is not a
+// safeguard; it is a form that passes validation and then fails at the
+// database, which is the one failure mode a shared schema exists to prevent.
+export const ADMIN_SUPPORT_STATUS_VALUES = ['open', 'pending', 'resolved', 'closed'] as const;
 export const ADMIN_SUPPORT_PRIORITY_VALUES = ['low', 'normal', 'high', 'urgent'] as const;
 export const ADMIN_SUPPORT_CATEGORY_VALUES = [
-  'billing',
+  'onboarding',
   'sync',
-  'inventory',
-  'account',
+  'payment',
+  'data',
   'device',
+  'account',
   'other',
 ] as const;
 
@@ -106,14 +108,21 @@ export const adminSupportCategorySchema = z.enum(ADMIN_SUPPORT_CATEGORY_VALUES);
 /**
  * Free text a support admin types. Bounded, because an unbounded text column
  * reachable from a form is a storage-exhaustion surface.
+ *
+ * The bounds are the CHECK constraints' bounds exactly — 2000 for a summary,
+ * 8000 for a note. A TIGHTER app-level cap would look harmless and is not: the
+ * panel renders a stored 2000-character summary into an edit form, so a 500-cap
+ * would refuse a payload that changed one word of a row the database already
+ * holds, and the operator would have no way to save it.
  */
-const supportSummary = z.string().trim().min(1, 'A summary is required').max(500);
-const supportBody = z.string().trim().min(1, 'A note cannot be empty').max(4_000);
+const supportSummary = z.string().trim().min(1, 'A summary is required').max(2_000);
+const supportBody = z.string().trim().min(1, 'A note cannot be empty').max(8_000);
 
 export const adminSupportCaseCreateSchema = z.object({
-  // A case may be about the platform rather than one shop, so the shop is
-  // optional — but when present it must be a real id, not a label.
-  shopId: adminUuid.nullish().transform((value) => value ?? null),
+  // REQUIRED, because `shop_id uuid not null` is. Every case is about a shop;
+  // a nullable field here would accept a platform-wide case the table refuses
+  // to store.
+  shopId: adminUuid,
   category: adminSupportCategorySchema,
   priority: adminSupportPrioritySchema,
   summary: supportSummary,
@@ -154,19 +163,21 @@ export type AdminSupportNoteCreate = z.infer<typeof adminSupportNoteCreateSchema
  * anywhere in the product, so a form that accepted one would be a save button
  * with nothing behind it.
  */
+// Again the migration's own CHECK, transcribed:
+// 20261023000000_e4_batch3_admin_platform.sql:246-254.
 export const ADMIN_SETTING_KEYS = [
-  'feature.analytics',
-  'feature.maps',
-  'feature.reports_pdf',
+  'flag.analytics_enabled',
+  'flag.maps_enabled',
+  'flag.reports_pdf_enabled',
   'notification.template.trial_ending',
   'notification.template.payment_failed',
-  'notification.template.subscription_renewed',
+  'notification.template.subscription_expired',
 ] as const;
 
 export const ADMIN_WRITABLE_SETTING_KEYS = [
-  'feature.analytics',
-  'feature.maps',
-  'feature.reports_pdf',
+  'flag.analytics_enabled',
+  'flag.maps_enabled',
+  'flag.reports_pdf_enabled',
 ] as const;
 
 export const adminSettingUpdateSchema = z.object({

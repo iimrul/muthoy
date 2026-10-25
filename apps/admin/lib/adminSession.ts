@@ -79,6 +79,27 @@ export function readSessionEpoch(env: SessionEnvironment): number {
   return Number(raw);
 }
 
+/**
+ * Batch 3 §8.11 — presence for the Settings diagnostics panel.
+ *
+ * It lives here for the reason lib/env.ts's equivalent does:
+ * serviceRoleExposure.test.ts asserts that exactly one module's source contains
+ * `ADMIN_SESSION_SECRET`, so a settings module naming it would be a second
+ * reader of the session secret. The owner reports its own presence instead.
+ *
+ * A name and a boolean. There is no field a value could occupy.
+ */
+export const SESSION_ENV_NAMES = ['ADMIN_SESSION_SECRET', 'ADMIN_SESSION_EPOCH'] as const;
+
+export function sessionEnvDiagnostics(
+  env: SessionEnvironment,
+): readonly { name: string; isSet: boolean }[] {
+  return SESSION_ENV_NAMES.map((name) => ({
+    name,
+    isSet: (env[name] ?? '').trim().length > 0,
+  }));
+}
+
 function base64urlEncode(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);

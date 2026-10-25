@@ -284,6 +284,25 @@ describe('admin write power is bounded at the source', () => {
     // §8.9's durable audit sink. INSERT ONLY — an audit row the panel can edit
     // or erase is not evidence, and the grant says so too.
     { module: 'lib/adminAuditStore.ts', table: 'admin_audit_log', operations: ['insert'] },
+    // §8.7's support tables. The case update is column-level on (status,
+    // priority, assignee, summary, updated_at), so `shop_id`, `opened_by` and
+    // `opened_at` cannot be rewritten.
+    {
+      module: 'lib/adminSupportStore.ts',
+      table: 'admin_support_cases',
+      operations: ['insert', 'update'],
+    },
+    // INSERT ONLY, and append-only by PRIVILEGE: the grant carries no update,
+    // no delete and no column-level update. A note is a record of what somebody
+    // said at a time.
+    { module: 'lib/adminSupportStore.ts', table: 'admin_support_notes', operations: ['insert'] },
+    // §8.11's three feature flags. `key` is excluded from the update grant, so
+    // a setting cannot be renamed into a different setting.
+    {
+      module: 'lib/adminSettings.ts',
+      table: 'admin_platform_settings',
+      operations: ['insert', 'update'],
+    },
   ];
 
   /** The one module whose single update carries the stale-order guards. */
