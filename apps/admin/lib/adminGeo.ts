@@ -28,8 +28,19 @@
 // request is made. That is asserted in the component's own test; this module is
 // what the component asks.
 
-/** The environment variable, named once. The page reads it; this module does not. */
+/** The environment variables, named once. The page reads them; this module does not. */
 export const MAP_TILE_URL_ENV = 'ADMIN_MAP_TILE_URL';
+
+/**
+ * The provider's attribution, and why it is part of the SAME gate.
+ *
+ * Virtually every tile provider requires attribution as a condition of use, so
+ * a configured URL with no attribution is a configuration that is not yet
+ * allowed to be used. Treating the two as one gate means the panel cannot be
+ * half-configured into breaching a provider's terms by someone who set the URL
+ * and did not know about the second variable.
+ */
+export const MAP_TILE_ATTRIBUTION_ENV = 'ADMIN_MAP_TILE_ATTRIBUTION';
 
 /** Shown on the page beside the empty state. Honest about which gate it is. */
 export const LOCATION_CONSENT_BLOCKED_REASON =
@@ -41,7 +52,8 @@ export const LOCATION_CONSENT_BLOCKED_REASON =
 export const MAP_TILE_UNSET_REASON =
   'No map tile provider is configured. A tile request would send the viewport '
   + 'around a pharmacy to a third party, so no provider is set by default and '
-  + 'no tile is requested (gate E14).';
+  + 'no tile is requested (gate E14). Both a tile URL and the provider’s '
+  + 'required attribution must be set before any tile is fetched.';
 
 /** The shop columns the map reads, and only these. No sale, no customer. */
 export interface ShopLocationRow {
@@ -204,7 +216,13 @@ export function plottableMarkers(
 }
 
 export type MapConfiguration =
-  | { status: 'ready'; tileUrl: string; markers: readonly MapMarker[]; withheldForConsent: number }
+  | {
+      status: 'ready';
+      tileUrl: string;
+      tileAttribution: string;
+      markers: readonly MapMarker[];
+      withheldForConsent: number;
+    }
   | { status: 'tile_provider_unset'; reason: string; withheldForConsent: number }
   | { status: 'no_consented_location'; reason: string; withheldForConsent: number };
 
@@ -219,14 +237,23 @@ export type MapConfiguration =
  */
 export function mapConfiguration(input: {
   tileUrl: string | undefined;
+  tileAttribution: string | undefined;
   rows: readonly ShopLocationRow[];
   consent: ConsentSource;
   nowMs: number;
 }): MapConfiguration {
   const { markers, withheldForConsent } = plottableMarkers(input.rows, input.consent, input.nowMs);
   const tileUrl = input.tileUrl?.trim();
+  const tileAttribution = input.tileAttribution?.trim();
 
-  if (tileUrl === undefined || tileUrl.length === 0) {
+  // BOTH halves, or neither. A URL with no attribution is a provider that has
+  // not been configured in a way its own terms permit, so it is not ready.
+  if (
+    tileUrl === undefined
+    || tileUrl.length === 0
+    || tileAttribution === undefined
+    || tileAttribution.length === 0
+  ) {
     return { status: 'tile_provider_unset', reason: MAP_TILE_UNSET_REASON, withheldForConsent };
   }
 
@@ -238,5 +265,5 @@ export function mapConfiguration(input: {
     };
   }
 
-  return { status: 'ready', tileUrl, markers, withheldForConsent };
+  return { status: 'ready', tileUrl, tileAttribution, markers, withheldForConsent };
 }

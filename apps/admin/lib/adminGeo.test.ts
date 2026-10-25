@@ -32,6 +32,7 @@ import {
 
 const NOW = Date.parse('2026-10-25T12:00:00+06:00');
 const TILE_URL = 'https://tiles.example.test/{z}/{x}/{y}.png';
+const ATTRIBUTION = '© Example Tiles';
 
 function shop(overrides: Partial<ShopLocationRow> = {}): ShopLocationRow {
   return {
@@ -186,6 +187,7 @@ describe('the tile configuration', () => {
     // so a non-ready status is the proof that no request can be made.
     const configuration = mapConfiguration({
       tileUrl: undefined,
+      tileAttribution: ATTRIBUTION,
       rows: [shop()],
       consent: grantingConsent(),
       nowMs: NOW,
@@ -198,8 +200,31 @@ describe('the tile configuration', () => {
   test('a blank or whitespace tile url is the same as unset', () => {
     for (const tileUrl of ['', '   ']) {
       expect(
-        mapConfiguration({ tileUrl, rows: [shop()], consent: grantingConsent(), nowMs: NOW })
+        mapConfiguration({
+          tileUrl,
+          tileAttribution: ATTRIBUTION,
+          rows: [shop()],
+          consent: grantingConsent(),
+          nowMs: NOW,
+        })
           .status,
+      ).toBe('tile_provider_unset');
+    }
+  });
+
+  test('a tile url with NO attribution is not ready — it is the same gate', () => {
+    // Virtually every provider requires attribution as a condition of use, so
+    // a URL set without one is a provider that is not yet allowed to be used.
+    // Half-configuring the panel must not breach a provider's terms.
+    for (const tileAttribution of [undefined, '', '   ']) {
+      expect(
+        mapConfiguration({
+          tileUrl: TILE_URL,
+          tileAttribution,
+          rows: [shop()],
+          consent: grantingConsent(),
+          nowMs: NOW,
+        }).status,
       ).toBe('tile_provider_unset');
     }
   });
@@ -209,6 +234,7 @@ describe('the tile configuration', () => {
     // operator after the wrong fix.
     const configuration = mapConfiguration({
       tileUrl: undefined,
+      tileAttribution: ATTRIBUTION,
       rows: [shop()],
       consent: noLocationConsent,
       nowMs: NOW,
@@ -225,6 +251,7 @@ describe('the tile configuration', () => {
   test('with a tile url but no consent, the status names consent and gate E13', () => {
     const configuration = mapConfiguration({
       tileUrl: TILE_URL,
+      tileAttribution: ATTRIBUTION,
       rows: [shop()],
       consent: noLocationConsent,
       nowMs: NOW,
@@ -242,6 +269,7 @@ describe('the tile configuration', () => {
   test('ready requires BOTH a tile url and a consented marker', () => {
     const configuration = mapConfiguration({
       tileUrl: TILE_URL,
+      tileAttribution: ATTRIBUTION,
       rows: [shop()],
       consent: grantingConsent(),
       nowMs: NOW,
