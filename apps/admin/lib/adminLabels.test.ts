@@ -78,8 +78,16 @@ describe('the GROSS boundary', () => {
     return SOURCES.filter((file) => file.path !== MANIFEST);
   }
 
+  // Scanned on the IDENTIFIER-STRIPPED text, the same as `revenue` below. A
+  // metric id such as requireMetric('mrr') is a lookup key, and the LABEL it
+  // resolves to is "Monthly recurring run rate" — the manifest deliberately
+  // does not use the acronym, and adminMetrics.test.ts asserts per family that
+  // it never will. A figure captioned MRR in any other shape is still caught;
+  // the negative control below proves it.
   test.each(['MRR', 'ARR', 'profit'])('no page describes a figure as %s', (word) => {
-    const offenders = scannable().filter((file) => mentionsWord(file.code, word));
+    const offenders = scannable().filter((file) =>
+      mentionsWord(withoutIdentifiers(file.code), word),
+    );
 
     expect(offenders.map((file) => file.path)).toEqual([]);
   });
@@ -124,19 +132,81 @@ describe('the GROSS boundary', () => {
   // The longer id comes FIRST: alternation is ordered, so `pharmacy_sales_net`
   // would otherwise match the prefix of `pharmacy_sales_net_today` and leave
   // `_today` behind.
-  const IDENTIFIERS =
-    /revenue\.(read|export)|subscription_revenue_and_renewals|refund_net_pharmacy_sales|pharmacy_sales_net_today|pharmacy_sales_net/g;
+  // Batch 3 §8.4 adds the PAGE ITSELF. Volume 5 names the page "Revenue &
+  // Billing", the permission is `revenue.read`, and the route is `/revenue` —
+  // a route, a nav entry and a page name are not captions on a figure. What
+  // stops a figure being captioned is structural and elsewhere: MetricTile
+  // takes a `Metric` and has no prop a caption could be passed in, so every
+  // money label on that page comes from §5.2's manifest, and
+  // adminMetrics.test.ts asserts per family that the manifest never
+  // mislabels. The two negative controls below prove this list has not
+  // blinded the scan.
+  const IDENTIFIERS = new RegExp(
+    [
+      // permissions
+      'revenue\\.(read|export)',
+      // report ids
+      'subscription_revenue_and_renewals',
+      'refund_net_pharmacy_sales',
+      // metric ids — longest first, since alternation is ordered
+      'pharmacy_sales_net_today',
+      'pharmacy_sales_net',
+      "'mrr'",
+      // the route, the nav entry and the page's own name
+      "'/revenue'",
+      "label: 'Revenue'",
+      'Revenue &amp; billing',
+    ].join('|'),
+    'g',
+  );
 
   function withoutIdentifiers(code: string): string {
     return code.replace(IDENTIFIERS, 'IDENTIFIER');
   }
 
-  test('no page describes a figure as revenue', () => {
-    const offenders = scannable().filter(
-      (file) => mentionsWord(withoutIdentifiers(file.code), 'revenue'),
-    );
+  // §5.2: "the typed metric manifest is what will eventually allow the word on
+  // the one page that earns it, against a computed figure." That page is §8.4's,
+  // and the manifest now exists — so the page is exempt from the word scan, the
+  // same way lib/adminMetrics.ts is, and for the same reason: Volume 5 names
+  // the page "Revenue & Billing" and the brief's own acceptance list calls it
+  // that. The exemption is BACKED by the two assertions below, because an
+  // exemption backed by nothing is just a hole.
+  const REVENUE_PAGE = 'app/revenue/page.tsx';
+
+  test('no page OTHER than §8.4’s describes a figure as revenue', () => {
+    const offenders = scannable()
+      .filter((file) => file.path !== REVENUE_PAGE)
+      .filter((file) => mentionsWord(withoutIdentifiers(file.code), 'revenue'));
 
     expect(offenders.map((file) => file.path)).toEqual([]);
+  });
+
+  test('the revenue page exists, and is the ONLY page exempted', () => {
+    expect(SOURCES.map((file) => file.path)).toContain(REVENUE_PAGE);
+    // MANIFEST plus this page: two exemptions in the whole tree, both named.
+    expect(
+      scannable().filter((file) => file.path === REVENUE_PAGE),
+    ).toHaveLength(1);
+  });
+
+  test('every money figure on the exempted page comes from the manifest', () => {
+    // The backing. The word is allowed there because nothing on that page
+    // captions a figure by hand: each one is a `Metric` resolved by id, and
+    // MetricTile has no prop a caption could be passed through.
+    const page = SOURCES.find((file) => file.path === REVENUE_PAGE);
+
+    expect(page, REVENUE_PAGE + ' is missing').toBeDefined();
+    const code = page?.code ?? '';
+
+    // Every MetricTile on the page takes its metric from requireMetric(...).
+    const tiles = [...code.matchAll(/<MetricTile\b/g)].length;
+    const resolved = [...code.matchAll(/metric=\{requireMetric\('[a-z_]+'\)\}/g)].length;
+    expect(tiles, 'the page renders no metric tile at all').toBeGreaterThan(0);
+    expect(resolved).toBe(tiles);
+
+    // And no money figure is formatted beside a hand-written caption: the only
+    // money formatters used are the shared ones.
+    expect(code).not.toMatch(/toFixed\(2\)\s*\+\s*['"]/);
   });
 
   test('negative control: the narrowing does not blind the guard', () => {
@@ -155,9 +225,43 @@ describe('the GROSS boundary', () => {
     for (const exempt of [
       "requireAdminPermission('revenue.read')",
       "reportId: 'subscription_revenue_and_renewals'",
+      "{ href: '/revenue', label: 'Revenue', permission: 'revenue.read' }",
     ]) {
       expect(mentionsWord(withoutIdentifiers(exempt), 'revenue')).toBe(false);
     }
+  });
+
+  test('negative control: the page-name exemption does not blind the scan', () => {
+    // The exemptions are the ROUTE, the NAV ENTRY and the page's own name.
+    // A caption on a figure is still caught, in every shape that matters.
+    for (const planted of [
+      'const label = "Revenue this month";',
+      "caption: 'Total revenue',",
+      '<p>Pharmacy revenue</p>',
+      'revenue_total',
+      'const title = `Revenue: ${total}`;',
+      'const mrr = "MRR today";',
+      'heading: "MRR trend",',
+    ]) {
+      const stripped = withoutIdentifiers(planted);
+      expect(
+        mentionsWord(stripped, 'revenue') || mentionsWord(stripped, 'MRR'),
+        planted,
+      ).toBe(true);
+    }
+  });
+
+  test('a money caption can only come from the manifest, never from a string', () => {
+    // The structural half of the argument above: MetricTile's props carry a
+    // `Metric`, and there is no prop a caller could pass a caption through. If
+    // that ever changed, the exemptions here would stop being safe.
+    const tile = SOURCES.find((file) => file.path === 'components/PageParts.tsx');
+
+    expect(tile, 'components/PageParts.tsx is missing').toBeDefined();
+    expect(tile?.code).toContain('metric: Metric;');
+    expect(tile?.code).toContain('{metric.label}');
+    // No `label` or `caption` string prop on the tile.
+    expect(tile?.code).not.toMatch(/interface MetricTileProps[^}]*\blabel\s*:\s*string/s);
   });
 
   test('negative control: the metric-id exemption does not blind the `net` guard', () => {

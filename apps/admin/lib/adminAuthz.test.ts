@@ -481,16 +481,30 @@ describe('every page is gated server-side (W4-07)', () => {
   const PAGES = pages(APP_ROOT);
 
   test('finds every page', () => {
+    // Batch 3 §8's ELEVEN pages, plus /accounts, /accounts/[id],
+    // /shops/[id] and /payments — real routes that left the top-level nav and
+    // lost no functionality — plus /login, the one public page.
+    //
+    // The list is spelled out rather than counted, so ADDING a page is a
+    // deliberate edit here. A page that appeared without this test changing
+    // would be a page nobody had checked the gate on.
     expect(PAGES.map((page) => page.path).sort()).toEqual([
       'accounts/[id]/page.tsx',
       'accounts/page.tsx',
+      'admins/page.tsx',
+      'analytics/page.tsx',
       'audit/page.tsx',
       'login/page.tsx',
+      'maps/page.tsx',
       'page.tsx',
       'payments/page.tsx',
       'pharmacies/page.tsx',
+      'reports/page.tsx',
+      'revenue/page.tsx',
+      'settings/page.tsx',
       'shops/[id]/page.tsx',
       'subscriptions/page.tsx',
+      'support/page.tsx',
     ]);
   });
 
@@ -505,8 +519,13 @@ describe('every page is gated server-side (W4-07)', () => {
   test('the gate comes BEFORE any data read on every gated page', () => {
     for (const page of PAGES.filter((candidate) => !PUBLIC_PAGES.has(candidate.path))) {
       const gate = page.contents.indexOf('requireAdminPermission');
+      // Every loader a page can call. The list must grow with each new page,
+      // or the assertion passes vacuously for exactly the page nobody checked.
       const loaders = ['listAccountSummaries(', 'listSubscriptionSummaries(', 'listPaymentOrderSummaries(',
-        'getAccountDetail(', 'getShopDetail(', 'loadStats(', 'loadPharmacies(', 'recentAdminAudit.entries('];
+        'getAccountDetail(', 'getShopDetail(', 'loadStats(', 'loadPharmacies(', 'recentAdminAudit.entries(',
+        'loadMap(', 'loadSettings(', 'loadSupport(', 'loadReport(', 'loadRevenue(', 'loadAnalytics(',
+        'loadAssignments(', 'listShopLocations(', 'listSupportCaseSummaries(', 'settingsView(',
+        'revenueOverview(', 'analyticsOverview(', 'listRoleAssignments(', 'platformReportData('];
       for (const loader of loaders) {
         const read = page.contents.indexOf(loader);
         if (read < 0) continue;

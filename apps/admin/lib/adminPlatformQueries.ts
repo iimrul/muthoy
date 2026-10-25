@@ -18,7 +18,8 @@ import 'server-only';
 // second page arrived. `readTallied` is the only reader the report source uses,
 // so no table can reach a report without producing its own evidence.
 
-import { asPaisa } from '@muthoy/types';
+import { addPaisa, asPaisa, type Paisa } from '@muthoy/types';
+import { netSalesPaisa } from '@muthoy/utils';
 import type { AdminListQuery, AdminReportExportQuery } from '@muthoy/validation';
 import {
   applyShopListFilters,
@@ -30,6 +31,14 @@ import {
   type PageMeta,
 } from './adminFilters';
 import type { ShopLocationRow } from './adminGeo';
+import {
+  collectedPaymentsByMonth,
+  collectedSubscriptionPaymentsPaisa,
+  expiredWithoutCancellation,
+  monthlyRecurringRevenue,
+  recordedCancellations,
+  type MrrBreakdown,
+} from './adminMetrics';
 import type { ReportData, ReportSaleTotalRow, ReportShopRow, SourceTally } from './adminReports';
 import {
   summarizeSupportCase,
@@ -42,7 +51,7 @@ import {
   listSupportNotes,
   readSupportCase,
 } from './adminSupportStore';
-import type { PaymentOrderRow, SubscriptionRow } from './adminViews';
+import type { OfferingRow, PaymentOrderRow, SubscriptionRow } from './adminViews';
 import { AdminDataError } from './errors';
 import { readAllPages } from './queries';
 import { getSupabaseAdmin } from './supabaseAdmin';
@@ -297,6 +306,209 @@ export async function getSupportCaseDetail(
     notes,
     nowMs: now.getTime(),
   });
+}
+
+// ───────────────────────────────────── §8.4 and §8.5 the overview composites
+
+const OFFERING_COLUMNS = 'tier,billing_cycle,amount_paisa,is_active';
+
+/**
+ * The window the cancellation count covers, and why it is bounded at all.
+ *
+ * A renewal overwrites the same `billing_subscriptions` row and clears
+ * `canceled_at`, so a count over all time is not "every cancellation ever" —
+ * it is every cancellation that has not yet been overwritten, which is a
+ * figure whose meaning changes as rows are renewed. Ninety days is stated so
+ * the page can say what the number covers.
+ */
+const CANCELLATION_WINDOW_DAYS = 90;
+
+/** The price list MRR is derived from. Small and operator-maintained. */
+export async function listPlanOfferings(): Promise<readonly OfferingRow[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('plan_offerings')
+    .select(OFFERING_COLUMNS)
+    .order('tier', { ascending: true })
+    .range(0, 199);
+
+  if (error) {
+    console.error('[admin] plan_offerings read failed:', error.message);
+    throw new AdminDataError('plan offering read failed');
+  }
+
+  return (data ?? []).map((raw) => {
+    const row = raw as Record<string, unknown>;
+    return {
+      tier: text(row.tier, 'free'),
+      billingCycle: text(row.billing_cycle, 'monthly'),
+      amountPaisa: asPaisa(finiteNumber(row.amount_paisa) ?? 0),
+      isActive: row.is_active === true,
+    };
+  });
+}
+
+export interface RevenueOverview {
+  /** The forward-looking monthly run rate. */
+  runRate: MrrBreakdown;
+  /** Cash collected, by month. NOT an MRR series — see §8.4 and gate E12. */
+  collectedByMonth: readonly { month: string; totalPaisa: Paisa; orderCount: number }[];
+  collectedTotalPaisa: Paisa;
+  subscriptions: readonly SubscriptionRow[];
+  orders: readonly PaymentOrderRow[];
+  offerings: readonly OfferingRow[];
+  recordedCancellations: number;
+  expiredWithoutCancellation: number;
+}
+
+/**
+ * Everything Revenue & Billing renders, in one read.
+ *
+ * The three money figures stay apart: `mrr` is a forward-looking run rate,
+ * `collectedByMonth` is cash that arrived, and refund-net pharmacy sales — a
+ * PHARMACY's takings, not Muthoy's — is a separate section fed by
+ * `analyticsOverview`. §5 exists because those three get conflated.
+ */
+export async function revenueOverview(now: Date = new Date()): Promise<RevenueOverview> {
+  const supabase = getSupabaseAdmin();
+
+  const [subscriptions, orders, offerings] = await Promise.all([
+    readAllPages<Record<string, unknown>>('billing_subscriptions', (from, to) =>
+      asPageQuery(supabase.from('billing_subscriptions').select(REPORT_SUBSCRIPTION_COLUMNS))
+        .order('id', { ascending: true })
+        .range(from, to),
+    ).then((rows) => rows.map(toSubscriptionRow)),
+    readAllPages<Record<string, unknown>>('payment_orders', (from, to) =>
+      asPageQuery(supabase.from('payment_orders').select(REPORT_ORDER_COLUMNS))
+        .order('id', { ascending: true })
+        .range(from, to),
+    ).then((rows) => rows.map(toPaymentOrderRow)),
+    listPlanOfferings(),
+  ]);
+
+  const nowMs = now.getTime();
+
+  return {
+    runRate: monthlyRecurringRevenue({ subscriptions, offerings, nowMs }),
+    collectedByMonth: collectedPaymentsByMonth(orders),
+    collectedTotalPaisa: collectedSubscriptionPaymentsPaisa(orders),
+    subscriptions,
+    orders,
+    offerings,
+    // A cancellation count needs an explicit PERIOD, because a renewal
+    // overwrites the same row and clears `canceled_at` — so this is
+    // "cancellations still visible in current state within the window", not a
+    // historical churn series. An immutable lifecycle table is gate E12, and
+    // §8.4 reports the trend as blocked rather than inventing one.
+    recordedCancellations: recordedCancellations(subscriptions, {
+      fromMs: nowMs - CANCELLATION_WINDOW_DAYS * 86_400_000,
+      toMs: nowMs,
+    }),
+    expiredWithoutCancellation: expiredWithoutCancellation(subscriptions, nowMs),
+  };
+}
+
+export interface AnalyticsOverview {
+  /** Per Dhaka day: the shops that recorded a sale. */
+  activeByDay: readonly { day: string; shopIds: readonly string[] }[];
+  /** Per Dhaka day: the shops that registered. */
+  registeredByDay: readonly { day: string; shopIds: readonly string[] }[];
+  /** Per month: the refund-net total and the shops behind it. */
+  pharmacySalesByMonth: readonly {
+    month: string;
+    totalPaisa: Paisa;
+    shopIds: readonly string[];
+  }[];
+  /** Per plan tier: the shops on it. */
+  shopsByPlan: readonly { plan: string; shopIds: readonly string[] }[];
+}
+
+function groupShops<T>(
+  rows: readonly T[],
+  keyOf: (row: T) => string,
+  shopOf: (row: T) => string,
+): Map<string, string[]> {
+  const buckets = new Map<string, string[]>();
+  for (const row of rows) {
+    const key = keyOf(row);
+    const held = buckets.get(key);
+    if (held === undefined) buckets.set(key, [shopOf(row)]);
+    else held.push(shopOf(row));
+  }
+  return buckets;
+}
+
+function sumTotals(rows: readonly ReportSaleTotalRow[]): Paisa {
+  return rows.reduce<Paisa>((total, row) => addPaisa(total, row.totalPaisa), asPaisa(0));
+}
+
+/**
+ * The analytics series, each carrying the CONTRIBUTING SHOP IDS rather than a
+ * finished number.
+ *
+ * Deliberate: lib/adminSuppression.ts counts DISTINCT shops, so a reader that
+ * returned totals would have thrown away the only thing the k floor can be
+ * applied to — and the page would then have had to either recount or publish
+ * an unsuppressed figure.
+ *
+ * It goes through the SAME tallied reads the reports use, so Analytics and the
+ * matching report cannot disagree about a day's figure.
+ */
+export async function analyticsOverview(
+  range: { from?: string; to?: string } = {},
+): Promise<AnalyticsOverview> {
+  const base = { format: 'csv' as const, ...range };
+  const [activity, sales] = await Promise.all([
+    platformReportData({ ...base, reportId: 'activity_summary' }),
+    platformReportData({ ...base, reportId: 'refund_net_pharmacy_sales' }),
+  ]);
+
+  const months = new Map<string, { totalPaisa: Paisa; shopIds: string[] }>();
+  for (const row of [...sales.sales, ...sales.refunds]) {
+    const month = row.businessDate.slice(0, 7);
+    const held = months.get(month) ?? { totalPaisa: asPaisa(0), shopIds: [] };
+    held.shopIds.push(row.shopId);
+    months.set(month, held);
+  }
+  for (const [month, held] of months) {
+    const monthSales = sales.sales.filter((row) => row.businessDate.startsWith(month));
+    const monthRefunds = sales.refunds.filter((row) => row.businessDate.startsWith(month));
+    // W4-04's shared subtraction, so this page and the report agree exactly.
+    held.totalPaisa = netSalesPaisa(sumTotals(monthSales), sumTotals(monthRefunds));
+  }
+
+  const toDayEntries = (buckets: Map<string, string[]>) =>
+    [...buckets.entries()]
+      .map(([day, shopIds]) => ({ day, shopIds }))
+      .sort((left, right) => left.day.localeCompare(right.day));
+
+  return {
+    activeByDay: toDayEntries(
+      groupShops(
+        sales.sales,
+        (row) => row.businessDate,
+        (row) => row.shopId,
+      ),
+    ),
+    registeredByDay: toDayEntries(
+      groupShops(
+        activity.shops,
+        (shop) => shop.createdAt.slice(0, 10),
+        (shop) => shop.id,
+      ),
+    ),
+    pharmacySalesByMonth: [...months.entries()]
+      .map(([month, held]) => ({ month, totalPaisa: held.totalPaisa, shopIds: held.shopIds }))
+      .sort((left, right) => left.month.localeCompare(right.month)),
+    shopsByPlan: [
+      ...groupShops(
+        activity.shops,
+        (shop) => shop.plan,
+        (shop) => shop.id,
+      ),
+    ]
+      .map(([plan, shopIds]) => ({ plan, shopIds }))
+      .sort((left, right) => left.plan.localeCompare(right.plan)),
+  };
 }
 
 // ─────────────────────────────────────────────────── §8.10 the report source

@@ -58,14 +58,119 @@ describe('service-role key exposure guards', () => {
     expect(SOURCE_FILES.length).toBeGreaterThan(5);
   });
 
-  test('no page or component is a client component', () => {
-    const clientFiles = SOURCE_FILES.filter(
-      (file) =>
-        (file.path.startsWith('app/') || file.path.startsWith('components/')) &&
-        /^\s*['"]use client['"]/m.test(file.contents),
-    );
+  // Batch 3 §8 replaces "zero client files" with an ALLOWLIST. Charts and the
+  // map genuinely need a browser, and the plan's own reasoning is that a
+  // 'use client' boundary never endangered the service-role key anyway — that
+  // key is protected by `server-only` on lib/env.ts, which is a BUILD failure
+  // if a client file reaches it. The assertions below are what make the
+  // narrower rule stronger than the blanket one it replaces.
+  const ALLOWED_CLIENT_FILES: readonly string[] = [
+    'components/charts/ChartLoader.tsx',
+    'components/charts/PlatformCharts.tsx',
+    'components/map/MapCanvas.tsx',
+    'components/map/MapLoader.tsx',
+  ];
 
-    expect(clientFiles.map((file) => file.path)).toEqual([]);
+  function clientFiles(): typeof SOURCE_FILES {
+    return SOURCE_FILES.filter((file) => /^\s*['"]use client['"]/m.test(file.contents));
+  }
+
+  test('only the four presentational chart and map components are client components', () => {
+    expect(
+      clientFiles()
+        .map((file) => file.path)
+        .sort(),
+    ).toEqual([...ALLOWED_CLIENT_FILES].sort());
+  });
+
+  test('every allowlisted client file EXISTS — a stale entry is a hole', () => {
+    for (const path of ALLOWED_CLIENT_FILES) {
+      expect(
+        SOURCE_FILES.map((file) => file.path),
+        path,
+      ).toContain(path);
+    }
+  });
+
+  test('no page is a client component, so authorization always runs on the server', () => {
+    // The part of the old rule that must never relax: a page running in the
+    // browser would be a page whose requireAdminPermission a reader could skip.
+    const clientPages = clientFiles().filter((file) => file.path.startsWith('app/'));
+
+    expect(clientPages.map((file) => file.path)).toEqual([]);
+  });
+
+  test('no client file reaches a server-only module, even transitively', () => {
+    // The real containment. A client file importing lib/env.ts is a BUILD
+    // failure, but only once somebody writes that import — this walks the graph
+    // so the second and third hops are checked too.
+    const byPath = new Map(SOURCE_FILES.map((file) => [file.path, file]));
+
+    function localImports(file: (typeof SOURCE_FILES)[number]): string[] {
+      const resolved: string[] = [];
+      for (const match of file.code.matchAll(/from\s+'(\.[^']+)'/g)) {
+        const specifier = match[1] ?? '';
+        const base = new URL(specifier, 'file:///' + file.path).pathname.slice(1);
+        for (const candidate of [base + '.ts', base + '.tsx', base]) {
+          if (byPath.has(candidate)) {
+            resolved.push(candidate);
+            break;
+          }
+        }
+      }
+      return resolved;
+    }
+
+    const offenders: string[] = [];
+    for (const entry of clientFiles()) {
+      const seen = new Set<string>();
+      const queue = localImports(entry);
+      while (queue.length > 0) {
+        const path = queue.shift() ?? '';
+        if (seen.has(path)) continue;
+        seen.add(path);
+        const file = byPath.get(path);
+        if (file === undefined) continue;
+        if (/^import 'server-only';$/m.test(file.contents)) {
+          offenders.push(entry.path + ' -> ' + path);
+          continue;
+        }
+        queue.push(...localImports(file));
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  test('no client component takes a raw database row as a prop', () => {
+    // §8's client-boundary rule: a client component receives already-aggregated,
+    // already-suppressed values. A prop typed as a row would be a row crossing
+    // the boundary even if today's caller happens to reduce it first.
+    const ROW_TYPES = [
+      'ShopRow',
+      'AccountRow',
+      'SubscriptionRow',
+      'PaymentOrderRow',
+      'EntitlementRow',
+      'MembershipRow',
+      'SupportCaseRow',
+      'SupportNoteRow',
+      'ReportShopRow',
+      'ReportSaleTotalRow',
+      'AdminSettingRow',
+      'ShopLocationRow',
+    ];
+
+    const offenders: string[] = [];
+    for (const file of clientFiles()) {
+      for (const type of ROW_TYPES) {
+        if (new RegExp('(^|[^A-Za-z])' + type + '([^A-Za-z]|$)').test(file.code)) {
+          offenders.push(file.path + ' -> ' + type);
+        }
+      }
+    }
+
+    expect(offenders).toEqual([]);
   });
 
   test('nothing is exposed to the browser through a NEXT_PUBLIC_ variable', () => {
