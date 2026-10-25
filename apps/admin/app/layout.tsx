@@ -45,13 +45,26 @@ export const metadata: Metadata = {
 // hasPermission(role). Asking the role would show a narrowed account links its
 // assignment row has already taken away — every one of which the page would
 // then refuse, which is a worse experience than not offering them.
+// Batch 3 §8: EXACTLY ELEVEN entries, one per page the brief names.
+//
+// `/accounts` and `/payments` are deliberately NOT here. Both remain real,
+// reachable routes and neither lost any functionality — `/payments` is the
+// order-level view linked from Revenue & Billing (§8.4) and `/accounts/[id]`
+// is linked from the pharmacy drill-down. They leave the top-level nav because
+// the brief asks for eleven pages, and a nav of thirteen would make two of them
+// look like pages the acceptance matrix had forgotten.
 const NAV_LINKS = [
   { href: '/', label: 'Dashboard', permission: 'shops.read' },
   { href: '/pharmacies', label: 'Pharmacies', permission: 'shops.read' },
-  { href: '/accounts', label: 'Accounts', permission: 'accounts.read' },
   { href: '/subscriptions', label: 'Subscriptions', permission: 'subscriptions.read' },
-  { href: '/payments', label: 'Payments', permission: 'payments.read' },
+  { href: '/revenue', label: 'Revenue', permission: 'revenue.read' },
+  { href: '/analytics', label: 'Analytics', permission: 'analytics.read' },
+  { href: '/maps', label: 'Maps', permission: 'maps.read' },
+  { href: '/support', label: 'Support', permission: 'support.read' },
+  { href: '/admins', label: 'Admins', permission: 'admins.read' },
   { href: '/audit', label: 'Audit', permission: 'audit.read' },
+  { href: '/reports', label: 'Reports', permission: 'reports.read' },
+  { href: '/settings', label: 'Settings', permission: 'settings.read' },
 ] as const;
 
 interface SignedIn {
