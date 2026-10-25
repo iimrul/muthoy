@@ -16,12 +16,12 @@ Do **not** restart steps 1–7. They are committed and green.
 | Thing | Value |
 |---|---|
 | Branch | `main` |
-| Local HEAD | `676900f` |
+| Local HEAD | `274bcba` |
 | `origin/main` | `c25924e` — **nothing pushed for Batch 3** |
-| Commits ahead of origin | 15 |
+| Commits ahead of origin | 18 |
 | Inherited dirty working-tree paths | **47, untouched** |
 
-### The six commits this session added, oldest first
+### The nine commits this session added, oldest first
 
 | SHA | What |
 |---|---|
@@ -31,17 +31,24 @@ Do **not** restart steps 1–7. They are committed and green.
 | `d3cc729` | **step 7 pt 3** — Settings, page furniture, loading states, eleven-entry nav |
 | `d602986` | **step 7 pt 4** — Support, Reports, the export endpoint |
 | `676900f` | **step 7 complete** — Revenue, Analytics, Admins; three guards strengthened |
+| `dcaeffc` | this handoff |
+| `9381652` | **§8.2** — the pharmacy list searched, filtered, sorted and paged |
+| `274bcba` | **§11 route contract tests** — 62 tests, all eleven pages invoked and rendered |
 
 Earlier Batch 3 commits (previous session): `b8fca1e`, `76d235f`, `28a4c11`,
 `16a1ad1`, `60d3cce`, `b509eaf`, `e568dba`, `919e84e`, `62fe90c`.
 
-### Verification at `676900f`
+### Verification at `274bcba`
 
-- **1016 tests, 33 files, exit 0** (`npx vitest run apps/admin/lib packages/validation`)
+- **1109 tests, 35 files, exit 0** (`npx vitest run apps/admin packages/validation`)
+- `apps/mobile/components` + `i18n`: **270 tests, 16 files, exit 0** — run to
+  confirm the `esbuild.jsx` config change disturbed nothing
 - `apps/admin` **typecheck exit 0**, **lint clean**
 - **`next build` exit 0**, all 19 routes, run against a placeholder URL and key
-- **The full repository suite has still not been run since step 3.** That is
-  step 10's gate and remains the largest unknown.
+- **Step 7's gate is now fully met**: route contract tests, client-boundary
+  tests, typecheck, lint and build.
+- **The full repository suite** was started at the end of this session. If its
+  result is not recorded below, **it did not finish — run it first.**
 
 ---
 
@@ -161,26 +168,29 @@ same kind of presence helper for the Settings diagnostics panel.
 
 ## 6. WHAT IS LEFT, precisely
 
-### 6a. §11's route contract tests — the one step-7 gate not met
+### 6a. §11's route contract tests — DONE (`274bcba`)
 
-Step 7's gate is "route contract tests pass; client-boundary tests pass; admin
-typecheck, lint and build clean". **Three of four are met.** The route contract
-tests do not exist yet.
+`apps/admin/app/adminRoutes.contract.test.tsx`, 62 tests, listed explicitly in
+`vitest.config.ts`'s `include`. **Step 7's gate is met in full.**
 
-**Gotcha, from the previous handoff and still true:**
-`apps/admin/app/**/*.test.tsx` is **not** in the vitest `include` list
-(`vitest.config.ts:537` covers `apps/admin/lib/**/*.test.ts` only). The route
-test must be added explicitly **and must live under `apps/admin/`** so pnpm
-resolves `react-dom`.
+Two things that file established, worth knowing before extending it:
 
-### 6b. The four existing pages are NOT yet extended to their §8 scope
+- **The exclusion list is itself a test.** A denial legitimately touches
+  `admin_role_assignments` (§4.3 reads it on every request — it IS the gate) and
+  `admin_audit_log` (§8.9c). Those two are named, and a test asserts no business
+  table has been added to that list.
+- **The Supabase fake is PER TABLE.** One shared rows array made the
+  authorization read of `admin_role_assignments` receive a shop row, which
+  `adminIdentityStore` correctly threw on — so every page failed closed and the
+  test measured nothing while appearing to pass its denial assertions.
 
-They work and are gated, but they still carry their Batch 2 feature set:
+### 6b. Four existing pages are NOT yet extended to their §8 scope
+
+`/pharmacies` **is now done** (`9381652`): search, three filters, sort and
+`.range()` paging with an exact count, all pushed into the query. The remainder
+work and are gated, but still carry their Batch 2 feature set:
 
 - **`/` (§8.1)** — needs the nine metrics and the five computed alert classes.
-- **`/pharmacies` (§8.2)** — needs search/filter/sort/pagination wired to
-  `listShopsPage` + `listShopDistricts`, which **already exist and are tested**.
-  The page still calls the old unpaginated `listPharmacies()`.
 - **`/shops/[id]` (§8.2)** — needs the support-notes block and the
   consent-gated location block.
 - **`/subscriptions` (§8.3)** — needs the status/tier/cycle filters, next
