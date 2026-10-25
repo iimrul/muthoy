@@ -220,13 +220,29 @@ export function pageMeta(range: RangeSpec, total: number): PageMeta {
  * which is the actual claim, since §8.2 requires the search to be pushed into
  * the query rather than applied after the rows come back.
  */
-export interface ListQueryBuilder<Self> {
-  eq(column: string, value: unknown): Self;
-  gte(column: string, value: unknown): Self;
-  lte(column: string, value: unknown): Self;
-  or(expression: string): Self;
-  order(column: string, options: { ascending: boolean }): Self;
-  range(from: number, to: number): Self;
+// `this`-typed methods rather than a `Self` type parameter. A recursive bound
+// (`Self extends ListQueryBuilder<Self>`) reads equivalently and is not:
+// checking PostgREST's own builder against it makes the compiler expand that
+// builder's generics into itself, and tsc gives up with "type instantiation is
+// excessively deep". `this` says the same thing without the recursion, and
+// PostgREST's filter methods return `this`, so its builder satisfies this
+// structurally.
+export interface ListFilterBuilder {
+  eq(column: string, value: unknown): this;
+  gte(column: string, value: unknown): this;
+  lte(column: string, value: unknown): this;
+  or(expression: string): this;
+}
+
+// The full builder EXTENDS the filters-only one rather than being Pick()ed
+// down to it. `Pick<I, 'eq'>` loses the polymorphic `this`: the picked method
+// comes back typed as returning the interface, so chaining inside a generic
+// function returns the interface rather than the caller's builder, and every
+// assignment back fails. Extension keeps `this` intact, and it states the real
+// relationship — a page query is a filtered query that also orders and pages.
+export interface ListQueryBuilder extends ListFilterBuilder {
+  order(column: string, options: { ascending: boolean }): this;
+  range(from: number, to: number): this;
 }
 
 export interface ShopListFilterOptions {
@@ -267,11 +283,37 @@ export function dhakaDayEndIso(day: string): string {
  * equals the empty string"; the schema admits the empty string deliberately so
  * that a form submitting all of its fields blank is not an error.
  */
-export function applyShopListQuery<Self extends ListQueryBuilder<Self>>(
-  builder: Self,
+export function applyShopListQuery<B extends ListQueryBuilder>(
+  builder: B,
   query: AdminListQuery,
   options: ShopListFilterOptions = {},
-): Self {
+): B {
+  const filtered = applyShopListFilters(builder, query, options);
+
+  const sort = sortSpec(query.sort);
+  // A deterministic tiebreak, so two shops sharing a timestamp cannot swap
+  // between pages and make one of them invisible. lib/queries.ts does the same.
+  const ordered = filtered
+    .order(sort.column, { ascending: sort.ascending })
+    .order('id', { ascending: true });
+
+  const range = rangeSpec(query);
+  return ordered.range(range.from, range.to);
+}
+
+/**
+ * The FILTERS only — no order, no range.
+ *
+ * Extracted so the exact count can be taken with the SAME predicate as the
+ * page. `select('id', { count: 'exact', head: true })` has no rows to order and
+ * takes no range, and a count computed from a different predicate than the rows
+ * is a pager reporting "123 pharmacies" above a list filtered to nine.
+ */
+export function applyShopListFilters<B extends ListFilterBuilder>(
+  builder: B,
+  query: AdminListQuery,
+  options: ShopListFilterOptions = {},
+): B {
   const dateColumn = options.dateColumn ?? 'created_at';
   let next = builder;
 
@@ -299,14 +341,7 @@ export function applyShopListQuery<Self extends ListQueryBuilder<Self>>(
   if (query.from !== undefined) next = next.gte(dateColumn, dhakaDayStartIso(query.from));
   if (query.to !== undefined) next = next.lte(dateColumn, dhakaDayEndIso(query.to));
 
-  const sort = sortSpec(query.sort);
-  next = next.order(sort.column, { ascending: sort.ascending });
-  // A deterministic tiebreak, so two shops sharing a timestamp cannot swap
-  // between pages and make one of them invisible. lib/queries.ts does the same.
-  next = next.order('id', { ascending: true });
-
-  const range = rangeSpec(query);
-  return next.range(range.from, range.to);
+  return next;
 }
 
 // ──────────────────────────────────────────────────────────────────── parsing
