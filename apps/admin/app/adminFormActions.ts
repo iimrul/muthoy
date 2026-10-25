@@ -94,13 +94,15 @@ export async function updateSupportCaseAction(formData: FormData): Promise<void>
     assignee: String(formData.get('assignee') ?? ''),
     summary: String(formData.get('summary') ?? ''),
   });
-  redirect('/support/' + caseId + outcomeQuery('case_update', outcomeFor(result)));
+  // The detail lives at `/support?case=<id>`, so the redirect carries the
+  // case forward and the operator lands back on what they were editing.
+  redirect('/support' + outcomeQuery('case_update', outcomeFor(result)) + '&case=' + caseId);
 }
 
 export async function addSupportNoteAction(formData: FormData): Promise<void> {
   const caseId = String(formData.get('caseId') ?? '');
   const result = await addSupportNote({ caseId, body: String(formData.get('body') ?? '') });
-  redirect('/support/' + caseId + outcomeQuery('note_add', outcomeFor(result)));
+  redirect('/support' + outcomeQuery('note_add', outcomeFor(result)) + '&case=' + caseId);
 }
 
 export async function assignAdminRoleAction(formData: FormData): Promise<void> {
