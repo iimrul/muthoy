@@ -47,8 +47,48 @@ Earlier Batch 3 commits (previous session): `b8fca1e`, `76d235f`, `28a4c11`,
 - **`next build` exit 0**, all 19 routes, run against a placeholder URL and key
 - **Step 7's gate is now fully met**: route contract tests, client-boundary
   tests, typecheck, lint and build.
-- **The full repository suite** was started at the end of this session. If its
-  result is not recorded below, **it did not finish — run it first.**
+### The full repository suite — RUN, and the result is mixed
+
+`npx vitest run` at `274bcba`, 920 seconds:
+
+```
+ Test Files  284 passed (284)
+      Tests  6255 passed (6255)
+     Errors  2 errors
+```
+
+**Every test passed. The process exited 1.** Both errors are identical and are
+Vitest's own infrastructure, not product code:
+
+```
+Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+ ❯ Object.onTimeoutError …/vitest/dist/chunks/rpc.-pEldfrD.js:53:10
+ ❯ Timeout._onTimeout …/vitest/dist/chunks/index.B521nVV-.js:59:62
+```
+
+That is a worker→main **reporter RPC** timeout: a worker took too long to report
+a task update. It is consistent with this suite's shape — 920 s in total, with
+individual SQLCipher migration tests at 2–17 s each — and it is not attributable
+to any assertion.
+
+**It is nevertheless a step-10 BLOCKER, and must not be waved through.** §12
+step 10's gate is "exit 0 recorded", and the exit was 1. Options, in the order I
+would try them:
+
+1. **Re-run once** to establish whether it is intermittent. I did not, because a
+   second 15-minute run was not a good use of the remaining budget — so
+   intermittency is genuinely unknown.
+2. If reproducible, raise `teardownTimeout` in `vitest.config.ts`, or reduce
+   reporter chatter (`reporters: ['dot']`) so fewer task updates cross the RPC
+   boundary on a run this long.
+3. **Do not** paper over it by ignoring the exit code. A config change here
+   alters how the whole suite is executed and should be visible to Codex rather
+   than buried.
+
+This is **not** caused by this session's `esbuild.jsx` change: that affects only
+how JSX is transformed, and the failure is in the worker's reporting channel.
+`apps/mobile/components` + `i18n` (270 tests) were run separately after that
+change and passed.
 
 ---
 
@@ -231,6 +271,12 @@ Recorded cancellations
 Full suite with real exit code, repo lint/typecheck, admin build, E4/H-9
 integrity, Codex FINAL ACCEPT, then push. **Do not push on REVISE or failing
 tests.**
+
+**The full suite has been run once (see §1): 6255/6255 tests pass and the
+process exits 1 on two Vitest reporter-RPC timeouts.** That is the first thing
+step 10 has to resolve, and §1 records the diagnosis and the options. Until the
+exit code is 0 — or the non-zero exit is explicitly accepted with its reason
+recorded — **step 10's gate is not met and nothing may be pushed.**
 
 ---
 
