@@ -9,6 +9,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import type { AdminRoleAssignment } from './adminAssignments';
 
 const cookieStore = vi.hoisted(() => ({ value: undefined as string | undefined }));
 vi.mock('next/headers', () => ({
@@ -23,6 +24,7 @@ vi.mock('next/headers', () => ({
 const { recentAdminAudit } = await import('./adminAudit');
 const { newSessionPayload, signAdminSession } = await import('./adminSession');
 const { AdminForbiddenError, AdminUnauthenticatedError } = await import('./errors');
+const { permissionsForRole } = await import('./adminRoles');
 const { currentAdminSession, requireAdminPermission, requirePermission } = await import('./adminAuthz');
 
 const SECRET = 'a'.repeat(32);
@@ -30,6 +32,33 @@ const BASE_ENV = {
   ADMIN_SESSION_SECRET: SECRET,
   ADMIN_ROLES: '{"founder":"super_admin","ops":"read_only"}',
 };
+
+// Batch 3 §4.3. Every pre-Batch-3 case is the NO-ROW case, so it is spelled out
+// once rather than repeated: with no assignment, authority is exactly what
+// ADMIN_ROLES grants, which is the W4-06 behaviour these tests were written for.
+// It is INJECTED rather than defaulted because the real reader opens a Supabase
+// connection, and a unit test that silently needs one is a unit test that
+// passes for the wrong reason.
+const NO_ASSIGNMENT = { readAssignment: async () => null };
+
+function assignment(overrides: Partial<AdminRoleAssignment> = {}): AdminRoleAssignment {
+  return {
+    username: 'ops',
+    role: 'read_only',
+    isActive: true,
+    sessionsRevokedAtMs: null,
+    sessionsRevokedAt: null,
+    assignedBy: 'founder',
+    assignedAt: '2026-10-25T00:00:00.000Z',
+    updatedAt: '2026-10-25T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+/** Injects one assignment row for whichever username is asked for. */
+function withAssignment(row: AdminRoleAssignment) {
+  return { readAssignment: async () => row };
+}
 
 async function cookieFor(
   sub: string,
@@ -49,14 +78,19 @@ beforeEach(() => {
 });
 
 describe('requirePermission', () => {
-  test('allows a role that holds the permission, and audits nothing', () => {
-    expect(() => requirePermission({ username: 'founder', role: 'billing' }, 'subscriptions.write')).not.toThrow();
+  test('allows a session that holds the permission, and audits nothing', () => {
+    expect(() => requirePermission(
+      { username: 'founder', role: 'billing', permissions: permissionsForRole('billing') },
+      'subscriptions.write',
+    )).not.toThrow();
     expect(recentAdminAudit.entries()).toEqual([]);
   });
 
   test('throws AND audits the denial', () => {
-    expect(() => requirePermission({ username: 'ops', role: 'read_only' }, 'subscriptions.write'))
-      .toThrow(AdminForbiddenError);
+    expect(() => requirePermission(
+      { username: 'ops', role: 'read_only', permissions: permissionsForRole('read_only') },
+      'subscriptions.write',
+    )).toThrow(AdminForbiddenError);
 
     expect(recentAdminAudit.entries()).toMatchObject([{
       actor: 'ops',
@@ -69,12 +103,41 @@ describe('requirePermission', () => {
 
   test('the thrown error names the permission and the role, not the data', () => {
     try {
-      requirePermission({ username: 'ops', role: 'support' }, 'subscriptions.write');
+      requirePermission(
+        { username: 'ops', role: 'support', permissions: permissionsForRole('support') },
+        'subscriptions.write',
+      );
       throw new Error('expected a throw');
     } catch (error) {
       expect(error).toBeInstanceOf(AdminForbiddenError);
       expect((error as InstanceType<typeof AdminForbiddenError>).permission).toBe('subscriptions.write');
       expect((error as InstanceType<typeof AdminForbiddenError>).role).toBe('support');
+    }
+  });
+
+  test('the EFFECTIVE set decides, not the role (Batch 3 §4.3)', () => {
+    // This is the whole intersection guarantee at the choke point: a session
+    // whose role still reads super_admin but whose narrowed set lacks the
+    // permission is refused. Reading hasPermission(role) here would pass.
+    expect(() => requirePermission(
+      { username: 'founder', role: 'super_admin', permissions: permissionsForRole('read_only') },
+      'admins.write',
+    )).toThrow(AdminForbiddenError);
+
+    expect(recentAdminAudit.entries()).toMatchObject([{
+      actor: 'founder',
+      role: 'super_admin',
+      action: 'authz.denied',
+      meta: { permission: 'admins.write' },
+    }]);
+  });
+
+  test('an empty effective set holds nothing at all', () => {
+    for (const permission of ['shops.read', 'admins.write', 'settings.read'] as const) {
+      expect(() => requirePermission(
+        { username: 'ops', role: 'super_admin', permissions: [] },
+        permission,
+      )).toThrow(AdminForbiddenError);
     }
   });
 });
@@ -83,15 +146,21 @@ describe('currentAdminSession', () => {
   test('returns the role ADMIN_ROLES grants, not the one the cookie claims', async () => {
     cookieStore.value = await cookieFor('ops', 'super_admin');
 
-    const session = await currentAdminSession(BASE_ENV);
+    const session = await currentAdminSession(BASE_ENV, NO_ASSIGNMENT);
 
-    expect(session).toEqual({ username: 'ops', role: 'read_only', claimedRole: 'super_admin' });
+    expect(session).toEqual({
+      username: 'ops',
+      role: 'read_only',
+      claimedRole: 'super_admin',
+      assignedRole: null,
+      permissions: permissionsForRole('read_only'),
+    });
   });
 
   test('a stale role claim is AUDITED, and the environment still wins', async () => {
     cookieStore.value = await cookieFor('ops', 'super_admin');
 
-    await currentAdminSession(BASE_ENV);
+    await currentAdminSession(BASE_ENV, NO_ASSIGNMENT);
 
     expect(recentAdminAudit.entries()).toMatchObject([{
       actor: 'ops',
@@ -104,7 +173,7 @@ describe('currentAdminSession', () => {
   test('a username removed from ADMIN_ROLES is denied immediately, cookie and all', async () => {
     cookieStore.value = await cookieFor('founder', 'super_admin');
 
-    await expect(currentAdminSession({ ...BASE_ENV, ADMIN_ROLES: '{"ops":"read_only"}' }))
+    await expect(currentAdminSession({ ...BASE_ENV, ADMIN_ROLES: '{"ops":"read_only"}' }, NO_ASSIGNMENT))
       .rejects.toBeInstanceOf(AdminUnauthenticatedError);
 
     expect(recentAdminAudit.entries()).toMatchObject([{
@@ -116,24 +185,168 @@ describe('currentAdminSession', () => {
   });
 
   test('no cookie at all is a rejection', async () => {
-    await expect(currentAdminSession(BASE_ENV)).rejects.toBeInstanceOf(AdminUnauthenticatedError);
+    await expect(currentAdminSession(BASE_ENV, NO_ASSIGNMENT))
+      .rejects.toBeInstanceOf(AdminUnauthenticatedError);
   });
 
   test('an expired cookie is a rejection', async () => {
     cookieStore.value = await cookieFor('founder', 'super_admin', { now: Date.now() - 9 * 60 * 60 * 1_000 });
-    await expect(currentAdminSession(BASE_ENV)).rejects.toBeInstanceOf(AdminUnauthenticatedError);
+    await expect(currentAdminSession(BASE_ENV, NO_ASSIGNMENT))
+      .rejects.toBeInstanceOf(AdminUnauthenticatedError);
   });
 
   test('a cookie from a revoked epoch is a rejection', async () => {
     cookieStore.value = await cookieFor('founder', 'super_admin', { epoch: 1 });
-    await expect(currentAdminSession({ ...BASE_ENV, ADMIN_SESSION_EPOCH: '2' }))
+    await expect(currentAdminSession({ ...BASE_ENV, ADMIN_SESSION_EPOCH: '2' }, NO_ASSIGNMENT))
       .rejects.toBeInstanceOf(AdminUnauthenticatedError);
   });
 
   test('an unconfigured panel throws rather than admitting anyone', async () => {
     cookieStore.value = await cookieFor('founder', 'super_admin');
-    await expect(currentAdminSession({ ADMIN_ROLES: BASE_ENV.ADMIN_ROLES })).rejects.toThrow();
-    await expect(currentAdminSession({ ADMIN_SESSION_SECRET: SECRET })).rejects.toThrow();
+    await expect(currentAdminSession({ ADMIN_ROLES: BASE_ENV.ADMIN_ROLES }, NO_ASSIGNMENT)).rejects.toThrow();
+    await expect(currentAdminSession({ ADMIN_SESSION_SECRET: SECRET }, NO_ASSIGNMENT)).rejects.toThrow();
+  });
+
+  test('the store is read BEFORE any authority is returned', async () => {
+    // Ordering matters: a read that happened after the context was built would
+    // make the disabled and revoked cases below unreachable in production.
+    cookieStore.value = await cookieFor('ops', 'read_only');
+    const asked: string[] = [];
+
+    await currentAdminSession(BASE_ENV, {
+      readAssignment: async (username) => {
+        asked.push(username);
+        return null;
+      },
+    });
+
+    expect(asked).toEqual(['ops']);
+  });
+});
+
+describe('currentAdminSession — the assignment row (Batch 3 §4.3)', () => {
+  test('rule 1: an is_active=false row DENIES, and never falls back to ADMIN_ROLES', async () => {
+    cookieStore.value = await cookieFor('founder', 'super_admin');
+
+    await expect(currentAdminSession(
+      BASE_ENV,
+      withAssignment(assignment({ username: 'founder', role: 'super_admin', isActive: false })),
+    )).rejects.toMatchObject({ reason: 'assignment_disabled' });
+
+    expect(recentAdminAudit.entries()).toMatchObject([{
+      actor: 'founder',
+      role: 'super_admin',
+      action: 'session.account_disabled',
+      outcome: 'denied',
+      meta: { reason: 'assignment_disabled' },
+    }]);
+  });
+
+  test('rule 2: permissions are the INTERSECTION — a wider row grants nothing', async () => {
+    cookieStore.value = await cookieFor('ops', 'read_only');
+
+    const session = await currentAdminSession(
+      BASE_ENV,
+      withAssignment(assignment({ username: 'ops', role: 'super_admin' })),
+    );
+
+    // The environment says read_only; the row says super_admin; the row loses.
+    expect(session.role).toBe('read_only');
+    expect(session.assignedRole).toBe('super_admin');
+    expect([...session.permissions].sort()).toEqual([...permissionsForRole('read_only')].sort());
+    expect(session.permissions).not.toContain('admins.write');
+  });
+
+  test('rule 2: a narrower row is what applies', async () => {
+    cookieStore.value = await cookieFor('founder', 'super_admin');
+
+    const session = await currentAdminSession(
+      BASE_ENV,
+      withAssignment(assignment({ username: 'founder', role: 'support' })),
+    );
+
+    expect(session.role).toBe('super_admin');
+    expect([...session.permissions].sort()).toEqual([...permissionsForRole('support')].sort());
+    expect(session.permissions).not.toContain('admins.write');
+    expect(session.permissions).not.toContain('subscriptions.write');
+  });
+
+  test('rule 3: a cookie minted BEFORE the revocation is refused', async () => {
+    const mintedAt = Date.now() - 60_000;
+    cookieStore.value = await cookieFor('ops', 'read_only', { now: mintedAt });
+
+    await expect(currentAdminSession(
+      BASE_ENV,
+      withAssignment(assignment({ sessionsRevokedAtMs: mintedAt + 1_000 })),
+    )).rejects.toMatchObject({ reason: 'sessions_revoked' });
+
+    expect(recentAdminAudit.entries()).toMatchObject([{
+      actor: 'ops',
+      action: 'session.sessions_revoked',
+      outcome: 'denied',
+    }]);
+  });
+
+  test('rule 3: a cookie minted AT the revocation instant is refused too', async () => {
+    const mintedAt = Date.now() - 60_000;
+    cookieStore.value = await cookieFor('ops', 'read_only', { now: mintedAt });
+
+    await expect(currentAdminSession(
+      BASE_ENV,
+      withAssignment(assignment({ sessionsRevokedAtMs: mintedAt })),
+    )).rejects.toMatchObject({ reason: 'sessions_revoked' });
+  });
+
+  test('rule 3: a cookie minted AFTER the revocation still works', async () => {
+    const revokedAt = Date.now() - 60_000;
+    cookieStore.value = await cookieFor('ops', 'read_only', { now: revokedAt + 1_000 });
+
+    const session = await currentAdminSession(
+      BASE_ENV,
+      withAssignment(assignment({ sessionsRevokedAtMs: revokedAt })),
+    );
+
+    expect(session.username).toBe('ops');
+  });
+
+  test('a disabled row denies even a cookie minted after its revocation point', async () => {
+    const revokedAt = Date.now() - 60_000;
+    cookieStore.value = await cookieFor('ops', 'read_only', { now: revokedAt + 1_000 });
+
+    await expect(currentAdminSession(
+      BASE_ENV,
+      withAssignment(assignment({ isActive: false, sessionsRevokedAtMs: revokedAt })),
+    )).rejects.toMatchObject({ reason: 'assignment_disabled' });
+  });
+
+  test('an unreadable store DENIES, with its own audited reason', async () => {
+    cookieStore.value = await cookieFor('founder', 'super_admin');
+
+    await expect(currentAdminSession(BASE_ENV, {
+      readAssignment: async () => {
+        throw new Error('connection refused');
+      },
+    })).rejects.toMatchObject({ reason: 'role_store_unavailable' });
+
+    expect(recentAdminAudit.entries()).toMatchObject([{
+      actor: 'founder',
+      role: 'super_admin',
+      action: 'session.role_store_unavailable',
+      outcome: 'denied',
+    }]);
+  });
+
+  test('an unreadable store does NOT fall back to the environment role', async () => {
+    // The failure mode this rules out: catching the read error and carrying on
+    // with ADMIN_ROLES alone, which would silently restore every permission a
+    // narrowing row had taken away, exactly when the store cannot say so.
+    cookieStore.value = await cookieFor('founder', 'super_admin');
+
+    await expect(currentAdminSession(BASE_ENV, {
+      readAssignment: async () => {
+        throw new Error('connection refused');
+      },
+    })).rejects.toBeInstanceOf(AdminUnauthenticatedError);
   });
 });
 
@@ -141,7 +354,7 @@ describe('requireAdminPermission', () => {
   test('authenticates then authorizes, and returns who', async () => {
     cookieStore.value = await cookieFor('founder', 'super_admin');
 
-    const session = await requireAdminPermission('subscriptions.write', BASE_ENV);
+    const session = await requireAdminPermission('subscriptions.write', BASE_ENV, NO_ASSIGNMENT);
 
     expect(session.username).toBe('founder');
   });
@@ -150,7 +363,11 @@ describe('requireAdminPermission', () => {
     cookieStore.value = await cookieFor('founder', 'billing');
 
     await expect(
-      requireAdminPermission('subscriptions.write', { ...BASE_ENV, ADMIN_ROLES: '{"founder":"support"}' }),
+      requireAdminPermission(
+        'subscriptions.write',
+        { ...BASE_ENV, ADMIN_ROLES: '{"founder":"support"}' },
+        NO_ASSIGNMENT,
+      ),
     ).rejects.toBeInstanceOf(AdminForbiddenError);
   });
 
@@ -161,8 +378,34 @@ describe('requireAdminPermission', () => {
     cookieStore.value = await cookieFor('founder', 'billing');
     const env = { ...BASE_ENV, ADMIN_ROLES: '{"founder":"support"}' };
 
-    await expect(requireAdminPermission('support.write', env)).resolves.toMatchObject({ role: 'support' });
-    await expect(requireAdminPermission('subscriptions.write', env)).rejects.toBeInstanceOf(AdminForbiddenError);
+    await expect(requireAdminPermission('support.write', env, NO_ASSIGNMENT))
+      .resolves.toMatchObject({ role: 'support' });
+    await expect(requireAdminPermission('subscriptions.write', env, NO_ASSIGNMENT))
+      .rejects.toBeInstanceOf(AdminForbiddenError);
+  });
+
+  test('a narrowing row takes a permission away at the gate, not just in the nav', async () => {
+    cookieStore.value = await cookieFor('founder', 'super_admin');
+    const narrowed = withAssignment(assignment({ username: 'founder', role: 'read_only' }));
+
+    await expect(requireAdminPermission('shops.read', BASE_ENV, narrowed))
+      .resolves.toMatchObject({ username: 'founder' });
+    await expect(requireAdminPermission('admins.write', BASE_ENV, narrowed))
+      .rejects.toBeInstanceOf(AdminForbiddenError);
+    await expect(requireAdminPermission('settings.write', BASE_ENV, narrowed))
+      .rejects.toBeInstanceOf(AdminForbiddenError);
+  });
+
+  test('a disabled row refuses every permission, including the ones it names', async () => {
+    cookieStore.value = await cookieFor('founder', 'super_admin');
+    const disabled = withAssignment(
+      assignment({ username: 'founder', role: 'super_admin', isActive: false }),
+    );
+
+    for (const permission of ['shops.read', 'admins.write', 'audit.export'] as const) {
+      await expect(requireAdminPermission(permission, BASE_ENV, disabled))
+        .rejects.toBeInstanceOf(AdminUnauthenticatedError);
+    }
   });
 });
 

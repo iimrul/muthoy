@@ -7,37 +7,162 @@
 // granted.
 
 import { describe, expect, test } from 'vitest';
+import { ADMIN_ROLE_NAME_VALUES } from '@muthoy/validation';
 import { AdminConfigError } from './errors';
 import {
   ADMIN_PERMISSIONS,
   ADMIN_ROLE_NAMES,
   hasPermission,
+  intersectPermissions,
+  isAdminPermission,
   isAdminRole,
   parseAdminRoles,
+  permissionMatrix,
   permissionsForRole,
   resolveRole,
+  type AdminPermission,
 } from './adminRoles';
+
+// Batch 3 §4.2, transcribed INDEPENDENTLY of ROLE_PERMISSIONS: a test that
+// derived its expectation from the table it is checking would pass against any
+// table at all. Order is [super_admin, billing, support, read_only], matching
+// ADMIN_ROLE_NAMES.
+const PLAN_MATRIX: Readonly<Record<string, readonly [boolean, boolean, boolean, boolean]>> = {
+  'shops.read': [true, true, true, true],
+  'accounts.read': [true, true, true, true],
+  'subscriptions.read': [true, true, true, true],
+  'subscriptions.write': [true, true, false, false],
+  'payments.read': [true, true, true, true],
+  'revenue.read': [true, true, false, false],
+  'analytics.read': [true, true, true, true],
+  'maps.read': [true, true, true, false],
+  'support.read': [true, false, true, true],
+  'support.write': [true, false, true, false],
+  'audit.read': [true, true, false, true],
+  'shop_audit.read': [true, false, true, false],
+  'audit.export': [true, false, false, false],
+  'admins.read': [true, false, false, false],
+  'admins.write': [true, false, false, false],
+  'reports.read': [true, true, true, true],
+  'reports.export': [true, true, false, false],
+  'settings.read': [true, true, true, true],
+  'settings.write': [true, false, false, false],
+};
 
 describe('the role table', () => {
   test('super_admin holds every permission', () => {
     expect([...permissionsForRole('super_admin')].sort()).toEqual([...ADMIN_PERMISSIONS].sort());
   });
 
-  test.each([
-    ['billing', 'subscriptions.write', true],
-    ['billing', 'support.write', false],
-    ['support', 'support.write', true],
-    ['support', 'subscriptions.write', false],
-    ['read_only', 'shops.read', true],
-    ['read_only', 'subscriptions.write', false],
-    ['read_only', 'support.write', false],
-    ['read_only', 'audit.read', false],
-    ['billing', 'audit.read', true],
-    ['support', 'audit.read', false],
-  ])('%s %s -> %s', (role, permission, expected) => {
-    expect(hasPermission(role, permission)).toBe(expected);
+  test('the permission list is exactly the nineteen the plan names', () => {
+    expect([...ADMIN_PERMISSIONS].sort()).toEqual(Object.keys(PLAN_MATRIX).sort());
   });
 
+  test('every cell of the §4.2 matrix is granted exactly as written', () => {
+    const wrong: string[] = [];
+    for (const [permission, grants] of Object.entries(PLAN_MATRIX)) {
+      ADMIN_ROLE_NAMES.forEach((role, index) => {
+        if (hasPermission(role, permission) !== grants[index]) {
+          wrong.push(role + ' ' + permission);
+        }
+      });
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  test('the four non-obvious grants, named, so a silent widening is visible', () => {
+    // support must never become a billing console.
+    expect(hasPermission('support', 'subscriptions.write')).toBe(false);
+    expect(hasPermission('support', 'revenue.read')).toBe(false);
+    // A coordinate locates a physical person; read_only does not get one.
+    expect(hasPermission('read_only', 'maps.read')).toBe(false);
+    // An export is the one way the log leaves the panel.
+    for (const role of ['billing', 'support', 'read_only']) {
+      expect(hasPermission(role, 'audit.export')).toBe(false);
+    }
+    // Volume 5 scopes the per-shop log to support/debugging use.
+    expect(hasPermission('support', 'shop_audit.read')).toBe(true);
+    expect(hasPermission('billing', 'shop_audit.read')).toBe(false);
+  });
+
+  test('the matrix Page 8 renders is the table itself', () => {
+    const rendered = permissionMatrix();
+    expect(rendered).toHaveLength(ADMIN_PERMISSIONS.length);
+    for (const row of rendered) {
+      expect(row.roles.map((entry) => entry.role)).toEqual([...ADMIN_ROLE_NAMES]);
+      for (const entry of row.roles) {
+        expect(entry.granted).toBe(hasPermission(entry.role, row.permission));
+      }
+    }
+  });
+
+  test('the shared schema names the SAME four roles, so the two cannot drift', () => {
+    // packages/validation/src/admin.ts has to enumerate the roles for its Zod
+    // enum, and a payload schema that accepted a fifth name — or refused one of
+    // these four — would be a gate that disagrees with the table it guards.
+    expect([...ADMIN_ROLE_NAME_VALUES]).toEqual([...ADMIN_ROLE_NAMES]);
+  });
+
+  test('isAdminPermission accepts exactly the nineteen names', () => {
+    for (const permission of ADMIN_PERMISSIONS) expect(isAdminPermission(permission)).toBe(true);
+    for (const value of ['shops.write', 'SHOPS.READ', '', 'constructor', null, 7, {}]) {
+      expect(isAdminPermission(value)).toBe(false);
+    }
+  });
+});
+
+describe('intersectPermissions — a row can only narrow', () => {
+  test('a wider assignment grants nothing extra', () => {
+    const effective = intersectPermissions(
+      permissionsForRole('read_only'),
+      permissionsForRole('super_admin'),
+    );
+    expect([...effective].sort()).toEqual([...permissionsForRole('read_only')].sort());
+    expect(effective).not.toContain('admins.write');
+    expect(effective).not.toContain('subscriptions.write');
+  });
+
+  test('a narrower assignment is what applies', () => {
+    const effective = intersectPermissions(
+      permissionsForRole('super_admin'),
+      permissionsForRole('support'),
+    );
+    expect([...effective].sort()).toEqual([...permissionsForRole('support')].sort());
+  });
+
+  test('two unordered roles yield only what both hold', () => {
+    const effective = intersectPermissions(
+      permissionsForRole('billing'),
+      permissionsForRole('support'),
+    );
+    expect(effective).toContain('shops.read');
+    expect(effective).toContain('analytics.read');
+    // Each role's exclusive permission is gone, which is the whole point: a
+    // ranking would have kept one of them.
+    expect(effective).not.toContain('subscriptions.write');
+    expect(effective).not.toContain('support.write');
+  });
+
+  test('the result does not depend on argument order', () => {
+    const left = intersectPermissions(permissionsForRole('billing'), permissionsForRole('support'));
+    const right = intersectPermissions(permissionsForRole('support'), permissionsForRole('billing'));
+    expect(left).toEqual(right);
+  });
+
+  test('an empty side yields nothing', () => {
+    expect(intersectPermissions(permissionsForRole('super_admin'), [])).toEqual([]);
+    expect(intersectPermissions([], permissionsForRole('super_admin'))).toEqual([]);
+  });
+
+  test('a value outside the permission list cannot survive the intersection', () => {
+    // Both sides "hold" it and it still does not come out: the result is built
+    // from ADMIN_PERMISSIONS, not from either input.
+    const planted = ['constructor', 'shops.read'] as unknown as readonly AdminPermission[];
+    expect(intersectPermissions(planted, planted)).toEqual(['shops.read']);
+  });
+});
+
+describe('the role table — invariants that outlive any one matrix', () => {
   test('billing and support are NOT ordered — neither contains the other', () => {
     // This is why a role mismatch cannot be resolved by "the lower-privilege of
     // the two wins": there is no lower. Either ranking preserves authority the

@@ -4,7 +4,6 @@ import { DM_Mono, Plus_Jakarta_Sans } from 'next/font/google';
 import Link from 'next/link';
 import './globals.css';
 import { currentAdminSession } from '../lib/adminAuthz';
-import { hasPermission } from '../lib/adminRoles';
 
 // W4-06. The shell shows WHO is signed in and offers the sign-out the shared
 // Basic Auth credential never had (a browser cannot be told to forget one).
@@ -37,9 +36,15 @@ export const metadata: Metadata = {
 };
 
 // W4-07. Each link declares the permission its page REQUIRES, and the shell
-// hides the ones this role cannot use. That is presentation, NOT the gate: the
-// page itself calls requireAdminPermission as its first statement, so typing
-// the URL directly is refused server-side regardless of what the nav shows.
+// hides the ones this session cannot use. That is presentation, NOT the gate:
+// the page itself calls requireAdminPermission as its first statement, so
+// typing the URL directly is refused server-side regardless of what the nav
+// shows.
+//
+// Batch 3 §4.3: the filter reads the session's EFFECTIVE permission set, not
+// hasPermission(role). Asking the role would show a narrowed account links its
+// assignment row has already taken away — every one of which the page would
+// then refuse, which is a worse experience than not offering them.
 const NAV_LINKS = [
   { href: '/', label: 'Dashboard', permission: 'shops.read' },
   { href: '/pharmacies', label: 'Pharmacies', permission: 'shops.read' },
@@ -49,10 +54,21 @@ const NAV_LINKS = [
   { href: '/audit', label: 'Audit', permission: 'audit.read' },
 ] as const;
 
-async function signedInAs(): Promise<{ username: string; role: string } | null> {
+interface SignedIn {
+  username: string;
+  role: string;
+  /** Batch 3 §4.3: the EFFECTIVE set, so a narrowed account's nav narrows too. */
+  permissions: readonly string[];
+}
+
+async function signedInAs(): Promise<SignedIn | null> {
   try {
     const session = await currentAdminSession();
-    return { username: session.username, role: session.role };
+    return {
+      username: session.username,
+      role: session.role,
+      permissions: session.permissions,
+    };
   } catch {
     // No session, an ended one, or an unconfigured panel. The middleware
     // decides what happens to the request; the shell just shows less.
@@ -74,7 +90,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
           <nav className="mx-auto flex w-full max-w-5xl items-center gap-6 px-6 py-4">
             <span className="font-semibold text-brand-deepGreen">Muthoy Admin</span>
             {signedIn
-              ? NAV_LINKS.filter((link) => hasPermission(signedIn.role, link.permission)).map((link) => (
+              ? NAV_LINKS.filter((link) => signedIn.permissions.includes(link.permission)).map((link) => (
                   <Link key={link.href} href={link.href} className="text-sm text-midGray hover:text-richBlack">
                     {link.label}
                   </Link>

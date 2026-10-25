@@ -111,6 +111,11 @@ function deps(role: 'super_admin' | 'billing' | 'support' | 'read_only', client?
     now: () => NOW,
     sinks: [recentAdminAudit],
     revalidate: () => undefined,
+    // Batch 3 §4.3. These actions have no assignment row, which is the
+    // unnarrowed case: authority is exactly what ADMIN_ROLES grants, as it was
+    // in W4-08. It is injected because the real reader opens a Supabase
+    // connection and an unreadable store DENIES by design.
+    readAssignment: async () => null,
     ...(client === undefined ? {} : { client: client as never }),
   };
 }

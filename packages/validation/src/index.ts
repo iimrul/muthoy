@@ -12,3 +12,5 @@ export * from './purchases';
 export * from './customers';
 export * from './expenses';
 export * from './b2';
+// Batch 3 - the admin panel's write payloads and query shapes.
+export * from './admin';

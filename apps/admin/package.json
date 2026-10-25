@@ -13,6 +13,7 @@
     "@muthoy/constants": "workspace:*",
     "@muthoy/types": "workspace:*",
     "@muthoy/utils": "workspace:*",
+    "@muthoy/validation": "workspace:*",
     "@supabase/supabase-js": "^2.112.3",
     "next": "15.5.23",
     "react": "19.2.0",

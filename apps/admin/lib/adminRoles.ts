@@ -17,19 +17,44 @@ import { AdminConfigError } from './errors';
 export const ADMIN_ROLE_NAMES = ['super_admin', 'billing', 'support', 'read_only'] as const;
 export type AdminRole = (typeof ADMIN_ROLE_NAMES)[number];
 
+// Batch 3 §4.1. The seven W4-06 names are UNCHANGED — renaming one would
+// silently un-gate whatever still asked for the old string — and twelve are
+// added for the eleven pages.
 export const ADMIN_PERMISSIONS = [
   'shops.read',
   'accounts.read',
   'subscriptions.read',
   'subscriptions.write',
   'payments.read',
+  'revenue.read',
+  'analytics.read',
+  'maps.read',
+  'support.read',
   'support.write',
   'audit.read',
+  'shop_audit.read',
+  'audit.export',
+  'admins.read',
+  'admins.write',
+  'reports.read',
+  'reports.export',
+  'settings.read',
+  'settings.write',
 ] as const;
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number];
 
 // Frozen, and frozen deliberately: a role table that can be mutated at runtime
 // is a role table an imported module can widen.
+//
+// Batch 3 §4.2. The four grants that are not obvious, each deliberate:
+//   - `support` holds NO subscriptions.write and NO revenue.read, so the
+//     support surface cannot become a billing console;
+//   - `read_only` holds NO maps.read, because a coordinate is the one field in
+//     this product that locates a physical person;
+//   - `audit.export` is super_admin only, because an export is the one way the
+//     log leaves the panel;
+//   - `shop_audit.read` goes to `support` and NOT to `billing`: Volume 5 scopes
+//     the per-shop log to "support/debugging use only".
 const ROLE_PERMISSIONS: Readonly<Record<AdminRole, readonly AdminPermission[]>> = Object.freeze({
   super_admin: Object.freeze([...ADMIN_PERMISSIONS]),
   billing: Object.freeze([
@@ -38,20 +63,37 @@ const ROLE_PERMISSIONS: Readonly<Record<AdminRole, readonly AdminPermission[]>> 
     'subscriptions.read',
     'subscriptions.write',
     'payments.read',
+    'revenue.read',
+    'analytics.read',
+    'maps.read',
     'audit.read',
+    'reports.read',
+    'reports.export',
+    'settings.read',
   ] as const),
   support: Object.freeze([
     'shops.read',
     'accounts.read',
     'subscriptions.read',
     'payments.read',
+    'analytics.read',
+    'maps.read',
+    'support.read',
     'support.write',
+    'shop_audit.read',
+    'reports.read',
+    'settings.read',
   ] as const),
   read_only: Object.freeze([
     'shops.read',
     'accounts.read',
     'subscriptions.read',
     'payments.read',
+    'analytics.read',
+    'support.read',
+    'audit.read',
+    'reports.read',
+    'settings.read',
   ] as const),
 });
 
@@ -74,6 +116,52 @@ export function permissionsForRole(role: string): readonly AdminPermission[] {
 
 export function hasPermission(role: string, permission: string): boolean {
   return (permissionsForRole(role) as readonly string[]).includes(permission);
+}
+
+export function isAdminPermission(value: unknown): value is AdminPermission {
+  return typeof value === 'string' && (ADMIN_PERMISSIONS as readonly string[]).includes(value);
+}
+
+/**
+ * Batch 3 §4.3 rule 2. The effective set of two disagreeing roles.
+ *
+ * lib/adminAuthz.ts already recorded why this is the only correct operation:
+ * billing holds subscriptions.write and support does not, support holds
+ * support.write and billing does not, so the four roles are NOT totally
+ * ordered and any ranking preserves authority one of them never had.
+ *
+ * Order follows ADMIN_PERMISSIONS, not either input, so the result is stable
+ * whichever way round it is called — a set, not a filtered list.
+ */
+export function intersectPermissions(
+  left: readonly AdminPermission[],
+  right: readonly AdminPermission[],
+): readonly AdminPermission[] {
+  const inLeft = new Set<string>(left);
+  const inRight = new Set<string>(right);
+  return ADMIN_PERMISSIONS.filter(
+    (permission) => inLeft.has(permission) && inRight.has(permission),
+  );
+}
+
+/**
+ * The §4.2 matrix, read from ROLE_PERMISSIONS itself.
+ *
+ * Page 8 renders this rather than a hand-kept copy, so the documented matrix
+ * cannot drift from the enforced one. Returns fresh arrays: a caller that
+ * sorts or splices its result must not be able to reach the frozen table.
+ */
+export function permissionMatrix(): readonly {
+  permission: AdminPermission;
+  roles: readonly { role: AdminRole; granted: boolean }[];
+}[] {
+  return ADMIN_PERMISSIONS.map((permission) => ({
+    permission,
+    roles: ADMIN_ROLE_NAMES.map((role) => ({
+      role,
+      granted: hasPermission(role, permission),
+    })),
+  }));
 }
 
 /**

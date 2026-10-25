@@ -252,40 +252,184 @@ describe('admin write power is bounded at the source', () => {
     });
   })(ADMIN_ROOT);
 
-  /** The ONE approved direct write. */
+  /**
+   * Batch 3 §8.12 — the write manifest: every direct table write in the panel,
+   * enumerated by (module, table, operation) and compared against the parsed
+   * sources.
+   *
+   * W4-08 had exactly one approved write site, so a single constant was enough.
+   * Batch 3 adds the modules that own the new admin tables, and a list of
+   * permitted FILES would say nothing about WHICH table each may write — which
+   * is the part that matters, because `shops`, `sales`, `sale_refunds`,
+   * `users`, `audit_logs`, `entitlement_snapshots`, `billing_subscriptions`,
+   * `billing_accounts` and `plan_offerings` must appear in no entry at all.
+   * That absence is also how §8.3's no-paid-access-without-payment rule is
+   * enforced at the source.
+   *
+   * `delete` and `truncate` appear in no entry, deliberately.
+   */
+  const ADMIN_WRITE_MANIFEST: readonly {
+    module: string;
+    table: string;
+    operations: readonly string[];
+  }[] = [
+    // The existing guarded stale-order transition, unchanged.
+    { module: 'lib/adminActions.ts', table: 'payment_orders', operations: ['update'] },
+    // §4.3's role narrowing, account disable and per-user session revocation.
+    {
+      module: 'lib/adminIdentityStore.ts',
+      table: 'admin_role_assignments',
+      operations: ['insert', 'update'],
+    },
+  ];
+
+  /** The one module whose single update carries the stale-order guards. */
   const APPROVED_WRITE_SITE = 'lib/adminActions.ts';
 
+  const MANIFEST_MODULES = new Set(ADMIN_WRITE_MANIFEST.map((entry) => entry.module));
+
+  /** Tables that must never appear in a write entry, named rather than implied. */
+  const READ_ONLY_TABLES: readonly string[] = [
+    'shops',
+    'sales',
+    'sale_refunds',
+    'users',
+    'audit_logs',
+    'entitlement_snapshots',
+    'billing_subscriptions',
+    'billing_accounts',
+    'plan_offerings',
+  ];
+
   /**
-   * A PostgREST write, and not a Map write. `.insert(`, `.update(` and
-   * `.upsert(` exist only on the query builder here, but `.delete(` is also
-   * Map.prototype.delete — lib/adminLogin.ts prunes its throttle maps with it,
-   * and counting that as a table write made this assertion fire on code that
-   * touches no table at all. So a delete counts only inside a .from() chain.
+   * Each write, paired with the table it targets.
+   *
+   * It searches BACKWARDS from the operation for the nearest preceding
+   * `.from('table')` rather than forwards from `.from(` over a fixed window: a
+   * module that reads one table and writes another would otherwise have its
+   * write attributed to whichever `.from(` happened to be within the window,
+   * and lib/adminIdentityStore.ts is exactly that shape.
    */
+  function writeOperations(source: { path: string; code: string }): { table: string; operation: string }[] {
+    const writes: { table: string; operation: string }[] = [];
+    const pattern = /\.(insert|update|upsert|delete)\s*\(/g;
+    for (const match of source.code.matchAll(pattern)) {
+      const operation = match[1] ?? '';
+      const before = source.code.slice(0, match.index ?? 0);
+      const froms = [...before.matchAll(/\.from\(\s*'([a-z_]+)'\s*\)/g)];
+      const nearest = froms[froms.length - 1];
+      // A `.delete(` with no `.from(` before it is Map.prototype.delete —
+      // lib/adminLogin.ts prunes its throttle maps with it, and counting that
+      // as a table write made this assertion fire on code that touches no
+      // table at all.
+      if (nearest === undefined) {
+        if (operation === 'delete') continue;
+        writes.push({ table: '(none)', operation });
+        continue;
+      }
+      writes.push({ table: nearest[1] ?? '(none)', operation });
+    }
+    return writes;
+  }
+
+  /** Just the operation names, for the single-site assertions below. */
   function writeCallSites(source: { path: string; code: string }): string[] {
-    const sites: string[] = [];
-    for (const match of source.code.matchAll(/\.(insert|update|upsert)\s*\(/g)) {
-      sites.push(match[1] ?? '');
-    }
-    const chainedDeletes = source.code.match(
-      /\.from\(\s*'[a-z_]+'\s*\)[\s\S]{0,300}?\.delete\s*\(/g,
-    );
-    for (let index = 0; index < (chainedDeletes?.length ?? 0); index += 1) {
-      sites.push('delete');
-    }
-    return sites;
+    return writeOperations(source).map((write) => write.operation);
   }
 
   test('finds the admin source tree', () => {
     expect(ADMIN_SOURCES.length).toBeGreaterThan(10);
   });
 
-  test('no admin source outside the approved call site performs a direct table write', () => {
+  test('only the manifest modules perform a direct table write', () => {
     const offenders = ADMIN_SOURCES
-      .filter((source) => source.path !== APPROVED_WRITE_SITE)
-      .filter((source) => writeCallSites(source).length > 0);
+      .filter((source) => !MANIFEST_MODULES.has(source.path))
+      .filter((source) => writeOperations(source).length > 0);
 
     expect(offenders.map((source) => source.path)).toEqual([]);
+  });
+
+  test('every write matches a manifest entry, table and operation together', () => {
+    const undeclared: string[] = [];
+    for (const source of ADMIN_SOURCES) {
+      for (const write of writeOperations(source)) {
+        const entry = ADMIN_WRITE_MANIFEST.find(
+          (candidate) => candidate.module === source.path && candidate.table === write.table,
+        );
+        if (entry === undefined || !entry.operations.includes(write.operation)) {
+          undeclared.push(source.path + ' ' + write.operation + ' ' + write.table);
+        }
+      }
+    }
+
+    expect(undeclared).toEqual([]);
+  });
+
+  test('every manifest entry is REAL — a stale entry is a hole, not a comment', () => {
+    const unused = ADMIN_WRITE_MANIFEST.filter((entry) => {
+      const source = ADMIN_SOURCES.find((candidate) => candidate.path === entry.module);
+      if (source === undefined) return true;
+      const writes = writeOperations(source);
+      return !entry.operations.every(
+        (operation) => writes.some(
+          (write) => write.table === entry.table && write.operation === operation,
+        ),
+      );
+    });
+
+    expect(unused.map((entry) => entry.module + ' ' + entry.table)).toEqual([]);
+  });
+
+  test('no manifest entry writes a table the panel may only read', () => {
+    const forbidden = ADMIN_WRITE_MANIFEST
+      .filter((entry) => READ_ONLY_TABLES.includes(entry.table));
+
+    expect(forbidden.map((entry) => entry.module + ' ' + entry.table)).toEqual([]);
+  });
+
+  test('delete and truncate appear in no manifest entry at all', () => {
+    const destructive = ADMIN_WRITE_MANIFEST
+      .filter((entry) => entry.operations.some(
+        (operation) => operation === 'delete' || operation === 'truncate',
+      ));
+
+    expect(destructive.map((entry) => entry.module)).toEqual([]);
+  });
+
+  test('negative control C: a synthetic module writing shops is rejected', () => {
+    const synthetic = {
+      path: 'lib/adminIdentityStore.ts',
+      code: "await client.from('shops').update({ name: 'nope' }).eq('id', id);",
+    };
+
+    // Same module as a real manifest entry, different table: the PAIR is what
+    // is checked, so declaring a module is not a licence to write anything.
+    expect(writeOperations(synthetic)).toEqual([{ table: 'shops', operation: 'update' }]);
+    expect(ADMIN_WRITE_MANIFEST.some(
+      (entry) => entry.module === synthetic.path && entry.table === 'shops',
+    )).toBe(false);
+  });
+
+  test('negative control D: a synthetic adminAuditStore UPDATE is rejected', () => {
+    // The audit table is INSERT-only by grant; this proves the source-level
+    // guard would catch an update even before Postgres refused it.
+    const synthetic = {
+      path: 'lib/adminAuditStore.ts',
+      code: "await client.from('admin_audit_log').update({ outcome: 'success' }).eq('id', id);",
+    };
+
+    expect(writeOperations(synthetic)).toEqual([
+      { table: 'admin_audit_log', operation: 'update' },
+    ]);
+    expect(MANIFEST_MODULES.has(synthetic.path)).toBe(false);
+  });
+
+  test('a Map delete is not a table write', () => {
+    // lib/adminLogin.ts prunes its throttle maps with `.delete(`, and counting
+    // that as a table write made this assertion fire on code that touches no
+    // table at all.
+    const synthetic = { path: 'lib/pretend.ts', code: 'throttle.delete(key);' };
+    expect(writeOperations(synthetic)).toEqual([]);
   });
 
   test('the approved call site performs exactly ONE update and no other write', () => {

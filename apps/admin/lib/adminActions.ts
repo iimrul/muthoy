@@ -25,7 +25,11 @@ import 'server-only';
 
 import { revalidatePath } from 'next/cache';
 import { recordAdminAction, type AdminAuditSink } from './adminAudit';
-import { requireAdminPermission, type AdminEnvironment } from './adminAuthz';
+import {
+  requireAdminPermission,
+  type AdminAuthzDeps,
+  type AdminEnvironment,
+} from './adminAuthz';
 import { isUuid } from './adminViews';
 import { AdminDataError } from './errors';
 import { getSupabaseAdmin } from './supabaseAdmin';
@@ -34,7 +38,7 @@ export type AdminActionResult =
   | { ok: true; message: string }
   | { ok: false; message: string };
 
-export interface AdminActionDeps {
+export interface AdminActionDeps extends AdminAuthzDeps {
   env?: AdminEnvironment;
   now?: () => Date;
   sinks?: readonly AdminAuditSink[];
@@ -122,7 +126,9 @@ export async function reconcilePlanLimits(
   accountId: string,
   deps: AdminActionDeps = {},
 ): Promise<AdminActionResult> {
-  const session = await requireAdminPermission('subscriptions.write', deps.env);
+  const session = await requireAdminPermission('subscriptions.write', deps.env, {
+    readAssignment: deps.readAssignment,
+  });
 
   if (!isUuid(accountId)) {
     audit({ actor: session.username, role: session.role, action: 'subscription.reconcile_limits', target: 'invalid', outcome: 'failure', reason: 'invalid_id' }, deps.sinks);
@@ -161,7 +167,9 @@ export async function expireStalePaymentOrder(
   orderId: string,
   deps: AdminActionDeps = {},
 ): Promise<AdminActionResult> {
-  const session = await requireAdminPermission('support.write', deps.env);
+  const session = await requireAdminPermission('support.write', deps.env, {
+    readAssignment: deps.readAssignment,
+  });
 
   if (!isUuid(orderId)) {
     audit({ actor: session.username, role: session.role, action: 'payment.expire_stale_order', target: 'invalid', outcome: 'failure', reason: 'invalid_id' }, deps.sinks);

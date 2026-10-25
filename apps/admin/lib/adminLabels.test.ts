@@ -60,13 +60,49 @@ describe('the GROSS boundary', () => {
     return new RegExp('(^|[^A-Za-z])' + word + '([^A-Za-z]|$)', 'i').test(code);
   }
 
-  // Four of the five words stay banned outright, because nothing in the panel
-  // computes them yet. `net` is the one W4-04 earns — and it is not simply
-  // unbanned, it is TIED TO THE COMPUTATION.
-  test.each(['revenue', 'MRR', 'ARR', 'profit'])('no page describes a figure as %s', (word) => {
+  // `MRR`, `ARR` and `profit` stay banned outright, because nothing in the
+  // panel computes them yet. `net` is the one W4-04 earns — and it is not
+  // simply unbanned, it is TIED TO THE COMPUTATION.
+  test.each(['MRR', 'ARR', 'profit'])('no page describes a figure as %s', (word) => {
     const offenders = SOURCES.filter((file) => mentionsWord(file.code, word));
 
     expect(offenders.map((file) => file.path)).toEqual([]);
+  });
+
+  // Batch 3 §4.1 adds the PERMISSION `revenue.read`, which is an authorization
+  // key and not a label on a figure. So the ban is not lifted — it is narrowed
+  // to exactly that identifier, and the word stays banned everywhere a reader
+  // could see it. §5.2's typed metric manifest is what will eventually allow
+  // the word on the one page that earns it, against a computed figure; until
+  // that manifest exists, nothing may say it at all.
+  const PERMISSION_IDENTIFIER = /revenue\.(read|export)/g;
+
+  test('no page describes a figure as revenue', () => {
+    const offenders = SOURCES.filter((file) => mentionsWord(
+      file.code.replace(PERMISSION_IDENTIFIER, 'PERMISSION_KEY'),
+      'revenue',
+    ));
+
+    expect(offenders.map((file) => file.path)).toEqual([]);
+  });
+
+  test('negative control: the narrowing does not blind the guard', () => {
+    // The exemption is the identifier, not the word. A figure labelled
+    // "Revenue" in any other shape is still caught — otherwise the line above
+    // would have quietly stopped checking anything.
+    for (const planted of [
+      'const label = "Revenue today";',
+      "heading: 'Total revenue',",
+      'revenue_total',
+    ]) {
+      expect(mentionsWord(planted.replace(PERMISSION_IDENTIFIER, 'PERMISSION_KEY'), 'revenue'))
+        .toBe(true);
+    }
+    // And the identifier itself is the only thing that passes.
+    expect(mentionsWord(
+      "requireAdminPermission('revenue.read')".replace(PERMISSION_IDENTIFIER, 'PERMISSION_KEY'),
+      'revenue',
+    )).toBe(false);
   });
 
   // The replacement has to be STRONGER than the ban, not weaker. A blanket ban

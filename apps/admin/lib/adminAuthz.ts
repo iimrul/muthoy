@@ -19,11 +19,27 @@ import 'server-only';
 // totally ordered and any ranking preserves authority the other role never had.
 // If a future requirement really needs both consulted, the correct operation is
 // the INTERSECTION of their permission sets, never a rank comparison.
+//
+// BATCH 3 §4.3 — that requirement arrived, and the intersection is what shipped.
+// `admin_role_assignments` is now read on every request and can do exactly
+// three things, none of which can WIDEN authority:
+//   - narrow it, to the intersection of the environment role and the row's;
+//   - deny outright, when the row is disabled;
+//   - deny this cookie, when it was minted at or before the row's
+//     `sessions_revoked_at` — the per-user revocation the W4-06 comment in
+//     lib/adminSession.ts said needed a table.
+// The decision itself is pure and lives in lib/adminAssignments.ts; the row is
+// read through lib/adminIdentityStore.ts. An unreadable store DENIES.
 
 import { cookies } from 'next/headers';
 import { AdminForbiddenError, AdminUnauthenticatedError } from './errors';
 import { recordAdminAction } from './adminAudit';
-import { hasPermission, parseAdminRoles, type AdminPermission, type AdminRole } from './adminRoles';
+import { parseAdminRoles, type AdminPermission, type AdminRole } from './adminRoles';
+import {
+  resolveEffectiveAuthority,
+  type AdminRoleAssignment,
+} from './adminAssignments';
+import { readRoleAssignment } from './adminIdentityStore';
 import {
   ADMIN_SESSION_COOKIE,
   type SessionEnvironment,
@@ -41,6 +57,26 @@ export interface AdminSessionContext {
   role: AdminRole;
   /** What the cookie claimed, kept only so a mismatch can be audited. */
   claimedRole: AdminRole;
+  /**
+   * Batch 3 §4.3. The narrowing row's role, or null when no row exists. It is
+   * NOT the authority — `permissions` is — and Page 8 shows it so the
+   * difference between the two roles is visible rather than inferred.
+   */
+  assignedRole: AdminRole | null;
+  /**
+   * What this request may actually do: the INTERSECTION of the environment
+   * role's permissions and the assignment row's, or the environment role's
+   * alone when no row exists. Every gate reads this and nothing else.
+   */
+  permissions: readonly AdminPermission[];
+}
+
+/**
+ * The one store read this module performs, injectable because every other case
+ * in adminAuthz.test.ts runs with no database at all.
+ */
+export interface AdminAuthzDeps {
+  readAssignment?: (username: string) => Promise<AdminRoleAssignment | null>;
 }
 
 /**
@@ -51,6 +87,7 @@ export interface AdminSessionContext {
  */
 export async function currentAdminSession(
   env: AdminEnvironment = process.env,
+  deps: AdminAuthzDeps = {},
 ): Promise<AdminSessionContext> {
   const secret = readSessionSecret(env);
   const epoch = readSessionEpoch(env);
@@ -66,39 +103,88 @@ export async function currentAdminSession(
     throw new AdminUnauthenticatedError(verified.reason);
   }
 
-  const role = roles.get(verified.payload.sub);
-  if (!role) {
-    // Removed from ADMIN_ROLES while holding a valid cookie: the cookie stops
-    // conferring anything, immediately.
+  const environmentRole = roles.get(verified.payload.sub) ?? null;
+
+  // Batch 3 §4.3 failure posture. FAIL CLOSED: if the narrowing store cannot
+  // be read, the request is denied with its own audited reason. The cost is
+  // stated rather than hidden — a database outage takes the panel down instead
+  // of silently widening authority back to ADMIN_ROLES alone, which is the
+  // right trade for a revocation check and the wrong one for availability.
+  let assignment: AdminRoleAssignment | null;
+  try {
+    const read = deps.readAssignment ?? readRoleAssignment;
+    assignment = await read(verified.payload.sub);
+  } catch (error: unknown) {
+    console.error('[admin] admin role assignment unreadable:', error);
     recordAdminAction({
       actor: verified.payload.sub,
-      role: null,
-      action: 'session.role_revoked',
+      role: environmentRole,
+      action: 'session.role_store_unavailable',
       outcome: 'denied',
-      meta: { claimedRole: verified.payload.role, reason: 'no ADMIN_ROLES entry' },
+      meta: { claimedRole: verified.payload.role, reason: 'role store unreadable' },
     });
-    throw new AdminUnauthenticatedError('no_role');
+    throw new AdminUnauthenticatedError('role_store_unavailable');
   }
 
-  if (role !== verified.payload.role) {
+  const authority = resolveEffectiveAuthority({
+    environmentRole,
+    assignment,
+    sessionIssuedAtMs: verified.payload.iat,
+  });
+
+  if (!authority.ok) {
+    // One record per reason, each distinguishable in the log: removed from the
+    // environment allowlist, disabled by a row, or revoked per user.
+    const action = authority.reason === 'no_environment_role'
+      ? 'session.role_revoked'
+      : authority.reason === 'assignment_disabled'
+        ? 'session.account_disabled'
+        : 'session.sessions_revoked';
     recordAdminAction({
       actor: verified.payload.sub,
-      role,
+      role: environmentRole,
+      action,
+      outcome: 'denied',
+      meta: { claimedRole: verified.payload.role, reason: authority.reason },
+    });
+    // 'no_role' is kept verbatim for the first case: it is what W4-06 recorded
+    // and what the middleware's own removal path already means.
+    throw new AdminUnauthenticatedError(
+      authority.reason === 'no_environment_role' ? 'no_role' : authority.reason,
+    );
+  }
+
+  if (authority.role !== verified.payload.role) {
+    recordAdminAction({
+      actor: verified.payload.sub,
+      role: authority.role,
       action: 'session.role_mismatch',
       outcome: 'success',
-      meta: { claimedRole: verified.payload.role, effectiveRole: role },
+      meta: { claimedRole: verified.payload.role, effectiveRole: authority.role },
     });
   }
 
-  return { username: verified.payload.sub, role, claimedRole: verified.payload.role };
+  return {
+    username: verified.payload.sub,
+    role: authority.role,
+    claimedRole: verified.payload.role,
+    assignedRole: authority.assignedRole,
+    permissions: authority.permissions,
+  };
 }
 
-/** Throws AdminForbiddenError and AUDITS the denial. Never returns false. */
+/**
+ * Throws AdminForbiddenError and AUDITS the denial. Never returns false.
+ *
+ * It tests the session's EFFECTIVE permission set, not `hasPermission(role)`.
+ * Asking the role would read straight past the §4.3 intersection and hand a
+ * narrowed account its environment role's full authority.
+ */
 export function requirePermission(
-  session: Pick<AdminSessionContext, 'username' | 'role'>,
+  session: Pick<AdminSessionContext, 'username' | 'role' | 'permissions'>,
   permission: AdminPermission,
 ): void {
-  if (hasPermission(session.role, permission)) return;
+  if ((session.permissions as readonly string[]).includes(permission)) return;
 
   recordAdminAction({
     actor: session.username,
@@ -114,8 +200,9 @@ export function requirePermission(
 export async function requireAdminPermission(
   permission: AdminPermission,
   env: AdminEnvironment = process.env,
+  deps: AdminAuthzDeps = {},
 ): Promise<AdminSessionContext> {
-  const session = await currentAdminSession(env);
+  const session = await currentAdminSession(env, deps);
   requirePermission(session, permission);
   return session;
 }
