@@ -19,11 +19,13 @@ import {
   expireStalePaymentOrder,
   reconcilePlanLimits,
 } from '../lib/adminActions';
+import { outcomeFor, outcomeQuery } from '../lib/adminOutcomes';
 
-/** 'done' or 'failed' plus the action name, so the page can say what happened. */
-function outcomeQuery(action: string, ok: boolean): string {
-  return '?' + (ok ? 'done=' : 'failed=') + action;
-}
+// Batch 3 §8.9d. `outcomeQuery(action, ok)` took a BOOLEAN and could emit only
+// `?done=` or `?failed=`, so a write that committed but could not be audited
+// had no way to say so and would have read as a plain failure — which invites
+// the retry that repeats the change. The three-way mapping lives in
+// lib/adminOutcomes.ts, where it is unit-tested.
 
 // E11: `refreshSnapshotAction` was HERE and is deliberately gone. It was the
 // HTTP surface of the withdrawn entitlement refresh — see the explanation in
@@ -34,11 +36,11 @@ function outcomeQuery(action: string, ok: boolean): string {
 export async function reconcileLimitsAction(formData: FormData): Promise<void> {
   const accountId = String(formData.get('accountId') ?? '');
   const result = await reconcilePlanLimits(accountId);
-  redirect('/accounts/' + accountId + outcomeQuery('reconcile', result.ok));
+  redirect('/accounts/' + accountId + outcomeQuery('reconcile', outcomeFor(result)));
 }
 
 export async function expireOrderAction(formData: FormData): Promise<void> {
   const orderId = String(formData.get('orderId') ?? '');
   const result = await expireStalePaymentOrder(orderId);
-  redirect('/payments' + outcomeQuery('expire', result.ok));
+  redirect('/payments' + outcomeQuery('expire', outcomeFor(result)));
 }

@@ -4,7 +4,7 @@ import DataTable, { type DataColumn } from '../../../components/DataTable';
 import DetailList from '../../../components/DetailList';
 import ErrorNotice from '../../../components/ErrorNotice';
 import { requireAdminPermission } from '../../../lib/adminAuthz';
-import { hasPermission } from '../../../lib/adminRoles';
+import { outcomeNote } from '../../../lib/adminOutcomes';
 import ActionButton from '../../../components/ActionButton';
 import { reconcileLimitsAction } from '../../adminFormActions';
 import { getAccountDetail, type AccountDetailView } from '../../../lib/adminQueries';
@@ -57,20 +57,17 @@ interface AccountPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
+// E11: the `refresh` entry was HERE and is deliberately gone with the action
+// it described. A success message for a withdrawn capability is a claim that
+// something happened.
+//
+// The three-outcome reading itself moved to lib/adminOutcomes.ts (§8.9d): this
+// page and /payments each had their own copy, and a third outcome spread across
+// two private copies is how one page ends up telling the truth and the other
+// one not.
 const OUTCOME_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
-  refresh: 'Entitlement snapshot refreshed.',
   reconcile: 'Plan limits reconciled.',
 });
-
-function outcomeNote(params: Record<string, string | string[] | undefined>): string | null {
-  const done = typeof params.done === 'string' ? params.done : null;
-  const failed = typeof params.failed === 'string' ? params.failed : null;
-  if (done !== null && Object.prototype.hasOwnProperty.call(OUTCOME_MESSAGES, done)) {
-    return OUTCOME_MESSAGES[done] ?? null;
-  }
-  if (failed !== null) return 'That action did not complete. The audit log and server log have the details.';
-  return null;
-}
 
 export default async function AccountDetailPage({ params, searchParams }: AccountPageProps) {
   let session;
@@ -96,8 +93,10 @@ export default async function AccountDetailPage({ params, searchParams }: Accoun
   if (detail === null) notFound();
 
   const { account, entitlement } = detail;
-  const note = outcomeNote(await searchParams);
-  const mayWrite = hasPermission(session.role, 'subscriptions.write');
+  const note = outcomeNote(await searchParams, OUTCOME_MESSAGES);
+  // Batch 3 §4.3: the EFFECTIVE set, so an assignment row that narrowed this
+  // account hides the control it has already taken away.
+  const mayWrite = session.permissions.includes('subscriptions.write');
 
   return (
     <>

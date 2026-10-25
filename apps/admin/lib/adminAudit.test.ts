@@ -38,12 +38,46 @@ describe('what an entry records', () => {
     expect(entries).toEqual([{
       at: '2026-10-22T06:00:00.000Z',
       actor: 'founder',
+      // Batch 3 §8.9: FALSE unless the caller says otherwise, so a call site
+      // that forgets to decide cannot claim a verified actor by omission.
+      actorVerified: false,
       role: 'billing',
       action: 'subscription.extend',
       target: 'account-7',
       outcome: 'success',
       meta: {},
     }]);
+  });
+
+  describe('actor_verified (Batch 3 §8.9)', () => {
+    function entryFor(input: Record<string, unknown>) {
+      const { sink, entries } = capture();
+      recordAdminAction(
+        { actor: 'claimed', action: 'login', outcome: 'failure', now: NOW, ...input },
+        [sink],
+      );
+      return entries[0]!;
+    }
+
+    test('a login attempt records the CLAIMED subject as unverified', () => {
+      expect(entryFor({}).actorVerified).toBe(false);
+    });
+
+    test('a session-derived actor can declare itself verified', () => {
+      expect(entryFor({ actorVerified: true }).actorVerified).toBe(true);
+    });
+
+    test.each([
+      ['a truthy string', 'yes'],
+      ['the number 1', 1],
+      ['an object', {}],
+      ['null', null],
+      ['undefined', undefined],
+    ])('%s does NOT claim verification', (_label, value) => {
+      // An unauthenticated caller must not be able to produce a verified row,
+      // and a truthiness check is how that would happen by accident.
+      expect(entryFor({ actorVerified: value }).actorVerified).toBe(false);
+    });
   });
 
   test('an absent role and target are null, never undefined', () => {
@@ -162,7 +196,79 @@ describe('redaction is by allowlist', () => {
 
   test('the allowlist holds no key that names a credential', () => {
     const forbidden = /secret|password|hash|salt|key|token|phone|authorization/i;
-    expect(ALLOWED_META_KEYS.filter((key) => forbidden.test(key))).toEqual([]);
+    // `settingKey` is the ONE deliberate exception, and it is an exception to
+    // the WORD and not to the rule: it names a platform setting key — one of
+    // six enumerated values, enforced below — and holds no credential. It is
+    // listed here rather than excluded by a looser pattern so that adding, say,
+    // `apiKey` still fails.
+    const EXEMPT: readonly string[] = ['settingKey'];
+    expect(
+      ALLOWED_META_KEYS.filter((key) => forbidden.test(key) && !EXEMPT.includes(key)),
+    ).toEqual([]);
+  });
+
+  describe('the enumerated value rules (Batch 3 §8.9)', () => {
+    function metaFor(meta: Record<string, unknown>) {
+      const { sink, entries } = capture();
+      recordAdminAction({ actor: 'founder', action: 'a', outcome: 'success', now: NOW, meta }, [sink]);
+      return entries[0]?.meta ?? {};
+    }
+
+    test('the eight new keys are allowed when their value fits', () => {
+      expect(metaFor({
+        caseId: '7b000000-0000-4000-8000-000000000001',
+        settingKey: 'feature.maps',
+        targetUsername: 'ops',
+        fromRole: 'billing',
+        toRole: 'support',
+        reportId: 'plan_distribution',
+        rowCount: 42,
+        durationMs: 17,
+        actorVerified: true,
+      })).toEqual({
+        caseId: '7b000000-0000-4000-8000-000000000001',
+        settingKey: 'feature.maps',
+        targetUsername: 'ops',
+        fromRole: 'billing',
+        toRole: 'support',
+        reportId: 'plan_distribution',
+        rowCount: 42,
+        durationMs: 17,
+        actorVerified: true,
+      });
+    });
+
+    test.each([
+      ['a caseId that is not a UUID', { caseId: 'case-7' }],
+      ['a settingKey outside the six', { settingKey: 'feature.everything' }],
+      ['a reportId that is not allowlisted', { reportId: 'all_the_money' }],
+      ['a role that is not one of the four', { fromRole: 'owner' }],
+      ['a target role that is not one of the four', { toRole: 'admin' }],
+      ['a username with whitespace', { targetUsername: 'two words' }],
+      ['an over-long username', { targetUsername: 'o'.repeat(65) }],
+      ['a fractional rowCount', { rowCount: 1.5 }],
+      ['a fractional durationMs', { durationMs: 0.25 }],
+      ['an infinite rowCount', { rowCount: Number.POSITIVE_INFINITY }],
+      ['a nested caseId', { caseId: { id: 'x' } }],
+      ['an array of roles', { fromRole: ['billing'] }],
+      ['a function', { reportId: () => 'x' }],
+      ['a null setting key', { settingKey: null }],
+    ])('drops %s', (_label, meta) => {
+      expect(metaFor(meta)).toEqual({});
+    });
+
+    test('a key outside the allowlist is dropped even with a valid-looking value', () => {
+      expect(metaFor({ serviceRoleKey: 'anything', notes: 'free text' })).toEqual({});
+    });
+
+    test('a phone-shaped value inside an allowed free-text key is still scrubbed', () => {
+      expect(metaFor({ reason: 'owner called from 01712345678' }).reason)
+        .toBe('owner called from [redacted]');
+    });
+
+    test('an empty settingKey is dropped rather than stored blank', () => {
+      expect(metaFor({ settingKey: '' })).toEqual({});
+    });
   });
 });
 

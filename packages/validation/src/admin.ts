@@ -47,3 +47,193 @@ export const adminSessionRevocationSchema = z.object({
 
 export type AdminRoleAssignmentUpdate = z.infer<typeof adminRoleAssignmentUpdateSchema>;
 export type AdminSessionRevocation = z.infer<typeof adminSessionRevocationSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The id-only write payloads.
+//
+// Batch 3 §8.13, round-3 finding 47: the two RETAINED write actions validated
+// their UUID with apps/admin's own `isUuid` — hand-written, not a shared
+// schema — which contradicts the rule that every write payload goes through
+// packages/validation. `isUuid` itself stays, because route params and
+// drill-down ids go through it on READ paths where no write payload exists.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A v1–v5 UUID with an RFC-4122 variant, matching apps/admin's `isUuid`
+ * exactly. Zod's own `z.string().uuid()` accepts the nil UUID and any variant
+ * nibble, so it is NOT the same predicate, and a write payload validated more
+ * loosely than the read path would be a gap rather than a safeguard.
+ */
+const adminUuid = z
+  .string()
+  .trim()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    'That is not a valid id',
+  );
+
+export const adminAccountIdActionSchema = z.object({ accountId: adminUuid });
+export const adminPaymentOrderIdActionSchema = z.object({ orderId: adminUuid });
+
+export type AdminAccountIdAction = z.infer<typeof adminAccountIdActionSchema>;
+export type AdminPaymentOrderIdAction = z.infer<typeof adminPaymentOrderIdActionSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Support (§8.7)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const ADMIN_SUPPORT_STATUS_VALUES = [
+  'open',
+  'investigating',
+  'waiting',
+  'resolved',
+  'closed',
+] as const;
+export const ADMIN_SUPPORT_PRIORITY_VALUES = ['low', 'normal', 'high', 'urgent'] as const;
+export const ADMIN_SUPPORT_CATEGORY_VALUES = [
+  'billing',
+  'sync',
+  'inventory',
+  'account',
+  'device',
+  'other',
+] as const;
+
+export const adminSupportStatusSchema = z.enum(ADMIN_SUPPORT_STATUS_VALUES);
+export const adminSupportPrioritySchema = z.enum(ADMIN_SUPPORT_PRIORITY_VALUES);
+export const adminSupportCategorySchema = z.enum(ADMIN_SUPPORT_CATEGORY_VALUES);
+
+/**
+ * Free text a support admin types. Bounded, because an unbounded text column
+ * reachable from a form is a storage-exhaustion surface.
+ */
+const supportSummary = z.string().trim().min(1, 'A summary is required').max(500);
+const supportBody = z.string().trim().min(1, 'A note cannot be empty').max(4_000);
+
+export const adminSupportCaseCreateSchema = z.object({
+  // A case may be about the platform rather than one shop, so the shop is
+  // optional — but when present it must be a real id, not a label.
+  shopId: adminUuid.nullish().transform((value) => value ?? null),
+  category: adminSupportCategorySchema,
+  priority: adminSupportPrioritySchema,
+  summary: supportSummary,
+});
+
+export const adminSupportCaseUpdateSchema = z.object({
+  caseId: adminUuid,
+  status: adminSupportStatusSchema,
+  priority: adminSupportPrioritySchema,
+  // An unassigned case is a real state, so null is allowed and '' becomes null.
+  assignee: z
+    .string()
+    .trim()
+    .max(64)
+    .regex(/^\S*$/, 'An assignee contains no whitespace')
+    .nullish()
+    .transform((value) => (value === undefined || value === null || value === '' ? null : value)),
+  summary: supportSummary,
+});
+
+export const adminSupportNoteCreateSchema = z.object({
+  caseId: adminUuid,
+  body: supportBody,
+});
+
+export type AdminSupportCaseCreate = z.infer<typeof adminSupportCaseCreateSchema>;
+export type AdminSupportCaseUpdate = z.infer<typeof adminSupportCaseUpdateSchema>;
+export type AdminSupportNoteCreate = z.infer<typeof adminSupportNoteCreateSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings (§8.11)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The six keys, and only these six. The three feature flags are editable
+ * because a real server-side consumer reads them; the three notification
+ * templates are NOT writable at all — no admin notification dispatcher exists
+ * anywhere in the product, so a form that accepted one would be a save button
+ * with nothing behind it.
+ */
+export const ADMIN_SETTING_KEYS = [
+  'feature.analytics',
+  'feature.maps',
+  'feature.reports_pdf',
+  'notification.template.trial_ending',
+  'notification.template.payment_failed',
+  'notification.template.subscription_renewed',
+] as const;
+
+export const ADMIN_WRITABLE_SETTING_KEYS = [
+  'feature.analytics',
+  'feature.maps',
+  'feature.reports_pdf',
+] as const;
+
+export const adminSettingUpdateSchema = z.object({
+  key: z.enum(ADMIN_WRITABLE_SETTING_KEYS),
+  // Every writable key is a flag, so the value space is a boolean and nothing
+  // else. The string 'false' must NOT read as true.
+  value: z.boolean(),
+});
+
+export type AdminSettingUpdate = z.infer<typeof adminSettingUpdateSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Query shapes (§8.2, §8.10)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const ADMIN_REPORT_IDS = [
+  'pharmacy_registrations',
+  'subscriptions',
+  'subscription_revenue_and_renewals',
+  'plan_distribution',
+  'activity_summary',
+  'refund_net_pharmacy_sales',
+] as const;
+
+export const ADMIN_EXPORT_FORMATS = ['csv', 'pdf'] as const;
+
+/** A calendar day, not a timestamp: every report range is a Dhaka day range. */
+const isoDate = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a YYYY-MM-DD date');
+
+/** The widest range any report may cover (§8.5's 400-day analytics cap). */
+export const ADMIN_MAX_RANGE_DAYS = 400;
+
+function rangeIsSane(value: { from?: string; to?: string }): boolean {
+  if (value.from === undefined || value.to === undefined) return true;
+  if (value.from > value.to) return false;
+  const days = (Date.parse(value.to + 'T00:00:00Z') - Date.parse(value.from + 'T00:00:00Z'))
+    / 86_400_000;
+  return Number.isFinite(days) && days <= ADMIN_MAX_RANGE_DAYS;
+}
+
+export const adminReportExportQuerySchema = z.object({
+  reportId: z.enum(ADMIN_REPORT_IDS),
+  format: z.enum(ADMIN_EXPORT_FORMATS),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  status: z.string().trim().max(32).regex(/^[a-z_]*$/, 'Not a valid status').optional(),
+}).refine(rangeIsSane, { message: 'That date range is not valid' });
+
+/** The maximum page size a list query may ask for. */
+export const ADMIN_MAX_PAGE_SIZE = 100;
+
+export const adminListQuerySchema = z.object({
+  // Search text is bounded and passed as a bound value; the query layer escapes
+  // the LIKE metacharacters. The length cap is what stops an unbounded ilike
+  // pattern becoming a query-cost surface.
+  search: z.string().trim().max(120).optional(),
+  district: z.string().trim().max(64).optional(),
+  plan: z.string().trim().max(32).regex(/^[a-z_]*$/, 'Not a valid plan').optional(),
+  status: z.string().trim().max(32).regex(/^[a-z_]*$/, 'Not a valid status').optional(),
+  sort: z.enum(['registered_desc', 'registered_asc', 'activity_desc', 'activity_asc']).optional(),
+  // coerce, because searchParams values are strings. The bounds are what stop a
+  // page number from becoming an unbounded .range() offset.
+  page: z.coerce.number().int().min(1).max(10_000).optional(),
+  pageSize: z.coerce.number().int().min(1).max(ADMIN_MAX_PAGE_SIZE).optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+}).refine(rangeIsSane, { message: 'That date range is not valid' });
+
+export type AdminReportExportQuery = z.infer<typeof adminReportExportQuerySchema>;
+export type AdminListQuery = z.infer<typeof adminListQuerySchema>;

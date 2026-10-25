@@ -75,13 +75,21 @@ describe('the GROSS boundary', () => {
   // could see it. §5.2's typed metric manifest is what will eventually allow
   // the word on the one page that earns it, against a computed figure; until
   // that manifest exists, nothing may say it at all.
-  const PERMISSION_IDENTIFIER = /revenue\.(read|export)/g;
+  // Batch 3 also adds the two REPORT IDS that carry the words: a report id is
+  // a database/export identifier, never rendered prose. They are listed by
+  // exact name rather than exempted by a shape rule such as "any snake_case
+  // token", because an exemption wide enough to cover `revenue_total` would
+  // stop checking the thing this guard exists for.
+  const IDENTIFIERS = /revenue\.(read|export)|subscription_revenue_and_renewals|refund_net_pharmacy_sales/g;
+
+  function withoutIdentifiers(code: string): string {
+    return code.replace(IDENTIFIERS, 'IDENTIFIER');
+  }
 
   test('no page describes a figure as revenue', () => {
-    const offenders = SOURCES.filter((file) => mentionsWord(
-      file.code.replace(PERMISSION_IDENTIFIER, 'PERMISSION_KEY'),
-      'revenue',
-    ));
+    const offenders = SOURCES.filter(
+      (file) => mentionsWord(withoutIdentifiers(file.code), 'revenue'),
+    );
 
     expect(offenders.map((file) => file.path)).toEqual([]);
   });
@@ -94,15 +102,17 @@ describe('the GROSS boundary', () => {
       'const label = "Revenue today";',
       "heading: 'Total revenue',",
       'revenue_total',
+      'monthly_revenue',
     ]) {
-      expect(mentionsWord(planted.replace(PERMISSION_IDENTIFIER, 'PERMISSION_KEY'), 'revenue'))
-        .toBe(true);
+      expect(mentionsWord(withoutIdentifiers(planted), 'revenue')).toBe(true);
     }
-    // And the identifier itself is the only thing that passes.
-    expect(mentionsWord(
-      "requireAdminPermission('revenue.read')".replace(PERMISSION_IDENTIFIER, 'PERMISSION_KEY'),
-      'revenue',
-    )).toBe(false);
+    // And the listed identifiers are the only things that pass.
+    for (const exempt of [
+      "requireAdminPermission('revenue.read')",
+      "reportId: 'subscription_revenue_and_renewals'",
+    ]) {
+      expect(mentionsWord(withoutIdentifiers(exempt), 'revenue')).toBe(false);
+    }
   });
 
   // The replacement has to be STRONGER than the ban, not weaker. A blanket ban
@@ -121,7 +131,7 @@ describe('the GROSS boundary', () => {
 
   test('link 1: `net` appears only alongside the one net-typed field', () => {
     const offenders = SOURCES
-      .filter((file) => mentionsWord(file.code, 'net'))
+      .filter((file) => mentionsWord(withoutIdentifiers(file.code), 'net'))
       .filter((file) => !file.code.includes(NET_FIELD));
 
     expect(

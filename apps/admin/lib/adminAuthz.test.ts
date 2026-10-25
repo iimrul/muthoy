@@ -86,19 +86,18 @@ describe('requirePermission', () => {
     expect(recentAdminAudit.entries()).toEqual([]);
   });
 
-  test('throws AND audits the denial', () => {
+  // Batch 3 §8.9c RETARGETED this case rather than deleting it. The THROW
+  // assertion stays here; the AUDIT assertion moved to requireAdminPermission,
+  // which is the async path that can await the record. requirePermission is
+  // synchronous and throws, so control never returns to a caller that could
+  // wait for it.
+  test('throws, and records NOTHING of its own', () => {
     expect(() => requirePermission(
       { username: 'ops', role: 'read_only', permissions: permissionsForRole('read_only') },
       'subscriptions.write',
     )).toThrow(AdminForbiddenError);
 
-    expect(recentAdminAudit.entries()).toMatchObject([{
-      actor: 'ops',
-      role: 'read_only',
-      action: 'authz.denied',
-      outcome: 'denied',
-      meta: { permission: 'subscriptions.write' },
-    }]);
+    expect(recentAdminAudit.entries()).toEqual([]);
   });
 
   test('the thrown error names the permission and the role, not the data', () => {
@@ -123,13 +122,6 @@ describe('requirePermission', () => {
       { username: 'founder', role: 'super_admin', permissions: permissionsForRole('read_only') },
       'admins.write',
     )).toThrow(AdminForbiddenError);
-
-    expect(recentAdminAudit.entries()).toMatchObject([{
-      actor: 'founder',
-      role: 'super_admin',
-      action: 'authz.denied',
-      meta: { permission: 'admins.write' },
-    }]);
   });
 
   test('an empty effective set holds nothing at all', () => {
@@ -394,6 +386,63 @@ describe('requireAdminPermission', () => {
       .rejects.toBeInstanceOf(AdminForbiddenError);
     await expect(requireAdminPermission('settings.write', BASE_ENV, narrowed))
       .rejects.toBeInstanceOf(AdminForbiddenError);
+  });
+
+  test('the denial is AUDITED here, on the awaited path (§8.9c)', async () => {
+    cookieStore.value = await cookieFor('ops', 'read_only');
+
+    await expect(requireAdminPermission('subscriptions.write', BASE_ENV, NO_ASSIGNMENT))
+      .rejects.toBeInstanceOf(AdminForbiddenError);
+
+    expect(recentAdminAudit.entries()).toMatchObject([{
+      actor: 'ops',
+      actorVerified: true,
+      role: 'read_only',
+      action: 'authz.denied',
+      outcome: 'denied',
+      meta: { permission: 'subscriptions.write' },
+    }]);
+  });
+
+  test('the denial audit SETTLES before the rejection is visible', async () => {
+    cookieStore.value = await cookieFor('ops', 'read_only');
+    const order: string[] = [];
+    const slowSink = {
+      write: () => order.push('write'),
+      flush: async () => {
+        await new Promise((resolve) => { setTimeout(resolve, 5); });
+        order.push('flushed');
+      },
+    };
+
+    await expect(requireAdminPermission('subscriptions.write', BASE_ENV, {
+      ...NO_ASSIGNMENT,
+      sinks: [slowSink],
+    })).rejects.toBeInstanceOf(AdminForbiddenError);
+    order.push('rejected');
+
+    // Not just "both happened": the flush completed FIRST. A denial recorded
+    // after the rejection propagates is a denial the request can outrun, and
+    // dropping the await is exactly what this ordering catches.
+    expect(order).toEqual(['write', 'flushed', 'rejected']);
+  });
+
+  test('the denial is recorded exactly ONCE', async () => {
+    cookieStore.value = await cookieFor('ops', 'read_only');
+
+    await expect(requireAdminPermission('subscriptions.write', BASE_ENV, NO_ASSIGNMENT))
+      .rejects.toThrow();
+
+    expect(recentAdminAudit.entries().filter((entry) => entry.action === 'authz.denied'))
+      .toHaveLength(1);
+  });
+
+  test('an authorized call records no denial at all', async () => {
+    cookieStore.value = await cookieFor('founder', 'super_admin');
+
+    await requireAdminPermission('shops.read', BASE_ENV, NO_ASSIGNMENT);
+
+    expect(recentAdminAudit.entries().map((entry) => entry.action)).not.toContain('authz.denied');
   });
 
   test('a disabled row refuses every permission, including the ones it names', async () => {

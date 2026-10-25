@@ -113,9 +113,42 @@ export function resolveEffectiveAuthority(input: {
  * The result shape every Batch 3 admin write returns.
  *
  * Lives here, in the framework-free module, so lib/adminActions.ts,
- * lib/adminIdentityStore.ts and the support and settings writers share ONE
+ * lib/adminIdentityActions.ts and the support and settings writers share ONE
  * definition rather than three structurally-equal unions.
+ *
+ * THREE SHAPES, not two (§8.9d). `committed: true` with a failed audit is not
+ * an ordinary failure: the change WAS applied, so reporting a plain failure
+ * would invite a retry, and a retry repeats a non-idempotent write. The
+ * discriminant is `committed`, and lib/adminOutcomes.ts is the one place that
+ * reads it.
  */
 export type AdminWriteResult =
   | { ok: true; message: string }
-  | { ok: false; message: string };
+  | { ok: false; committed?: false; message: string }
+  | { ok: false; committed: true; code: 'audit_write_failed'; message: string };
+
+/** The sentence a committed-but-unaudited write reports. */
+export const AUDIT_WRITE_FAILED_MESSAGE =
+  'The change was applied but could not be recorded in the audit log. '
+  + 'Do not retry it. The server log holds the record.';
+
+/**
+ * Wraps a successful mutation in the right shape for its audit's durability.
+ *
+ * The mutation has already committed by the time this is called, so nothing
+ * here can undo it — the only question is what the caller is told.
+ */
+export function resultForDurability(
+  durability: 'durable' | 'stderr_only' | 'failed',
+  successMessage: string,
+): AdminWriteResult {
+  if (durability === 'failed') {
+    return {
+      ok: false,
+      committed: true,
+      code: 'audit_write_failed',
+      message: AUDIT_WRITE_FAILED_MESSAGE,
+    };
+  }
+  return { ok: true, message: successMessage };
+}

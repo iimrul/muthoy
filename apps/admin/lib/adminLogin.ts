@@ -39,6 +39,7 @@ import 'server-only';
 import { pbkdf2Sync } from 'node:crypto';
 import { constantTimeEquals } from './basicAuth';
 import { recordAdminAction, type AdminAuditSink } from './adminAudit';
+import { durableAuditSinks } from './adminAuditStore';
 import { loadAdminIdentity, type AdminAccount } from './adminIdentity';
 import {
   ADMIN_SESSION_COOKIE,
@@ -219,20 +220,36 @@ interface AuditCall {
   meta?: Record<string, unknown>;
 }
 
+/**
+ * Batch 3 §8.9. `actorVerified` is FALSE for every entry on this path, and
+ * that is the whole reason the column exists.
+ *
+ * A login attempt by nature PRECEDES a session, so `call.actor` is either
+ * 'unknown' or the username the request CLAIMED — never a value proven by a
+ * verified cookie. A successful login is still an unverified actor here: the
+ * password was checked, but the cookie it mints has not been presented yet.
+ * So an unauthenticated caller cannot produce a row with actor_verified = true
+ * no matter what it sends.
+ *
+ * IT STAYS SYNCHRONOUS, deliberately. The entry reaches the durable sink —
+ * `durableAuditSinks()` includes it, so a failed-login row does land in
+ * `admin_audit_log` — but this path does NOT await the insert. Awaiting a
+ * database round-trip inside credential verification would add a timing signal
+ * to the one place that is deliberately constant-work, and would make the login
+ * route fail when the audit table is unreachable. stderr runs first and remains
+ * the record of account.
+ */
 function audit(call: AuditCall, sinks: readonly AdminAuditSink[] | undefined): void {
   const entry = {
     actor: call.actor,
+    actorVerified: false,
     role: call.role ?? null,
     action: call.action,
     outcome: call.outcome,
     now: call.now,
     meta: call.meta,
   };
-  if (sinks) {
-    recordAdminAction(entry, sinks);
-    return;
-  }
-  recordAdminAction(entry);
+  recordAdminAction(entry, sinks ?? durableAuditSinks());
 }
 
 async function readFields(request: Request): Promise<Record<string, string>> {

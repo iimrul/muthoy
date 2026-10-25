@@ -24,19 +24,27 @@ import 'server-only';
 // guarded transition that matches nothing the second time.
 
 import { revalidatePath } from 'next/cache';
-import { recordAdminAction, type AdminAuditSink } from './adminAudit';
+import {
+  adminAccountIdActionSchema,
+  adminPaymentOrderIdActionSchema,
+} from '@muthoy/validation';
+import { type AdminAuditSink } from './adminAudit';
+import { recordAdminActionDurably, type AdminAuditDurability } from './adminAuditStore';
+import { resultForDurability, type AdminWriteResult } from './adminAssignments';
 import {
   requireAdminPermission,
   type AdminAuthzDeps,
   type AdminEnvironment,
 } from './adminAuthz';
-import { isUuid } from './adminViews';
 import { AdminDataError } from './errors';
 import { getSupabaseAdmin } from './supabaseAdmin';
 
-export type AdminActionResult =
-  | { ok: true; message: string }
-  | { ok: false; message: string };
+/**
+ * The shared three-shape union (§8.9d). Kept as an alias rather than a second
+ * definition: lib/adminAssignments.ts owns it, so the support and settings
+ * writers cannot drift from the payment one.
+ */
+export type AdminActionResult = AdminWriteResult;
 
 export interface AdminActionDeps extends AdminAuthzDeps {
   env?: AdminEnvironment;
@@ -48,7 +56,18 @@ export interface AdminActionDeps extends AdminAuthzDeps {
   revalidate?: (path: string) => void;
 }
 
-function audit(
+/**
+ * Batch 3 §8.9. ASYNC and AWAITED on every return path.
+ *
+ * It was synchronous, and that was the hole: `AdminAuditSink.write(entry):
+ * void` plus a durable sibling is not enough on its own when every call site
+ * goes through a wrapper that cannot wait. Each action now awaits this before
+ * it produces a return value, and a test asserts exactly that.
+ *
+ * `actorVerified` is TRUE for every call here: requireAdminPermission ran
+ * first, so the actor came from a verified session cookie.
+ */
+async function audit(
   input: {
     actor: string;
     role: string;
@@ -58,20 +77,20 @@ function audit(
     reason?: string;
   },
   sinks: readonly AdminAuditSink[] | undefined,
-): void {
+): Promise<AdminAuditDurability> {
   const entry = {
     actor: input.actor,
+    actorVerified: true,
     role: input.role,
     action: input.action,
     target: input.target,
     outcome: input.outcome,
     meta: input.reason === undefined ? undefined : { reason: input.reason },
   };
-  if (sinks) {
-    recordAdminAction(entry, sinks);
-    return;
-  }
-  recordAdminAction(entry);
+  const result = sinks
+    ? await recordAdminActionDurably(entry, sinks)
+    : await recordAdminActionDurably(entry);
+  return result.durability;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,8 +149,11 @@ export async function reconcilePlanLimits(
     readAssignment: deps.readAssignment,
   });
 
-  if (!isUuid(accountId)) {
-    audit({ actor: session.username, role: session.role, action: 'subscription.reconcile_limits', target: 'invalid', outcome: 'failure', reason: 'invalid_id' }, deps.sinks);
+  // §8.13. The SHARED schema, parsed before any RPC or table call — not the
+  // local isUuid, which is a read-path helper and not a write-payload contract.
+  const parsed = adminAccountIdActionSchema.safeParse({ accountId });
+  if (!parsed.success) {
+    await audit({ actor: session.username, role: session.role, action: 'subscription.reconcile_limits', target: 'invalid', outcome: 'failure', reason: 'invalid_id' }, deps.sinks);
     throw new AdminDataError('account is not a valid id');
   }
 
@@ -143,13 +165,15 @@ export async function reconcilePlanLimits(
 
   if (error) {
     console.error('[admin] reconcile plan limits failed:', error.message);
-    audit({ actor: session.username, role: session.role, action: 'subscription.reconcile_limits', target: accountId, outcome: 'failure', reason: 'rpc_failed' }, deps.sinks);
+    await audit({ actor: session.username, role: session.role, action: 'subscription.reconcile_limits', target: accountId, outcome: 'failure', reason: 'rpc_failed' }, deps.sinks);
     return { ok: false, message: 'Could not reconcile plan limits. The server log has the details.' };
   }
 
-  audit({ actor: session.username, role: session.role, action: 'subscription.reconcile_limits', target: accountId, outcome: 'success' }, deps.sinks);
+  const durability = await audit({ actor: session.username, role: session.role, action: 'subscription.reconcile_limits', target: accountId, outcome: 'success' }, deps.sinks);
   (deps.revalidate ?? revalidatePath)('/accounts/' + accountId);
-  return { ok: true, message: 'Plan limits reconciled.' };
+  // §8.9d. The RPC already committed, so a failed audit is reported as
+  // applied-but-unrecorded rather than as a failure that invites a retry.
+  return resultForDurability(durability, 'Plan limits reconciled.');
 }
 
 /**
@@ -171,8 +195,10 @@ export async function expireStalePaymentOrder(
     readAssignment: deps.readAssignment,
   });
 
-  if (!isUuid(orderId)) {
-    audit({ actor: session.username, role: session.role, action: 'payment.expire_stale_order', target: 'invalid', outcome: 'failure', reason: 'invalid_id' }, deps.sinks);
+  // §8.13, as above: the shared schema, before the table call.
+  const parsed = adminPaymentOrderIdActionSchema.safeParse({ orderId });
+  if (!parsed.success) {
+    await audit({ actor: session.username, role: session.role, action: 'payment.expire_stale_order', target: 'invalid', outcome: 'failure', reason: 'invalid_id' }, deps.sinks);
     throw new AdminDataError('payment order is not a valid id');
   }
 
@@ -189,7 +215,7 @@ export async function expireStalePaymentOrder(
 
   if (error) {
     console.error('[admin] expire payment order failed:', error.message);
-    audit({ actor: session.username, role: session.role, action: 'payment.expire_stale_order', target: orderId, outcome: 'failure', reason: 'update_failed' }, deps.sinks);
+    await audit({ actor: session.username, role: session.role, action: 'payment.expire_stale_order', target: orderId, outcome: 'failure', reason: 'update_failed' }, deps.sinks);
     return { ok: false, message: 'Could not expire that payment order. The server log has the details.' };
   }
 
@@ -197,14 +223,18 @@ export async function expireStalePaymentOrder(
   if (changed === 0) {
     // Not an error: the guard did its job. A second click, or an order that is
     // still live or already terminal, lands here.
-    audit({ actor: session.username, role: session.role, action: 'payment.expire_stale_order', target: orderId, outcome: 'failure', reason: 'not_stale' }, deps.sinks);
+    await audit({ actor: session.username, role: session.role, action: 'payment.expire_stale_order', target: orderId, outcome: 'failure', reason: 'not_stale' }, deps.sinks);
     return {
       ok: false,
       message: 'That order is not a stale open order, so nothing was changed.',
     };
   }
 
-  audit({ actor: session.username, role: session.role, action: 'payment.expire_stale_order', target: orderId, outcome: 'success' }, deps.sinks);
+  const durability = await audit({ actor: session.username, role: session.role, action: 'payment.expire_stale_order', target: orderId, outcome: 'success' }, deps.sinks);
   (deps.revalidate ?? revalidatePath)('/payments');
-  return { ok: true, message: 'Payment order marked expired.' };
+  // §8.9d. The update already committed. Retrying is harmless here — the guard
+  // makes a second attempt a no-op — but the reader is still told the truth,
+  // because the shape must not depend on whether THIS write happens to be
+  // idempotent.
+  return resultForDurability(durability, 'Payment order marked expired.');
 }

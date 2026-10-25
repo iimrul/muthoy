@@ -1,0 +1,390 @@
+// Batch 3 §8.9 — the durable audit sink and the three write outcomes, executed.
+//
+// The properties that matter, and why each one is here:
+//
+//  - the insert is AWAITED. `recordAdminActionDurably` does not resolve until
+//    the row has committed or failed, and the ordering test proves it rather
+//    than assuming it: dropping the await makes that test fail and nothing
+//    else;
+//  - stderr runs FIRST. A database outage must not lose the line, so the order
+//    of the sinks is asserted, not described;
+//  - the row carries actor_verified, and the column maps to the entry field;
+//  - INSERT ONLY. The sink has no update, delete or upsert path at all;
+//  - a failed audit after a committed write is its own outcome. It must not
+//    read as a plain failure, because a plain failure invites the retry that
+//    repeats a non-idempotent write.
+
+import { beforeEach, describe, expect, test } from 'vitest';
+import { recentAdminAudit, type AdminAuditEntry, type AdminAuditSink } from './adminAudit';
+import { createPostgresAuditSink, recordAdminActionDurably, toAuditRow } from './adminAuditStore';
+import { resultForDurability, AUDIT_WRITE_FAILED_MESSAGE } from './adminAssignments';
+import { outcomeFor, outcomeNote, outcomeQuery, OUTCOME_SENTENCES } from './adminOutcomes';
+
+const NOW = Date.parse('2026-10-25T06:00:00.000Z');
+
+interface InsertCall {
+  table: string;
+  values: Record<string, unknown>;
+}
+
+function createClient(options: { error?: string; failAfter?: number } = {}) {
+  const inserts: InsertCall[] = [];
+  const methods: string[] = [];
+
+  const client = {
+    from(table: string) {
+      return {
+        insert(values: Record<string, unknown>) {
+          methods.push('insert');
+          inserts.push({ table, values });
+          const shouldFail = options.error !== undefined
+            && (options.failAfter === undefined || inserts.length > options.failAfter);
+          return Promise.resolve(
+            shouldFail
+              ? { data: null, error: { message: options.error } }
+              : { data: null, error: null },
+          );
+        },
+        update() {
+          methods.push('update');
+          return { eq: () => Promise.resolve({ data: null, error: null }) };
+        },
+        delete() {
+          methods.push('delete');
+          return { eq: () => Promise.resolve({ data: null, error: null }) };
+        },
+      };
+    },
+  };
+
+  return { client: client as never, inserts, methods };
+}
+
+function entry(overrides: Partial<AdminAuditEntry> = {}): AdminAuditEntry {
+  return {
+    at: '2026-10-25T06:00:00.000Z',
+    actor: 'founder',
+    actorVerified: true,
+    role: 'super_admin',
+    action: 'admins.assign_role',
+    target: 'ops',
+    outcome: 'success',
+    meta: { targetUsername: 'ops' },
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  recentAdminAudit.clear();
+});
+
+describe('toAuditRow', () => {
+  test('maps every entry field to its column, actor_verified included', () => {
+    expect(toAuditRow(entry())).toEqual({
+      at: '2026-10-25T06:00:00.000Z',
+      actor: 'founder',
+      actor_verified: true,
+      role: 'super_admin',
+      action: 'admins.assign_role',
+      target: 'ops',
+      outcome: 'success',
+      meta: { targetUsername: 'ops' },
+    });
+  });
+
+  test('a null role and a null target survive as null, not as empty strings', () => {
+    const row = toAuditRow(entry({ role: null, target: null }));
+    expect(row.role).toBeNull();
+    expect(row.target).toBeNull();
+  });
+
+  test('an unverified actor maps to false', () => {
+    expect(toAuditRow(entry({ actorVerified: false })).actor_verified).toBe(false);
+  });
+});
+
+describe('the Postgres sink', () => {
+  test('inserts one row per entry, into admin_audit_log', async () => {
+    const { client, inserts } = createClient();
+    const sink = createPostgresAuditSink({ client });
+
+    sink.write(entry());
+    sink.write(entry({ action: 'admins.revoke_sessions' }));
+    await sink.flush();
+
+    expect(inserts.map((call) => call.table)).toEqual(['admin_audit_log', 'admin_audit_log']);
+    expect(inserts[0]?.values.action).toBe('admins.assign_role');
+    expect(inserts[1]?.values.action).toBe('admins.revoke_sessions');
+  });
+
+  test('performs no update, no delete and no upsert', async () => {
+    const { client, methods } = createClient();
+    const sink = createPostgresAuditSink({ client });
+
+    sink.write(entry());
+    await sink.flush();
+
+    expect(methods).toEqual(['insert']);
+  });
+
+  test('flush REJECTS when the insert failed', async () => {
+    const { client } = createClient({ error: 'permission denied for table admin_audit_log' });
+    const sink = createPostgresAuditSink({ client });
+
+    sink.write(entry());
+
+    await expect(sink.flush()).rejects.toThrow('admin audit insert failed');
+  });
+
+  test('the driver message never reaches the thrown error', async () => {
+    const { client } = createClient({ error: 'FATAL: password authentication failed' });
+    const sink = createPostgresAuditSink({ client });
+
+    sink.write(entry());
+
+    await expect(sink.flush()).rejects.not.toThrow('password');
+  });
+
+  test('one failing insert does not leave the others unawaited', async () => {
+    // allSettled, not Promise.all: an unawaited rejected promise is an
+    // unhandled rejection, and in Node that can take the process down.
+    const { client, inserts } = createClient({ error: 'nope', failAfter: 1 });
+    const sink = createPostgresAuditSink({ client });
+
+    sink.write(entry());
+    sink.write(entry());
+    sink.write(entry());
+
+    await expect(sink.flush()).rejects.toThrow();
+    expect(inserts).toHaveLength(3);
+  });
+
+  test('flush DRAINS, so a second flush does not re-report a settled write', async () => {
+    const { client } = createClient({ error: 'nope' });
+    const sink = createPostgresAuditSink({ client });
+
+    sink.write(entry());
+    await expect(sink.flush()).rejects.toThrow();
+
+    // Nothing is pending now, so the next flush is clean. A sink that kept its
+    // history would report the same failure on every later request.
+    await expect(sink.flush()).resolves.toBeUndefined();
+  });
+
+  test('flush on an empty sink resolves', async () => {
+    const { client } = createClient();
+    await expect(createPostgresAuditSink({ client }).flush()).resolves.toBeUndefined();
+  });
+});
+
+describe('recordAdminActionDurably', () => {
+  function orderedSinks() {
+    const order: string[] = [];
+    const first: AdminAuditSink = { write: () => order.push('stderr') };
+    const durable: AdminAuditSink = {
+      write: () => order.push('durable-write'),
+      flush: async () => {
+        await Promise.resolve();
+        order.push('durable-flush');
+      },
+    };
+    return { order, sinks: [first, durable] };
+  }
+
+  test('writes every sink in order, stderr FIRST', async () => {
+    const { order, sinks } = orderedSinks();
+
+    await recordAdminActionDurably(
+      { actor: 'founder', action: 'a', outcome: 'success', now: NOW },
+      sinks,
+    );
+
+    expect(order).toEqual(['stderr', 'durable-write', 'durable-flush']);
+  });
+
+  test('does not resolve until the durable sink has flushed', async () => {
+    const order: string[] = [];
+    const durable: AdminAuditSink = {
+      write: () => undefined,
+      flush: async () => {
+        await new Promise((resolve) => { setTimeout(resolve, 5); });
+        order.push('flushed');
+      },
+    };
+
+    await recordAdminActionDurably(
+      { actor: 'founder', action: 'a', outcome: 'success', now: NOW },
+      [durable],
+    );
+    order.push('resolved');
+
+    expect(order).toEqual(['flushed', 'resolved']);
+  });
+
+  test('reports durable when the sink committed', async () => {
+    const { client } = createClient();
+    const result = await recordAdminActionDurably(
+      { actor: 'founder', action: 'a', outcome: 'success', now: NOW },
+      [createPostgresAuditSink({ client })],
+    );
+
+    expect(result.durability).toBe('durable');
+  });
+
+  test('reports failed when the sink could not commit', async () => {
+    const { client } = createClient({ error: 'permission denied' });
+    const result = await recordAdminActionDurably(
+      { actor: 'founder', action: 'a', outcome: 'success', now: NOW },
+      [createPostgresAuditSink({ client })],
+    );
+
+    expect(result.durability).toBe('failed');
+  });
+
+  test('reports stderr_only when no sink is durable', async () => {
+    // Three values and not a boolean: "nothing durable is configured" is not a
+    // failure, and collapsing the two would make every such path raise an
+    // alarm that is always on.
+    const result = await recordAdminActionDurably(
+      { actor: 'founder', action: 'a', outcome: 'success', now: NOW },
+      [recentAdminAudit],
+    );
+
+    expect(result.durability).toBe('stderr_only');
+  });
+
+  test('NEVER throws, even when the durable sink fails', async () => {
+    // A throw here would unwind a mutation that had already committed, which is
+    // the one outcome worth avoiding.
+    const { client } = createClient({ error: 'permission denied' });
+    await expect(recordAdminActionDurably(
+      { actor: 'founder', action: 'a', outcome: 'success', now: NOW },
+      [createPostgresAuditSink({ client })],
+    )).resolves.toMatchObject({ durability: 'failed' });
+  });
+
+  test('a failing durable sink still leaves the stderr-side entry recorded', async () => {
+    const { client } = createClient({ error: 'permission denied' });
+    await recordAdminActionDurably(
+      { actor: 'founder', action: 'login', outcome: 'failure', now: NOW },
+      [recentAdminAudit, createPostgresAuditSink({ client })],
+    );
+
+    expect(recentAdminAudit.entries()).toMatchObject([{ actor: 'founder', action: 'login' }]);
+  });
+
+  test('the returned entry is the redacted one, not the raw input', async () => {
+    const result = await recordAdminActionDurably(
+      {
+        actor: 'founder',
+        action: 'a',
+        outcome: 'success',
+        now: NOW,
+        meta: { reason: 'called 01712345678', serviceRoleKey: 'secret' },
+      },
+      [recentAdminAudit],
+    );
+
+    expect(result.entry.meta).toEqual({ reason: 'called [redacted]' });
+  });
+});
+
+describe('committed-but-unaudited is its own outcome (§8.9d)', () => {
+  test('a failed audit after a committed write is NOT a plain failure', () => {
+    const result = resultForDurability('failed', 'Saved.');
+
+    expect(result).toEqual({
+      ok: false,
+      committed: true,
+      code: 'audit_write_failed',
+      message: AUDIT_WRITE_FAILED_MESSAGE,
+    });
+    expect(outcomeFor(result)).toBe('applied_unrecorded');
+  });
+
+  test('a durable audit is an ordinary success', () => {
+    const result = resultForDurability('durable', 'Saved.');
+
+    expect(result).toEqual({ ok: true, message: 'Saved.' });
+    expect(outcomeFor(result)).toBe('done');
+  });
+
+  test('stderr_only is also a success — it is the documented shipped state', () => {
+    expect(resultForDurability('stderr_only', 'Saved.')).toEqual({ ok: true, message: 'Saved.' });
+  });
+
+  test('an ordinary failure stays an ordinary failure', () => {
+    expect(outcomeFor({ ok: false, message: 'nope' })).toBe('failed');
+  });
+
+  test('the message tells the reader NOT to retry', () => {
+    expect(AUDIT_WRITE_FAILED_MESSAGE.toLowerCase()).toContain('do not retry');
+    expect(AUDIT_WRITE_FAILED_MESSAGE.toLowerCase()).toContain('was applied');
+  });
+});
+
+describe('the three query values map to three distinct notices', () => {
+  test('each outcome has its own key', () => {
+    expect(outcomeQuery('reconcile', 'done')).toBe('?done=reconcile');
+    expect(outcomeQuery('reconcile', 'failed')).toBe('?failed=reconcile');
+    expect(outcomeQuery('reconcile', 'applied_unrecorded')).toBe('?applied_unrecorded=reconcile');
+  });
+
+  test('the action name is encoded, so it cannot inject another parameter', () => {
+    expect(outcomeQuery('a&b=c', 'done')).toBe('?done=a%26b%3Dc');
+  });
+
+  test('all three notices are non-empty and distinct', () => {
+    const notices = [
+      outcomeNote({ done: 'reconcile' }, { reconcile: 'Plan limits reconciled.' }),
+      outcomeNote({ failed: 'reconcile' }),
+      outcomeNote({ applied_unrecorded: 'reconcile' }),
+    ];
+
+    for (const notice of notices) {
+      expect(notice).toBeTruthy();
+      expect((notice ?? '').length).toBeGreaterThan(10);
+    }
+    expect(new Set(notices).size).toBe(3);
+  });
+
+  test('the third NEVER reads as a plain failure', () => {
+    const notice = outcomeNote({ applied_unrecorded: 'reconcile' }) ?? '';
+
+    expect(notice).not.toBe(OUTCOME_SENTENCES.failed);
+    expect(notice.toLowerCase()).not.toContain('nothing was changed');
+    expect(notice.toLowerCase()).toContain('do not retry');
+  });
+
+  test('the failure notice says nothing was changed, because nothing was', () => {
+    expect((outcomeNote({ failed: 'reconcile' }) ?? '').toLowerCase())
+      .toContain('nothing was changed');
+  });
+
+  test('no outcome in the URL is no notice', () => {
+    expect(outcomeNote({})).toBeNull();
+    expect(outcomeNote({ other: 'x' })).toBeNull();
+  });
+
+  test('an unknown success action produces no notice rather than an empty box', () => {
+    expect(outcomeNote({ done: 'something_else' }, { reconcile: 'ok' })).toBeNull();
+  });
+
+  test('a prototype name cannot become a notice', () => {
+    expect(outcomeNote({ done: 'constructor' }, { reconcile: 'ok' })).toBeNull();
+    expect(outcomeNote({ done: '__proto__' }, { reconcile: 'ok' })).toBeNull();
+  });
+
+  test('applied_unrecorded wins when a malformed redirect carries two keys', () => {
+    // Of the three, the one that must never be missed is the one telling the
+    // reader not to retry.
+    expect(outcomeNote({ done: 'reconcile', applied_unrecorded: 'reconcile' }, { reconcile: 'ok' }))
+      .toBe(OUTCOME_SENTENCES.applied_unrecorded);
+    expect(outcomeNote({ failed: 'reconcile', applied_unrecorded: 'reconcile' }))
+      .toBe(OUTCOME_SENTENCES.applied_unrecorded);
+  });
+
+  test('a repeated query key reads as the first value, not as no outcome', () => {
+    expect(outcomeNote({ failed: ['reconcile', 'expire'] })).toBe(OUTCOME_SENTENCES.failed);
+  });
+});

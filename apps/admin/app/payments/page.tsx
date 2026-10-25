@@ -2,7 +2,7 @@ import DataTable, { type DataColumn } from '../../components/DataTable';
 import ErrorNotice from '../../components/ErrorNotice';
 import { formatMoney } from '@muthoy/utils';
 import { requireAdminPermission } from '../../lib/adminAuthz';
-import { hasPermission } from '../../lib/adminRoles';
+import { outcomeNote } from '../../lib/adminOutcomes';
 import ActionButton from '../../components/ActionButton';
 import { expireOrderAction } from '../adminFormActions';
 import { listPaymentOrderSummaries } from '../../lib/adminQueries';
@@ -52,17 +52,17 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
     return <ErrorNotice message={toDisplayMessage(error)} />;
   }
 
-  const params = await searchParams;
-  const note = typeof params.done === 'string'
-    ? 'Payment order marked expired.'
-    : typeof params.failed === 'string'
-      ? 'Nothing was changed: that order is not a stale open order, or the write failed. The audit log has the details.'
-      : null;
+  // §8.9d, through the one shared reader: `done`, `failed` and the third
+  // outcome, applied-but-unrecorded, which must never read as a plain failure.
+  const note = outcomeNote(await searchParams, {
+    expire: 'Payment order marked expired.',
+  });
 
   // isStaleOpen was decided in the query layer, with the instant the rows
   // were read at: a Server Component must be pure, so no clock is read during
   // render. The action re-checks staleness in its own UPDATE guard.
-  const columns: readonly DataColumn<PaymentOrderSummary>[] = hasPermission(session.role, 'support.write')
+  // Batch 3 §4.3: the EFFECTIVE set, not the role.
+  const columns: readonly DataColumn<PaymentOrderSummary>[] = session.permissions.includes('support.write')
     ? [
         ...BASE_COLUMNS,
         {

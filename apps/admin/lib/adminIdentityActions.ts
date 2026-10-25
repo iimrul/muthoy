@@ -38,18 +38,32 @@ import {
   adminRoleAssignmentUpdateSchema,
   adminSessionRevocationSchema,
 } from '@muthoy/validation';
-import { recordAdminAction, type AdminAuditSink } from './adminAudit';
-import { type AdminWriteResult } from './adminAssignments';
+import { type AdminAuditSink } from './adminAudit';
+import { recordAdminActionDurably, type AdminAuditDurability } from './adminAuditStore';
+import { resultForDurability, type AdminWriteResult } from './adminAssignments';
 import { requireAdminPermission, type AdminAuthzDeps, type AdminEnvironment } from './adminAuthz';
 import { parseAdminRoles } from './adminRoles';
-import { writeRoleAssignment, type AdminIdentityStoreDeps } from './adminIdentityStore';
+import {
+  readRoleAssignment,
+  writeRoleAssignment,
+  type AdminIdentityStoreDeps,
+} from './adminIdentityStore';
 
 export interface AdminIdentityActionDeps extends AdminIdentityStoreDeps, AdminAuthzDeps {
   env?: AdminEnvironment;
   sinks?: readonly AdminAuditSink[];
 }
 
-function audit(
+/**
+ * Batch 3 §8.9. ASYNC and AWAITED on every return path, success and failure.
+ *
+ * `actorVerified` is TRUE for every call here: requireAdminPermission ran
+ * first, so the actor came from a verified session cookie. `targetUsername`,
+ * `fromRole` and `toRole` are the §8.9 allowlist keys that make a role change
+ * readable; each is dropped by lib/adminAudit.ts unless it matches its own
+ * value space, so a malformed one is absent rather than half-recorded.
+ */
+async function audit(
   input: {
     actor: string;
     role: string | null;
@@ -57,22 +71,30 @@ function audit(
     target: string;
     outcome: 'success' | 'failure' | 'denied';
     reason?: string;
+    targetUsername?: string;
+    fromRole?: string;
+    toRole?: string;
   },
   sinks: readonly AdminAuditSink[] | undefined,
-): void {
+): Promise<AdminAuditDurability> {
   const entry = {
     actor: input.actor,
+    actorVerified: true,
     role: input.role,
     action: input.action,
     target: input.target,
     outcome: input.outcome,
-    meta: input.reason === undefined ? undefined : { reason: input.reason },
+    meta: {
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
+      ...(input.targetUsername === undefined ? {} : { targetUsername: input.targetUsername }),
+      ...(input.fromRole === undefined ? {} : { fromRole: input.fromRole }),
+      ...(input.toRole === undefined ? {} : { toRole: input.toRole }),
+    },
   };
-  if (sinks) {
-    recordAdminAction(entry, sinks);
-    return;
-  }
-  recordAdminAction(entry);
+  const result = sinks
+    ? await recordAdminActionDurably(entry, sinks)
+    : await recordAdminActionDurably(entry);
+  return result.durability;
 }
 
 /** Whether ADMIN_ROLES knows this username at all. */
@@ -101,7 +123,7 @@ export async function assignAdminRole(
 
   const parsed = adminRoleAssignmentUpdateSchema.safeParse(payload);
   if (!parsed.success) {
-    audit(
+    await audit(
       {
         actor: session.username,
         role: session.role,
@@ -117,7 +139,7 @@ export async function assignAdminRole(
   const { username, role, isActive } = parsed.data;
 
   if (username === session.username) {
-    audit(
+    await audit(
       {
         actor: session.username,
         role: session.role,
@@ -132,7 +154,7 @@ export async function assignAdminRole(
   }
 
   if (environmentRoleFor(env, username) === undefined) {
-    audit(
+    await audit(
       {
         actor: session.username,
         role: session.role,
@@ -147,30 +169,37 @@ export async function assignAdminRole(
   }
 
   try {
+    const existingRole = (await readRoleAssignment(username, storeDeps(deps)))?.role;
     const effect = await writeRoleAssignment(
       { username, role, isActive, revokeSessionsAtMs: null, assignedBy: session.username },
       storeDeps(deps),
     );
-    audit(
+    const durability = await audit(
       {
         actor: session.username,
         role: session.role,
         action: 'admins.assign_role',
         target: username,
         outcome: 'success',
-        reason: effect + ' ' + role + (isActive ? ' enabled' : ' disabled'),
+        reason: effect + (isActive ? ' enabled' : ' disabled'),
+        targetUsername: username,
+        // Absent on a create, because there was no previous role to name.
+        ...(existingRole === undefined ? {} : { fromRole: existingRole }),
+        toRole: role,
       },
       deps?.sinks,
     );
-    return {
-      ok: true,
-      message: isActive
+    // §8.9d. The row is already written, so a failed audit reports
+    // applied-but-unrecorded rather than a failure that invites a retry.
+    return resultForDurability(
+      durability,
+      isActive
         ? 'Saved. ' + username + ' now holds at most the ' + role + ' permissions.'
         : 'Saved. ' + username + ' is disabled and is denied on the next request.',
-    };
+    );
   } catch (error: unknown) {
     console.error('[admin] assignAdminRole failed:', error);
-    audit(
+    await audit(
       {
         actor: session.username,
         role: session.role,
@@ -204,7 +233,7 @@ export async function revokeAdminSessions(
 
   const parsed = adminSessionRevocationSchema.safeParse(payload);
   if (!parsed.success) {
-    audit(
+    await audit(
       {
         actor: session.username,
         role: session.role,
@@ -220,7 +249,7 @@ export async function revokeAdminSessions(
   const username = parsed.data.username;
 
   if (username === session.username) {
-    audit(
+    await audit(
       {
         actor: session.username,
         role: session.role,
@@ -236,7 +265,7 @@ export async function revokeAdminSessions(
 
   const environmentRole = environmentRoleFor(env, username);
   if (environmentRole === undefined) {
-    audit(
+    await audit(
       {
         actor: session.username,
         role: session.role,
@@ -263,23 +292,24 @@ export async function revokeAdminSessions(
       },
       storeDeps(deps),
     );
-    audit(
+    const durability = await audit(
       {
         actor: session.username,
         role: session.role,
         action: 'admins.revoke_sessions',
         target: username,
         outcome: 'success',
+        targetUsername: username,
       },
       deps?.sinks,
     );
-    return {
-      ok: true,
-      message: 'Revoked. Every session ' + username + ' holds is refused from now on.',
-    };
+    return resultForDurability(
+      durability,
+      'Revoked. Every session ' + username + ' holds is refused from now on.',
+    );
   } catch (error: unknown) {
     console.error('[admin] revokeAdminSessions failed:', error);
-    audit(
+    await audit(
       {
         actor: session.username,
         role: session.role,

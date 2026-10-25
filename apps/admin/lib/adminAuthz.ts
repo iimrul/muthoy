@@ -33,7 +33,8 @@ import 'server-only';
 
 import { cookies } from 'next/headers';
 import { AdminForbiddenError, AdminUnauthenticatedError } from './errors';
-import { recordAdminAction } from './adminAudit';
+import { type AdminAuditInput, type AdminAuditSink } from './adminAudit';
+import { recordAdminActionDurably } from './adminAuditStore';
 import { parseAdminRoles, type AdminPermission, type AdminRole } from './adminRoles';
 import {
   resolveEffectiveAuthority,
@@ -77,6 +78,8 @@ export interface AdminSessionContext {
  */
 export interface AdminAuthzDeps {
   readAssignment?: (username: string) => Promise<AdminRoleAssignment | null>;
+  /** Injected in tests; production uses lib/adminAuditStore.ts's defaults. */
+  sinks?: readonly AdminAuditSink[];
 }
 
 /**
@@ -85,6 +88,22 @@ export interface AdminAuthzDeps {
  * header, because a header is only as trustworthy as every path that can set
  * one.
  */
+/**
+ * Batch 3 §8.9. One durable, AWAITED record, with the sinks a test injected.
+ *
+ * It returns void rather than the durability, because every caller here is on
+ * a DENIAL path: the request is being refused either way, and there is no
+ * third result shape to report an audit failure through. The failure is on
+ * stderr, which is the record of account.
+ */
+async function audit(deps: AdminAuthzDeps, input: AdminAuditInput): Promise<void> {
+  if (deps.sinks) {
+    await recordAdminActionDurably(input, deps.sinks);
+    return;
+  }
+  await recordAdminActionDurably(input);
+}
+
 export async function currentAdminSession(
   env: AdminEnvironment = process.env,
   deps: AdminAuthzDeps = {},
@@ -116,8 +135,9 @@ export async function currentAdminSession(
     assignment = await read(verified.payload.sub);
   } catch (error: unknown) {
     console.error('[admin] admin role assignment unreadable:', error);
-    recordAdminAction({
+    await audit(deps, {
       actor: verified.payload.sub,
+      actorVerified: true,
       role: environmentRole,
       action: 'session.role_store_unavailable',
       outcome: 'denied',
@@ -140,8 +160,9 @@ export async function currentAdminSession(
       : authority.reason === 'assignment_disabled'
         ? 'session.account_disabled'
         : 'session.sessions_revoked';
-    recordAdminAction({
+    await audit(deps, {
       actor: verified.payload.sub,
+      actorVerified: true,
       role: environmentRole,
       action,
       outcome: 'denied',
@@ -155,8 +176,9 @@ export async function currentAdminSession(
   }
 
   if (authority.role !== verified.payload.role) {
-    recordAdminAction({
+    await audit(deps, {
       actor: verified.payload.sub,
+      actorVerified: true,
       role: authority.role,
       action: 'session.role_mismatch',
       outcome: 'success',
@@ -174,35 +196,52 @@ export async function currentAdminSession(
 }
 
 /**
- * Throws AdminForbiddenError and AUDITS the denial. Never returns false.
+ * Throws AdminForbiddenError. Never returns false, and NO LONGER AUDITS.
  *
  * It tests the session's EFFECTIVE permission set, not `hasPermission(role)`.
  * Asking the role would read straight past the §4.3 intersection and hand a
  * narrowed account its environment role's full authority.
+ *
+ * Batch 3 §8.9c moved the denial record OUT of here. This function is
+ * synchronous and it throws, so control never returns to the caller that could
+ * await the record — making the audit `await`-able required it to live on the
+ * async path. It is recorded exactly once, by requireAdminPermission below.
  */
 export function requirePermission(
   session: Pick<AdminSessionContext, 'username' | 'role' | 'permissions'>,
   permission: AdminPermission,
 ): void {
   if ((session.permissions as readonly string[]).includes(permission)) return;
-
-  recordAdminAction({
-    actor: session.username,
-    role: session.role,
-    action: 'authz.denied',
-    outcome: 'denied',
-    meta: { permission },
-  });
   throw new AdminForbiddenError(permission, session.role);
 }
 
-/** The page/action entry point: authenticate, then authorize, then return who. */
+/**
+ * The page/action entry point: authenticate, then authorize, then return who.
+ *
+ * Batch 3 §8.9c: the denial is PERSISTED BEFORE the caller sees the throw. A
+ * denial that is recorded after the rejection propagates is a denial the
+ * request can outrun.
+ */
 export async function requireAdminPermission(
   permission: AdminPermission,
   env: AdminEnvironment = process.env,
   deps: AdminAuthzDeps = {},
 ): Promise<AdminSessionContext> {
   const session = await currentAdminSession(env, deps);
-  requirePermission(session, permission);
+  try {
+    requirePermission(session, permission);
+  } catch (error: unknown) {
+    if (error instanceof AdminForbiddenError) {
+      await audit(deps, {
+        actor: session.username,
+        actorVerified: true,
+        role: session.role,
+        action: 'authz.denied',
+        outcome: 'denied',
+        meta: { permission },
+      });
+    }
+    throw error;
+  }
   return session;
 }

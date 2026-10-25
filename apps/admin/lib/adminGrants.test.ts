@@ -281,6 +281,9 @@ describe('admin write power is bounded at the source', () => {
       table: 'admin_role_assignments',
       operations: ['insert', 'update'],
     },
+    // §8.9's durable audit sink. INSERT ONLY — an audit row the panel can edit
+    // or erase is not evidence, and the grant says so too.
+    { module: 'lib/adminAuditStore.ts', table: 'admin_audit_log', operations: ['insert'] },
   ];
 
   /** The one module whose single update carries the stale-order guards. */
@@ -418,10 +421,25 @@ describe('admin write power is bounded at the source', () => {
       code: "await client.from('admin_audit_log').update({ outcome: 'success' }).eq('id', id);",
     };
 
-    expect(writeOperations(synthetic)).toEqual([
-      { table: 'admin_audit_log', operation: 'update' },
-    ]);
-    expect(MANIFEST_MODULES.has(synthetic.path)).toBe(false);
+    const writes = writeOperations(synthetic);
+    expect(writes).toEqual([{ table: 'admin_audit_log', operation: 'update' }]);
+    // The module IS in the manifest, and that is the point: the operation is
+    // what fails. `insert` is declared; `update` is not, so an update would be
+    // reported as undeclared even though the module and the table are both
+    // legitimate.
+    const entry = ADMIN_WRITE_MANIFEST.find(
+      (candidate) => candidate.module === synthetic.path && candidate.table === 'admin_audit_log',
+    );
+    expect(entry?.operations).toEqual(['insert']);
+    expect(entry?.operations).not.toContain('update');
+  });
+
+  test('the real audit store performs an insert and nothing else', () => {
+    const store = ADMIN_SOURCES.find((source) => source.path === 'lib/adminAuditStore.ts');
+
+    expect(store).toBeDefined();
+    expect(writeOperations(store ?? { path: '', code: '' }))
+      .toEqual([{ table: 'admin_audit_log', operation: 'insert' }]);
   });
 
   test('a Map delete is not a table write', () => {
