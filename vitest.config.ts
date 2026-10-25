@@ -9,6 +9,14 @@ import { defineConfig } from "vitest/config";
 // default node environment below still applies everywhere else).
 export default defineConfig({
   define: { __DEV__: false },
+  // Batch 3 §11. apps/admin/tsconfig.json sets `"jsx": "preserve"`, which Next
+  // requires — Next does its own JSX transform. Vite reads that same tsconfig
+  // and therefore falls back to the CLASSIC transform, which emits
+  // `React.createElement` and fails with "React is not defined" in a file that
+  // does not import React. Every workspace here is on React 19, whose own
+  // runtime is the automatic one, so this states at TEST time what the apps
+  // already do at build time. It changes nothing about `next build`.
+  esbuild: { jsx: 'automatic' },
   resolve: {
     alias: {
       "expo-constants": resolve(process.cwd(), "apps/mobile/db/test/expo-constants.ts"),
@@ -535,6 +543,12 @@ export default defineConfig({
       // apps/admin's pure logic + service-role exposure guards. Framework-free:
       // nothing here imports Next or opens a Supabase connection.
       "apps/admin/lib/**/*.test.ts",
+      // Batch 3 §11. The per-route contract INVOKES each of the eleven pages
+      // and renders the result with react-dom/server. Listed explicitly
+      // because the glob above covers lib/ only, and it has to live under
+      // apps/admin/ — pnpm resolves react-dom from that workspace, and a
+      // root-level file fails with ERR_MODULE_NOT_FOUND.
+      "apps/admin/app/adminRoutes.contract.test.tsx",
       // W4-06. The REAL Next middleware, driven with NextRequest: the exact-match
       // public-path set (and every near miss), the fail-closed 503, the
       // redirect-vs-401 split, idle refresh, and denial after a role is removed.
