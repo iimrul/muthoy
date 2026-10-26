@@ -35,6 +35,7 @@ import {
   recordedCancellations,
   requireMetric,
   trialToPaidConversion,
+  isActiveSubscriptionNow,
 } from './adminMetrics';
 import type {
   AccountRow,
@@ -557,5 +558,91 @@ describe('the metric manifest (§5.2)', () => {
       ADMIN_METRICS.filter((entry) => entry.unit === 'paisa').map((entry) => entry.family),
     );
     expect([...paisaFamilies].sort()).toEqual(['pharmacy_sales', 'subscription']);
+  });
+});
+
+describe('§5.1c active subscriptions, across statuses and expiry (Gate 5 finding 11)', () => {
+  // THE DEFECT. The Dashboard counted `status === 'active'` literally, so a row
+  // left at `active` with `paid_through` in the past was reported as an active
+  // customer indefinitely. Numeric assertions, not shape assertions.
+  const NOW = Date.parse('2026-10-27T06:00:00.000Z');
+  const DAY = 86_400_000;
+  const future = new Date(NOW + 30 * DAY).toISOString();
+  const past = new Date(NOW - 30 * DAY).toISOString();
+
+  function sub(over: Partial<SubscriptionRow>): SubscriptionRow {
+    return {
+      id: 'bs-' + (over.id ?? '1'),
+      billingAccountId: 'ba-1',
+      tier: 'pro',
+      billingCycle: 'monthly',
+      status: 'active',
+      startsAt: past,
+      paidThrough: future,
+      graceEndsAt: null,
+      canceledAt: null,
+      provider: 'sslcommerz',
+      createdAt: past,
+      ...over,
+    };
+  }
+
+  test('an active row inside its paid period counts', () => {
+    expect(isActiveSubscriptionNow(sub({ paidThrough: future }), NOW)).toBe(true);
+  });
+
+  test('an EXPIRED active row does NOT count — the defect', () => {
+    // This is the case that was wrong: status still `active`, period long gone.
+    expect(isActiveSubscriptionNow(sub({ paidThrough: past, graceEndsAt: null }), NOW)).toBe(false);
+  });
+
+  test('an active row inside its GRACE period counts, even past paid_through', () => {
+    // The canonical predicate allows either period; requiring paid_through
+    // alone was one of the two errors an earlier draft of the plan made.
+    expect(
+      isActiveSubscriptionNow(sub({ paidThrough: past, graceEndsAt: future }), NOW),
+    ).toBe(true);
+  });
+
+  test.each(['trialing', 'past_due', 'grace', 'canceled', 'expired'])(
+    'a %s row is not an ACTIVE subscription, whatever its dates',
+    (status) => {
+      expect(isActiveSubscriptionNow(sub({ status, paidThrough: future }), NOW)).toBe(false);
+    },
+  );
+
+  test('a free-tier active row DOES count, unlike MRR eligibility', () => {
+    // The two predicates are different on purpose: a run rate needs a price,
+    // an active-subscription count does not.
+    const free = sub({ tier: 'free', paidThrough: future });
+
+    expect(isActiveSubscriptionNow(free, NOW)).toBe(true);
+    expect(isMrrEligible(free, NOW)).toBe(false);
+  });
+
+  test('the numeric count over a mixed population', () => {
+    const rows = [
+      sub({ id: 'a', paidThrough: future }), // counts
+      sub({ id: 'b', paidThrough: past, graceEndsAt: future }), // counts
+      sub({ id: 'c', paidThrough: past }), // expired — must NOT count
+      sub({ id: 'd', status: 'trialing', paidThrough: future }), // not active
+      sub({ id: 'e', status: 'canceled', paidThrough: future }), // not active
+      sub({ id: 'f', tier: 'free', paidThrough: future }), // counts
+    ];
+
+    const counted = rows.filter((row) => isActiveSubscriptionNow(row, NOW)).length;
+
+    expect(counted).toBe(3);
+    // MUTATION: the literal-status count the Dashboard used would say 4,
+    // including the expired row.
+    expect(rows.filter((row) => row.status === 'active').length).toBe(4);
+  });
+
+  test('the boundary is exclusive at the instant the period ends', () => {
+    const exactly = new Date(NOW).toISOString();
+
+    expect(isActiveSubscriptionNow(sub({ paidThrough: exactly }), NOW)).toBe(false);
+    expect(isActiveSubscriptionNow(sub({ paidThrough: new Date(NOW + 1).toISOString() }), NOW))
+      .toBe(true);
   });
 });

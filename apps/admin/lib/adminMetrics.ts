@@ -99,6 +99,36 @@ export function isMrrEligible(
   return ['active', 'past_due', 'grace'].includes(row.status) && isAfter(row.graceEndsAt, nowMs);
 }
 
+/**
+ * §5.1c's "active subscriptions": a subscription ROW that is active and whose
+ * period has not ended.
+ *
+ * GATE 5 FINDING 11. The Dashboard counted `status === 'active'` literally, so a
+ * row left at `active` with `paid_through` in the past was reported as active
+ * indefinitely — a stale row presented as a live customer.
+ *
+ * Deliberately NOT `isMrrEligible` and NOT `currentlyPaid`:
+ *
+ *   - `isMrrEligible` additionally requires a PAID TIER, because a run rate
+ *     needs a price. A `free`-tier active subscription is still a real active
+ *     subscription and belongs in this count;
+ *   - `currentlyPaid` is counted over ENTITLEMENT SNAPSHOTS, which is what a
+ *     device honours. Keeping the two apart is the point of showing both: a
+ *     subscription row and the entitlement derived from it can disagree, and
+ *     that disagreement is worth seeing.
+ *
+ * The time conditions are the canonical ones, in the same shape
+ * `b4_user_has_premium` uses: either the paid period or the grace period must
+ * still be running.
+ */
+export function isActiveSubscriptionNow(
+  row: Pick<SubscriptionRow, 'status' | 'paidThrough' | 'graceEndsAt'>,
+  nowMs: number,
+): boolean {
+  if (row.status !== 'active') return false;
+  return isAfter(row.paidThrough, nowMs) || isAfter(row.graceEndsAt, nowMs);
+}
+
 // ───────────────────────────────────────────────────────────────── MRR
 
 function isLater(candidate: SubscriptionRow, held: SubscriptionRow): boolean {

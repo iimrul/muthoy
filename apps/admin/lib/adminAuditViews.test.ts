@@ -7,6 +7,7 @@
 // is not told so.
 
 import { describe, expect, test } from 'vitest';
+import { adminListQuerySchema } from '@muthoy/validation';
 import type { AdminAuditEntry } from './adminAudit';
 import {
   auditActionNamespaces,
@@ -194,5 +195,60 @@ describe('paging and rendering', () => {
     expect(formatAuditMeta(entry({ meta: { permission: 'audit.read', rowCount: 3 } }))).toBe(
       'permission=audit.read rowCount=3',
     );
+  });
+});
+
+describe('every RENDERED filter option survives the shared schema (Gate 5 finding 6)', () => {
+  // THE DEFECT. The Audit page generates its Action options from the recorded
+  // entries — dotted namespaces such as `authz.` and `session.` — and submitted
+  // them through `plan`, whose `/^[a-z_]*$/` rejects a dot. So selecting any
+  // namespaced action made `parseListQuery` fail, and the page reported "that
+  // filter is not valid" and queried nothing. Every option but the dotless
+  // `login` was unusable.
+  //
+  // Generating an option the schema refuses is the whole bug, so the test is:
+  // round-trip the OPTIONS THE PAGE ACTUALLY RENDERS.
+  const entries: AdminAuditEntry[] = [
+    entry({ actor: 'founder', action: 'authz.denied', outcome: 'denied' }),
+    entry({ actor: 'ops', action: 'session.role_revoked', outcome: 'failure' }),
+    entry({ actor: 'ops2', action: 'settings.updated', outcome: 'success' }),
+    entry({ actor: 'founder', action: 'login', outcome: 'success' }),
+    entry({ actor: 'founder', action: 'admins.role_assigned', outcome: 'success' }),
+  ];
+
+  test('the rendered options really do contain dots, or this proves nothing', () => {
+    const options = auditActionNamespaces(entries);
+
+    expect(options.length).toBeGreaterThan(3);
+    expect(options.filter((option) => option.includes('.')).length).toBeGreaterThan(2);
+  });
+
+  test('every action namespace option parses', () => {
+    for (const option of auditActionNamespaces(entries)) {
+      const parsed = adminListQuerySchema.safeParse({ action: option });
+      expect(parsed.success, option + ' is offered but refused by the schema').toBe(true);
+    }
+  });
+
+  test('every actor and outcome option parses too', () => {
+    for (const actor of auditActors(entries)) {
+      expect(adminListQuerySchema.safeParse({ district: actor }).success, actor).toBe(true);
+    }
+    for (const outcome of AUDIT_OUTCOMES) {
+      expect(adminListQuerySchema.safeParse({ status: outcome }).success, outcome).toBe(true);
+    }
+  });
+
+  test('MUTATION: the field this used to borrow still refuses a dotted action', () => {
+    // Proves the fix was necessary rather than cosmetic: the old carrier
+    // rejects exactly the options the page offers.
+    expect(adminListQuerySchema.safeParse({ plan: 'authz.' }).success).toBe(false);
+    expect(adminListQuerySchema.safeParse({ action: 'authz.' }).success).toBe(true);
+  });
+
+  test('the action field is still BOUNDED — it is not a free-text hole', () => {
+    for (const rejected of ['Authz.', 'authz;drop', 'a'.repeat(65), 'authz denied', 'authz-1']) {
+      expect(adminListQuerySchema.safeParse({ action: rejected }).success, rejected).toBe(false);
+    }
   });
 });

@@ -518,7 +518,10 @@ export async function analyticsOverview(
     registeredByDay: toDayEntries(
       groupShops(
         activity.shops,
-        (shop) => shop.createdAt.slice(0, 10),
+        // The DHAKA day, not the UTC slice (Gate 5 finding 10): a 20:00Z
+        // registration belongs to the next Dhaka day, and the Dashboard
+        // already filed it that way — so these two views disagreed.
+        (shop) => dhakaDayLabel(shop.createdAt) ?? shop.createdAt.slice(0, 10),
         (shop) => shop.id,
       ),
     ),

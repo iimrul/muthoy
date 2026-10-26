@@ -244,6 +244,19 @@ export const adminListQuerySchema = z.object({
   // here would be a fourth copy of that list to keep in step. An unknown cycle
   // matches nothing, which is the honest answer to a stale bookmark.
   cycle: z.string().trim().max(32).regex(/^[a-z_]*$/, 'Not a valid billing cycle').optional(),
+  // Batch 3 §8.9a's audit action filter. DOTS ARE THE POINT: action names are
+  // dotted namespaces (`authz.denied`, `session.role_revoked`,
+  // `settings.updated`), and the Audit page offers the namespace prefix as the
+  // filter value. This previously rode on `plan`, whose `/^[a-z_]*$/` rejects a
+  // dot — so every generated option except the dotless `login` was refused and
+  // the filter reported "not valid" instead of filtering. A bounded field of
+  // its own, matched as a PREFIX by the page.
+  action: z
+    .string()
+    .trim()
+    .max(64)
+    .regex(/^[a-z_.]*$/, 'Not a valid action')
+    .optional(),
   sort: z.enum(['registered_desc', 'registered_asc', 'activity_desc', 'activity_asc']).optional(),
   // coerce, because searchParams values are strings. The bounds are what stop a
   // page number from becoming an unbounded .range() offset.

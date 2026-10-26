@@ -42,6 +42,7 @@ import { addPaisa, asPaisa, type Paisa } from '@muthoy/types';
 import { netSalesPaisa } from '@muthoy/utils';
 import { ADMIN_REPORT_IDS, type AdminReportExportQuery } from '@muthoy/validation';
 import { CSV_CONTENT_TYPE, contentDisposition, toCsv, type CsvDocument } from './adminCsv';
+import { dhakaDayLabel } from './adminDashboard';
 import { dhakaDayEndIso, dhakaDayStartIso } from './adminFilters';
 import { collectedPaymentsByMonth, requireMetric, type Metric } from './adminMetrics';
 import { PDF_CONTENT_TYPE, PDF_LATIN1_NOTICE, toPdf } from './adminPdf';
@@ -404,6 +405,27 @@ function suppressRows(rows: readonly AggregateRow[]): {
   return { rows: out, suppressedBuckets };
 }
 
+/**
+ * The DHAKA day a registration belongs to.
+ *
+ * GATE 5 FINDING 10. These three call sites sliced the ISO string, which is the
+ * UTC day — so a shop registered at `2026-10-25T20:00:00Z` was filed under
+ * October 25 when Dhaka had already turned 26. The Dashboard already used the
+ * Dhaka conversion, so Analytics, the reports and the Dashboard disagreed about
+ * the same registration.
+ *
+ * The raw slice is kept as a LAST RESORT for a timestamp `Date.parse` cannot
+ * read. That branch is unreachable through the database — `shops.created_at`
+ * is `timestamptz NOT NULL DEFAULT now()`, and `withinInstantRange` already
+ * excludes an unparseable instant before any bucketing happens — so it exists
+ * only so that this function is total and can never return `null` into a
+ * report key. It is NOT a claim that such a row survives into a report; it
+ * does not, and the test below records that.
+ */
+function registrationDay(createdAt: string): string {
+  return dhakaDayLabel(createdAt) ?? createdAt.slice(0, 10);
+}
+
 function sumPaisaOf(rows: readonly ReportSaleTotalRow[]): Paisa {
   return rows.reduce<Paisa>((total, row) => addPaisa(total, row.totalPaisa), asPaisa(0));
 }
@@ -417,7 +439,7 @@ function buildRegistrations(data: ReportData, query: AdminReportExportQuery): Ag
         left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
     )
     .map((shop) => ({
-      key: shop.createdAt.slice(0, 10),
+      key: registrationDay(shop.createdAt),
       values: [shop.name, shop.district ?? '', shop.plan, shop.commercialStatus],
       // Registration metadata is not suppressed, so this list is not consulted.
       // It is still the shop's own id rather than an empty one, so a later
@@ -493,7 +515,7 @@ function buildActivitySummary(data: ReportData, query: AdminReportExportQuery): 
   );
   const registrationsByDay = groupContributors(
     data.shops.filter((shop) => withinInstantRange(shop.createdAt, query)),
-    (shop) => shop.createdAt.slice(0, 10),
+    (shop) => registrationDay(shop.createdAt),
     (shop) => shop.id,
   );
 

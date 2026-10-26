@@ -15,6 +15,7 @@ import {
 import {
   accountsEverPaid,
   entitlementCounts,
+  isActiveSubscriptionNow,
   monthlyRecurringRevenue,
   requireMetric,
 } from '../lib/adminMetrics';
@@ -121,12 +122,22 @@ export default async function DashboardPage() {
   const { shops, subscriptions, entitlements, orders, events, offerings } = overview;
 
   const counts = entitlementCounts(entitlements, nowMs);
-  const activeSubscriptions = subscriptions.filter(
-    (subscription) => subscription.status === 'active',
+
+  // GATE 5 FINDING 11. These counted the literal status, so a row left at
+  // `active` with `paid_through` in the past was reported as active for ever,
+  // and an expired trial went on being counted as a trial.
+  //
+  // Both now use §5.1c's accepted definitions. The ACTIVE count stays on the
+  // subscription rows, with the canonical time conditions applied, because a
+  // subscription row and the entitlement derived from it can legitimately
+  // disagree and showing both is the point. The TRIAL count comes from the
+  // entitlement snapshots, because `trial_ends_at` exists nowhere else — a
+  // `billing_subscriptions` row has no column saying when its trial ends, so
+  // counting `status === 'trialing'` could never have expired.
+  const activeSubscriptions = subscriptions.filter((subscription) =>
+    isActiveSubscriptionNow(subscription, nowMs),
   ).length;
-  const trialSubscriptions = subscriptions.filter(
-    (subscription) => subscription.status === 'trialing',
-  ).length;
+  const trialSubscriptions = counts.trialing;
 
   const today = overview.activeByDay[overview.activeByDay.length - 1];
   const activeToday = today === undefined ? 0 : distinctShopCount(today);
@@ -196,13 +207,13 @@ export default async function DashboardPage() {
         <MetricTile
           metric={requireMetric('active_subscriptions')}
           value={formatCount(activeSubscriptions)}
-          note="Subscription rows in status active. Entitlement is counted separately below."
+          note="Active rows whose paid or grace period is still running. Entitlement is counted separately below."
           href="/subscriptions"
         />
         <MetricTile
           metric={requireMetric('trial_subscriptions')}
           value={formatCount(trialSubscriptions)}
-          note="Subscription rows in status trialing."
+          note="The canonical trialing branch, read from the entitlement snapshots — the only record that holds a trial's end date."
           href="/subscriptions"
         />
         <MetricTile

@@ -306,30 +306,98 @@ describe('the GROSS boundary', () => {
       expect(countResolved(mutated)).toBeLessThan(countTiles(mutated));
     });
 
-    test('MUTATION 2: pointing a subscription figure at the pharmacy net value is caught', () => {
-      // The mutation: feed `collected_subscription_payments` — a SUBSCRIPTION
-      // metric — the pharmacy net total. What makes it wrong is the manifest:
-      // the metric's family and the value's family disagree.
+    /**
+     * THE GUARD, as a callable function — so a mutant can be run through it.
+     *
+     * GATE 5 FINDING 12. The previous version of mutation 2 built a mutant and
+     * then asserted only that the mutation had applied and that two families
+     * differ. Both are true of the UNMUTATED page, so the mutant was never
+     * evaluated against anything that could reject it. A mutation check that
+     * does not run a guard proves nothing.
+     *
+     * This reads each `<MetricTile>` on a page, resolves its metric's family
+     * from the manifest, and reports any tile whose VALUE expression is built
+     * from the other family's figures. That is the real rule §5.2 states: a
+     * subscription metric may not be fed a pharmacy-sales value, or the reverse.
+     */
+    const PHARMACY_VALUES = ['pharmacySales', 'pharmacyNetSalesPaisa'] as const;
+    const SUBSCRIPTION_VALUES = ['collectedTotalPaisa', 'runRate.totalPaisa'] as const;
+
+    function familyViolations(code: string): string[] {
+      const violations: string[] = [];
+      for (const tile of code.split('<MetricTile').slice(1)) {
+        const block = tile.slice(0, tile.indexOf('/>') + 2);
+        const id = /requireMetric\('([a-z_]+)'\)/.exec(block)?.[1];
+        if (id === undefined) {
+          violations.push('a MetricTile whose metric is not resolved from the manifest');
+          continue;
+        }
+        const family = familyOf(id);
+        const value = /value=\{([\s\S]*?)\}\s*$/m.exec(block)?.[1] ?? block;
+
+        if (family === 'subscription' && PHARMACY_VALUES.some((name) => value.includes(name))) {
+          violations.push(id + ' (subscription) is fed a pharmacy-sales value');
+        }
+        if (family === 'pharmacy_sales' && SUBSCRIPTION_VALUES.some((n) => value.includes(n))) {
+          violations.push(id + ' (pharmacy_sales) is fed a subscription value');
+        }
+      }
+      return violations;
+    }
+
+    test('the guard finds NO violation on the real page', () => {
+      expect(familyViolations(revenuePage())).toEqual([]);
+    });
+
+    test('MUTATION 2: feeding MRR the pharmacy net value IS REJECTED by the guard', () => {
+      // §5.2 names this mutation exactly: "pointing its MRR metric at a
+      // netSalesPaisa value must fail". The mutant is now RUN through the
+      // guard, and the guard rejects it.
+      const real = revenuePage();
+      const mutated = real.replace(
+        'value={formatMoney(runRate.totalPaisa)}',
+        'value={formatMoney(asPaisa(Math.trunc(pharmacySales.value)))}',
+      );
+
+      expect(mutated, 'the mutation did not apply').not.toBe(real);
+      expect(familyViolations(mutated)).toEqual(['mrr (subscription) is fed a pharmacy-sales value']);
+    });
+
+    test('MUTATION 2b: the same substitution on collected payments is rejected too', () => {
       const real = revenuePage();
       const mutated = real.replace(
         'value={formatMoney(collectedTotalPaisa)}',
         'value={formatMoney(asPaisa(Math.trunc(pharmacySales.value)))}',
       );
 
-      expect(mutated, 'the mutation did not apply').not.toBe(real);
-      expect(familyOf('collected_subscription_payments')).not.toBe(
-        familyOf('pharmacy_sales_net'),
-      );
+      expect(mutated).not.toBe(real);
+      expect(familyViolations(mutated)).toEqual([
+        'collected_subscription_payments (subscription) is fed a pharmacy-sales value',
+      ]);
+    });
 
-      // The REAL page keeps them apart: the pharmacy value reaches only the
-      // pharmacy metric's own tile, and the subscription tile never sees it.
-      const pharmacyTile = real.slice(real.indexOf("requireMetric('pharmacy_sales_net')"));
-      expect(pharmacyTile).toContain('pharmacySales');
+    test('MUTATION 2c: the REVERSE substitution is rejected as well', () => {
+      // A pharmacy-sales tile fed Muthoy's own money is the same error with the
+      // families swapped, and would read as a pharmacy earning what Muthoy did.
+      // Built directly rather than by patching the page's multi-line value
+      // expression, which would make the test's reach depend on formatting.
+      const synthetic =
+        "<MetricTile metric={requireMetric('pharmacy_sales_net')} "
+        + 'value={formatMoney(collectedTotalPaisa)} />';
 
-      const subscriptionTile = real.slice(
-        real.indexOf("requireMetric('collected_subscription_payments')"),
-      );
-      expect(subscriptionTile.slice(0, 300)).not.toContain('pharmacySales');
+      expect(familyViolations(synthetic)).toEqual([
+        'pharmacy_sales_net (pharmacy_sales) is fed a subscription value',
+      ]);
+    });
+
+    test('MUTATION 2d: a hand-captioned tile is rejected, not merely unresolved', () => {
+      const synthetic =
+        '<MetricTile metric={{ id: "x", label: "Total revenue", family: "pharmacy_sales" }} '
+        + 'value={formatMoney(collectedTotalPaisa)} />';
+
+      expect(familyViolations(synthetic)).toEqual([
+        'a MetricTile whose metric is not resolved from the manifest',
+      ]);
     });
   });
 
@@ -428,15 +496,55 @@ describe('the GROSS boundary', () => {
   // was not computed by the one definition".
   const NET_ANCHORS = [NET_FIELD, 'pharmacyNetSalesPaisa'] as const;
 
-  test('link 1: `net` appears only alongside a net-typed, provenanced field', () => {
+  /**
+   * An anchor only counts if the number behind it has PROVENANCE.
+   *
+   * GATE 5 FINDING 12. Link 1 originally accepted a file that merely CONTAINED
+   * an anchor's name, so a fabricated `pharmacyNetSalesPaisa = 42` would have
+   * licensed the word `net` on any page. Each anchor now carries the
+   * expression it must be derived from, and naming it without deriving it
+   * fails.
+   */
+  const ANCHOR_PROVENANCE: Readonly<Record<string, string>> = {
+    // queries.ts assigns it from the shared subtraction; platformStats declares
+    // the type. Either file satisfies the anchor by carrying the name, and
+    // link 2 below pins which file may assign it.
+    netSalesToday: 'netSalesToday',
+    // The pharmacy anchor must be SUMMED FROM the tallied monthly totals, which
+    // lib/adminPlatformQueries.ts produces through netSalesPaisa.
+    pharmacyNetSalesPaisa: 'pharmacySalesByMonth',
+  };
+
+  function anchoredWithProvenance(code: string): boolean {
+    return NET_ANCHORS.some(
+      (anchor) => code.includes(anchor) && code.includes(ANCHOR_PROVENANCE[anchor] ?? anchor),
+    );
+  }
+
+  test('link 1: `net` appears only alongside a net-typed, PROVENANCED field', () => {
     const offenders = scannable()
       .filter((file) => mentionsWord(withoutIdentifiers(file.code), 'net'))
-      .filter((file) => !NET_ANCHORS.some((anchor) => file.code.includes(anchor)));
+      .filter((file) => !anchoredWithProvenance(file.code));
 
     expect(
       offenders.map((file) => file.path),
-      `a figure called net must be one of: ${NET_ANCHORS.join(', ')}`,
+      `a figure called net must be one of: ${NET_ANCHORS.join(', ')}, and must be derived`,
     ).toEqual([]);
+  });
+
+  test('MUTATION: a FABRICATED anchor does not license the word', () => {
+    // The hole finding 12 named: the name alone used to be enough.
+    const fabricated = 'const pharmacyNetSalesPaisa = 42; const label = "Net takings";';
+
+    expect(
+      NET_ANCHORS.some((anchor) => fabricated.includes(anchor)),
+      'the old check would have accepted this',
+    ).toBe(true);
+    expect(anchoredWithProvenance(fabricated), 'the new check must reject it').toBe(false);
+
+    // And the real derivation passes.
+    const real = 'const pharmacyNetSalesPaisa = result.pharmacy.pharmacySalesByMonth.reduce(';
+    expect(anchoredWithProvenance(real)).toBe(true);
   });
 
   test('link 2b: the pharmacy anchor is produced by the shared netSalesPaisa too', () => {

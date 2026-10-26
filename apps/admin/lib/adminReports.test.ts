@@ -628,3 +628,79 @@ describe('buildReport reads through its injected source', () => {
     ).rejects.toThrow(ReportCompletenessError);
   });
 });
+
+describe('registrations are bucketed by the DHAKA day (Gate 5 finding 10)', () => {
+  // THE DEFECT. These sites sliced the ISO string, which is the UTC day. A shop
+  // registered at 20:00Z belongs to the NEXT Dhaka day — and the Dashboard
+  // already filed it that way, so Analytics, the reports and the Dashboard
+  // disagreed about the same registration.
+  const BEFORE_MIDNIGHT = '2026-10-25T17:59:00.000Z'; // 23:59 Dhaka, the 25th
+  const AFTER_MIDNIGHT = '2026-10-25T18:00:00.000Z'; // 00:00 Dhaka, the 26th
+  const LATE_EVENING = '2026-10-25T20:00:00.000Z'; // 02:00 Dhaka, the 26th
+
+  test('the UTC slice and the Dhaka day genuinely differ here', () => {
+    // Non-vacuity: if these agreed, the assertions below would prove nothing.
+    expect(AFTER_MIDNIGHT.slice(0, 10)).toBe('2026-10-25');
+    expect(LATE_EVENING.slice(0, 10)).toBe('2026-10-25');
+  });
+
+  test('a registration just before Dhaka midnight stays on its own day', () => {
+    const table = buildReportTable(
+      'pharmacy_registrations',
+      data({
+        shops: [shop(1, { createdAt: BEFORE_MIDNIGHT })],
+        tallies: [{ label: 'shops', counted: 1, loaded: 1 }],
+      }),
+      query({ reportId: 'pharmacy_registrations', format: 'csv' }),
+    );
+
+    expect(table.rows[0]?.[0]).toBe('2026-10-25');
+  });
+
+  test('a registration after Dhaka midnight moves to the NEXT day', () => {
+    const table = buildReportTable(
+      'pharmacy_registrations',
+      data({
+        shops: [shop(1, { createdAt: AFTER_MIDNIGHT }), shop(2, { createdAt: LATE_EVENING })],
+        tallies: [{ label: 'shops', counted: 2, loaded: 2 }],
+      }),
+      query({ reportId: 'pharmacy_registrations', format: 'csv' }),
+    );
+
+    // Both would have read 2026-10-25 under the UTC slice.
+    expect(table.rows.map((row) => row[0])).toEqual(['2026-10-26', '2026-10-26']);
+  });
+
+  test('the activity report agrees with it, so the two views cannot drift', () => {
+    const table = buildReportTable(
+      'activity_summary',
+      data({
+        shops: [shop(1, { createdAt: LATE_EVENING })],
+        sales: [],
+        tallies: [{ label: 'shops', counted: 1, loaded: 1 }],
+      }),
+      query({ reportId: 'activity_summary', format: 'csv' }),
+    );
+
+    expect(table.rows[0]?.[0]).toBe('2026-10-26');
+  });
+
+  test('an unreadable timestamp is EXCLUDED before bucketing, and that is stated', () => {
+    // Written expecting the row to survive; it does not, and the code is right.
+    // `withinInstantRange` refuses an instant `Date.parse` cannot read even
+    // when no range is set, so the row never reaches a bucket. Recorded as the
+    // real behaviour rather than left as an assumption, because
+    // `shops.created_at` is `timestamptz NOT NULL DEFAULT now()` and the case
+    // is unreachable through the database.
+    const table = buildReportTable(
+      'pharmacy_registrations',
+      data({
+        shops: [shop(1, { createdAt: 'not-a-date' })],
+        tallies: [{ label: 'shops', counted: 1, loaded: 1 }],
+      }),
+      query({ reportId: 'pharmacy_registrations', format: 'csv' }),
+    );
+
+    expect(table.rows).toEqual([]);
+  });
+});

@@ -65,7 +65,7 @@ const SHOP_COLUMNS: readonly DataColumn<ShopAuditPage['rows'][number]>[] = [
 /** The params to carry forward in pager links, as plain strings. */
 function carriedParams(raw: Record<string, string | string[] | undefined>): Record<string, string> {
   const carried: Record<string, string> = {};
-  for (const key of ['search', 'district', 'status', 'plan', 'from', 'to', 'pageSize', 'shop']) {
+  for (const key of ['search', 'district', 'status', 'action', 'from', 'to', 'pageSize', 'shop']) {
     const value = raw[key];
     const first = typeof value === 'string' ? value : Array.isArray(value) ? value[0] : undefined;
     if (first !== undefined && first.length > 0) carried[key] = first;
@@ -126,11 +126,14 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
   }
 
   const raw = await searchParams;
-  // The shared schema bounds `page`, `pageSize`, `search` and the date range.
-  // The actor, action and outcome filters ride on the schema's spare bounded
-  // text fields and are matched EXACTLY or by PREFIX against values that came
-  // from the entries themselves — none of them reaches a query or a pattern,
-  // because the platform view is in memory.
+  // The shared schema bounds `page`, `pageSize`, `search`, `action` and the
+  // date range. `action` is its own field because action names are dotted
+  // namespaces and the `plan` field this used to borrow rejects a dot — which
+  // made every generated option except `login` unusable (Gate 5 finding 6).
+  // The actor and outcome filters ride on the schema's spare bounded text
+  // fields; both carry values that came from the entries themselves and are
+  // matched EXACTLY, so neither reaches a query or a pattern — the platform
+  // view is in memory.
   const parsed = parseListQuery(raw);
   if (!parsed.ok) {
     return (
@@ -148,7 +151,8 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
   const entries = recentAdminAudit.entries();
   const actorFilter = firstParam(raw, 'district');
   const outcomeFilter = firstParam(raw, 'status');
-  const actionFilter = firstParam(raw, 'plan');
+  // Its OWN schema field, because action names carry dots (finding 6).
+  const actionFilter = query.action ?? '';
 
   const matched = filterAuditEntries(entries, {
     actor: actorFilter,
@@ -209,7 +213,7 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
             ],
           },
           {
-            name: 'plan',
+            name: 'action',
             label: 'Action',
             value: actionFilter,
             options: [
