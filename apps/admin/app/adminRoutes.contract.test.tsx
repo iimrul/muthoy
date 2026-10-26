@@ -76,13 +76,28 @@ vi.mock('../lib/supabaseAdmin', () => ({
         : { data: null, error: { message: clientBox.error }, count: null };
     };
 
+    // The ONE-ROW shape, which is a different envelope from the list one:
+    // `.maybeSingle()` resolves to `{ data: row | null }`, never to an array.
+    // Its absence was not a harmless gap — a page calling it got `undefined is
+    // not a function`, rendered its error notice, and every assertion about
+    // what that page SHOWS passed vacuously while the page was broken. The
+    // §8.2 drill-down is the page that found this.
+    const singleResult = (table: string) => {
+      const rows = clientBox.rowsByTable[table] ?? [];
+      return clientBox.error === undefined
+        ? { data: rows[0] ?? null, error: null }
+        : { data: null, error: { message: clientBox.error } };
+    };
+
     const build = (table: string, columns: string) => {
       clientBox.calls.push({ table, columns });
       const chain: Record<string, unknown> = {
         then: (resolve: (value: unknown) => unknown) =>
           Promise.resolve(result(table)).then(resolve),
+        maybeSingle: () => Promise.resolve(singleResult(table)),
+        single: () => Promise.resolve(singleResult(table)),
       };
-      for (const method of ['eq', 'gte', 'lte', 'or', 'order', 'not', 'in', 'limit', 'range']) {
+      for (const method of ['eq', 'gte', 'lte', 'lt', 'or', 'order', 'not', 'in', 'limit', 'range']) {
         chain[method] = () => chain;
       }
       return chain;
@@ -148,10 +163,14 @@ function setEnvironment(roles: Record<string, Role>): void {
 
 /** Renders one page. `searchParams` is the promise Next 15 hands a page. */
 async function render(path: string, searchParams: Record<string, string> = {}): Promise<string> {
-  const module = (await import(path)) as {
+  // NOT `module`: @next/next/no-assign-module-variable forbids shadowing it,
+  // and the rule is right — a file that declares `module` can confuse a
+  // bundler's CommonJS interop. This was already failing lint on the committed
+  // version of this file.
+  const routeModule = (await import(path)) as {
     default: (props: { searchParams: Promise<Record<string, string>> }) => Promise<unknown>;
   };
-  const element = await module.default({ searchParams: Promise.resolve(searchParams) });
+  const element = await routeModule.default({ searchParams: Promise.resolve(searchParams) });
   return renderToStaticMarkup(element as never);
 }
 
@@ -402,5 +421,414 @@ describe('the shipped Maps state plots nothing and loads no map', () => {
     // import — and therefore Leaflet — is never reached.
     expect(html).not.toContain('data-map');
     expect(html).toContain('E14');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Batch 3 §8.1/§8.2/§8.3/§8.9 — THE POSITIVE HALF.
+//
+// Everything above measures that a DENIED role reaches no business query. That
+// is only half a claim, and on its own it is satisfied by a fake that is
+// broken for everybody: if every page failed closed for every caller, every
+// denial assertion would pass and the suite would be measuring nothing.
+//
+// So each of the four pages extended in this batch is also rendered by an
+// AUTHORIZED role against FIXTURE ROWS, and asserted to have reached the
+// business tables it needs AND to have put the fixture's own values on the
+// page. A page that silently rendered an empty state would fail here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SHOP_ID = '7b000000-0000-4000-8000-000000000001';
+const ACCOUNT_ID = 'ba000000-0000-4000-8000-000000000001';
+
+/** Renders a `[id]` route, which Next hands `params` rather than `searchParams`. */
+async function renderWithParams(
+  path: string,
+  params: Record<string, string>,
+  searchParams: Record<string, string> = {},
+): Promise<string> {
+  // NOT `module`: @next/next/no-assign-module-variable forbids shadowing it,
+  // and the rule is right — a file that declares `module` can confuse a
+  // bundler's CommonJS interop. This was already failing lint on the committed
+  // version of this file.
+  const routeModule = (await import(path)) as {
+    default: (props: {
+      params: Promise<Record<string, string>>;
+      searchParams: Promise<Record<string, string>>;
+    }) => Promise<unknown>;
+  };
+  const element = await routeModule.default({
+    params: Promise.resolve(params),
+    searchParams: Promise.resolve(searchParams),
+  });
+  return renderToStaticMarkup(element as never);
+}
+
+function tablesTouched(): string[] {
+  return [...new Set(clientBox.calls.map((call) => call.table))].sort();
+}
+
+/** A platform with one of everything, so every §8.1 figure has a source row. */
+function seedPlatform(): void {
+  clientBox.rowsByTable.shops = [
+    {
+      id: SHOP_ID,
+      name: 'Banani Pharmacy',
+      name_en: 'Banani Pharmacy',
+      phone: '+8801700000001',
+      district: 'Dhaka',
+      thana: 'Banani',
+      plan: 'pro',
+      commercial_status: 'active',
+      commercial_reason: null,
+      archived_at: null,
+      billing_account_id: null,
+      latitude: null,
+      longitude: null,
+      location_captured_at: null,
+      created_at: '2026-01-02T00:00:00.000Z',
+      updated_at: '2026-10-20T00:00:00.000Z',
+    },
+  ];
+  clientBox.rowsByTable.billing_subscriptions = [
+    {
+      id: 'bs000000-0000-4000-8000-000000000001',
+      billing_account_id: ACCOUNT_ID,
+      tier: 'pro',
+      billing_cycle: 'monthly',
+      status: 'active',
+      starts_at: '2026-09-01T00:00:00.000Z',
+      paid_through: '2026-11-01T00:00:00.000Z',
+      grace_ends_at: null,
+      canceled_at: null,
+      provider: 'sslcommerz',
+      created_at: '2026-09-01T00:00:00.000Z',
+    },
+  ];
+  clientBox.rowsByTable.entitlement_snapshots = [
+    {
+      billing_account_id: ACCOUNT_ID,
+      tier: 'pro',
+      status: 'past_due',
+      trial_ends_at: null,
+      paid_through: '2026-11-01T00:00:00.000Z',
+      grace_ends_at: null,
+      verified_at: '2026-10-20T00:00:00.000Z',
+    },
+  ];
+  clientBox.rowsByTable.payment_orders = [
+    {
+      id: 'po000000-0000-4000-8000-000000000001',
+      billing_account_id: ACCOUNT_ID,
+      tier: 'pro',
+      billing_cycle: 'monthly',
+      amount_paisa: 50000,
+      status: 'verified',
+      provider: 'sslcommerz',
+      failure_code: null,
+      expires_at: '2026-09-30T00:00:00.000Z',
+      verified_at: '2026-09-29T00:00:00.000Z',
+      created_at: '2026-09-28T00:00:00.000Z',
+    },
+  ];
+  clientBox.rowsByTable.payment_provider_events = [
+    {
+      id: 'pe000000-0000-4000-8000-000000000001',
+      payment_order_id: 'po000000-0000-4000-8000-000000000001',
+      processing_status: 'rejected',
+      error_code: 'signature_mismatch',
+      received_at: '2026-09-29T00:00:00.000Z',
+    },
+  ];
+  clientBox.rowsByTable.plan_offerings = [
+    { tier: 'pro', billing_cycle: 'monthly', amount_paisa: 50000, is_active: true },
+  ];
+  clientBox.rowsByTable.billing_accounts = [{ id: ACCOUNT_ID, primary_shop_id: SHOP_ID }];
+}
+
+describe('§8.1 the Dashboard renders its nine figures and all five alerts', () => {
+  beforeEach(() => {
+    setEnvironment({ founder: 'super_admin' });
+    seedPlatform();
+  });
+
+  test('an authorized role reaches every source table it needs', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./page');
+
+    // THE POSITIVE CLAIM: the page got to the business data. If the fake were
+    // broken for everybody, this is the assertion that would fail — and the
+    // denial assertions above would then be worthless.
+    for (const table of [
+      'shops',
+      'billing_subscriptions',
+      'entitlement_snapshots',
+      'payment_orders',
+      'payment_provider_events',
+      'plan_offerings',
+      'sales',
+    ]) {
+      expect(tablesTouched(), table + ' was never read').toContain(table);
+    }
+    // And it rendered the fixture's own row, not an empty state.
+    expect(html).toContain('Banani Pharmacy');
+  });
+
+  test('all nine metric captions come from the manifest', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./page');
+
+    for (const label of [
+      'Registered pharmacies',
+      'Pharmacies active today',
+      'Active subscriptions',
+      'Trial subscriptions',
+      'Accounts that have ever paid',
+      'Currently paid entitlements',
+      'Monthly recurring run rate',
+      'Total sales today, net of refunds',
+    ]) {
+      expect(html, label + ' is missing').toContain(label);
+    }
+  });
+
+  test('all five alert classes are listed, and the summary counts them', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./page');
+
+    expect(html).toContain('Subscriptions expiring within 7 days');
+    expect(html).toContain('Accounts past due or in grace');
+    expect(html).toContain('Pharmacies with no billing account');
+    expect(html).toContain('Payment orders open past expiry');
+    expect(html).toContain('Provider events rejected');
+    // Five checked, and the sentence reports how many of the five are raised —
+    // a real count rather than a constant.
+    expect(html).toMatch(/of 5/);
+  });
+
+  test('the run rate is ABSENT for a role without the money permission', async () => {
+    // `support` holds shops.read but not revenue.read, so the page must render
+    // and simply not carry the run rate. §8.1: "still correct without it".
+    setEnvironment({ helper: 'support' });
+    seedPlatform();
+    await signInAs('helper', 'support');
+
+    const html = await render('./page');
+
+    expect(html).toContain('Registered pharmacies');
+    expect(html).not.toContain('Monthly recurring run rate');
+    expect(html).toContain('does not hold the permission');
+  });
+});
+
+describe('§8.2 the drill-down shows support notes and withholds the location', () => {
+  beforeEach(() => {
+    setEnvironment({ founder: 'super_admin' });
+    seedPlatform();
+    clientBox.rowsByTable.admin_support_cases = [
+      {
+        id: 'sc000000-0000-4000-8000-000000000001',
+        shop_id: SHOP_ID,
+        summary: 'Sync stalled after reinstall',
+        status: 'open',
+        priority: 'high',
+        category: 'sync',
+        assignee: 'founder',
+        opened_by: 'founder',
+        opened_at: '2026-10-20T00:00:00.000Z',
+        updated_at: '2026-10-21T00:00:00.000Z',
+      },
+    ];
+  });
+
+  test('the support block renders the shop own case', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await renderWithParams('./shops/[id]/page', { id: SHOP_ID });
+
+    expect(tablesTouched()).toContain('admin_support_cases');
+    expect(html).toContain('Sync stalled after reinstall');
+    expect(html).toContain('Support notes');
+  });
+
+  test('the location block withholds the coordinate and names gate E13', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await renderWithParams('./shops/[id]/page', { id: SHOP_ID });
+
+    expect(html).toContain('E13');
+    expect(html).toContain('Location');
+    // No coordinate reaches the page in the shipped state.
+    expect(html).not.toContain('23.79');
+  });
+
+  test('a role without maps.read is told so', async () => {
+    // `read_only` is the one role in the §4.2 matrix that holds `shops.read`
+    // and NOT `maps.read` — billing and support both hold the map read, so
+    // using either would have asserted nothing.
+    setEnvironment({ viewer: 'read_only' });
+    seedPlatform();
+    await signInAs('viewer', 'read_only');
+
+    const html = await renderWithParams('./shops/[id]/page', { id: SHOP_ID });
+
+    expect(html).toContain('does not hold the maps permission');
+    // And the drill-down itself still works, so this is a narrowed page rather
+    // than a refused one.
+    expect(html).toContain('Banani Pharmacy');
+  });
+
+  test('a malformed route parameter reaches no query', async () => {
+    await signInAs('founder', 'super_admin');
+
+    // notFound() throws a Next navigation error, which is the correct
+    // behaviour — the claim being measured is that nothing was queried first.
+    await expect(renderWithParams('./shops/[id]/page', { id: 'not-a-uuid' })).rejects.toThrow();
+    expect(businessCalls()).toEqual([]);
+  });
+});
+
+describe('§8.3 Subscriptions filters, dates the next bill, and refuses overrides', () => {
+  beforeEach(() => {
+    setEnvironment({ founder: 'super_admin' });
+    seedPlatform();
+  });
+
+  test('the next billing date and its basis both render', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./subscriptions/page');
+
+    expect(tablesTouched()).toContain('billing_subscriptions');
+    expect(html).toContain('Next billing');
+    // The fixture is an active paid cycle, so the basis is the paid cycle's
+    // end — the words, not merely a date.
+    expect(html).toContain('end of the paid cycle');
+  });
+
+  test('the renewal column comes from the verified order', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./subscriptions/page');
+
+    expect(tablesTouched()).toContain('payment_orders');
+    expect(html).toContain('Renewals');
+    expect(html).toContain('latest');
+  });
+
+  test('the status, tier and cycle filters all reach the query', async () => {
+    await signInAs('founder', 'super_admin');
+
+    await render('./subscriptions/page', { status: 'active', plan: 'pro', cycle: 'monthly' });
+
+    // Two reads of the table: the exact count and the page, both filtered.
+    const reads = clientBox.calls.filter((call) => call.table === 'billing_subscriptions');
+    expect(reads.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('the E10 lifecycle-override notice is present, and no override control is', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./subscriptions/page');
+
+    expect(html).toContain('E10');
+    expect(html).toContain('Lifecycle overrides are unavailable');
+    // No button, no form, no action that could extend a trial or force a
+    // status. §8.3(ii)'s refresh action is gone from the whole panel (E11).
+    expect(html).not.toMatch(/Extend trial|Force status|refreshSnapshot/);
+  });
+
+  test('a malformed filter is reported, nothing is queried, and the notice still shows', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./subscriptions/page', { pageSize: '5000' });
+
+    expect(html).toContain('role="alert"');
+    expect(businessCalls()).toEqual([]);
+    // The refusal must not swallow the E10 statement.
+    expect(html).toContain('E10');
+  });
+});
+
+describe('§8.9 the audit page filters, and the per-shop view is gated', () => {
+  const AUDIT_ROW = {
+    id: 'al000000-0000-4000-8000-000000000001',
+    shop_id: SHOP_ID,
+    actor_id: '9c000000-0000-4000-8000-000000000001',
+    action: 'sale.voided',
+    target: 'INV-0001',
+    created_at: '2026-10-21T06:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    setEnvironment({ founder: 'super_admin' });
+    clientBox.rowsByTable.audit_logs = [AUDIT_ROW];
+  });
+
+  test('the filter controls are rendered, and the view states it is not the record', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./audit/page');
+
+    expect(html).toContain('Any actor');
+    expect(html).toContain('Any action');
+    expect(html).toContain('Any outcome');
+    expect(html).toContain('This view is not the record');
+  });
+
+  test('with no shop id, the per-shop view reads NOTHING', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./audit/page');
+
+    expect(tablesTouched()).not.toContain('audit_logs');
+    expect(html).toContain('No pharmacy is selected');
+  });
+
+  test('with a shop id, a permitted role reads that ONE shop log', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./audit/page', { shop: SHOP_ID });
+
+    expect(tablesTouched()).toContain('audit_logs');
+    expect(html).toContain('sale.voided');
+    expect(html).toContain('INV-0001');
+  });
+
+  test('a role without shop_audit.read reads no pharmacy log at all', async () => {
+    // `billing` holds audit.read but NOT shop_audit.read — §4.2 scopes the
+    // per-shop view to super_admin and support.
+    setEnvironment({ money: 'billing' });
+    clientBox.rowsByTable.audit_logs = [AUDIT_ROW];
+    await signInAs('money', 'billing');
+
+    const html = await render('./audit/page', { shop: SHOP_ID });
+
+    expect(tablesTouched()).not.toContain('audit_logs');
+    expect(html).toContain('does not hold the per-shop audit permission');
+    expect(html).not.toContain('sale.voided');
+  });
+
+  test('a malformed shop id is refused before any query', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./audit/page', { shop: 'not-a-uuid' });
+
+    expect(tablesTouched()).not.toContain('audit_logs');
+    expect(html).toContain('not a valid pharmacy id');
+  });
+
+  test('the per-shop read only ever selects', async () => {
+    // §3.5 revokes every privilege on `audit_logs` from the panel's role and
+    // grants back SELECT alone, so a write fails in the database. This is the
+    // source-level half of the same claim.
+    const source = readFileSync(join(import.meta.dirname, '../lib/adminPlatformQueries.ts'), 'utf8');
+    const block = source.slice(source.indexOf('export async function shopAuditPage'));
+
+    expect(block.length).toBeGreaterThan(200);
+    expect(block).not.toMatch(/\.(insert|update|delete|upsert)\(/);
   });
 });

@@ -3,9 +3,20 @@ import { notFound } from 'next/navigation';
 import DataTable, { type DataColumn } from '../../../components/DataTable';
 import DetailList from '../../../components/DetailList';
 import ErrorNotice from '../../../components/ErrorNotice';
+import { EmptyState } from '../../../components/PageParts';
 import { formatMoney } from '@muthoy/utils';
 import { requireAdminPermission } from '../../../lib/adminAuthz';
+import {
+  hasPlottableCoordinates,
+  isPlottable,
+  LOCATION_CONSENT_BLOCKED_REASON,
+  markerColorForPlan,
+  noLocationConsent,
+  type ShopLocationRow,
+} from '../../../lib/adminGeo';
+import { listSupportCaseSummaries, shopLocationFor } from '../../../lib/adminPlatformQueries';
 import { getShopDetail } from '../../../lib/adminQueries';
+import type { SupportCaseSummary } from '../../../lib/adminSupport';
 import {
   formatDhakaDate,
   isUuid,
@@ -17,6 +28,24 @@ import {
 import { formatPhone } from '../../../lib/platformStats';
 import { toDisplayMessage } from '../../../lib/errors';
 
+// Batch 3 §8.2 — the pharmacy drill-down.
+//
+// ONE SHOP'S ROWS, AND NEVER ANOTHER'S. Every read below is keyed by the same
+// validated id, and the support block filters on `shop_id` in the query rather
+// than in JavaScript — a client-side filter over a wider read is one missing
+// `continue` away from showing a neighbour's case.
+//
+// THE LOCATION BLOCK IS GATED TWICE, AND BOTH GATES ARE REAL.
+//   1. `maps.read`, because a coordinate is not inside `shops.read`'s scope;
+//   2. §8.6's consent rule, which lib/adminGeo.ts owns. `noLocationConsent` is
+//      the shipped consent source and it returns null for every shop, so
+//      `isPlottable` is false for every shop and no coordinate is rendered
+//      until gate E13 lands a real, versioned, revocable consent record.
+//
+// THE BLOCK IS STILL BUILT, and that is the point: enabling it later is a data
+// and policy change rather than new code. What it renders today is whether a
+// coordinate EXISTS and why it is withheld — never the coordinate.
+
 export const dynamic = 'force-dynamic';
 
 const MEMBER_COLUMNS: readonly DataColumn<MembershipRow>[] = [
@@ -26,13 +55,68 @@ const MEMBER_COLUMNS: readonly DataColumn<MembershipRow>[] = [
   { heading: 'Since', cell: (row) => formatDhakaDate(row.createdAt) },
 ];
 
+const SUPPORT_COLUMNS: readonly DataColumn<SupportCaseSummary>[] = [
+  {
+    heading: 'Case',
+    cell: (row) => (
+      <Link href={'/support?case=' + row.id} className="underline">
+        {row.summary}
+      </Link>
+    ),
+  },
+  { heading: 'Status', cell: (row) => row.statusLabel },
+  { heading: 'Priority', cell: (row) => row.priorityLabel },
+  { heading: 'Category', cell: (row) => row.categoryLabel },
+  { heading: 'Assignee', cell: (row) => row.assignee ?? '—' },
+  { heading: 'Opened', cell: (row) => row.openedOn },
+  { heading: 'Last updated', cell: (row) => row.lastUpdated },
+];
+
 interface ShopPageProps {
   params: Promise<{ id: string }>;
 }
 
-export default async function ShopDetailPage({ params }: ShopPageProps) {
+interface ShopBundle {
+  detail: ShopDetailView;
+  cases: readonly SupportCaseSummary[];
+  location: ShopLocationRow | null;
+}
+
+type BundleResult =
+  | { ok: true; bundle: ShopBundle | null; nowMs: number }
+  | { ok: false; message: string };
+
+/**
+ * The three reads, in parallel, against one instant.
+ *
+ * The support read is issued without `support.read`, deliberately: a support
+ * case is platform data ABOUT this shop, and §4.2 gives a `shops.read` holder
+ * the drill-down in full. What `support.write` gates is CHANGING a case, which
+ * happens on the Support page — this block is read-only and links there.
+ */
+async function loadShop(id: string, mayReadLocation: boolean): Promise<BundleResult> {
   try {
-    await requireAdminPermission('shops.read');
+    const now = new Date();
+    const [detail, cases, location] = await Promise.all([
+      getShopDetail(id, now),
+      listSupportCaseSummaries({ shopId: id }, now),
+      // Not read at all without the permission. A figure nobody may see should
+      // not be fetched either — the narrowest read is the one never issued.
+      mayReadLocation ? shopLocationFor(id) : Promise.resolve(null),
+    ]);
+    if (detail === null) return { ok: true, bundle: null, nowMs: now.getTime() };
+    return { ok: true, bundle: { detail, cases, location }, nowMs: now.getTime() };
+  } catch (error: unknown) {
+    console.error('[admin] shop detail failed to load:', error);
+    return { ok: false, message: toDisplayMessage(error) };
+  }
+}
+
+export default async function ShopDetailPage({ params }: ShopPageProps) {
+  let permissions: readonly string[];
+  try {
+    const session = await requireAdminPermission('shops.read');
+    permissions = session.permissions;
   } catch (error: unknown) {
     console.error('[admin] shop detail denied:', error);
     return <ErrorNotice message={toDisplayMessage(error)} />;
@@ -43,16 +127,17 @@ export default async function ShopDetailPage({ params }: ShopPageProps) {
   const { id } = await params;
   if (!isUuid(id)) notFound();
 
-  let detail: ShopDetailView | null;
-  try {
-    detail = await getShopDetail(id);
-  } catch (error: unknown) {
-    console.error('[admin] shop detail failed to load:', error);
-    return <ErrorNotice message={toDisplayMessage(error)} />;
-  }
-  if (detail === null) notFound();
+  const mayReadLocation = permissions.includes('maps.read');
+  const result = await loadShop(id, mayReadLocation);
+  if (!result.ok) return <ErrorNotice message={result.message} />;
+  if (result.bundle === null) notFound();
 
+  const { detail, cases, location } = result.bundle;
   const { shop } = detail;
+
+  const openCases = cases.filter((entry) => entry.isOpen).length;
+  const hasCoordinates = location !== null && hasPlottableCoordinates(location);
+  const plottable = location !== null && isPlottable(location, noLocationConsent, result.nowMs);
 
   return (
     <>
@@ -98,6 +183,65 @@ export default async function ShopDetailPage({ params }: ShopPageProps) {
           emptyMessage="This shop has no memberships."
         />
       </div>
+
+      <section aria-labelledby="shop-support" className="mt-8">
+        <h2 id="shop-support" className="text-lg font-semibold">
+          Support notes
+        </h2>
+        <p className="mt-1 text-sm text-midGray">
+          {cases.length === 0
+            ? 'Read-only here. Cases are opened and annotated on the Support page, where every transition is audited.'
+            : openCases
+              + (openCases === 1 ? ' open case of ' : ' open cases of ')
+              + cases.length
+              + '. Read-only here — a case is changed on the Support page, where every transition is audited.'}
+        </p>
+        <div className="mt-3">
+          <DataTable
+            columns={SUPPORT_COLUMNS}
+            rows={cases}
+            rowKey={(row) => row.id}
+            emptyMessage="No support case has been opened for this pharmacy. The support tables ship empty, and no history is fabricated."
+          />
+        </div>
+      </section>
+
+      <section aria-labelledby="shop-location" className="mt-8">
+        <h2 id="shop-location" className="text-lg font-semibold">
+          Location
+        </h2>
+        {!mayReadLocation ? (
+          <EmptyState message="Location is not shown, because this account does not hold the maps permission. A coordinate is outside the scope of pharmacy read access, so it was not read at all." />
+        ) : plottable ? (
+          // Unreachable in the shipped build — `noLocationConsent` returns null
+          // for every shop, so `isPlottable` is false. The branch exists so
+          // that landing a real consent source is a data change rather than new
+          // code, and so the plan-tier colour rule has somewhere to live.
+          <DetailList
+            items={[
+              { label: 'District', value: location?.district ?? '—' },
+              { label: 'Captured', value: formatDhakaDate(location?.locationCapturedAt ?? null) },
+              { label: 'Plan marker colour', value: markerColorForPlan(shop.plan) },
+            ]}
+          />
+        ) : (
+          <EmptyState message={LOCATION_CONSENT_BLOCKED_REASON}>
+            <p className="mt-2 text-xs text-midGray">
+              {hasCoordinates
+                ? 'This pharmacy does hold a coordinate pair and a capture timestamp. A capture '
+                  + 'timestamp is not consent, so the coordinate is withheld rather than shown.'
+                : 'This pharmacy holds no coordinate pair at all, so there is nothing to withhold. '
+                  + 'Nothing in the mobile app writes a latitude or a longitude today.'}
+            </p>
+            <p className="mt-2 text-xs text-midGray">
+              <Link href="/maps" className="underline">
+                The platform map
+              </Link>{' '}
+              reports the same two gates for every pharmacy at once.
+            </p>
+          </EmptyState>
+        )}
+      </section>
     </>
   );
 }

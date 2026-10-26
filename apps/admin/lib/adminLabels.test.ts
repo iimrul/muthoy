@@ -154,6 +154,13 @@ describe('the GROSS boundary', () => {
       "'mrr'",
       // the route, the nav entry and the page's own name
       "'/revenue'",
+      // Batch 3 §8.1: the same route as a JSX attribute. The Dashboard's
+      // run-rate card links to its detail page, which §8.1 requires of every
+      // card, and `href="/revenue"` is the attribute form of the route already
+      // exempted on the line above. Both quoting forms are listed EXACTLY —
+      // not a loosened pattern — and `href=` is part of the needle, so a bare
+      // "/revenue" used as prose is still caught. The controls below prove it.
+      'href="/revenue"',
       "label: 'Revenue'",
       'Revenue &amp; billing',
     ].join('|'),
@@ -249,6 +256,46 @@ describe('the GROSS boundary', () => {
         planted,
       ).toBe(true);
     }
+  });
+
+  test('negative control: the href exemption does not blind the scan', () => {
+    // Batch 3 §8.1. The exemption is `href="/revenue"` exactly. A caption, a
+    // heading, a different attribute or a different route must all still be
+    // caught, or widening the list for one link would have quietly stopped the
+    // check for every other shape.
+    for (const planted of [
+      '<p>Revenue this month</p>',
+      'title="Revenue"',
+      'aria-label="Revenue today"',
+      'const path = "/revenue-detail";',
+      'href="/revenue-summary"',
+      'alt="Revenue chart"',
+    ]) {
+      expect(mentionsWord(withoutIdentifiers(planted), 'revenue'), planted).toBe(true);
+    }
+    // And the one exempted shape is the only new thing that passes.
+    expect(mentionsWord(withoutIdentifiers('href="/revenue"'), 'revenue')).toBe(false);
+  });
+
+  test('the Dashboard links to the detail page and captions nothing by hand', () => {
+    // The BACKING for the exemption above, the same shape the revenue page's
+    // exemption carries: the word is allowed there because the only thing it
+    // attaches to is a route, and every money figure on the page takes its
+    // caption from §5.2's manifest rather than from a string.
+    const dashboard = SOURCES.find((file) => file.path === 'app/page.tsx');
+
+    expect(dashboard, 'app/page.tsx is missing').toBeDefined();
+    const code = dashboard?.code ?? '';
+
+    // The word appears ONLY as the route. Strip the route and it is gone.
+    expect(code).toContain('href="/revenue"');
+    expect(mentionsWord(withoutIdentifiers(code), 'revenue')).toBe(false);
+
+    // Every MetricTile resolves its metric through requireMetric.
+    const tiles = [...code.matchAll(/<MetricTile\b/g)].length;
+    const resolved = [...code.matchAll(/metric=\{requireMetric\('[a-z_]+'\)\}/g)].length;
+    expect(tiles, 'the dashboard renders no metric tile at all').toBeGreaterThan(0);
+    expect(resolved).toBe(tiles);
   });
 
   test('a money caption can only come from the manifest, never from a string', () => {

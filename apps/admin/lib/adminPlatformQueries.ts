@@ -30,6 +30,7 @@ import {
   type ListQueryBuilder,
   type PageMeta,
 } from './adminFilters';
+import { alignToWindow, dhakaDayLabel, trendDays, type DayBucket } from './adminDashboard';
 import type { ShopLocationRow } from './adminGeo';
 import {
   collectedPaymentsByMonth,
@@ -41,6 +42,11 @@ import {
 } from './adminMetrics';
 import type { ReportData, ReportSaleTotalRow, ReportShopRow, SourceTally } from './adminReports';
 import {
+  renewalHistory,
+  subscriptionDetailRows,
+  type SubscriptionDetailRow,
+} from './adminSubscriptionViews';
+import {
   summarizeSupportCase,
   supportCaseDetail,
   type SupportCaseDetail,
@@ -51,8 +57,16 @@ import {
   listSupportNotes,
   readSupportCase,
 } from './adminSupportStore';
-import type { OfferingRow, PaymentOrderRow, SubscriptionRow } from './adminViews';
+import type {
+  EntitlementRow,
+  OfferingRow,
+  PaymentOrderRow,
+  ProviderEventRow,
+  ShopRow,
+  SubscriptionRow,
+} from './adminViews';
 import { AdminDataError } from './errors';
+import { dhakaDayRange } from './platformStats';
 import { readAllPages } from './queries';
 import { getSupabaseAdmin } from './supabaseAdmin';
 
@@ -824,4 +838,463 @@ export async function platformReportData(query: AdminReportExportQuery): Promise
   }
 
   return { shops, subscriptions, orders, sales, refunds, tallies };
+}
+
+// ──────────────────────────────────────────────────── §8.1 the Dashboard read
+
+const DASHBOARD_SHOP_COLUMNS =
+  'id,name,phone,created_at,plan,commercial_status,commercial_reason,archived_at,'
+  + 'billing_account_id';
+
+const ENTITLEMENT_COLUMNS =
+  'billing_account_id,tier,status,trial_ends_at,paid_through,grace_ends_at,verified_at';
+
+const PROVIDER_EVENT_COLUMNS = 'id,payment_order_id,processing_status,error_code,received_at';
+
+function toDashboardShopRow(row: Record<string, unknown>): ShopRow {
+  return {
+    id: text(row.id),
+    name: text(row.name),
+    phone: text(row.phone),
+    createdAt: text(row.created_at),
+    plan: text(row.plan, 'free'),
+    commercialStatus: text(row.commercial_status, 'active'),
+    commercialReason: nullableText(row.commercial_reason),
+    archivedAt: nullableText(row.archived_at),
+    billingAccountId: nullableText(row.billing_account_id),
+  };
+}
+
+function toEntitlementRow(row: Record<string, unknown>): EntitlementRow {
+  return {
+    billingAccountId: text(row.billing_account_id),
+    tier: text(row.tier, 'free'),
+    status: text(row.status, 'unknown'),
+    trialEndsAt: nullableText(row.trial_ends_at),
+    paidThrough: nullableText(row.paid_through),
+    graceEndsAt: nullableText(row.grace_ends_at),
+    verifiedAt: text(row.verified_at),
+  };
+}
+
+function toProviderEventRow(row: Record<string, unknown>): ProviderEventRow {
+  return {
+    id: text(row.id),
+    paymentOrderId: nullableText(row.payment_order_id),
+    processingStatus: text(row.processing_status),
+    errorCode: nullableText(row.error_code),
+    receivedAt: text(row.received_at),
+  };
+}
+
+export interface DashboardOverview {
+  /** The Dhaka business date every window below was computed for. */
+  businessDate: string;
+  /** The thirty Dhaka days of the trend axis, oldest first. */
+  days: readonly string[];
+  shops: readonly ShopRow[];
+  subscriptions: readonly SubscriptionRow[];
+  entitlements: readonly EntitlementRow[];
+  orders: readonly PaymentOrderRow[];
+  events: readonly ProviderEventRow[];
+  offerings: readonly OfferingRow[];
+  /** Per Dhaka day in the window: the shops that registered. */
+  registeredByDay: readonly DayBucket[];
+  /** Per Dhaka day in the window: the shops that recorded a sale. */
+  activeByDay: readonly DayBucket[];
+}
+
+/**
+ * Everything the Dashboard renders, in one read.
+ *
+ * SEVEN READS, ALL IN PARALLEL, each a whole table or a bounded window — and
+ * not one of the nine figures is a separate query. §8.1 asks for nine metrics
+ * and five alert classes over the same instant, and issuing fourteen queries
+ * would mean fourteen different instants: an alert could then count a
+ * subscription the KPI card above it did not. One instant is passed to every
+ * predicate instead.
+ *
+ * THE ACTIVITY WINDOW IS BOUNDED, THE REST ARE NOT. `sales` is the only table
+ * here that grows with usage rather than with the number of pharmacies, so it
+ * is the only one read through a date range. The others are read whole because
+ * the alert predicates need every row — a shop with no billing account from
+ * six months ago still needs the alert, so a recent-only read would silently
+ * stop reporting the oldest instances of exactly the problem it is for.
+ *
+ * ACTIVITY IS WINDOWED ON `business_date`, the same column W4-04 corrected the
+ * reports to use. A sale windowed on `created_at` and a report windowed on
+ * `business_date` disagree for every sale made after 6pm Dhaka.
+ */
+export async function dashboardOverview(now: Date = new Date()): Promise<DashboardOverview> {
+  const supabase = getSupabaseAdmin();
+  const day = dhakaDayRange(now);
+  const days = trendDays(day.businessDate);
+  const windowStart = days[0] ?? day.businessDate;
+
+  const [shopRows, subscriptionRows, entitlementRows, orderRows, eventRows, offerings, saleRows] =
+    await Promise.all([
+      readAllPages<Record<string, unknown>>('shops', (from, to) =>
+        asPageQuery(
+          supabase.from('shops').select(DASHBOARD_SHOP_COLUMNS).eq('is_deleted', false),
+        )
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
+      readAllPages<Record<string, unknown>>('billing_subscriptions', (from, to) =>
+        asPageQuery(supabase.from('billing_subscriptions').select(REPORT_SUBSCRIPTION_COLUMNS))
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
+      readAllPages<Record<string, unknown>>('entitlement_snapshots', (from, to) =>
+        asPageQuery(supabase.from('entitlement_snapshots').select(ENTITLEMENT_COLUMNS))
+          .order('billing_account_id', { ascending: true })
+          .range(from, to),
+      ),
+      readAllPages<Record<string, unknown>>('payment_orders', (from, to) =>
+        asPageQuery(supabase.from('payment_orders').select(REPORT_ORDER_COLUMNS))
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
+      readAllPages<Record<string, unknown>>('payment_provider_events', (from, to) =>
+        asPageQuery(supabase.from('payment_provider_events').select(PROVIDER_EVENT_COLUMNS))
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
+      listPlanOfferings(),
+      readAllPages<Record<string, unknown>>('sales', (from, to) =>
+        asPageQuery(
+          supabase
+            .from('sales')
+            .select('id,shop_id,business_date')
+            .eq('is_deleted', false)
+            .gte('business_date', windowStart)
+            .lte('business_date', day.businessDate),
+        )
+          .order('id', { ascending: true })
+          .range(from, to),
+      ),
+    ]);
+
+  const shops = shopRows.map(toDashboardShopRow);
+
+  // Registrations are grouped by the Dhaka day of `created_at`. A row whose
+  // timestamp will not parse is DROPPED from the trend rather than filed under
+  // today — a trend is about when things happened, and an unparseable date has
+  // no answer to that. It still counts in the total, which is read from the
+  // same array.
+  const registrations = new Map<string, string[]>();
+  for (const shop of shops) {
+    const label = dhakaDayLabel(shop.createdAt);
+    if (label === null) continue;
+    const held = registrations.get(label);
+    if (held === undefined) registrations.set(label, [shop.id]);
+    else held.push(shop.id);
+  }
+
+  const activity = new Map<string, string[]>();
+  for (const row of saleRows) {
+    const label = text(row.business_date);
+    if (label.length === 0) continue;
+    const shopId = text(row.shop_id);
+    const held = activity.get(label);
+    if (held === undefined) activity.set(label, [shopId]);
+    else held.push(shopId);
+  }
+
+  const toBuckets = (source: Map<string, string[]>): readonly DayBucket[] =>
+    alignToWindow(
+      [...source.entries()].map(([label, shopIds]) => ({ day: label, shopIds })),
+      days,
+    );
+
+  return {
+    businessDate: day.businessDate,
+    days,
+    shops,
+    subscriptions: subscriptionRows.map(toSubscriptionRow),
+    entitlements: entitlementRows.map(toEntitlementRow),
+    orders: orderRows.map(toPaymentOrderRow),
+    events: eventRows.map(toProviderEventRow),
+    offerings,
+    registeredByDay: toBuckets(registrations),
+    activeByDay: toBuckets(activity),
+  };
+}
+
+// ───────────────────────────────── §8.2 the drill-down's own location read
+
+/**
+ * ONE shop's coordinate columns, by already-validated id.
+ *
+ * A separate read from `listShopLocations()` rather than a filter over it: the
+ * drill-down needs one row, and scanning every shop to find it would make a
+ * per-shop page cost grow with the platform. The id is validated by the route
+ * before it arrives — `isUuid` in the page — and it is passed as a bound
+ * equality value, never interpolated.
+ *
+ * Returns null for a missing or deleted shop, so the caller distinguishes
+ * "no such shop" from "a shop with no coordinates".
+ */
+export async function shopLocationFor(shopId: string): Promise<ShopLocationRow | null> {
+  const { data, error } = (await getSupabaseAdmin()
+    .from('shops')
+    .select(SHOP_LOCATION_COLUMNS)
+    .eq('id', shopId)
+    .eq('is_deleted', false)
+    .limit(1)) as RowsResponse;
+
+  if (error) {
+    console.error('[admin] shop location read failed:', error.message);
+    throw new AdminDataError('shop location read failed');
+  }
+
+  const row = (data ?? [])[0];
+  if (row === undefined) return null;
+
+  return {
+    id: text(row.id),
+    name: text(row.name),
+    latitude: finiteNumber(row.latitude),
+    longitude: finiteNumber(row.longitude),
+    locationCapturedAt: nullableText(row.location_captured_at),
+    district: nullableText(row.district),
+    plan: text(row.plan, 'free'),
+    commercialStatus: text(row.commercial_status, 'active'),
+  };
+}
+
+// ──────────────────────────────────────────── §8.3 the Subscriptions read
+
+/**
+ * Account id to a human label, via each account's primary shop.
+ *
+ * TWO reads rather than a PostgREST embed, the same choice the rest of this
+ * module makes: one missing foreign-key relationship cannot then turn a whole
+ * page into an error, and the join is a pure `Map` lookup a test can check.
+ */
+async function accountLabelsFor(
+  accountIds: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
+  const unique = [...new Set(accountIds)].filter((id) => id.length > 0);
+  if (unique.length === 0) return new Map();
+
+  const { data, error } = (await getSupabaseAdmin()
+    .from('billing_accounts')
+    .select('id,primary_shop_id')
+    .in('id', unique)
+    .range(0, Math.max(0, unique.length - 1))) as RowsResponse;
+
+  if (error) {
+    console.error('[admin] billing account label lookup failed:', error.message);
+    throw new AdminDataError('billing account lookup failed');
+  }
+
+  const primaryShopByAccount = new Map<string, string>();
+  for (const row of data ?? []) {
+    primaryShopByAccount.set(text(row.id), text(row.primary_shop_id));
+  }
+
+  const shopNames = await shopNamesFor([...primaryShopByAccount.values()]);
+  const labels = new Map<string, string>();
+  for (const [accountId, shopId] of primaryShopByAccount) {
+    const name = shopNames.get(shopId);
+    if (name !== undefined && name.length > 0) labels.set(accountId, name);
+  }
+  return labels;
+}
+
+/** §8.3's filters, applied to both the count and the page. */
+function applySubscriptionFilters<B extends ListFilterBuilder>(
+  builder: B,
+  query: AdminListQuery,
+): B {
+  let next = builder;
+  // EQUALITY on values the shared schema has already bounded to
+  // /^[a-z_]*$/ — no pattern metacharacter is in play, so nothing here needs
+  // the LIKE escaping lib/adminFilters.ts owns.
+  if (query.status !== undefined && query.status.length > 0) {
+    next = next.eq('status', query.status);
+  }
+  if (query.plan !== undefined && query.plan.length > 0) {
+    next = next.eq('tier', query.plan);
+  }
+  if (query.cycle !== undefined && query.cycle.length > 0) {
+    next = next.eq('billing_cycle', query.cycle);
+  }
+  return next;
+}
+
+export interface SubscriptionsOverview {
+  rows: readonly SubscriptionDetailRow[];
+  meta: PageMeta;
+  /** Verified orders with no verification timestamp, carried for the notice. */
+  undatedVerifiedOrders: number;
+  /** The whole platform's cycles and tiers, for the filter options. */
+  cycles: readonly string[];
+  tiers: readonly string[];
+}
+
+/**
+ * One page of subscriptions, with every §8.3 column.
+ *
+ * THE COUNT AND THE PAGE CARRY THE SAME FILTERS, for the §8.2 reason: a total
+ * taken without them is a pager reporting "123 subscriptions" over a list of
+ * nine, and an operator reads that figure as a fact.
+ *
+ * THE ORDERS ARE READ WHOLE, not filtered to the page. Renewal history is per
+ * BILLING ACCOUNT and a page of subscriptions spans many accounts; reading only
+ * the page's accounts would mean a second round trip per page and a renewal
+ * count that changed as the operator paged. The table is bounded by paying
+ * accounts, not by usage.
+ *
+ * `nextBilling` IS COMPUTED, NOT SORTED IN SQL. It is a different COLUMN per
+ * status — `trial_ends_at` lives on a different table from `paid_through` —
+ * so no single `order()` expresses it. The page's `.range()` therefore pages
+ * the FILTERED set in a stable id order, and the ordering by next billing date
+ * is applied within the page. That is stated rather than hidden: the pager is
+ * exact, the sort is per page.
+ */
+export async function subscriptionsOverview(
+  query: AdminListQuery,
+): Promise<SubscriptionsOverview> {
+  const supabase = getSupabaseAdmin();
+  const range = rangeSpec(query);
+
+  const [countResult, pageRows, entitlementRows, offerings, orderRows] = await Promise.all([
+    applySubscriptionFilters(
+      asCountQuery(
+        supabase.from('billing_subscriptions').select('id', { count: 'exact', head: true }),
+      ),
+      query,
+    ),
+    applySubscriptionFilters(
+      asPageQuery(supabase.from('billing_subscriptions').select(REPORT_SUBSCRIPTION_COLUMNS)),
+      query,
+    )
+      .order('id', { ascending: true })
+      .range(range.from, range.to),
+    readAllPages<Record<string, unknown>>('entitlement_snapshots', (from, to) =>
+      asPageQuery(supabase.from('entitlement_snapshots').select(ENTITLEMENT_COLUMNS))
+        .order('billing_account_id', { ascending: true })
+        .range(from, to),
+    ),
+    listPlanOfferings(),
+    readAllPages<Record<string, unknown>>('payment_orders', (from, to) =>
+      asPageQuery(supabase.from('payment_orders').select(REPORT_ORDER_COLUMNS))
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+  ]);
+
+  if (countResult.error) {
+    console.error('[admin] subscription count failed:', countResult.error.message);
+    throw new AdminDataError('subscription count failed');
+  }
+  if (pageRows.error) {
+    console.error('[admin] subscription page failed:', pageRows.error.message);
+    throw new AdminDataError('subscription page failed');
+  }
+
+  const subscriptions = (pageRows.data ?? []).map(toSubscriptionRow);
+  const entitlements = entitlementRows.map(toEntitlementRow);
+  const orders = orderRows.map(toPaymentOrderRow);
+  const renewals = renewalHistory(orders);
+
+  const rows = subscriptionDetailRows({
+    subscriptions,
+    entitlements,
+    offerings,
+    accountLabels: await accountLabelsFor(
+      subscriptions.map((subscription) => subscription.billingAccountId),
+    ),
+    renewals,
+  });
+
+  // The filter options come from the OFFERINGS, which is the table that
+  // declares what may be sold — not from the subscriptions on this page, which
+  // would make a filter's options depend on the filter already applied.
+  return {
+    rows,
+    meta: pageMeta(range, countResult.count ?? 0),
+    undatedVerifiedOrders: renewals.undatedVerified,
+    cycles: [...new Set(offerings.map((offering) => offering.billingCycle))].sort(),
+    tiers: [...new Set(offerings.map((offering) => offering.tier))].sort(),
+  };
+}
+
+// ───────────────────────────────── §8.9b the per-shop audit_logs read
+
+const SHOP_AUDIT_COLUMNS = 'id,shop_id,actor_id,action,target,created_at';
+
+export interface ShopAuditRow {
+  id: string;
+  shopId: string;
+  actorId: string;
+  action: string;
+  target: string | null;
+  createdAt: string;
+}
+
+export interface ShopAuditPage {
+  rows: readonly ShopAuditRow[];
+  meta: PageMeta;
+}
+
+/**
+ * One shop's own `audit_logs`, newest first, paginated.
+ *
+ * READ-ONLY, AND STRUCTURALLY SO. §3.5 revokes everything on this table from
+ * `service_role` and grants back SELECT alone (migration 35, lines 66–67), so
+ * a write from here fails in the database and not merely in review. No admin
+ * module writes it, and `adminGrants.test.ts`'s `(module, table, operation)`
+ * manifest has no entry for it.
+ *
+ * SCOPED TO ONE VALIDATED SHOP ID, always. `audit_logs` is shop-scoped — every
+ * row carries a `shop_id` — so an unfiltered read would be every pharmacy's
+ * internal history at once. The id is validated by the caller (`isUuid`) and
+ * bound as an equality value here; there is no code path that omits it.
+ *
+ * `meta` IS DELIBERATELY NOT SELECTED. It is free-form shop-authored text that
+ * has passed through no admin redaction allowlist, and §8.9b's purpose is
+ * support and debugging — which the action, target, actor and timestamp serve.
+ * Reading a column in order to not render it would be the wrong instinct.
+ */
+export async function shopAuditPage(
+  shopId: string,
+  query: Pick<AdminListQuery, 'page' | 'pageSize'>,
+): Promise<ShopAuditPage> {
+  const supabase = getSupabaseAdmin();
+  const range = rangeSpec(query);
+
+  const [countResult, pageResult] = await Promise.all([
+    asCountQuery(
+      supabase.from('audit_logs').select('id', { count: 'exact', head: true }),
+    ).eq('shop_id', shopId),
+    asPageQuery(supabase.from('audit_logs').select(SHOP_AUDIT_COLUMNS))
+      .eq('shop_id', shopId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(range.from, range.to),
+  ]);
+
+  if (countResult.error) {
+    console.error('[admin] shop audit count failed:', countResult.error.message);
+    throw new AdminDataError('shop audit count failed');
+  }
+  if (pageResult.error) {
+    console.error('[admin] shop audit page failed:', pageResult.error.message);
+    throw new AdminDataError('shop audit page failed');
+  }
+
+  return {
+    rows: (pageResult.data ?? []).map((row) => ({
+      id: text(row.id),
+      shopId: text(row.shop_id),
+      actorId: text(row.actor_id),
+      action: text(row.action),
+      target: nullableText(row.target),
+      createdAt: text(row.created_at),
+    })),
+    meta: pageMeta(range, countResult.count ?? 0),
+  };
 }

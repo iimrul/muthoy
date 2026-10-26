@@ -237,6 +237,13 @@ export const adminListQuerySchema = z.object({
   district: z.string().trim().max(64).optional(),
   plan: z.string().trim().max(32).regex(/^[a-z_]*$/, 'Not a valid plan').optional(),
   status: z.string().trim().max(32).regex(/^[a-z_]*$/, 'Not a valid status').optional(),
+  // Batch 3 §8.3's billing-cycle filter. The same shape as `plan` and `status`
+  // — bounded, lowercase, and an EQUALITY value the query layer binds rather
+  // than a pattern, so no metacharacter is in play. Deliberately NOT a
+  // `z.enum`: `billing_cycle` is CHECK-constrained in Postgres, and an enum
+  // here would be a fourth copy of that list to keep in step. An unknown cycle
+  // matches nothing, which is the honest answer to a stale bookmark.
+  cycle: z.string().trim().max(32).regex(/^[a-z_]*$/, 'Not a valid billing cycle').optional(),
   sort: z.enum(['registered_desc', 'registered_asc', 'activity_desc', 'activity_asc']).optional(),
   // coerce, because searchParams values are strings. The bounds are what stop a
   // page number from becoming an unbounded .range() offset.

@@ -525,7 +525,10 @@ describe('every page is gated server-side (W4-07)', () => {
         'getAccountDetail(', 'getShopDetail(', 'loadStats(', 'loadPharmacies(', 'recentAdminAudit.entries(',
         'loadMap(', 'loadSettings(', 'loadSupport(', 'loadReport(', 'loadRevenue(', 'loadAnalytics(',
         'loadAssignments(', 'listShopLocations(', 'listSupportCaseSummaries(', 'settingsView(',
-        'revenueOverview(', 'analyticsOverview(', 'listRoleAssignments(', 'platformReportData('];
+        'revenueOverview(', 'analyticsOverview(', 'listRoleAssignments(', 'platformReportData(',
+        // Batch 3 §8.1/§8.2/§8.3/§8.9 — the loaders the four extended pages add.
+        'loadDashboard(', 'dashboardOverview(', 'getPlatformStats(', 'loadSubscriptions(',
+        'subscriptionsOverview(', 'loadAudit(', 'listShopSupportNotes(', 'shopLocationFor('];
       for (const loader of loaders) {
         const read = page.contents.indexOf(loader);
         if (read < 0) continue;
