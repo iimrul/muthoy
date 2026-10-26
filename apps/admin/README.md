@@ -1,16 +1,68 @@
 # apps/admin/
 
-Next.js 15 admin panel — the **Basic Admin Panel** from Volume 0's Day 14 and
-Volume 5's P0 scope. Exactly two pages, both read-only:
+Next.js 15 admin panel. Batch 3 built out Volume 5's P1 scope, so this is no
+longer the two-page P0 console.
 
-| Route         | Shows                                                      |
-| ------------- | ---------------------------------------------------------- |
-| `/`           | Total shops, total sales today (all shops, Asia/Dhaka day) |
-| `/pharmacies` | Shop name, phone, registration date, plan                  |
+**Eleven pages, all CODE-COMPLETE, none PRODUCTION-VERIFIED.** The per-page
+acceptance record — what each page does, the tests that prove it, and what is
+still missing — is `docs/plans/admin-architecture-rbac.md`. Read that before
+trusting any page.
 
-Everything else in Volume 5 — analytics, charts, maps, subscription
-management, audit logs, reports, role management — is **P1, post-beta**. Do not
-add it here during the sprint.
+| Route | Page | Permission |
+| --- | --- | --- |
+| `/` | Dashboard — nine metrics, five computed alerts, two 30-day trends | `shops.read` |
+| `/pharmacies`, `/shops/[id]` | Pharmacy Management, with the drill-down | `shops.read` |
+| `/subscriptions` | Subscriptions, with next billing and renewal history | `subscriptions.read` |
+| `/revenue` | Revenue & Billing, plus W4-04's separately-labelled pharmacy section | `revenue.read` |
+| `/analytics` | Analytics, k=5 suppressed | `analytics.read` |
+| `/maps` | Maps — plots nothing until gates E13 and E14 | `maps.read` |
+| `/support` | Support Management | `support.read` / `support.write` |
+| `/admins` | Admin Users & Roles | `admins.read` / `admins.write` |
+| `/audit` | Audit Logs — the platform audit, and a per-shop view | `audit.read` / `shop_audit.read` |
+| `/reports`, `/api/reports/export` | Reports, CSV and PDF | `reports.read` / `reports.export` |
+| `/settings` | Settings — flags editable, templates read-only | `settings.read` / `settings.write` |
+
+`/accounts`, `/accounts/[id]` and `/payments` are not in the top navigation and
+**lost no functionality**: `/payments` is linked from Revenue & Billing, and
+`/accounts/[id]` from the drill-down.
+
+## Dependencies Batch 3 added
+
+`recharts@3.10.1`, `leaflet@1.9.4`, `@types/leaflet`, and `@muthoy/validation`
+as a workspace dependency. **`react-leaflet` was deliberately not added** —
+`TECH_STACK.md` names Leaflet, and one thin client component driving the Leaflet
+API directly avoids a wrapper whose releases are coupled to React's.
+
+## Environment
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | yes | |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | **server only**; see the rule below |
+| `ADMIN_SESSION_SECRET` | yes | ≥ 32 bytes |
+| `ADMIN_ROLES` | yes | JSON mapping username → role |
+| `ADMIN_ACCOUNTS` | yes | the login credentials |
+| `ADMIN_MAP_TILE_URL` | no | **unset by default.** With it unset no tile is requested (gate E14) |
+| `ADMIN_MAP_TILE_ATTRIBUTION` | no | both halves gate readiness — a provider configured without its required attribution is one being used outside its own terms |
+
+`/settings` shows whether each is **set or not set, and never a value**.
+
+## Honest limits
+
+- **Nothing here has been verified in a deployed browser.** Gate **E15** —
+  Volume 5's devtools network-tab check — is open, and no page is DONE without
+  it.
+- **The audit, support and settings tables do not exist on any hosted project.**
+  They ship in migration 35, which is **not applied** (gate E4-H). The audit
+  page's platform view reads an in-memory ring buffer and says so; the record of
+  account is the structured stderr line.
+- **Maps plots nothing**, by design, until an explicit versioned revocable
+  consent record exists (E13) and a tile provider is approved (E14).
+- **The MRR trend and churn are reported BLOCKED**, not estimated: a renewal
+  overwrites the same subscription row, so the history does not exist (E12).
+- **No subscription lifecycle override exists** (E10) and the entitlement-refresh
+  action was **removed** from the panel in Batch 3 (E11), because it extended
+  paid access with no payment behind it.
 
 ## The one rule
 

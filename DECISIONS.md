@@ -3651,6 +3651,143 @@ uncommitted; nothing hosted, no DEV change; Codex review pending).**
 ## H-9 F12 R4 — local implementation, 2026-10-16
 
 Founder authorized the complete local R4 workflow and the remaining verification corrections. D1 stays exactly 48 semantic supabase_admin public default items, never modified. API roots and conservative Reach refuse six unsafe attributes; pg_roles supplies readable metadata. rolconfig is inventoried for hosted review and is outside F12 enforcement. Mandatory hosted preflight separates enforced predicates from observations and rejects unexpected platform absence/drift. B13/M15 now require real revocable grants and drift before canary activation; C11 expects checks 3 and 10. Shared RLS restoration and all prior security contracts remain. No hosted access or production authorization. C4, Data API disabling, F14 and H-11 remain out of scope. Details: [R4 implementation](docs/plans/h9-f12-r4.md). Local sign-off not yet granted; final verification evidence follows in the verification report.
+
+## 2026-10-19 — H-9 N0 final focused acceptance and single inventory
+
+Founder retained authorization for the three GET-only account endpoints. Focused
+independent Codex verdict ACCEPT preceded separate N0 staging and one successful
+inventory. Original A5-only launcher and all 131 sealed H1 files remain unchanged.
+Both known projects are ACTIVE_HEALTHY in the returned free organization; proven
+visible active Free count is 2. Capacity remains UNVERIFIED because account coverage,
+Owner/Administrator membership, other-member quotas and creation eligibility are
+not proven by these endpoints. A2/A3 allocation stays on hold; no new endpoint,
+project mutation, migration, deployment, installation, commit, push or device action.
+New runtime metadata records the actual base commit and uncommitted reviewed hashes;
+historical SOURCE_REVISION and stale installer audit hash were retained as history.
+Details: docs/plans/h9-n0-final-acceptance-2026-10-19.md.
+## 2026-10-19 — PG17 local environment start; image pull withheld
+
+Founder approved Docker Desktop startup and one verified digest-pinned official
+Supabase PG17 image download only. Docker Desktop/WSL2 started; official
+supabase/postgres:17.6.1.136 source, platform and immutable digests were verified from
+public metadata. Pull withheld: retained A5 evidence lacks the complete installed
+DEV extension inventory required to establish recovery compatibility. No alternative
+image downloaded. Docker auto-resumed the old local restore stack; those containers
+were stopped again, with all container/image/volume identities retained. Volume byte
+identity after that automatic startup is not asserted. No new container, hosted call,
+backup, migration, installation, device action, commit or push was issued.
+Founder confirms DEV and rehearsal consume both Free slots; preserve both, no paid
+upgrade or deletion. Next obtain trusted extension metadata under separate read-only
+authorization if no retained inventory exists; existing image-pull approval persists.
+Details: docs/plans/h9-pg17-local-setup-2026-10-19.md.
+## 2026-10-19 — DEV extension read and conditional PG17 image pull completed
+
+Founder approved one DEV-only catalog inventory and clarified the fixed project SQL
+endpoint is permitted; no account inventory endpoints. A separate one-use protected
+launcher executed one read_only=true request. Same-query role/session/database/PG17,
+READ ONLY state and H1 instance fingerprint matched. Installed: pg_stat_statements
+1.11, pgcrypto 1.3, plpgsql 1.0, supabase_vault 0.3.1, uuid-ossp 1.1; schemas/owners
+retained in protected evidence. Exact source/version/schema compatibility for the
+previously verified official supabase/postgres:17.6.1.136 linux/amd64 image passed.
+One image pulled by manifest digest sha256:5a4314708484bec672de2c09653a5c01fb1c84a998564ac231b0325e2238ed5b;
+post-pull digest/platform verified. Existing Docker objects preserved; all 12
+containers remain exited, no old-stack restart. No new container, restore, backup,
+migration, upgrade, deployment, account listing, device action, commit or push.
+A5/N0 and sealed H1/F12 evidence unchanged. Image selection PASS does not close H5
+runtime/extension-owner/ACL or restore proof. Next separately authorize isolated
+local verification container; no real DEV data or outbound network.
+Details: docs/plans/h9-pg17-extension-verification-2026-10-19.md.
+
+## 2026-10-19 — isolated PG17 runtime verification PARTIAL
+
+Founder approved one disposable synthetic-only container on the existing pinned
+Supabase PG17 image. Image defaults were inspected and bypassed; fresh initdb,
+include-free config, network none, no ports/binds/existing volumes, tmpfs storage,
+workers/schedulers disabled. Actual server/client tools are PostgreSQL 17.6;
+server accepted a Unix-socket connection. My isolation assertion incorrectly
+expected an empty archive_command display; PG17 reports (disabled) with archiving
+off. The guard stopped before extension installation/schema/owner and synthetic
+SQL tests, so compatibility remains unverified at runtime. Original failure
+evidence retained; separate correction prepared but not executed. The one owned
+container was cleanly stopped/removed. Existing 12 containers remain exited;
+3 volume names, 14 image IDs and 131 protected H1 hashes match baseline.
+No hosted calls, real backup/restore, downloads, old-stack start, install,
+migration, deployment, device action, commit or push. H1/F12 and historical evidence
+unchanged. Next authorize one replacement isolated container because the approved
+ONE was removed; real H5 acceptance and its A5/A2/A3 gates remain pending.
+Details: docs/plans/h9-pg17-runtime-verification-2026-10-19.md.
+
+## 2026-10-19 — final isolated PG17 runtime PASS; H5 restore still pending
+
+Founder approved exactly one replacement after the previous cleanup. Narrow
+archive guard correction tested 21/21 before creation; live startup/final snapshots
+confirmed archive_mode off, actual applied command/library empty, approved sources,
+no pending restart or archive activity. One container used the existing pinned
+Supabase 17.6.1.136 Linux/amd64 image, network none, no ports/binds/volumes, tmpfs,
+disabled healthcheck/restart and bypassed image bootstrap/config hooks.
+Actual PG server/client tools 17.6; all five DEV extension versions, schemas and
+owner names installed and matched exactly. Synthetic SQL/FK/rollback checks passed;
+no schedulers, external network, archiver or unsafe preloads. Owner-name compatibility
+does not prove authentic DEV role attributes/ACLs; Vault encryption/key recovery
+was not exercised. The owned container and tmpfs were removed cleanly. Existing
+12 stopped containers and their start/stop timestamps, 3 volumes, 14 images,
+131 protected hashes and 47 previous runtime evidence hashes matched baseline.
+No hosted access, real backup/restore, download/install, old-stack start, migration,
+deployment, device action, commit or push. Prior PARTIAL report and historical
+evidence retained. Runtime prerequisite PASS; real H5 acceptance remains pending
+separate scope/approval and A5/A2/A3/recovery gates. Next prepare run-specific H5 plan.
+Details: docs/plans/h9-pg17-final-runtime-verification-2026-10-19.md.
+
+## 2026-10-19 — H5 real backup/restore stopped at security preflight
+
+Founder approved the scoped DEV read-only backup and isolated PG17 restore, then
+confirmed no approved direct-PG password workflow or writer-pause/RPO/RTO/retention
+agreement has been identified. One focused independent Codex review returned
+BLOCKED: A5's fixed Management API token path cannot be used as a DB password or
+retargeted; no reviewed direct-PG17 credential/client/encrypted backup executor was
+found in the checked H9 paths. Existing H5/H11 docs describe controls, not concrete
+approved operating values. No credentials, live source identity/data, hosted API,
+backup, restore, traffic pause or new container accessed/executed. No privilege
+escalation, install, deployment, device action, commit or push. PG17 runtime PASS
+remains intact. Existing 12 stopped containers/3 volumes/14 images, timestamps,
+131 protected hashes and 30 final-runtime evidence/source hashes matched baseline.
+Founder requested one proposal: separate reviewed masked-prompt/tmpfs-passfile H5
+launcher, immediate authenticated encryption with founder-held recovery custody;
+90-minute scheduled writer-pause window, RPO zero committed checkpoint loss,
+RTO 60 minutes, 7-day minimum encrypted retention, founder Imrul as custodian.
+These are proposed, NOT approved. Host/WSL persistence protection, private storage,
+source privileges, authentic role/ACL/RLS and Vault/full recovery remain unverified.
+Existing task approval stays valid; real execution remains stopped pending all
+mandatory gates. H-11 C5 not ready or signed off. No historical evidence rewritten.
+Details: docs/plans/h9-h5-preflight-and-recovery-proposal-2026-10-19.md.
+
+## 2026-10-19 — H5 approved policy retained; unchanged Windows host blocked
+
+Founder approved the proposed Imrul custody, scheduled 90-minute writer pause,
+zero committed checkpoint-loss RPO (offline/unpushed work excluded), RTO at most
+60 minutes, minimum seven-day encrypted retention with no automatic deletion,
+and separate protected password/recovery-passphrase workflow. The earlier report's
+unapproved proposal remains historical; current parameters are recorded in
+scripts/h9/h5-approved-policy.json. No writer pause or retention clock has started.
+
+Founder now reports administrator BitLocker results: C: and D: both Off, 0 percent,
+FullyDecrypted; no agent privileged recheck. Together with the retained disabled
+pagefile-encryption observation, this blocks plaintext backup/restore processing
+on the unchanged Windows/Docker Desktop host. Streaming encryption protects the
+stored archive, but cannot alone exclude pagefile/swap/dump/log persistence.
+Founder prohibits Windows/BitLocker changes; none were made. No execution guard
+was weakened, no real data/credential accessed, no Docker resource touched.
+
+Proposed smallest alternative: trusted native Linux host or separately prepared
+nonpersistent bare-metal live USB session, Windows not running, internal disks
+unmounted, no disk-backed swap/dumps/hibernation, RAM-only isolated pinned PG17
+restore, authenticated streaming encryption and distinct founder-held passphrase.
+Environment/tool acquisition and boot remain proposals, not actions or security
+PASS. All H5 identity/privilege/traffic/recovery gates remain; H-11 C5 is pending.
+Historical H1/F12/N0 evidence and prior reports were not rewritten. No install,
+backup/restore, hosted call, reboot, device action, commit or push.
+Details: docs/plans/h9-h5-encrypted-workflow-assessment-2026-10-19.md.
+
 ---
 
 ## 2026-10-20 — Batch 1 (nine tasks): five decisions
@@ -4042,3 +4179,141 @@ machine's reading of a blurry strip.
 in scope, and the disagreement is now resolved in the place that is read first.
 `docs/plans/ocr.md` carries a header pointing at
 `docs/plans/ocr-and-multilingual-search.md` for current status.
+
+## 2026-10-23 — the delivery roadmap becomes SIX batches
+
+*Decision (founder):* the delivery grouping extends from **five batches to
+six**. A new **Batch 6** holds **exactly two deliverables and no third**:
+
+- **B6-01 — the real ~21,000-medicine dataset.** Obtain and verify a legally
+  usable, appropriately licensed dataset: provenance, actual record count,
+  duplicates, quality and update rights all verified; the records integrated
+  through the **existing Batch 2 architecture** (catalogue schema, JSONL
+  importer, search provider, offline lookup); offline availability, integrity,
+  updates and device performance verified. **No unlicensed scraping, and no
+  fabricated entries to reach 21,000** — that number is a product target, not
+  permission to invent records, and whatever count is verified is the count that
+  gets reported. Existing shop medicine, inventory, purchase and sales records
+  are preserved.
+- **B6-02 — the direct bKash merchant payment gateway.** bKash is the **only**
+  approved subscription gateway and **SSLCommerz is never reactivated for new
+  subscription payments**. Built on the verified official merchant API and
+  security contracts, with secure initiation, callback verification,
+  idempotency, reconciliation, failure recovery, and the required sandbox and
+  live acceptance. Historical payment data and the legacy reconciliation that
+  still settles pre-retirement orders are preserved. **No invented API
+  contract, credential or live payment evidence.**
+
+*What this supersedes, and what it does not:* it supersedes the five-batch
+**delivery grouping** only. The original **Waves 1–5 development roadmap is
+unchanged** — a wave says what the work is, a batch says when it ships. Every
+completed implementation, signed-off review and piece of historical evidence
+stands as written; the Batch 1 and Batch 2 records keep their original
+statements and carry dated ownership addenda instead of being rewritten.
+
+*Ownership moved:* gate **E7** (licensed dataset) → **B6-01**; gates **E8** and
+task **W4-09** (direct bKash), plus the live payment acceptance previously
+pencilled into Batch 4/5 → **B6-02**. These are owned in Batch 6 and **nowhere
+else**, so no batch double-counts them.
+
+*Ownership deliberately NOT moved:* W2-03 stays **PARTIAL** and its remaining
+Bangla/Banglish search over **existing shop medicines** stays in **Batch 3**,
+together with its SQLite folded-key migration, FTS rebuild and
+data-preservation verification. W4-04, W4-05, the H-9 migration dependencies
+(E4) and the durable admin audit table also stay in Batch 3. **Barcode scanning
+remains EXCLUDED.**
+
+*Release dependency, stated so the regrouping cannot be read as a shortcut:*
+Batch 5 may prepare the pilot, the release checklist and its other launch
+activities, but **final public launch and full-feature production sign-off stay
+BLOCKED until both Batch 6 deliverables and every other applicable release gate
+are accepted.** Neither B6-01 nor B6-02 may be marked DONE before real evidence
+exists — a licensed dataset with a measured count, and an actual sandbox/live
+payment run.
+
+*Why it is worth recording:* the two things this product most visibly lacks —
+real medicine data and a way to take money — were each blocked on an external
+dependency no amount of engineering could clear from inside the repository
+(E7's licensing, E8's undocumented contract). Scattering them across Batches 3,
+4 and 5 as "remaining work" is how they stayed everyone's problem and nobody's
+deliverable. Giving them their own batch, with exactly two items and an explicit
+bar for DONE, is what makes them schedulable.
+
+---
+
+## 2026-10-26 — Batch 3: the Admin Panel's P1 build-out, E4, W4-04, W4-05, W2-03
+
+*Decision:* Batch 3 is **CODE-COMPLETE** on every local axis and **verified on
+nothing hosted and no device**. The two axes stay separate words, and this entry
+says which applies to each claim.
+
+*What was decided, and why it is worth recording:*
+
+**1. The entitlement-refresh action was withdrawn from the panel, not fixed.**
+`b4_refresh_entitlement_snapshot` sets `verified_at = now()`, and
+`apps/mobile/domain/entitlements.ts:143-146` makes `verified_at` the offline
+access ceiling. So the button shipped in Batch 2 (`a2c196a`) extended a device's
+premium access by the full offline window **with no payment behind it**. The
+conservative response was taken: the surface is gone and the RPC is forbidden by
+name, so re-adding it fails the build. **The RPC itself is unmodified** —
+rewriting money-path SQL needs its own approved plan (CLAUDE.md rule 10). That
+is gate E11.
+
+**2. Three figures that cannot be computed are reported BLOCKED, not estimated.**
+The MRR trend and churn need a subscription history that does not exist, because
+a renewal overwrites the same row (gate E12). A collected-payments series ships
+in their place, labelled as itself. Calling it the MRR trend would have been the
+mislabelling the metric manifest exists to prevent.
+
+**3. No pharmacy location is plotted, although the map is built.** A
+`location_captured_at` timestamp is a capture record, not an affirmative,
+versioned, revocable consent record (gate E13), and no tile provider is
+configured, so no viewport around a pharmacy leaves the browser (gate E14).
+Leaflet is wired behind both predicates, so enabling it later is a data and
+policy change rather than new code. This costs nothing today: nothing in the
+mobile app writes a coordinate.
+
+**4. Lifecycle overrides are rendered unavailable WITH THEIR REASON, not as
+disabled buttons.** A greyed-out control says "this exists and you may not use
+it". The truth is that the extend-trial / force-status design was superseded and
+unapproved, and its replacement needs a separately approved audited server API
+(gate E10). Those are different facts and only one is true.
+
+**5. W2-03 is complete, and one limit of the fold is recorded rather than
+hidden.** SQLite migration 0033 adds a folded `search_key`, a chunked
+transactional backfill fills it, and the query permanently unions the raw and
+folded terms so a row whose key is still NULL stays findable. The fold has no
+`c`/`k` rule, so the English spelling "seclo" does not reach a row stored as
+"সেক্লো" — a gap in W2-02's shipped fold, asserted by a test that will fail the
+day somebody fixes it. Widening the fold would change the national catalogue's
+index semantics and require a re-import, so it was not done here.
+
+**6. A test that compared copies to copies is replaced by one that reads the
+database.** `packages/validation`'s admin schemas had drifted from hash-sealed
+migration 35 on five value spaces, and the test asserting "the keys are
+identical in three places" passed because all three TypeScript copies had
+drifted together. Every support and settings write would have passed validation
+and then failed at the CHECK constraint. The lesson is recorded in
+`docs/plans/admin-architecture-rbac.md`: **compare against the database, not
+against another copy.** The same class recurred in this batch's own test
+fixture, where a missing `maybeSingle()` made a page's error notice look like a
+passing assertion.
+
+**7. Every guard that fired on new code was made stronger, never relaxed.** That
+happened repeatedly — the metric label scan, the net-figure provenance chain,
+the server-owned-fields evidence table, the rollback classification, the E4
+evidence manifest, and the route-contract fixture. Each widening is an exact
+needle with a negative control proving the guard still catches what it is for.
+
+*Boundaries honoured without exception:* no hosted SQL executed, no hosted
+project altered, no credential retrieved, no production deployment, no real
+payment, no EAS build, no physical-device operation. The founder's Galaxy A04s
+is untouched. No `audit-artifacts/**` file was modified and the H-9 baseline
+hashes are unchanged and still asserted. Both Supabase Free projects are
+untouched.
+
+*What Batch 3 did NOT close:* E1, E4-H, E5, E10, E12, E13, E14 and E15, plus
+H-11's C5 restore rehearsal. Each is enumerated with its owner in
+`docs/plans/release-readiness-checklist.md`. **No admin page is DONE until E15 —
+the deployed devtools check Volume 5 calls "a hard-spot verification, not a
+formality" — has been performed.**

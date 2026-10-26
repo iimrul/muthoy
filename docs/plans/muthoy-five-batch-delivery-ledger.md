@@ -1,10 +1,14 @@
-# Muthoy POS — five-batch delivery ledger
+# Muthoy POS — delivery ledger (SIX batches)
 
 **Purpose:** one place that says which task sits in which delivery batch, and
 what each batch's status actually is.
-**Last updated:** 2026-10-21 (Batch 1 final closure reconciliation)
+**Last updated:** 2026-10-23 — **the founder extended the delivery grouping from
+FIVE batches to SIX.** The filename still says `five-batch` deliberately: other
+documents and several commit messages reference that path, and renaming would
+break them for no gain. This file is the authoritative ledger and it now
+describes **six** batches.
 
-> The five batches are **delivery groups**, not replacement development phases.
+> The six batches are **delivery groups**, not replacement development phases.
 > The project roadmap is still the original Waves 1–5
 > (`docs/plans/pre-rc-master-plan.md`). A batch says *when work ships together*;
 > a wave says *what it is*.
@@ -21,10 +25,11 @@ green test suite starts being read as a shipped feature:
 | Batch | Tasks | CODE-COMPLETE | DEVICE/PRODUCTION-VERIFIED |
 |---|---:|---|---|
 | **1** | **9** | **YES** — all nine, suite green at exit 0 | **NO** — none. Device work was outside this batch's authorization. Acceptance gates listed below |
-| 2 | 9 | not started | not started |
-| 3 | 21 | not started — owns H-9 hosted/recovery **and W4-04 + W4-05** | not started |
+| **2** | **9** | **YES for six of the seven implemented tasks**; **W2-03 PARTIAL**; W4-09 not implemented (E8) and W5-16 excluded | **NO** — none. Pushed at `c25924e`, CI green |
+| 3 | 21 | not started — owns H-9 hosted/recovery, **W4-04 + W4-05**, **W2-03's remaining shop-medicine search**, and the durable admin audit table | not started |
 | 4 | 18 | not started — owns the **Batch 1 external acceptance gates** (H-6 two-device, H-8 provider/device) | not started |
-| 5 | 6 | not started | not started |
+| 5 | 6 | not started — RC gates. May PREPARE the pilot and release checklist, but **final launch sign-off is BLOCKED until Batch 6 is accepted** | not started |
+| **6** | **2** | not started — **B6-01** the real licensed medicine dataset (E7) and **B6-02** the direct bKash merchant gateway (E8 / W4-09). **No third deliverable** | not started |
 
 ---
 
@@ -103,7 +108,7 @@ anyway.
   CODE-COMPLETE and W2-03 PARTIAL; not pushed and not device-verified.** Seven
   executable tasks were implemented:
   **W2-01** medicine OCR completion, **W2-02** the offline catalogue
-  mechanism, **W2-03** Bangla / English / Banglish search (**PARTIAL**: the fold reaches the catalogue path only — shop-inventory search stays single-script until a Batch 3 SQLite migration), **W4-06** admin
+  mechanism, **W2-03** Bangla / English / Banglish search (was **PARTIAL** — the fold reached the catalogue path only; **COMPLETED in Batch 3** by SQLite migration 0033 and the union query), **W4-06** admin
   auth / RBAC / audit / sessions (Basic Auth retired), **W4-07** the six admin
   management pages, **W4-08** three bounded admin write actions, and **W4-10**
   SSLCommerz retirement. Evidence:
@@ -114,7 +119,8 @@ anyway.
     surfaces (the callback request contract, the `Authorization` value format,
     the signature/IPN verification procedures). Its design and the verified
     contract are preserved in `docs/plans/bkash-integration-runbook.md`.
-    Implementation and live acceptance move to **Batch 4**.
+    **Implementation and live acceptance are assigned to Batch 6 as B6-02**
+    (founder decision 2026-10-23; previously recorded as moving to Batch 4).
   - **W5-16 barcode scanning — EXCLUDED** (Q1, founder decision).
     **Barcode remains EXCLUDED and is not to be reintroduced into any batch
     without an explicit decision.** OCR works independently with manual
@@ -128,8 +134,9 @@ anyway.
     and the ~21,000 figure in the original scope line traces to an unlicensed
     Kaggle scrape of medex.com.bd. **Zero rows ship and the 21,000 count is
     not claimed.** See `docs/plans/medicine-catalog-provenance.md` for the
-    four conditions a verified count requires.
-  - **E8 — the bKash contract**, above.
+    four conditions a verified count requires. **Owned by Batch 6 as B6-01**
+    (founder decision 2026-10-23).
+  - **E8 — the bKash contract**, above. **Owned by Batch 6 as B6-02.**
   - **E9 — prescription capture cleanup on the `captureOnly` path**,
     descoped after five designs each proved unsafe. Existing durable captures
     are preserved and no destructive cleanup was introduced.
@@ -147,10 +154,30 @@ anyway.
   and shop location/map, which needs an `update` grant on `shops` that does
   not exist. An effective-ACL pgtest now proves that absence rather than
   assuming it.
-- **Batch 3 (21)** — H-9 hosted/recovery execution (ON HOLD, with the
-  uncommitted working-tree paths and the H1/F12/N0/PG17 evidence preserved), the
-  migration-chain extension, **W4-04 and W4-05 (still BLOCKED — see above)**,
-  and H-11's C5 restore rehearsal.
+- **Batch 3 (21)** — **IMPLEMENTED 2026-10-26. CODE-COMPLETE on both local
+  axes; NOTHING device-verified and NOTHING hosted.** See
+  `docs/plans/muthoy-batch-3-implementation-2026-10-26.md` for the evidence
+  record and `docs/plans/admin-architecture-rbac.md` for the per-page
+  acceptance checklist.
+
+  **Closed locally in Batch 3:**
+
+  | Task | State | Evidence |
+  |---|---|---|
+  | **E4** the migration-chain successor | **CLOSED LOCALLY.** Migration 35 written, four gates re-pointed to an exact-set successor check, a new hash-verified evidence manifest | `e4-admin-platform`, `e4-chain-succession`, `e4-evidence-manifest`; `docs/plans/e4-migration-and-rollback.md`. **Hosted application is gate E4-H and was NOT performed** |
+  | **W4-04** refund-net pharmacy sales | **CODE-COMPLETE.** One shared `netSalesPaisa`, consumed by the mobile reports and the admin panel, both sides windowed on `business_date` | `packages/utils/src/netSales.test.ts`, `platformStats.test.ts`, the mobile report regressions |
+  | **W4-05** owner-controlled shop sync | **CODE-COMPLETE.** The permission gate plus the independent field-level identity pin; no working path refused | `w405-shop-identity.pgtest.ts` |
+  | **W4-06** admin audit, awaited | **CODE-COMPLETE.** Awaited on every sensitive path including denials, with `actor_verified` and the committed-but-unaudited outcome | `docs/plans/admin-audit-security.md` |
+  | **W2-03** multilingual shop-medicine search | **COMPLETE — no longer PARTIAL.** SQLite migration 0033, a chunked transactional backfill, and a permanent raw-OR-folded union query | `w203-shop-medicine-search.sqlite.test.ts` (35 tests); `docs/plans/w203-shop-medicine-search.md` |
+  | **E11** the unsafe entitlement refresh | **WITHDRAWN from the panel.** It extended paid access with no payment behind it. The RPC itself is unmodified — rewriting it is money-path SQL and needs its own approved plan | `adminGrants.test.ts` forbids the RPC by name |
+  | **The eleven Admin Panel pages** | **ALL CODE-COMPLETE** | `adminRoutes.contract.test.tsx` (81 tests); per-page record in `admin-architecture-rbac.md` |
+
+  **Still open and NOT closed by Batch 3:** H-9 hosted/recovery execution
+  (ON HOLD, with the uncommitted working-tree paths and the H1/F12/N0/PG17
+  evidence preserved **byte-identical**), H-11's C5 restore rehearsal (needs a
+  real backup provider), and the external gates E1, E4-H, E5, E10, E12, E13,
+  E14 and E15 — enumerated with their owners in
+  `docs/plans/release-readiness-checklist.md`.
 
   **Inherited from Batch 2, unresolved (added 2026-10-23):**
   - **W2-03's remaining half — multilingual search over EXISTING SHOP
@@ -160,8 +187,14 @@ anyway.
     Closing it requires **a SQLite migration adding a folded search-key column
     to `medicines` plus an FTS index rebuild**, over a search index every
     existing shop depends on — so it is subject to Batch 3's approved migration
-    and device-safety gates, not to be slipped in as a patch. Until then
-    **W2-03 stays PARTIAL and multilingual medicine search is NOT accepted.**
+    and device-safety gates, not to be slipped in as a patch.
+    **CLOSED IN BATCH 3** by migration `0033_medicine_search_key.sql`, a
+    chunked transactional backfill and a permanent raw-OR-folded union query.
+    One limit is recorded rather than hidden: the fold has no `c`/`k` rule, so
+    the English spelling "seclo" does not reach a row stored as "সেক্লো". That
+    is a gap in W2-02's shipped fold, asserted by a test, and widening it would
+    change the national catalogue's index semantics.
+    **Real Android-device acceptance is still NOT claimed.**
   - **The durable admin audit table.** SQL staged out-of-chain at
     `backend/supabase/deploy/batch2-admin-audit.sql`, never executed, **BLOCKED
     on E4**. Batch 2 ships the stderr and ring-buffer sinks behind the same
@@ -179,7 +212,48 @@ anyway.
   - **H-8 provider + device acceptance.** A real monitoring provider with a DSN,
     and a forced failure in each of the five classes observed arriving. Batch 1
     shipped the redaction core and a no-op sink only.
-- **Batch 5 (6)** — RC gates.
+- **Batch 5 (6)** — RC gates. Batch 5 **may prepare** the pilot, the release
+  checklist and its other assigned launch activities, but **final public launch
+  and full-feature production sign-off stay BLOCKED until the Batch 6
+  deliverables and every other applicable release gate are accepted.** Six
+  delivery groups is not permission to launch an incomplete product.
+- **Batch 6 (2)** — **added by founder decision 2026-10-23. EXACTLY TWO
+  DELIVERABLES, and no third.** Supporting tests, documentation, security review
+  and the required deployment/device acceptance belong **inside** these two; they
+  are not separate Batch 6 tasks.
+
+  - **B6-01 — the real ~21,000-medicine dataset (owns E7).** Obtain and verify a
+    legally usable, appropriately licensed dataset; verify source provenance,
+    actual record count, duplicates, quality and update rights; integrate the
+    verified records through the **existing Batch 2 architecture** (catalogue
+    schema, JSONL importer, search provider, offline lookup) rather than
+    rebuilding it; verify offline availability, integrity, updates and device
+    performance.
+    **Never scrape an unlicensed database and never fabricate entries to reach
+    21,000.** ~21,000 is a product TARGET, not permission to invent records: the
+    verified count is reported truthfully whatever it turns out to be. Existing
+    shop-specific medicine, inventory, purchase and sales records are preserved.
+    Conditions a verified count must meet:
+    `docs/plans/medicine-catalog-provenance.md`.
+  - **B6-02 — the direct bKash merchant payment gateway (owns E8, implements
+    W4-09).** bKash is the **ONLY** approved subscription gateway, and
+    **SSLCommerz is never reactivated for new subscription payments** — W4-10's
+    retirement stands. Use the verified official bKash merchant API and security
+    contracts; implement secure initiation, callback verification, idempotency,
+    reconciliation and failure recovery; obtain the required sandbox and live
+    acceptance. Historical payment data and the legacy reconciliation behaviour
+    that still settles pre-retirement orders are preserved.
+    **Never invent an API contract, a credential or live payment evidence.** The
+    verified contract, the three undocumented surfaces that block it, and the
+    two-identifier problem are in `docs/plans/bkash-integration-runbook.md`.
+
+  **Neither deliverable may be marked DONE before actual evidence exists** —
+  a licensed dataset with a measured count for B6-01, and a real sandbox/live
+  payment run for B6-02.
+
+  **No duplication:** E7 and E8 are owned here and **nowhere else**. Batches 3,
+  4 and 5 do not carry them, and Batch 2's records keep their historical
+  statements with dated ownership addenda rather than being rewritten.
 
 ---
 
@@ -230,8 +304,11 @@ device, a hosted environment, or a founder decision.
 | E2 | **H-6 two-device convergence** | 4 | Force a real conflict between two physical devices on one shop and resolve it from each side. Batch 1's coverage simulates both clocks in one process |
 | E3 | **H-8 provider + device acceptance** | 4 | A real provider with a DSN, and a forced failure in each of the five classes observed arriving. Batch 1 shipped redaction and a no-op sink |
 | E4 | **Migration-chain extension** | 3 | The H-9 seal pins the chain at 34. W4-04 and W4-05 cannot ship until it is deliberately extended with its hash-recorded evidence re-established |
-| E5 | **Payment provider decision** | founder | See below. Needs a decision before any payment work, not an engineering fix |
-| E6 | **Live payment acceptance** | 5 | Real gateway credentials and sandbox/live validation. Currently fails closed with no credentials configured |
+| E5 | **Payment provider decision** | **CLOSED by the founder** | Decided: SSLCommerz is no longer approved, direct bKash is the only approved subscription gateway. W4-10 retired SSLCommerz initiation; delivery of bKash is **Batch 6, B6-02**. The analysis below is kept as the record of what was true when the question was open |
+| E6 | **Live payment acceptance** | **6 — B6-02** (was 5) | Real bKash merchant credentials plus sandbox and live validation. Currently fails closed: no provider is active at all after W4-10 |
+| E7 | **Real licensed medicine dataset** | **6 — B6-01** | A legally usable, licensed dataset with verified provenance, a MEASURED record count, duplicate and quality checks, update rights, and offline availability proven on a device. Zero catalogue rows ship today and the ~21,000 figure is not claimed |
+| E8 | **bKash merchant contract** | **6 — B6-02** | The official callback request contract, the `Authorization` value format, and the signature/IPN verification procedures, from bKash onboarding material — plus merchant credentials and the unpublished live base URL. Until then no callback or signature path may be written |
+| E9 | **Prescription capture cleanup (`captureOnly`)** | **documented, descoped** | Not a pending gate: five designs each proved unsafe, so the rule is that existing durable captures are preserved and no destructive cleanup is introduced. Recorded in `docs/plans/ocr-and-multilingual-search.md` |
 
 ### E5 — the payment provider question, stated plainly
 

@@ -1,5 +1,27 @@
 -- Batch 2 / W4-06 — the durable admin audit table.
 --
+-- ===========================================================================
+-- SUPERSEDED BY MIGRATION 35, Batch 3 (E4).
+--
+-- `backend/supabase/migrations/20261023000000_e4_batch3_admin_platform.sql`
+-- promotes this table into the migration chain. Every column, index, revoke
+-- and grant below is preserved there, PLUS ONE ADDED COLUMN:
+--
+--     actor_verified boolean
+--
+-- That is the only difference, and it is stated here rather than described as
+-- "substance unchanged". The column exists because
+-- apps/admin/lib/adminLogin.ts:364 audits a FAILED LOGIN with the claimed
+-- username and no verified cookie — so "the actor always comes from the
+-- verified cookie" was false for login attempts, which by nature precede a
+-- session. `actor_verified = true` only when the actor came from a verified
+-- session cookie.
+--
+-- This file is kept for provenance. It is NOT the thing to apply; migration 35
+-- is. Migration 35 itself is also NOT YET APPLIED to any hosted project
+-- (gate E4-H).
+-- ===========================================================================
+--
 -- STAGED, NOT APPLIED. **BLOCKED on gate E4.**
 --
 -- This file is deliberately NOT in backend/supabase/migrations/. The migration

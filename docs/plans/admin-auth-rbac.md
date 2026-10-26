@@ -4,6 +4,27 @@
 `a2c196a`).
 **Status:** CODE-COMPLETE. **Not deployed, no account provisioned.**
 
+> ### SUPERSEDED IN PART BY BATCH 3
+>
+> **The current reference is `docs/plans/admin-architecture-rbac.md`.** Read it
+> first. This document is kept for its Batch 2 history and is not updated.
+>
+> Four things changed in Batch 3 and are described there, not here:
+>
+> 1. **The effective permission set is an INTERSECTION** of the environment
+>    role's permissions and the assignment row's. A narrowing row now takes a
+>    permission away *at the gate*, not merely from the navigation.
+> 2. **`shop_audit.read` was added**, scoped to super_admin and support, for
+>    §8.9b's per-shop audit view.
+> 3. **The audit is awaited on every sensitive path, denials included**, and a
+>    write that commits but fails to audit returns a distinct "applied, not
+>    recorded, do not retry" outcome. `actor_verified` now distinguishes a
+>    verified session from a claimed login subject.
+> 4. **W4-08's entitlement-refresh action was REMOVED from the panel** (gate
+>    E11). It shipped in `a2c196a`, and it extended a device's premium access by
+>    the full offline window with no payment behind it. Any description of it
+>    below is historical.
+
 This is the reference for how the platform console authenticates people, what
 each role may do, and what the panel records. It also states the three limits
 honestly, because each one matters operationally.
