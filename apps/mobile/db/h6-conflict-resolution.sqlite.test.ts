@@ -84,6 +84,7 @@ beforeAll(() => {
     '0008_native_pin_lookup.sql', '0009_strong_gargoyle.sql', '0010_known_ares.sql',
     '0027_h7_local_access_lock.sql', '0028_shop_scoped_pin_lookup.sql',
     '0029_pin_reserved_while_inactive.sql', '0031_h6_conflict_queue.sql',
+    '0033_medicine_search_key.sql',
   ]) applyMigration(name);
 
   db.insert(shops).values({ id: SHOP, ownerId: OWNER, name: 'Resolve Shop', phone: '01700000610', createdAt: T0, updatedAt: T0 }).run();

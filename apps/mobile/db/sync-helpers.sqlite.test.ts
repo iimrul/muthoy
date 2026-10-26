@@ -55,6 +55,12 @@ beforeAll(() => {
   applyMigration("0027_h7_local_access_lock.sql");
   applyMigration("0028_shop_scoped_pin_lookup.sql");
   applyMigration("0029_pin_reserved_while_inactive.sql");
+  // W2-03: medicines.search_key and the three-column FTS index. applyToTable
+  // writes the folded key on every pulled medicine, so this fixture needs the
+  // column that write targets — without it the rollback case below failed with
+  // "no such column", which is the schema drift this line removes rather than
+  // the behaviour the test is about.
+  applyMigration("0033_medicine_search_key.sql");
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: USER_ID, name: "Test Shop", phone: "01700000000", createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: "owner", isSystem: true, createdAt: NOW, updatedAt: NOW }).run();

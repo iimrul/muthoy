@@ -41,6 +41,13 @@ export const MONITORING_EVENTS = [
   // failure there leaves a JPEG of a medicine strip in the cache directory, so
   // it is worth a breadcrumb even though the scan itself succeeded.
   "scan.capture_cleanup.failed",
+  // W2-03. The folded-key backfill, both outcomes. The success breadcrumb
+  // fires only when rows were actually folded, so a finished table is silent.
+  // The failure one matters because the consequence is INVISIBLE: search keeps
+  // working through the raw term, so a shop whose Bangla search never improved
+  // would have nothing to report and no way to say what went wrong.
+  "db.medicine_search_key.backfilled",
+  "db.medicine_search_key.failed",
 ] as const;
 
 export type MonitoringEvent = (typeof MONITORING_EVENTS)[number];

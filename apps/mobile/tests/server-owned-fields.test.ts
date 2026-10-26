@@ -120,7 +120,10 @@ describe('stripped and preserved fields (source 2: sync-helpers.ts)', () => {
     // And nothing is declared server-owned for a table that has no reason to:
     // an extra exclusion is the silent-blindness direction.
     const TABLES_WITH_A_REASON = new Set([
-      'batches', 'shops', 'users', 'sales', 'expenses', 'sale_attachments',
+      // 'medicines' is W2-03's device-local search_key, whose authority is the
+      // strip in toSyncPayload — stated in the EVIDENCE table above with its
+      // own scoped needle, exactly like the three sale_attachments fields.
+      'batches', 'shops', 'users', 'sales', 'expenses', 'sale_attachments', 'medicines',
     ]);
     for (const table of Object.keys(SERVER_OWNED_FIELDS)) {
       expect(TABLES_WITH_A_REASON, `${table} declares server-owned fields with no documented authority`)
@@ -202,6 +205,13 @@ describe('non-SQL server rewrites (source 4: functions/sync/push.ts)', () => {
 const PRESERVE_BATCHES = [
   'export function preservedLocalFields',
   'if (tableName === "users")',
+] as const;
+// W2-03's strip sits FIRST in toSyncPayload, so its branch runs from itself to
+// the shops branch that follows. Bounded like every other one: a needle
+// satisfied anywhere else in the file would prove nothing about this branch.
+const MEDICINES_STRIP = [
+  'if (tableName === "medicines")',
+  'if (tableName === "shops")',
 ] as const;
 const SHOPS_STRIP = ['if (tableName === "shops")', 'if (tableName === "users")'] as const;
 const USERS_STRIP = [
@@ -348,6 +358,13 @@ const EVIDENCE: Record<string, Record<string, Evidence>> = {
       // would still contain the table check, so the check alone proved nothing.
       needle: 'return { ...payload, category };',
     },
+  },
+  medicines: {
+    // W2-03. The authority is the STRIP itself: Postgres `medicines` declares
+    // no `search_key`, so toSyncPayload removing it is what makes the column
+    // absent from every pushed payload — and applyToTable recomputes it
+    // locally on the way in, so it is absent from the pulled side too.
+    search_key: { source: HELPERS, scope: MEDICINES_STRIP, needle: 'delete payload.searchKey' },
   },
   sale_attachments: {
     local_uri: { source: HELPERS, scope: ATTACHMENT_STRIP, needle: 'delete payload.localUri' },

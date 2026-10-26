@@ -9,7 +9,7 @@ import {
   multiplyPaisa,
   type Paisa,
 } from '@muthoy/types';
-import { DHAKA_SQL_OFFSET, dhakaBusinessDate } from '@muthoy/utils';
+import { DHAKA_SQL_OFFSET, dhakaBusinessDate, medicineSearchKey } from '@muthoy/utils';
 import { resolvePaymentEffect, type PurchasePaymentType } from '../domain/purchases';
 import { buildPurchaseInvoiceNo } from '../domain/invoice';
 import { expectedCash } from '../domain/cashFormula';
@@ -44,7 +44,7 @@ import {
   users,
 } from './schema';
 import { recordChange, stampUpdatedAt, type SyncOperationGroup } from './sync-helpers';
-import { toFtsPrefixQuery } from '../domain/ftsQuery';
+import { toMultilingualFtsQuery } from '../domain/ftsQuery';
 
 const SEARCH_LIMIT = 50;
 
@@ -106,7 +106,10 @@ export async function searchMedicinesForPurchase(
   shopId: string,
   query: string,
 ): Promise<PurchaseMedicineSearchResult[]> {
-  const matchQuery = toFtsPrefixQuery(query);
+  // W2-03: the same union the sale path uses, folded by the same function the
+  // index is folded by. A purchase is where a Bangla-named medicine most often
+  // enters a shop's stock, so this path mattering is not hypothetical.
+  const matchQuery = toMultilingualFtsQuery(query, medicineSearchKey);
   if (!matchQuery) {
     return [];
   }

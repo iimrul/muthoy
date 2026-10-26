@@ -435,7 +435,7 @@ work since the last successful push. Measuring that loss, rather than estimating
 it, is part of the drill.
 
 <!-- rollback-classification:start -->
-Generated rollback references: migration-time data writes `0001` · `0002` · `0006` · `0007` · `0009` · `0010` · `0011` · `0012` · `0018` · `0024` · `0029`. Table drops `0006` · `0011` · `0012`. Source: [rollback-classification.json](../../../backend/supabase/migrations/rollback-classification.json).
+Generated rollback references: migration-time data writes `0001` · `0002` · `0006` · `0007` · `0009` · `0010` · `0011` · `0012` · `0018` · `0024` · `0029` · `0033`. Table drops `0006` · `0011` · `0012` · `0033`. Source: [rollback-classification.json](../../../backend/supabase/migrations/rollback-classification.json).
 <!-- rollback-classification:end -->
 
 Those are the steps where a half-applied upgrade costs the most. The procedure

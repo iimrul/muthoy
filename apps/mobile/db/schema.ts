@@ -396,6 +396,16 @@ export const medicines = sqliteTable(
     // B2: null means use the live shop default. Migration preserves every
     // legacy threshold as an explicit override before new rows start at null.
     lowStockThresholdOverride: integer("low_stock_threshold_override"),
+    // W2-03 (migration 0033): the folded multi-script comparison key, indexed
+    // by `medicines_fts` so one FTS column serves English, Bangla and Banglish
+    // queries over a shop's OWN stock.
+    //
+    // NULLABLE on purpose. Every row that existed before 0033 starts NULL and
+    // is filled by db/medicineSearchKeyBackfill.ts in chunks after migrations;
+    // the search query unions the raw term so a NULL row stays findable in the
+    // meantime. DEVICE-LOCAL: Postgres `medicines` has no such column, so
+    // toSyncPayload strips it on push and applyToTable recomputes it on pull.
+    searchKey: text("search_key"),
   },
   (t) => ({
     shopIdx: index("medicines_shop_idx").on(t.shopId),

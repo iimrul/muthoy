@@ -34,6 +34,7 @@ import m0029 from './0029_pin_reserved_while_inactive.sql';
 import m0030 from './0030_a23_device_registry_mirror.sql';
 import m0031 from './0031_h6_conflict_queue.sql';
 import m0032 from './0032_medicine_catalog.sql';
+import m0033 from './0033_medicine_search_key.sql';
 
 export default {
   journal,
@@ -71,5 +72,6 @@ export default {
     m0030,
     m0031,
     m0032,
+    m0033,
   },
 };

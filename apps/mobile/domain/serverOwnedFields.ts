@@ -104,6 +104,17 @@ export const SERVER_OWNED_FIELDS: Partial<
 
   // Stripped by toSyncPayload: all three are local upload bookkeeping.
   sale_attachments: ["local_uri", "upload_status", "upload_error"],
+
+  // W2-03 (migration 0033). EVIDENCE: `search_key` is DEVICE-LOCAL — the
+  // Postgres `medicines` table declares no such column, so there is nothing on
+  // the server to own it. It is listed here for the narrow reason the list
+  // exists: toSyncPayload STRIPS it on push, so the field can never be part of
+  // a pushed payload, and a pulled row never carries it either (applyToTable
+  // recomputes it locally on arrival). Excluding it from the comparable set is
+  // therefore not a judgement call about authority — the field is absent from
+  // both sides of every comparison the detector makes, and naming it keeps a
+  // future change to that pull-side recompute from reading as a lost write.
+  medicines: ["search_key"],
 };
 
 /**

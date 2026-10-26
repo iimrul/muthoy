@@ -1,5 +1,6 @@
 import { and, asc, count, desc, eq, isNull, max, or } from "drizzle-orm";
 import { canonicalizeExpenseCategory } from "@muthoy/validation";
+import { medicineSearchKeys } from "@muthoy/utils";
 import {
   comparableFields,
   isConflictExemptTable,
@@ -505,6 +506,12 @@ function toSyncPayload(
   row: Record<string, unknown>,
 ): Record<string, unknown> {
   const payload = { ...row };
+  if (tableName === "medicines") {
+    // W2-03. `search_key` is DEVICE-LOCAL: the Postgres `medicines` table has
+    // no such column, so pushing it would be rejected by the schema. The
+    // established pattern — shops.cloudLinkedAt and the six users fields.
+    delete payload.searchKey;
+  }
   if (tableName === "shops") {
     delete payload.cloudLinkedAt;
   }
@@ -1156,12 +1163,29 @@ function upsertRemoteRow(
         .onConflictDoUpdate({ target: userPermissions.id, set: row })
         .run();
       break;
-    case "medicines":
+    case "medicines": {
+      // W2-03. The server has no `search_key`, so a pulled row arrives without
+      // one — and inserting it as NULL would make a Bangla-named medicine
+      // pulled from another device unreachable by a folded query until the next
+      // cold start's backfill. So it is computed HERE, on arrival, from the
+      // row's own name and generic, by the SAME fold the index uses.
+      //
+      // Included in BOTH `values` and the conflict `set`: an UPDATE that left
+      // the old key in place would keep a renamed medicine findable under its
+      // previous name, which is the bug this column exists to prevent.
+      const medicineRow = {
+        ...(row as typeof medicines.$inferInsert),
+        searchKey: medicineSearchKeys([
+          (row as Record<string, unknown>).name as string | null,
+          (row as Record<string, unknown>).generic as string | null,
+        ]),
+      };
       tx.insert(medicines)
-        .values(row as typeof medicines.$inferInsert)
-        .onConflictDoUpdate({ target: medicines.id, set: row })
+        .values(medicineRow)
+        .onConflictDoUpdate({ target: medicines.id, set: medicineRow })
         .run();
       break;
+    }
     case "batches":
       tx.insert(batches)
         .values(row as typeof batches.$inferInsert)

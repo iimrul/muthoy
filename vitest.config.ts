@@ -117,6 +117,9 @@ export default defineConfig({
     include: [
       "apps/mobile/db/environment-binding.test.ts",
       "apps/mobile/db/medicine-catalog.sqlite.test.ts",
+      // W2-03: the folded-key migration, its backfill and the union query,
+      // on real SQLite against a POPULATED pre-0033 fixture.
+      "apps/mobile/db/w203-shop-medicine-search.sqlite.test.ts",
       "apps/mobile/tests/environment-policy.test.ts",
       // H-9 archive controls on a real Git revision; the EAS CLI 21.8.0 half
       // runs EAS's own copy/workflow code when that pinned CLI is installed.

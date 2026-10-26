@@ -27,9 +27,9 @@ Wave-2 state. Treat this as the plan it is until that rehearsal signs it off.
 
 PostgreSQL classifications: `20260813000000_initial_schema` (C) · `20260817000000_admin_read_grants` (A) · `20260817000100_sync_roles_read_grant` (A) · `20260818000000_inventory_movement_ledger` (B) · `20260818000100_sync_batches_stock_server_derived` (B) · `20260819000000_staff_device_login` (C) · `20260821000000_phase_b1_navigation_roles` (B) · `20260821010000_phase_b2_sales_inventory_sync` (C) · `20260822000000_owner_dashboard_credit_period` (A) · `20260822010000_b3_group1_shop_settings` (B) · `20260823000000_b3_group2_payment_note` (A) · `20260823010000_b3_group2_cash_reconcile` (A) · `20260823020000_b3_group2_sync_completion` (B) · `20260823030000_b3_group3_expense_category_taxonomy` (C) · `20260823040000_b3_groups456_schema_additions` (B) · `20260823050000_b3_groups456_sync_completion` (B) · `20260824000000_b3_group7_purchase_return_sync` (B) · `20260825000000_inventory_add_purchase_sync` (B) · `20260827000000_b3_group8_report_indexes` (C) · `20260827010000_b3_group9_sale_tax_snapshot` (B) · `20260831000000_b4_commercial_platform` (C) · `20260905000000_b4_canonical_onboarding` (B) · `20260907000000_h7_security_hardening` (B) · `20260907010000_h7_revoke_api_role_truncate` (A) · `20260907020000_h7_fix_pass_b` (C) · `20260909000000_h7_actor_binding_staff_reactivation` (B) · `20260923000000_a23_device_registry` (B) · `20260926000000_a23_persistent_enrollment_holds` (B) · `20261001000000_h5_auth_sms_dispatch` (B) · `20261004000000_h5_sms_dispatch_claim_owner` (C) · `20261005000000_h5_revoke_auth_user_sessions` (B) · `20261008000000_h9_enrollment_hold_constraint_normalization` (B) · `20261008000100_h9_sync_staging_cleanup_schedule` (A) · `20261015000000_h9_api_role_table_privileges` (A) · `20261023000000_e4_batch3_admin_platform` (C)
 
-SQLite migration-time data writes: `0001` · `0002` · `0006` · `0007` · `0009` · `0010` · `0011` · `0012` · `0018` · `0024` · `0029`
+SQLite migration-time data writes: `0001` · `0002` · `0006` · `0007` · `0009` · `0010` · `0011` · `0012` · `0018` · `0024` · `0029` · `0033`
 
-SQLite table drops: `0006` · `0011` · `0012`
+SQLite table drops: `0006` · `0011` · `0012` · `0033`
 <!-- rollback-classification:end -->
 
 ---

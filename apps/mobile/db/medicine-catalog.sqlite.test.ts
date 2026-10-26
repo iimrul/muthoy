@@ -57,6 +57,7 @@ beforeAll(() => {
     '0027_h7_local_access_lock.sql', '0028_shop_scoped_pin_lookup.sql',
     '0029_pin_reserved_while_inactive.sql',
     '0032_medicine_catalog.sql',
+    '0033_medicine_search_key.sql',
   ]) applyMigration(name);
 
   const now = new Date().toISOString();

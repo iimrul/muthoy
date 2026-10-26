@@ -234,6 +234,7 @@ beforeAll(() => {
   applyMigration('0027_h7_local_access_lock.sql');
   applyMigration('0028_shop_scoped_pin_lookup.sql');
   applyMigration('0029_pin_reserved_while_inactive.sql');
+  applyMigration('0033_medicine_search_key.sql');
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: OWNER_ID, name: 'Hydration Shop', phone: '01700000903', createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: 'owner', isSystem: true, createdAt: NOW, updatedAt: NOW }).run();

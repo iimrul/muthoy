@@ -9,7 +9,7 @@ import {
   multiplyPaisa,
   type Paisa,
 } from "@muthoy/types";
-import { businessDateDifference, dhakaBusinessDate } from "@muthoy/utils";
+import { businessDateDifference, dhakaBusinessDate, medicineSearchKey } from "@muthoy/utils";
 import { db, sqliteConnection } from "./client";
 import {
   batches,
@@ -54,7 +54,7 @@ import { deductStock } from "./stockLedger";
 import { recordChange, stampUpdatedAt } from "./sync-helpers";
 import { markSaleDraftCompleted } from "./saleDrafts";
 import { uuidV5 } from "../domain/deterministicId";
-import { toFtsPrefixQuery } from "../domain/ftsQuery";
+import { toMultilingualFtsQuery } from "../domain/ftsQuery";
 import { extractInclusiveTax, normalizeTaxLabel } from "../domain/tax";
 
 const SEARCH_LIMIT = 50;
@@ -85,7 +85,11 @@ export async function searchMedicinesForSale(
   shopId: string,
   query: string,
 ): Promise<MedicineSearchResult[]> {
-  const matchQuery = toFtsPrefixQuery(query);
+  // W2-03: the raw term AND the folded term, so one search reaches a row
+  // stored in English, in Bangla, or in Banglish. `medicineSearchKey` is the
+  // SAME fold migration 0033 indexes and db/medicineSearchKeyBackfill.ts
+  // writes — passed in here so that invariant is visible at the call site.
+  const matchQuery = toMultilingualFtsQuery(query, medicineSearchKey);
   if (!matchQuery) {
     return [];
   }

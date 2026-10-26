@@ -291,9 +291,17 @@ describe('the local SQLite side', () => {
 
   it('names every migration that writes data at migration time', () => {
     // The first audit listed seven of these and missed 0001, 0009, 0011, 0012.
-    expect(writesData).toEqual(
-      ['0001', '0002', '0006', '0007', '0009', '0010', '0011', '0012', '0018', '0024', '0029'],
-    );
+    //
+    // W2-03 adds 0033, for the same reason 0001 is here: it ends with
+    // `INSERT INTO medicines_fts VALUES('rebuild')`, which writes the whole FTS
+    // index. The rows it writes are INDEX rows rather than shop data — no
+    // medicine, batch, sale or purchase is touched — but the classification is
+    // about what a re-run or a rollback has to redo, and rebuilding an index is
+    // exactly that.
+    expect(writesData).toEqual([
+      '0001', '0002', '0006', '0007', '0009', '0010', '0011', '0012', '0018', '0024', '0029',
+      '0033',
+    ]);
   });
 
   it('lists them all in ROLLBACK.md', () => {
@@ -303,7 +311,13 @@ describe('the local SQLite side', () => {
   });
 
   it('names the ones that drop tables, which no re-run can undo', () => {
+    // 0033 drops `medicines_fts` in order to recreate it with a third column —
+    // fts5 has no ALTER that adds one. What is dropped is an INDEX whose
+    // content lives in `medicines`, so the rebuild on the next line restores
+    // it in full and nothing is unrecoverable. Listed anyway, because the
+    // classification records what the statement DOES rather than how
+    // recoverable somebody judges it to be.
     expect(lite.filter((row) => row.facts.dropTable > 0).map((row) => row.name.slice(0, 4)))
-      .toEqual(['0006', '0011', '0012']);
+      .toEqual(['0006', '0011', '0012', '0033']);
   });
 });

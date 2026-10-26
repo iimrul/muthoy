@@ -232,6 +232,13 @@
       "when": 1791331200000,
       "tag": "0032_medicine_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1791417600000,
+      "tag": "0033_medicine_search_key",
+      "breakpoints": true
     }
   ]
 }

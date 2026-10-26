@@ -9,6 +9,7 @@ import {
 import { DatabaseRecoveryPendingError } from './errors';
 import { reportError, reportEvent } from '../monitoring';
 import migrations from './migrations/migrations';
+import { backfillMedicineSearchKeys } from './medicineSearchKeyBackfill';
 import { ensureEnvironmentAllowed } from './environmentBinding';
 
 export interface DatabaseInitState {
@@ -23,6 +24,32 @@ export interface DatabaseInitState {
 let initialization: Promise<void> | null = null;
 let isInitialized = false;
 let isRecoveryMode = false;
+
+/**
+ * W2-03's folded-key backfill, with its failure contained.
+ *
+ * A medicine that is searchable only in the script it was typed in is a
+ * degraded search; a database that will not open is a shop that cannot trade.
+ * Those are not the same severity, so a backfill failure must NOT fail boot:
+ * it is reported and swallowed, and the next launch retries the chunks that did
+ * not land. The union query in domain/ftsQuery.ts is what makes that safe —
+ * every unfolded row stays findable by its raw name meanwhile.
+ *
+ * The migration itself is NOT treated this way. If 0033 fails, `migrate` throws
+ * and boot fails, exactly as for every other migration.
+ */
+function runSearchKeyBackfill(): void {
+  try {
+    const result = backfillMedicineSearchKeys();
+    if (result.updated > 0) {
+      reportEvent('db.medicine_search_key.backfilled');
+    }
+  } catch (error) {
+    // The error KIND only, never the message — a SQLite failure quotes SQL,
+    // and a medicine name is shop data.
+    reportError({ event: 'db.medicine_search_key.failed', error, route: 'startup' });
+  }
+}
 
 /**
  * Brings the local database all the way up: unlocks it (H-3), runs any
@@ -59,6 +86,10 @@ export async function ensureDatabaseInitialized(): Promise<void> {
   initialization ??= (async () => {
     await ensureDatabaseReady();
     await migrate(db, migrations);
+    // W2-03: immediately after migrations, and BEFORE isInitialized is set, so
+    // no screen can read a half-folded table through a published handle.
+    // Chunked and idempotent — a finished table costs one empty SELECT.
+    runSearchKeyBackfill();
     isInitialized = true;
   })();
   try {
@@ -86,6 +117,10 @@ export async function initializeRecoveryDatabase(
   try {
     initializeDatabaseFileForRecovery(fileName, keyHex);
     await migrate(db, migrations);
+    // The recovery target gets the same treatment: a restored database holds
+    // real medicines, and they must be searchable in every script the moment
+    // the restore completes.
+    runSearchKeyBackfill();
     isInitialized = true;
   } catch (error) {
     try {
