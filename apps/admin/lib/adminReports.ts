@@ -330,6 +330,15 @@ interface AggregateRow {
   /** The already-formatted cells after the key, in column order. */
   values: readonly string[];
   contributorIds: readonly string[];
+  /**
+   * Optional PER-VALUE contributors, index-aligned with `values`.
+   *
+   * Present only where one row mixes a suppressible aggregate with a value
+   * that must be gated separately — or not at all. An `undefined` entry means
+   * that column is exempt, which is how §8.10's registration metadata sits
+   * beside a sales aggregate without either weakening the other.
+   */
+  valueContributorIds?: readonly (readonly string[] | undefined)[];
 }
 
 /**
@@ -348,6 +357,37 @@ function suppressRows(rows: readonly AggregateRow[]): {
   let suppressedBuckets = 0;
 
   for (const row of rows) {
+    // GATE 5 FINDING 4 — PER-VALUE GATING.
+    //
+    // Row-level gating alone was a real k=5 bypass. `activity_summary`
+    // declared the UNION of its registration and sales contributors, so a day
+    // on which five shops registered and ONE of them traded cleared the floor
+    // and then published the active count of 1 — which identifies that exactly
+    // one of those five traded. The test meant to catch this asserted the
+    // bypass and rationalised it as "safe BECAUSE five shops stand behind the
+    // row"; the floor is on the contributors to THAT VALUE, not to the row.
+    //
+    // A row may now declare `valueContributorIds`, index-aligned with
+    // `values`, and each value is gated by its own contributors. A value with
+    // NO declared contributors is exempt — that is how registration metadata
+    // rides in the same row as a suppressed aggregate, which §8.10 permits
+    // explicitly. A row without the field keeps the previous whole-row
+    // behaviour, so no other report changes.
+    if (row.valueContributorIds !== undefined) {
+      const perValue = row.values.map((value, index) => {
+        const contributors = row.valueContributorIds?.[index];
+        if (contributors === undefined) return { cell: value, suppressed: false };
+        const gated = suppressBelowK({ value, contributingShopIds: contributors });
+        return {
+          cell: gated.suppressed ? exportSuppressed(gated, () => '') : value,
+          suppressed: gated.suppressed,
+        };
+      });
+      if (perValue.some((entry) => entry.suppressed)) suppressedBuckets += 1;
+      out.push([row.key, ...perValue.map((entry) => entry.cell)]);
+      continue;
+    }
+
     const aggregate: Aggregate<readonly string[]> = {
       value: row.values,
       contributingShopIds: row.contributorIds,
@@ -465,10 +505,19 @@ function buildActivitySummary(data: ReportData, query: AdminReportExportQuery): 
     return {
       key: day,
       values: [formatCount(new Set(active).size), formatCount(new Set(registered).size)],
-      // The contributors are every shop behind EITHER figure: a day visible
-      // because five shops registered must not disclose that one of them also
-      // made the day's only sale.
       contributorIds: [...active, ...registered],
+      // EACH VALUE BY ITS OWN CONTRIBUTORS (Gate 5 finding 4).
+      //
+      // The active count is a sales-derived aggregate and is gated by the
+      // shops that actually traded — so a day on which five shops registered
+      // and one traded shows the registration count and withholds the active
+      // one. Taking the union, as this did, published that single shop's day.
+      //
+      // The registration count is REGISTRATION METADATA, which §8.10 permits
+      // unsuppressed, so it declares no contributors and is exempt. That
+      // exemption is narrow and deliberate: a count of pharmacies that
+      // registered is not a disclosure about any pharmacy's trade.
+      valueContributorIds: [active, undefined],
     };
   });
 }

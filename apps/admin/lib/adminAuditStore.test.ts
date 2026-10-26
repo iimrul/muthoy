@@ -388,3 +388,86 @@ describe('the three query values map to three distinct notices', () => {
     expect(outcomeNote({ failed: ['reconcile', 'expire'] })).toBe(OUTCOME_SENTENCES.failed);
   });
 });
+
+describe('an audit failure cannot crash the thing it is auditing (Gate 5 finding 2)', () => {
+  /** A client whose insert always fails, as an unavailable audit table would. */
+  function failingClient() {
+    return {
+      from: () => ({
+        insert: async () => ({ error: { message: 'relation does not exist' } }),
+      }),
+    } as unknown as NonNullable<Parameters<typeof createPostgresAuditSink>[0]>['client'];
+  }
+
+  test('write() WITHOUT a flush produces no unhandled rejection', async () => {
+    // THE DEFECT. `write` is a void method and its callers are not required to
+    // flush — lib/adminLogin.ts audits a failed login and returns. The queued
+    // promise could reject with nobody observing it, and Node's default
+    // --unhandled-rejections=throw turns that into a process crash: an audit
+    // failure taking down the login path.
+    const seen: unknown[] = [];
+    const onUnhandled = (reason: unknown) => seen.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      const sink = createPostgresAuditSink({ client: failingClient() });
+      sink.write({
+        at: '2026-10-26T06:00:00.000Z',
+        actor: 'ops',
+        actorVerified: false,
+        role: 'read_only',
+        action: 'login',
+        target: null,
+        outcome: 'failure',
+        meta: {},
+      });
+
+      // Let the insert settle and let Node get a turn to notice an unobserved
+      // rejection, which it reports at the end of the microtask queue.
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(seen, 'a queued audit write must never reject unobserved').toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  test('and the failure is still REPORTED to an awaited flush', async () => {
+    // The fix must not swallow the failure: `recordAdminActionDurably`'s
+    // awaited callers depend on flush throwing, which is what produces §8.9d's
+    // committed-but-unaudited outcome.
+    const sink = createPostgresAuditSink({ client: failingClient() });
+    sink.write({
+      at: '2026-10-26T06:00:00.000Z',
+      actor: 'founder',
+      actorVerified: true,
+      role: 'super_admin',
+      action: 'settings.updated',
+      target: 'flag.analytics_enabled',
+      outcome: 'success',
+      meta: {},
+    });
+
+    await expect(sink.flush?.()).rejects.toThrow('admin audit insert failed');
+  });
+
+  test('a drained batch is not re-reported by the next flush', async () => {
+    const sink = createPostgresAuditSink({ client: failingClient() });
+    sink.write({
+      at: '2026-10-26T06:00:00.000Z',
+      actor: 'founder',
+      actorVerified: true,
+      role: 'super_admin',
+      action: 'login',
+      target: null,
+      outcome: 'success',
+      meta: {},
+    });
+
+    await expect(sink.flush?.()).rejects.toThrow('admin audit insert failed');
+    // Nothing queued since, so the second flush reports nothing — a sink reused
+    // across requests must not re-report a write it already failed on.
+    await expect(sink.flush?.()).resolves.toBeUndefined();
+  });
+});

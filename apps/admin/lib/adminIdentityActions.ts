@@ -281,12 +281,28 @@ export async function revokeAdminSessions(
 
   try {
     const revokeAt = (deps?.now?.() ?? new Date()).getTime();
+
+    // GATE 5 FINDING 1 — a confirmed security defect, fixed here.
+    //
+    // This previously wrote `role: environmentRole` and `isActive: true`
+    // unconditionally, so revoking the sessions of a DISABLED, NARROWED account
+    // silently restored both: the narrowing was replaced by the environment
+    // role — possibly super_admin — and the account was re-enabled. A security
+    // action must never widen authority.
+    //
+    // So the existing row's role and enabled state are READ and PRESERVED, and
+    // only the revocation point moves. With no row, the environment role and
+    // `isActive: true` are correct: that is the account's standing authority,
+    // and a first revocation must not invent a narrowing nobody asked for.
+    const existing = await readRoleAssignment(username, storeDeps(deps));
     await writeRoleAssignment(
       {
         username,
         // Already proven to be one of the four by parseAdminRoles.
-        role: environmentRole as Parameters<typeof writeRoleAssignment>[0]['role'],
-        isActive: true,
+        role:
+          existing?.role
+          ?? (environmentRole as Parameters<typeof writeRoleAssignment>[0]['role']),
+        isActive: existing?.isActive ?? true,
         revokeSessionsAtMs: revokeAt,
         assignedBy: session.username,
       },

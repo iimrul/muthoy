@@ -67,6 +67,29 @@ interface PendingRow {
  */
 export type SearchKeyFolder = (values: readonly (string | null)[]) => string;
 
+/**
+ * The folded key for a medicine row — THE one definition every write uses.
+ *
+ * GATE 5 FINDING 3. The backfill and the pull path each computed this inline,
+ * and the app's OWN write paths — `createMedicine`, the two add-stock inserts,
+ * the CSV import and `updateMedicine` — computed it nowhere at all. Two
+ * consequences, and the second is worse than the first:
+ *
+ *   1. a medicine added offline had `search_key = NULL` until the next cold
+ *      start, so a Bangla-named new row was not reachable by a Latin query
+ *      until the app was restarted;
+ *   2. a RENAMED medicine kept its OLD key, so it went on answering to its
+ *      previous name — and the backfill never repaired it, because the key was
+ *      not NULL. A wrong result, not a missing one.
+ *
+ * Exported from here rather than from a new module because this file already
+ * owns "what key does a row get", and a second home for the same question is
+ * how two answers drift apart.
+ */
+export function searchKeyFor(row: { name?: string | null; generic?: string | null }): string {
+  return medicineSearchKeys([row.name ?? null, row.generic ?? null]);
+}
+
 export interface BackfillResult {
   /** Rows given a key by this run. */
   updated: number;

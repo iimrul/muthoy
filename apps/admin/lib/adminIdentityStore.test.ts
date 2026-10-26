@@ -567,7 +567,10 @@ describe('revokeAdminSessions', () => {
     }]);
   });
 
-  test('writes the ENVIRONMENT role, so a revocation narrows nothing', async () => {
+  test('with NO existing row, writes the environment role and enabled', async () => {
+    // A FIRST revocation of an un-narrowed account must not invent a narrowing
+    // nobody asked for: the environment role IS this account's standing
+    // authority.
     await signInAs('founder', 'super_admin');
     const { client, calls } = createClient({ rows: [] });
 
@@ -579,6 +582,55 @@ describe('revokeAdminSessions', () => {
     const insert = calls.find((call) => call.op === 'insert');
     expect(insert?.values?.role).toBe('billing');
     expect(insert?.values?.is_active).toBe(true);
+  });
+
+  test('a DISABLED, NARROWED account stays disabled and narrowed', async () => {
+    // GATE 5 FINDING 1, as a regression test.
+    //
+    // This previously wrote `role: environmentRole, isActive: true`
+    // unconditionally, so revoking the sessions of a disabled `read_only`
+    // account whose environment role is `super_admin` RE-ENABLED it and
+    // restored full authority. A security action that widens authority is
+    // worse than no action at all.
+    await signInAs('founder', 'super_admin');
+    const { client, calls } = createClient({
+      rows: [row({ role: 'read_only', is_active: false })],
+    });
+
+    const result = await revokeAdminSessions(
+      // The environment says super_admin; the stored row says disabled
+      // read_only. The row wins for role and enabled state.
+      { username: 'ops' },
+      deps(client, { founder: 'super_admin', ops: 'super_admin' }),
+    );
+
+    expect(result.ok).toBe(true);
+    const write =
+      calls.find((call) => call.op === 'update') ?? calls.find((call) => call.op === 'insert');
+    expect(write?.values?.role, 'the narrowing must survive a revocation').toBe('read_only');
+    expect(write?.values?.is_active, 'a disabled account must stay disabled').toBe(false);
+    // And the revocation itself still happened — the fix must not make the
+    // action a no-op.
+    expect(write?.values?.sessions_revoked_at).toBe(NOW.toISOString());
+  });
+
+  test('an ENABLED, narrowed account keeps its narrowing too', async () => {
+    // The other half: the role is preserved even when the account is enabled,
+    // so the fix is not "only disabled rows are protected".
+    await signInAs('founder', 'super_admin');
+    const { client, calls } = createClient({
+      rows: [row({ role: 'support', is_active: true })],
+    });
+
+    await revokeAdminSessions(
+      { username: 'ops' },
+      deps(client, { founder: 'super_admin', ops: 'super_admin' }),
+    );
+
+    const write =
+      calls.find((call) => call.op === 'update') ?? calls.find((call) => call.op === 'insert');
+    expect(write?.values?.role).toBe('support');
+    expect(write?.values?.is_active).toBe(true);
   });
 
   test('an admin cannot revoke their OWN sessions', async () => {

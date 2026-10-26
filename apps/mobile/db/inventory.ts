@@ -57,6 +57,7 @@ import {
   expiryBand,
 } from "../domain/inventoryRules";
 import { effectiveUnitPrice } from "../domain/pricing";
+import { searchKeyFor } from "./medicineSearchKeyBackfill";
 
 const BATCH_UNIQUE_COLUMNS = ["shop_id", "medicine_id", "batch_no"];
 
@@ -249,6 +250,10 @@ export async function createMedicineWithBatch(
       shopId: input.shopId,
       name: input.name,
       generic: input.generic ?? null,
+      // W2-03: folded on the way in, by the one shared definition, so a new
+      // medicine is searchable in every script IMMEDIATELY rather than after
+      // the next cold start's backfill (Gate 5 finding 3).
+      searchKey: searchKeyFor({ name: input.name, generic: input.generic ?? null }),
       manufacturer: input.manufacturer ?? null,
       strength: input.strength ?? null,
       category: input.category ?? null,
@@ -425,6 +430,8 @@ export async function createMedicineWithPurchase(
       shopId: input.shopId,
       name: input.name,
       generic: input.generic ?? null,
+      // W2-03, as above: folded on the way in.
+      searchKey: searchKeyFor({ name: input.name, generic: input.generic ?? null }),
       manufacturer: input.manufacturer ?? null,
       type: input.type ?? null,
       strength: input.strength ?? null,
@@ -509,6 +516,8 @@ export async function createMedicineOnly(
       shopId: input.shopId,
       name: input.name,
       generic: input.generic ?? null,
+      // W2-03, as above: folded on the way in.
+      searchKey: searchKeyFor({ name: input.name, generic: input.generic ?? null }),
       manufacturer: input.manufacturer ?? null,
       unitOfMeasure: "piece",
       requiresPrescription: false,
@@ -967,7 +976,33 @@ export async function updateMedicine(
   }
   db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
-    const values = stampUpdatedAt({ ...input.values, isDirty: true });
+    // W2-03 (Gate 5 finding 3). A rename must refold the key, and `values` is
+    // PARTIAL — a caller may change the name without touching the generic — so
+    // the key is recomputed from the MERGED row rather than from the patch.
+    // Without this a renamed medicine kept its old key and went on answering to
+    // its previous name, which the backfill never repaired because the key was
+    // not NULL.
+    const renamesSearchable =
+      input.values.name !== undefined || input.values.generic !== undefined;
+    const current = renamesSearchable
+      ? tx
+          .select({ name: medicines.name, generic: medicines.generic })
+          .from(medicines)
+          .where(and(eq(medicines.id, input.medicineId), eq(medicines.shopId, input.shopId)))
+          .get()
+      : undefined;
+    const refolded = renamesSearchable
+      ? {
+          searchKey: searchKeyFor({
+            name: input.values.name ?? current?.name ?? null,
+            generic:
+              input.values.generic !== undefined
+                ? input.values.generic
+                : (current?.generic ?? null),
+          }),
+        }
+      : {};
+    const values = stampUpdatedAt({ ...input.values, ...refolded, isDirty: true });
     const result = tx
       .update(medicines)
       .set(values)

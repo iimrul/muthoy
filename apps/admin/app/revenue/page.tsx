@@ -96,11 +96,68 @@ export default async function RevenuePage() {
     byStatus.set(order.status, (byStatus.get(order.status) ?? 0) + 1);
   }
 
-  // §8.4's billing exceptions, all computed — never a hardcoded figure.
-  const verifiedWithNoTimestamp = orders.filter(
-    (order) => order.status === 'verified' && order.verifiedAt === null,
-  ).length;
-  const failedOrders = orders.filter((order) => order.status === 'failed').length;
+  // §8.4's billing exceptions, ALL FIVE, all computed — never a hardcoded
+  // figure, and never a silent omission.
+  //
+  // GATE 5 FINDING 5: this page previously checked only failed orders and
+  // missing verification timestamps, so it could announce "No billing
+  // exception is on record" while every exception §8.4 actually names was
+  // present. The three missing classes need the webhook's own record, which is
+  // why `revenueOverview` now reads `payment_provider_events`.
+  const accountsWithSubscription = new Set(
+    result.data.subscriptions.map((subscription) => subscription.billingAccountId),
+  );
+  const orderIds = new Set(orders.map((order) => order.id));
+
+  const exceptions = [
+    {
+      id: 'verified_no_timestamp',
+      count: orders.filter((order) => order.status === 'verified' && order.verifiedAt === null)
+        .length,
+      describe: (count: number) =>
+        formatCount(count)
+        + ' order' + (count === 1 ? '' : 's')
+        + ' marked verified with no verification timestamp. They are absent from the collected'
+        + ' series, because an order with no date cannot be placed in a month.',
+    },
+    {
+      id: 'verified_no_subscription',
+      // Money arrived and nothing was granted for it. The worst of the five.
+      count: orders.filter(
+        (order) =>
+          order.status === 'verified' && !accountsWithSubscription.has(order.billingAccountId),
+      ).length,
+      describe: (count: number) =>
+        formatCount(count)
+        + ' verified order' + (count === 1 ? '' : 's')
+        + ' whose billing account holds no subscription at all — paid for, and nothing granted.',
+    },
+    {
+      id: 'event_no_order',
+      count: result.data.events.filter(
+        (event) => event.paymentOrderId === null || !orderIds.has(event.paymentOrderId),
+      ).length,
+      describe: (count: number) =>
+        formatCount(count)
+        + ' provider event' + (count === 1 ? '' : 's')
+        + ' referencing no order this platform holds — a payment signal with nothing to apply to.',
+    },
+    {
+      id: 'rejected_event',
+      count: result.data.events.filter((event) => event.processingStatus === 'rejected').length,
+      describe: (count: number) =>
+        formatCount(count)
+        + ' provider event' + (count === 1 ? '' : 's')
+        + ' the server REFUSED. Each one is a payment signal that was not applied.',
+    },
+    {
+      id: 'failed_order',
+      count: orders.filter((order) => order.status === 'failed').length,
+      describe: (count: number) =>
+        formatCount(count) + ' failed order' + (count === 1 ? '' : 's') + '.',
+    },
+  ];
+  const raisedExceptions = exceptions.filter((entry) => entry.count > 0);
 
   // The last twelve months of the collected series, newest last.
   const trend = collectedByMonth.slice(-12).map((month) => ({
@@ -265,24 +322,26 @@ export default async function RevenuePage() {
         <h2 id="exceptions" className="text-base font-semibold">
           Billing exceptions
         </h2>
-        {verifiedWithNoTimestamp === 0 && failedOrders === 0 ? (
-          <EmptyState message="No billing exception is on record. That is the data, not an unchecked list." />
+        {raisedExceptions.length === 0 ? (
+          <EmptyState
+            message={
+              'No billing exception is on record, across all '
+              + exceptions.length
+              + ' classes checked. That is the data, not an unchecked list.'
+            }
+          />
         ) : (
           <ul className="mt-3 space-y-1 text-sm">
-            {verifiedWithNoTimestamp > 0 ? (
-              <li>
-                {formatCount(verifiedWithNoTimestamp)} order
-                {verifiedWithNoTimestamp === 1 ? '' : 's'} marked verified with no verification
-                timestamp.
-              </li>
-            ) : null}
-            {failedOrders > 0 ? (
-              <li>
-                {formatCount(failedOrders)} failed order{failedOrders === 1 ? '' : 's'}.
-              </li>
-            ) : null}
+            {raisedExceptions.map((entry) => (
+              <li key={entry.id}>{entry.describe(entry.count)}</li>
+            ))}
           </ul>
         )}
+        <p className="mt-2 text-xs text-midGray">
+          All {exceptions.length} classes are checked on every load: a verified order with no
+          verification timestamp, a verified order whose account holds no subscription, a provider
+          event referencing no order, an event the server rejected, and a failed order.
+        </p>
       </section>
 
       <section aria-labelledby="pharmacy-sales" className="mt-10 rounded border border-black/10 bg-offWhite p-4">

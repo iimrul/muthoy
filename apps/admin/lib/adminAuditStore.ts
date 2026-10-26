@@ -76,30 +76,55 @@ export function createPostgresAuditSink(
 ): PostgresAuditSink {
   // One promise per accepted entry. `flush` drains the list, so a sink reused
   // across requests never re-awaits a write it already reported on.
-  let pending: Promise<void>[] = [];
+  // GATE 5 FINDING 2. These used to be `Promise<void>` that could REJECT, and
+  // `write` is a `void` method whose callers are not required to flush —
+  // `lib/adminLogin.ts` audits a failed login and returns without flushing. So
+  // an unavailable audit table produced an **unhandled rejection** on the login
+  // path, which Node's default `--unhandled-rejections=throw` turns into a
+  // process crash. An audit failure must never be able to take down the thing
+  // it is auditing.
+  //
+  // Each task is therefore HANDLED AT CREATION and settles to a boolean. The
+  // failure is not swallowed: `flush` still throws for any insert in the batch
+  // it drained, which is what `recordAdminActionDurably`'s awaited callers rely
+  // on, and the driver message still reaches the server log either way.
+  let pending: Promise<boolean>[] = [];
 
   return {
     write(entry) {
       const client = deps.client ?? getSupabaseAdmin();
+      const task = (async () => {
+        const { error } = await client.from('admin_audit_log').insert(toAuditRow(entry));
+        if (error) {
+          // The driver message goes to the server log and never to a caller.
+          console.error('[admin] admin_audit_log insert failed:', error.message);
+          throw new Error('admin audit insert failed');
+        }
+      })();
+      // The handler is attached SYNCHRONOUSLY, in the same turn the promise is
+      // created, so there is no window in which a rejection is unobserved.
       pending.push(
-        (async () => {
-          const { error } = await client.from('admin_audit_log').insert(toAuditRow(entry));
-          if (error) {
-            // The driver message goes to the server log and never to a caller.
-            console.error('[admin] admin_audit_log insert failed:', error.message);
-            throw new Error('admin audit insert failed');
-          }
-        })(),
+        task.then(
+          () => true,
+          (error: unknown) => {
+            // A driver error is already logged above. This branch also catches
+            // a throw from the client itself, which would otherwise be silent.
+            if (!(error instanceof Error && error.message === 'admin audit insert failed')) {
+              console.error('[admin] admin_audit_log insert threw');
+            }
+            return false;
+          },
+        ),
       );
     },
     async flush() {
       const draining = pending;
       pending = [];
-      // allSettled, then report: one failing insert must not leave the others
-      // unawaited, because an unawaited rejected promise is an unhandled
-      // rejection that can take the process down.
-      const settled = await Promise.allSettled(draining);
-      if (settled.some((outcome) => outcome.status === 'rejected')) {
+      // These cannot reject any more, so `Promise.all` is safe and every write
+      // in the batch is still awaited — one failure never leaves another
+      // unawaited.
+      const results = await Promise.all(draining);
+      if (results.includes(false)) {
         throw new Error('admin audit insert failed');
       }
     },

@@ -8,6 +8,7 @@ import { auditLogs, batches, inventoryImports, medicines } from "./schema";
 import { addStock } from "./stockLedger";
 import { recordChange, type SyncOperationGroup } from "./sync-helpers";
 import { generateId } from "../native/id";
+import { searchKeyFor } from "./medicineSearchKeyBackfill";
 
 const REQUIRED_HEADERS = [
   "name",
@@ -296,6 +297,9 @@ export async function importInventoryCsv(
           shopId,
           name: row.name,
           generic: row.generic,
+          // W2-03 (Gate 5 finding 3): an imported medicine is searchable in
+          // every script immediately, through the one shared fold.
+          searchKey: searchKeyFor({ name: row.name, generic: row.generic }),
           manufacturer: row.manufacturer,
           type: row.type,
           unitOfMeasure: row.unitOfMeasure,

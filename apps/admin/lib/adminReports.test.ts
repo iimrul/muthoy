@@ -345,9 +345,16 @@ describe('k-anonymity at the boundary', () => {
     expect(table.suppressedBuckets).toBe(0);
   });
 
-  test('an activity day is suppressed on the shops behind EITHER figure', () => {
-    // A day visible because five shops registered must not disclose that one of
-    // them made the day's only sale.
+  test('an activity day suppresses EACH figure by its OWN contributors', () => {
+    // RETARGETED, Gate 5 finding 4. This test previously asserted the opposite
+    // and rationalised it: five registrations plus one seller cleared the floor
+    // on the UNION, and the row then published the active count of 1 as "only
+    // safe BECAUSE five shops stand behind the row".
+    //
+    // That reasoning was wrong. An active count of 1 identifies that exactly
+    // one of those five traded that day, which is precisely the single-shop
+    // disclosure the k floor exists to prevent. The floor is on the
+    // contributors to THAT VALUE.
     const shops = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
       shop(index + 1, { createdAt: '2026-10-01T06:00:00.000Z' }),
     );
@@ -362,10 +369,47 @@ describe('k-anonymity at the boundary', () => {
       query({ reportId: 'activity_summary', format: 'csv' }),
     );
 
-    // Five registrations, one of those five also selling: five distinct
-    // contributors, so the bucket is visible — and the sales count it shows is
-    // the real 1, which is only safe BECAUSE five shops stand behind the row.
-    expect(table.rows[0]).toEqual(['2026-10-01', '1', String(SUPPRESSION_K)]);
+    // The active count is WITHHELD — one shop traded. The registration count
+    // stands, because registration metadata is exempt by §8.10 and five
+    // pharmacies registering discloses nothing about any of their trade.
+    expect(table.rows[0]).toEqual(['2026-10-01', '', String(SUPPRESSION_K)]);
+    expect(table.suppressedBuckets).toBe(1);
+  });
+
+  test('an activity day shows BOTH figures once k shops have traded', () => {
+    // The other side of the boundary, so the fix is not simply "withhold
+    // everything": with five sellers the active count is visible.
+    const shops = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      shop(index + 1, { createdAt: '2026-10-01T06:00:00.000Z' }),
+    );
+    const sales = Array.from({ length: SUPPRESSION_K }, (_unused, index) => saleTotal(index + 1));
+
+    const table = buildReportTable(
+      'activity_summary',
+      data({
+        shops,
+        sales,
+        tallies: [{ label: 'shops', counted: shops.length, loaded: shops.length }],
+      }),
+      query({ reportId: 'activity_summary', format: 'csv' }),
+    );
+
+    expect(table.rows[0]).toEqual(['2026-10-01', String(SUPPRESSION_K), String(SUPPRESSION_K)]);
+    expect(table.suppressedBuckets).toBe(0);
+  });
+
+  test('MUTATION: gating the activity row on the UNION republishes the one seller', () => {
+    // The bypass, reconstructed from the same fixture: five distinct shops in
+    // the union clears the floor, so a union-gated row would have emitted the
+    // real active count of 1. That is what the retargeted test above refuses.
+    const activeShops = ['shop-1'];
+    const registeredShops = Array.from({ length: SUPPRESSION_K }, (_u, i) => 'shop-' + (i + 1));
+
+    const unionContributors = new Set([...activeShops, ...registeredShops]).size;
+    const ownContributors = new Set(activeShops).size;
+
+    expect(unionContributors).toBeGreaterThanOrEqual(SUPPRESSION_K);
+    expect(ownContributors).toBeLessThan(SUPPRESSION_K);
   });
 });
 

@@ -369,6 +369,12 @@ export interface RevenueOverview {
   collectedTotalPaisa: Paisa;
   subscriptions: readonly SubscriptionRow[];
   orders: readonly PaymentOrderRow[];
+  /**
+   * §8.4's billing exceptions need the webhook's own record, not just the
+   * orders: an event with no order, and a `rejected` event, are both
+   * exceptions that no order row can reveal (Gate 5 finding 5).
+   */
+  events: readonly ProviderEventRow[];
   offerings: readonly OfferingRow[];
   recordedCancellations: number;
   expiredWithoutCancellation: number;
@@ -385,7 +391,7 @@ export interface RevenueOverview {
 export async function revenueOverview(now: Date = new Date()): Promise<RevenueOverview> {
   const supabase = getSupabaseAdmin();
 
-  const [subscriptions, orders, offerings] = await Promise.all([
+  const [subscriptions, orders, events, offerings] = await Promise.all([
     readAllPages<Record<string, unknown>>('billing_subscriptions', (from, to) =>
       asPageQuery(supabase.from('billing_subscriptions').select(REPORT_SUBSCRIPTION_COLUMNS))
         .order('id', { ascending: true })
@@ -396,6 +402,11 @@ export async function revenueOverview(now: Date = new Date()): Promise<RevenueOv
         .order('id', { ascending: true })
         .range(from, to),
     ).then((rows) => rows.map(toPaymentOrderRow)),
+    readAllPages<Record<string, unknown>>('payment_provider_events', (from, to) =>
+      asPageQuery(supabase.from('payment_provider_events').select(PROVIDER_EVENT_COLUMNS))
+        .order('id', { ascending: true })
+        .range(from, to),
+    ).then((rows) => rows.map(toProviderEventRow)),
     listPlanOfferings(),
   ]);
 
@@ -407,6 +418,7 @@ export async function revenueOverview(now: Date = new Date()): Promise<RevenueOv
     collectedTotalPaisa: collectedSubscriptionPaymentsPaisa(orders),
     subscriptions,
     orders,
+    events,
     offerings,
     // A cancellation count needs an explicit PERIOD, because a renewal
     // overwrites the same row and clears `canceled_at` — so this is
