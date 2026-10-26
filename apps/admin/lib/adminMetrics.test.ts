@@ -13,6 +13,8 @@
 // (20260831000000_b4_commercial_platform.sql:261-272), which is the canonical
 // definition. The mutation checks fail if either branch is dropped.
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { asPaisa } from '@muthoy/types';
 import {
@@ -477,6 +479,63 @@ describe('the metric manifest (§5.2)', () => {
     for (const entry of ADMIN_METRICS) {
       expect(entry.definitionRef.length).toBeGreaterThan(0);
     }
+  });
+
+  // §5.2's last clause, deferred until the document existed: "every
+  // definitionRef resolves to a heading that exists in
+  // docs/plans/admin-metric-definitions.md".
+  //
+  // A non-empty string was never the claim. The claim is that a figure cannot
+  // be rendered with a definition nobody wrote down — so the reference has to
+  // be checked against the document, not against itself.
+  describe('every definitionRef resolves to a real heading', () => {
+    const DOC = 'docs/plans/admin-metric-definitions.md';
+
+    /** Every `##`/`###` heading in the document, exactly as written. */
+    function headings(): string[] {
+      const source = readFileSync(resolve(DOC), 'utf8');
+      return [...source.matchAll(/^#{2,3} (.+)$/gm)].map((match) => match[1]!.trim());
+    }
+
+    test('the document exists and declares headings', () => {
+      // Non-vacuity: a reader that returned nothing would make the assertions
+      // below pass for the wrong reason, so the count is stated.
+      expect(headings().length).toBeGreaterThan(5);
+    });
+
+    test('the six headings the manifest depends on are all present', () => {
+      // Named explicitly, because these are the strings the manifest's
+      // definitionRef values carry. Renaming one in the document without
+      // updating the manifest is the drift this catches.
+      expect(headings()).toEqual(
+        expect.arrayContaining([
+          'MRR',
+          'Collected subscription payments',
+          'Pharmacy sales (refund-net)',
+          'Counts, named for what they measure',
+          'Currently paid entitlements',
+          'Recorded cancellations',
+        ]),
+      );
+    });
+
+    test('no metric points at a heading that is not there', () => {
+      const available = new Set(headings());
+      const unresolved = ADMIN_METRICS.filter((entry) => !available.has(entry.definitionRef)).map(
+        (entry) => entry.id + ' -> ' + entry.definitionRef,
+      );
+
+      expect(unresolved).toEqual([]);
+    });
+
+    test('MUTATION: an invented definitionRef does not resolve', () => {
+      // Proves the check compares against the document rather than accepting
+      // any non-empty string.
+      const available = new Set(headings());
+
+      expect(available.has('Total revenue, obviously')).toBe(false);
+      expect(available.has('MRR')).toBe(true);
+    });
   });
 
   test('a manifest entry cannot be mutated at runtime', () => {

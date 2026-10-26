@@ -15,6 +15,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { describe, expect, test } from 'vitest';
+import { ADMIN_METRICS } from './adminMetrics';
 
 const ADMIN_ROOT = join(import.meta.dirname, '..');
 const SCANNED = ['app', 'components', 'lib'];
@@ -258,6 +259,80 @@ describe('the GROSS boundary', () => {
     }
   });
 
+  // §5.2's two mutation checks, DEFERRED until the page existed and both
+  // families rendered on it. They do now: §8.4's W4-04 section puts a
+  // `pharmacy_sales` metric on the same page as the `subscription` ones, which
+  // is the only place a mislabelling could actually mislead anybody.
+  describe('§5.2 mutation checks, on the one page where both families render', () => {
+    function revenuePage(): string {
+      const page = SOURCES.find((file) => file.path === REVENUE_PAGE);
+      expect(page, REVENUE_PAGE + ' is missing').toBeDefined();
+      return page?.code ?? '';
+    }
+
+    /** The manifest's own family for an id, read from the source of truth. */
+    function familyOf(id: string): string | undefined {
+      return ADMIN_METRICS.find((entry) => entry.id === id)?.family;
+    }
+
+    test('the page really does render BOTH families, or these checks are vacuous', () => {
+      const code = revenuePage();
+
+      expect(code).toContain("requireMetric('mrr')");
+      expect(code).toContain("requireMetric('pharmacy_sales_net')");
+      expect(familyOf('mrr')).toBe('subscription');
+      expect(familyOf('pharmacy_sales_net')).toBe('pharmacy_sales');
+    });
+
+    test('MUTATION 1: relabelling the pharmacy figure as revenue is caught', () => {
+      // The mutation: swap the pharmacy metric for a hand-written caption. The
+      // guard that catches it is structural — MetricTile has no caption prop —
+      // so the detectable symptom is a MetricTile whose metric did NOT come
+      // from requireMetric.
+      const real = revenuePage();
+      const mutated = real.replace(
+        "metric={requireMetric('pharmacy_sales_net')}",
+        'metric={{ id: "x", label: "Total revenue", family: "pharmacy_sales", unit: "paisa", definitionRef: "MRR" }}',
+      );
+
+      expect(mutated, 'the mutation did not apply').not.toBe(real);
+
+      const countTiles = (code: string) => [...code.matchAll(/<MetricTile\b/g)].length;
+      const countResolved = (code: string) =>
+        [...code.matchAll(/metric=\{requireMetric\('[a-z_]+'\)\}/g)].length;
+
+      // The real page: every tile resolves. The mutant: one does not.
+      expect(countResolved(real)).toBe(countTiles(real));
+      expect(countResolved(mutated)).toBeLessThan(countTiles(mutated));
+    });
+
+    test('MUTATION 2: pointing a subscription figure at the pharmacy net value is caught', () => {
+      // The mutation: feed `collected_subscription_payments` — a SUBSCRIPTION
+      // metric — the pharmacy net total. What makes it wrong is the manifest:
+      // the metric's family and the value's family disagree.
+      const real = revenuePage();
+      const mutated = real.replace(
+        'value={formatMoney(collectedTotalPaisa)}',
+        'value={formatMoney(asPaisa(Math.trunc(pharmacySales.value)))}',
+      );
+
+      expect(mutated, 'the mutation did not apply').not.toBe(real);
+      expect(familyOf('collected_subscription_payments')).not.toBe(
+        familyOf('pharmacy_sales_net'),
+      );
+
+      // The REAL page keeps them apart: the pharmacy value reaches only the
+      // pharmacy metric's own tile, and the subscription tile never sees it.
+      const pharmacyTile = real.slice(real.indexOf("requireMetric('pharmacy_sales_net')"));
+      expect(pharmacyTile).toContain('pharmacySales');
+
+      const subscriptionTile = real.slice(
+        real.indexOf("requireMetric('collected_subscription_payments')"),
+      );
+      expect(subscriptionTile.slice(0, 300)).not.toContain('pharmacySales');
+    });
+  });
+
   test('negative control: the href exemption does not blind the scan', () => {
     // Batch 3 §8.1. The exemption is `href="/revenue"` exactly. A caption, a
     // heading, a different attribute or a different route must all still be
@@ -345,15 +420,52 @@ describe('the GROSS boundary', () => {
   // @muthoy/utils — which is what the blanket ban could never check.
   const NET_FIELD = 'netSalesToday';
 
-  test('link 1: `net` appears only alongside the one net-typed field', () => {
+  // Batch 3 §8.4 adds a SECOND net figure, on the one page that renders both
+  // families: W4-04's refund-net pharmacy takings. The chain is EXTENDED, not
+  // relaxed — the new anchor gets its own link 2 below, asserting that the
+  // number behind it also comes from the shared `netSalesPaisa`. Two anchors,
+  // each with provenance, is still "the word cannot attach to a figure that
+  // was not computed by the one definition".
+  const NET_ANCHORS = [NET_FIELD, 'pharmacyNetSalesPaisa'] as const;
+
+  test('link 1: `net` appears only alongside a net-typed, provenanced field', () => {
     const offenders = scannable()
       .filter((file) => mentionsWord(withoutIdentifiers(file.code), 'net'))
-      .filter((file) => !file.code.includes(NET_FIELD));
+      .filter((file) => !NET_ANCHORS.some((anchor) => file.code.includes(anchor)));
 
     expect(
       offenders.map((file) => file.path),
-      `a figure called net must be the ${NET_FIELD} field`,
+      `a figure called net must be one of: ${NET_ANCHORS.join(', ')}`,
     ).toEqual([]);
+  });
+
+  test('link 2b: the pharmacy anchor is produced by the shared netSalesPaisa too', () => {
+    // The second anchor's provenance, in the same two links as the first.
+    //
+    // The page sums `pharmacySalesByMonth[].totalPaisa`, and that field is
+    // assigned by `netSalesPaisa(...)` in lib/adminPlatformQueries.ts — so the
+    // subtraction behind the word is the shared one, reached through the
+    // reports' own tallied reads rather than recomputed here.
+    const page = SOURCES.find((file) => file.path === 'app/revenue/page.tsx');
+    expect(page?.code).toContain('pharmacyNetSalesPaisa');
+    expect(page?.code).toContain('pharmacySalesByMonth');
+
+    const queries = SOURCES.find((file) => file.path === 'lib/adminPlatformQueries.ts');
+    expect(queries?.code, 'the month total must come from the shared definition')
+      .toContain('netSalesPaisa(');
+
+    // And the page does NOT do its own subtraction: no minus sign between two
+    // money fields, which is how the shared definition gets bypassed.
+    expect(page?.code).not.toMatch(/totalPaisa\s*-\s*\w*[Rr]efund/);
+  });
+
+  test('negative control: the second anchor does not blind link 1', () => {
+    // A file that says `net` and carries NEITHER anchor is still caught.
+    const planted = 'const x = "Net revenue this month";';
+    expect(
+      mentionsWord(withoutIdentifiers(planted), 'net')
+        && !NET_ANCHORS.some((anchor) => planted.includes(anchor)),
+    ).toBe(true);
   });
 
   test('link 2: that field is produced only by the shared netSalesPaisa', () => {

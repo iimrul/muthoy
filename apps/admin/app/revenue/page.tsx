@@ -1,13 +1,20 @@
 import Link from 'next/link';
+import { asPaisa } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
 import ChartPanel from '../../components/charts/ChartPanel';
 import ErrorNotice from '../../components/ErrorNotice';
 import { EmptyState, MetricTile } from '../../components/PageParts';
 import { requireAdminPermission } from '../../lib/adminAuthz';
 import { requireMetric } from '../../lib/adminMetrics';
-import { revenueOverview, type RevenueOverview } from '../../lib/adminPlatformQueries';
+import {
+  analyticsOverview,
+  revenueOverview,
+  type AnalyticsOverview,
+  type RevenueOverview,
+} from '../../lib/adminPlatformQueries';
+import { suppressBelowK } from '../../lib/adminSuppression';
 import { exportTaka } from '../../lib/adminReports';
-import { formatCount } from '../../lib/adminViews';
+import { EMPTY_VALUE, formatCount } from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
 
 // Batch 3 §8.4 — Revenue & Billing.
@@ -40,11 +47,23 @@ const RUN_RATE_TREND_BLOCKED =
 /** The order statuses §8.4 names, so a zero is stated rather than absent. */
 const ORDER_STATUSES = ['created', 'pending', 'verified', 'failed', 'expired'] as const;
 
-type RevenueResult = { ok: true; data: RevenueOverview } | { ok: false; message: string };
+type RevenueResult =
+  | { ok: true; data: RevenueOverview; pharmacy: AnalyticsOverview }
+  | { ok: false; message: string };
 
+/**
+ * BOTH families, in one load.
+ *
+ * The pharmacy figure comes through `analyticsOverview`, which goes through the
+ * same tallied reads the reports use — so this page and Analytics cannot
+ * disagree about what the pharmacies sold. Fetching it here is what makes the
+ * §5.2 guard meaningful on this page: a manifest that can mislabel is only
+ * dangerous where two families render together, and this is that page.
+ */
 async function loadRevenue(): Promise<RevenueResult> {
   try {
-    return { ok: true, data: await revenueOverview() };
+    const [data, pharmacy] = await Promise.all([revenueOverview(), analyticsOverview()]);
+    return { ok: true, data, pharmacy };
   } catch (error: unknown) {
     console.error('[admin] revenue failed to load:', error);
     return { ok: false, message: toDisplayMessage(error) };
@@ -88,6 +107,23 @@ export default async function RevenuePage() {
     label: month.month,
     value: Number(month.totalPaisa) / 100,
   }));
+
+  // W4-04, on this page because §8.4 puts it here — and kept in its own
+  // section, with its own metric, because it is a DIFFERENT FAMILY. Every
+  // figure above is Muthoy's own money; this one is the pharmacies'.
+  //
+  // k-suppressed like every other cross-pharmacy aggregate: the total derives
+  // from the shops behind it, and a total built from fewer than five shops is
+  // those shops' takings wearing a platform label.
+  const pharmacyShopIds = result.pharmacy.pharmacySalesByMonth.flatMap((month) => month.shopIds);
+  const pharmacyNetSalesPaisa = result.pharmacy.pharmacySalesByMonth.reduce(
+    (total, month) => total + Number(month.totalPaisa),
+    0,
+  );
+  const pharmacySales = suppressBelowK({
+    value: pharmacyNetSalesPaisa,
+    contributingShopIds: pharmacyShopIds,
+  });
 
   return (
     <>
@@ -247,6 +283,35 @@ export default async function RevenuePage() {
             ) : null}
           </ul>
         )}
+      </section>
+
+      <section aria-labelledby="pharmacy-sales" className="mt-10 rounded border border-black/10 bg-offWhite p-4">
+        <h2 id="pharmacy-sales" className="text-base font-semibold">
+          Pharmacy sales — a different family of money
+        </h2>
+        <p className="mt-1 text-sm text-richBlack">
+          W4-04&rsquo;s refund-net pharmacy takings, shown here because the founder reads both
+          figures in one place. <strong>It is not Muthoy&rsquo;s money</strong> and is never added
+          to anything above: these are the pharmacies&rsquo; own sales, less their own refunds,
+          both sides windowed on the same business date.
+        </p>
+        <div className="mt-4 max-w-sm">
+          <MetricTile
+            metric={requireMetric('pharmacy_sales_net')}
+            value={
+              pharmacySales.suppressed
+                ? EMPTY_VALUE
+                : formatMoney(asPaisa(Math.trunc(pharmacySales.value)))
+            }
+            note={
+              pharmacySales.suppressed
+                ? 'Withheld: fewer than five pharmacies contributed, so the total would be those pharmacies’ own takings.'
+                : formatCount(pharmacySales.contributorCount)
+                  + ' contributing pharmacies, all time. Their money, not Muthoy’s.'
+            }
+            href="/analytics"
+          />
+        </div>
       </section>
 
       <p className="mt-8 text-xs text-midGray">
