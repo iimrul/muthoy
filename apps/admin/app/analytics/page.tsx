@@ -3,6 +3,7 @@ import ChartPanel from '../../components/charts/ChartPanel';
 import ErrorNotice from '../../components/ErrorNotice';
 import { FilterForm } from '../../components/PageParts';
 import { requireAdminPermission } from '../../lib/adminAuthz';
+import { parseListQuery } from '../../lib/adminFilters';
 import { requireMetric } from '../../lib/adminMetrics';
 import { analyticsOverview, type AnalyticsOverview } from '../../lib/adminPlatformQueries';
 import { featureState } from '../../lib/adminSettings';
@@ -29,12 +30,6 @@ import { toDisplayMessage } from '../../lib/errors';
 // NO CUSTOMER, NO SALE LINE AND NO MEDICINE is read or rendered anywhere here.
 
 export const dynamic = 'force-dynamic';
-
-function firstParam(value: string | string[] | undefined): string {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
-  return '';
-}
 
 /**
  * One series, gated. The ONLY path from a bucket to a chart on this page.
@@ -108,8 +103,32 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
   }
 
   const params = await searchParams;
-  const from = firstParam(params.from);
-  const to = firstParam(params.to);
+
+  // GATE 5 FINDING 7. `from` and `to` previously went straight from the search
+  // params into the query, and the 400-day cap existed only as text on the
+  // page. So a reversed range, a malformed date or a ten-year span all reached
+  // the business queries — the cap was a promise rather than a rule.
+  //
+  // `parseListQuery` runs the SHARED schema, whose `rangeIsSane` refine
+  // enforces both `from <= to` and the 400-day bound, and a malformed range is
+  // reported WITH its reason rather than thrown: a stale bookmark is not a
+  // server fault.
+  const parsedRange = parseListQuery(params);
+  if (!parsedRange.ok) {
+    return (
+      <>
+        <h1 className="text-xl font-semibold">Analytics</h1>
+        <p role="alert" className="mt-4 text-sm text-richBlack">
+          {parsedRange.message} Nothing was queried. The range is capped at{' '}
+          {ADMIN_MAX_RANGE_DAYS} days.
+        </p>
+        <FilterForm range={{ from: '', to: '' }} />
+      </>
+    );
+  }
+
+  const from = parsedRange.query.from ?? '';
+  const to = parsedRange.query.to ?? '';
 
   const result = await loadAnalytics(from, to);
   if (!result.ok) return <ErrorNotice message={result.message} />;

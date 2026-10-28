@@ -6,6 +6,7 @@ import { requireAdminPermission } from '../../lib/adminAuthz';
 import { PDF_LATIN1_NOTICE } from '../../lib/adminPdf';
 import { platformReportData } from '../../lib/adminPlatformQueries';
 import {
+  AdminReportFilterError,
   ADMIN_REPORT_DEFINITIONS,
   ReportCompletenessError,
   buildReport,
@@ -48,7 +49,7 @@ const REPORT_OPTIONS = ADMIN_REPORT_DEFINITIONS.map((entry) => ({
 
 type ReportResult =
   | { ok: true; table: ReportTable }
-  | { ok: false; message: string; incomplete: boolean };
+  | { ok: false; message: string; incomplete: boolean; unsupportedFilter?: boolean };
 
 async function loadReport(
   raw: Record<string, string | string[] | undefined>,
@@ -73,6 +74,12 @@ async function loadReport(
     if (error instanceof ReportCompletenessError) {
       console.error('[admin] report refused as incomplete:', error.message);
       return { ok: false, incomplete: true, message: error.message };
+    }
+    // GATE 5 FINDING 9: a filter this report cannot apply is REFUSED with its
+    // reason, not reported as a server failure. The operator asked for
+    // something coherent; the answer is that this report cannot answer it.
+    if (error instanceof AdminReportFilterError) {
+      return { ok: false, incomplete: false, unsupportedFilter: true, message: error.message };
     }
     console.error('[admin] report failed to build:', error);
     return { ok: false, incomplete: false, message: toDisplayMessage(error) };

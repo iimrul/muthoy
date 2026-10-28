@@ -34,6 +34,17 @@ const clientBox = vi.hoisted(() => ({
   // measures nothing. A table nobody set answers empty.
   rowsByTable: {} as Record<string, Record<string, unknown>[]>,
   error: undefined as string | undefined,
+  // GATE 5 FINDING 13. `error` used to fail EVERY table, including
+  // `admin_role_assignments` — which IS the authorization gate (§4.3 reads it
+  // on every request). So the "a query failure renders a notice" test actually
+  // measured a DENIAL: the page never got as far as a business read, and the
+  // assertion that no driver message leaks was never exercised on the path it
+  // describes.
+  //
+  // The injection is therefore scoped. By default the two admin
+  // INFRASTRUCTURE tables keep working, so authorization succeeds and the
+  // failure lands where the test claims it does.
+  healthyTables: ['admin_role_assignments', 'admin_audit_log'] as readonly string[],
 }));
 
 vi.mock('next/headers', () => ({
@@ -69,11 +80,15 @@ vi.mock('../components/map/MapLoader', () => ({
  */
 vi.mock('../lib/supabaseAdmin', () => ({
   getSupabaseAdmin: () => {
+    /** Whether THIS table is failing, honouring the healthy-table list. */
+    const failing = (table: string) =>
+      clientBox.error !== undefined && !clientBox.healthyTables.includes(table);
+
     const result = (table: string) => {
       const rows = clientBox.rowsByTable[table] ?? [];
-      return clientBox.error === undefined
-        ? { data: rows, error: null, count: rows.length }
-        : { data: null, error: { message: clientBox.error }, count: null };
+      return failing(table)
+        ? { data: null, error: { message: clientBox.error }, count: null }
+        : { data: rows, error: null, count: rows.length };
     };
 
     // The ONE-ROW shape, which is a different envelope from the list one:
@@ -84,9 +99,9 @@ vi.mock('../lib/supabaseAdmin', () => ({
     // §8.2 drill-down is the page that found this.
     const singleResult = (table: string) => {
       const rows = clientBox.rowsByTable[table] ?? [];
-      return clientBox.error === undefined
-        ? { data: rows[0] ?? null, error: null }
-        : { data: null, error: { message: clientBox.error } };
+      return failing(table)
+        ? { data: null, error: { message: clientBox.error } }
+        : { data: rows[0] ?? null, error: null };
     };
 
     const build = (table: string, columns: string) => {
@@ -130,17 +145,34 @@ const MIGRATIONS_DIR = join(process.cwd(), 'backend/supabase/migrations');
  * know. That asymmetry is the §4.2 matrix being exercised rather than restated.
  */
 const ROUTES = [
-  { name: 'dashboard', path: './page', denied: null },
-  { name: 'pharmacies', path: './pharmacies/page', denied: null },
-  { name: 'subscriptions', path: './subscriptions/page', denied: null },
-  { name: 'revenue', path: './revenue/page', denied: 'read_only' },
-  { name: 'analytics', path: './analytics/page', denied: null },
-  { name: 'maps', path: './maps/page', denied: null },
-  { name: 'support', path: './support/page', denied: null },
-  { name: 'admins', path: './admins/page', denied: 'read_only' },
-  { name: 'audit', path: './audit/page', denied: null },
-  { name: 'reports', path: './reports/page', denied: null },
-  { name: 'settings', path: './settings/page', denied: null },
+  { name: 'dashboard', path: './page', denied: null,
+    heading: 'Dashboard', reads: ['shops', 'billing_subscriptions'] },
+  { name: 'pharmacies', path: './pharmacies/page', denied: null,
+    heading: 'Pharmacies', reads: ['shops'] },
+  { name: 'subscriptions', path: './subscriptions/page', denied: null,
+    heading: 'Subscriptions', reads: ['billing_subscriptions'] },
+  { name: 'revenue', path: './revenue/page', denied: 'read_only',
+    heading: 'Revenue', reads: ['billing_subscriptions', 'payment_orders'] },
+  { name: 'analytics', path: './analytics/page', denied: null,
+    heading: 'Analytics', reads: ['shops'] },
+  // Maps reads the coordinate columns even though it plots nothing: the empty
+  // state reports how many shops were WITHHELD, and a zero that came from not
+  // looking is a different claim from a zero that came from looking.
+  { name: 'maps', path: './maps/page', denied: null,
+    heading: 'Maps', reads: ['shops'] },
+  { name: 'support', path: './support/page', denied: null,
+    heading: 'Support', reads: ['admin_support_cases'] },
+  // Admins and Settings read no BUSINESS table — their data is the environment
+  // and the admin tables — so they declare none and are asserted on the
+  // heading alone.
+  { name: 'admins', path: './admins/page', denied: 'read_only',
+    heading: 'Admin', reads: [] },
+  { name: 'audit', path: './audit/page', denied: null,
+    heading: 'audit', reads: [] },
+  { name: 'reports', path: './reports/page', denied: null,
+    heading: 'Reports', reads: [] },
+  { name: 'settings', path: './settings/page', denied: null,
+    heading: 'Settings', reads: [] },
 ] as const;
 
 /** A username ADMIN_ROLES does not know, so it holds nothing at all. */
@@ -201,6 +233,7 @@ beforeEach(() => {
   clientBox.calls = [];
   clientBox.rowsByTable = {};
   clientBox.error = undefined;
+  clientBox.healthyTables = ['admin_role_assignments', 'admin_audit_log'];
   vi.resetModules();
 });
 
@@ -275,6 +308,17 @@ describe('every route renders an authorized empty state', () => {
 
       const html = await render(route.path);
 
+      // GATE 5 FINDING 13. This used to assert only that the output was longer
+      // than 40 characters and carried no `undefined` — which an ErrorNotice
+      // satisfies. A page that failed to load passed as "renders an authorized
+      // empty state". So the claim is now measured: the page's own heading is
+      // present and NO alert is rendered.
+      expect(html, route.name + ' did not render its own heading').toContain(route.heading);
+      expect(html, route.name + ' rendered an alert in its empty state').not.toContain(
+        'role="alert"',
+      );
+      expect(html).not.toContain('Could not load data');
+
       // An empty platform is the shipped state, so every page must render it
       // rather than throw — and must not render a bare blank or a stray
       // `undefined` where a figure belongs.
@@ -283,6 +327,36 @@ describe('every route renders an authorized empty state', () => {
       expect(html).not.toContain('NaN');
     },
   );
+});
+
+describe('an AUTHORIZED route reaches its intended reads (Gate 5 finding 13)', () => {
+  // The positive direction, per route. The denial tests above measure that a
+  // forbidden caller reaches no business table; on their own they are satisfied
+  // by a page that reaches no table for ANYBODY — which is exactly what the
+  // missing `maybeSingle()` produced on the drill-down earlier in this batch.
+  test.each(
+    ROUTES.filter((route) => route.reads.length > 0).map((route) => [route.name, route] as const),
+  )('%s reads the tables it is built on', async (_name, route) => {
+    setEnvironment({ founder: 'super_admin' });
+    await signInAs('founder', 'super_admin');
+
+    await render(route.path);
+
+    const touched = new Set(clientBox.calls.map((call) => call.table));
+    for (const table of route.reads) {
+      expect(touched.has(table), route.name + ' never read ' + table).toBe(true);
+    }
+  });
+
+  test('the declared reads are BUSINESS tables, not the gate', () => {
+    // Otherwise a route could satisfy the assertion above with the
+    // authorization read it performs anyway.
+    for (const route of ROUTES) {
+      for (const table of route.reads) {
+        expect(ADMIN_INFRASTRUCTURE_TABLES as readonly string[], route.name).not.toContain(table);
+      }
+    }
+  });
 });
 
 describe('a query failure renders a notice and leaks nothing', () => {

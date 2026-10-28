@@ -11,7 +11,7 @@
 // the exact `.range()` count the pager shows.
 
 import { describe, expect, test } from 'vitest';
-import { adminListQuerySchema } from '@muthoy/validation';
+import { ADMIN_MAX_RANGE_DAYS, adminListQuerySchema } from '@muthoy/validation';
 import {
   DEFAULT_PAGE_SIZE,
   SEARCH_COLUMNS,
@@ -372,5 +372,57 @@ describe('parsing the query string', () => {
 
   test('an unknown sort value is refused rather than silently defaulted', () => {
     expect(parseListQuery({ sort: 'price_desc' }).ok).toBe(false);
+  });
+});
+
+describe('the Analytics range is validated before any query (Gate 5 finding 7)', () => {
+  // THE DEFECT. `from` and `to` went straight from the search params into
+  // `analyticsOverview`, and the 400-day cap existed only as text on the page.
+  // So a reversed range, a malformed date or a ten-year span all reached the
+  // business queries. The page now runs the SHARED schema first, whose
+  // `rangeIsSane` refine carries both rules.
+  test('a well-formed range inside the cap parses', () => {
+    const parsed = parseListQuery({ from: '2026-01-01', to: '2026-06-01' });
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok && parsed.query.from).toBe('2026-01-01');
+  });
+
+  test('a REVERSED range is refused', () => {
+    const parsed = parseListQuery({ from: '2026-06-01', to: '2026-01-01' });
+
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok === false && parsed.message.length).toBeGreaterThan(5);
+  });
+
+  test('a range longer than the cap is refused', () => {
+    // 2024-01-01 → 2026-01-01 is ~731 days, well past ADMIN_MAX_RANGE_DAYS.
+    const parsed = parseListQuery({ from: '2024-01-01', to: '2026-01-01' });
+
+    expect(parsed.ok).toBe(false);
+  });
+
+  test('a range EXACTLY at the cap is allowed, so the bound is not off by one', () => {
+    const from = new Date(Date.UTC(2026, 0, 1));
+    const to = new Date(from.getTime() + ADMIN_MAX_RANGE_DAYS * 86_400_000);
+    const iso = (date: Date) => date.toISOString().slice(0, 10);
+
+    expect(parseListQuery({ from: iso(from), to: iso(to) }).ok).toBe(true);
+    const over = new Date(to.getTime() + 86_400_000);
+    expect(parseListQuery({ from: iso(from), to: iso(over) }).ok).toBe(false);
+  });
+
+  test.each(['not-a-date', '2026-13-01', '2026-02-30x', '01/01/2026'])(
+    'a malformed date (%s) is refused rather than passed through',
+    (value) => {
+      expect(parseListQuery({ from: value }).ok).toBe(false);
+    },
+  );
+
+  test('an absent range is NOT an error — it means all dates', () => {
+    const parsed = parseListQuery({});
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok && parsed.query.from).toBeUndefined();
   });
 });

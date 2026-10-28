@@ -175,6 +175,20 @@ export interface ReportDefinition {
   metricId: string | null;
   /** What a contributor is, for the k-anonymity caption. */
   contributorNoun: string | null;
+  /**
+   * Whether this report can honour the `status` filter, and WHAT status it
+   * means.
+   *
+   * GATE 5 FINDING 9. The subtitle appended "status X" whenever the filter was
+   * set, while only three of the six builders applied it — so a suspended-only
+   * pharmacy-sales report said "status suspended" and returned the full total.
+   * An export whose subtitle contradicts its rows is worse than one that
+   * refuses the filter, because the reader has no way to tell.
+   *
+   * `null` means the report CANNOT apply it, and `buildReportTable` refuses the
+   * query rather than quietly widening it.
+   */
+  statusFilter: 'commercial' | 'subscription' | null;
 }
 
 function definition(entry: ReportDefinition): ReportDefinition {
@@ -204,6 +218,7 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
     columns: ['Registered', 'Pharmacy', 'District', 'Plan', 'Commercial status'],
     metricId: null,
     contributorNoun: null,
+      statusFilter: 'commercial',
   }),
   definition({
     id: 'subscriptions',
@@ -212,6 +227,7 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
     columns: ['Tier', 'Billing cycle', 'Status', 'Accounts'],
     metricId: null,
     contributorNoun: 'billing accounts',
+      statusFilter: 'subscription',
   }),
   definition({
     id: 'subscription_revenue_and_renewals',
@@ -225,6 +241,7 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
     ],
     metricId: 'collected_subscription_payments',
     contributorNoun: 'billing accounts',
+      statusFilter: null,
   }),
   definition({
     id: 'plan_distribution',
@@ -233,6 +250,7 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
     columns: ['Plan', 'Pharmacies'],
     metricId: null,
     contributorNoun: 'pharmacies',
+      statusFilter: 'commercial',
   }),
   definition({
     id: 'activity_summary',
@@ -241,6 +259,7 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
     columns: ['Day', 'Pharmacies with recorded sales', 'New registrations'],
     metricId: null,
     contributorNoun: 'pharmacies',
+      statusFilter: 'commercial',
   }),
   definition({
     id: 'refund_net_pharmacy_sales',
@@ -249,6 +268,7 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
     columns: ['Month', requireMetric('pharmacy_sales_net').label + MONEY_UNIT_SUFFIX],
     metricId: 'pharmacy_sales_net',
     contributorNoun: 'pharmacies',
+      statusFilter: null,
   }),
 ]);
 
@@ -303,6 +323,19 @@ function withinInstantRange(timestamp: string, query: AdminReportExportQuery): b
 function rangeCaption(query: AdminReportExportQuery): string {
   if (query.from === undefined && query.to === undefined) return 'All dates';
   return (query.from ?? 'the beginning') + ' to ' + (query.to ?? 'today');
+}
+
+/**
+ * Raised when a report is asked for a filter it cannot apply.
+ *
+ * A named class so the page can render a sentence and the export route can
+ * answer 400, instead of either of them inferring intent from a generic error.
+ */
+export class AdminReportFilterError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AdminReportFilterError';
+  }
 }
 
 function matchesStatus(value: string, query: AdminReportExportQuery): boolean {
@@ -508,13 +541,27 @@ function buildPlanDistribution(data: ReportData, query: AdminReportExportQuery):
 }
 
 function buildActivitySummary(data: ReportData, query: AdminReportExportQuery): AggregateRow[] {
+  // GATE 5 FINDING 9: the status filter now reaches BOTH halves of this report.
+  // The sales half carries no status of its own, so it is restricted to the
+  // shops that match — which is the only honest reading of "activity, status
+  // suspended" and is possible here because this report reads `shops`.
+  const matchingShopIds = new Set(
+    data.shops
+      .filter((shop) => matchesStatus(shop.commercialStatus, query))
+      .map((shop) => shop.id),
+  );
+
   const salesByDay = groupContributors(
-    data.sales.filter((row) => withinRange(row.businessDate, query)),
+    data.sales
+      .filter((row) => withinRange(row.businessDate, query))
+      .filter((row) => matchingShopIds.has(row.shopId)),
     (row) => row.businessDate,
     (row) => row.shopId,
   );
   const registrationsByDay = groupContributors(
-    data.shops.filter((shop) => withinInstantRange(shop.createdAt, query)),
+    data.shops
+      .filter((shop) => withinInstantRange(shop.createdAt, query))
+      .filter((shop) => matchesStatus(shop.commercialStatus, query)),
     (shop) => registrationDay(shop.createdAt),
     (shop) => shop.id,
   );
@@ -604,6 +651,15 @@ export function buildReportTable(
     // must not produce an empty report that looks like no data.
     throw new Error('No builder is registered for report: ' + entry.id);
   }
+  // Refused BEFORE a row is built, so no partially-filtered table can exist.
+  if (query.status !== undefined && query.status.length > 0 && entry.statusFilter === null) {
+    throw new AdminReportFilterError(
+      'The ' + entry.title + ' report cannot be filtered by status: its rows carry no status, '
+      + 'and applying the filter to a different table would silently change what the figures '
+      + 'mean. Clear the status filter, or use a report that supports it.',
+    );
+  }
+
   const built = builder(data, query);
 
   const { rows, suppressedBuckets } =

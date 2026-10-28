@@ -204,8 +204,29 @@ export const ADMIN_REPORT_IDS = [
 
 export const ADMIN_EXPORT_FORMATS = ['csv', 'pdf'] as const;
 
-/** A calendar day, not a timestamp: every report range is a Dhaka day range. */
-const isoDate = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a YYYY-MM-DD date');
+/**
+ * A calendar day, not a timestamp: every report range is a Dhaka day range.
+ *
+ * The shape check alone was not enough. `/^\d{4}-\d{2}-\d{2}$/` accepts
+ * `2026-13-01` and `2026-02-31`, which then reached Postgres as a `date`
+ * literal and came back as a query error — so the operator was told "could not
+ * load data" when the truth was "that is not a date". Found while writing the
+ * range tests for Gate 5 finding 7.
+ *
+ * The refine round-trips the value through `Date.UTC` and compares: a real day
+ * normalises to itself, and 13 as a month does not.
+ */
+const isoDate = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a YYYY-MM-DD date')
+  .refine((value) => {
+    const [year, month, day] = value.split('-').map(Number) as [number, number, number];
+    const at = new Date(Date.UTC(year, month - 1, day));
+    return (
+      at.getUTCFullYear() === year && at.getUTCMonth() === month - 1 && at.getUTCDate() === day
+    );
+  }, 'That is not a real calendar date');
 
 /** The widest range any report may cover (§8.5's 400-day analytics cap). */
 export const ADMIN_MAX_RANGE_DAYS = 400;

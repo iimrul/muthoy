@@ -40,6 +40,7 @@ import {
   type ReportSaleTotalRow,
   type ReportShopRow,
   type SourceTally,
+  AdminReportFilterError,
 } from './adminReports';
 
 function query(raw: Record<string, string>) {
@@ -702,5 +703,91 @@ describe('registrations are bucketed by the DHAKA day (Gate 5 finding 10)', () =
     );
 
     expect(table.rows).toEqual([]);
+  });
+});
+
+describe('the status filter is applied or REFUSED, never claimed falsely (finding 9)', () => {
+  // THE DEFECT. The subtitle appended "status X" whenever the filter was set,
+  // while only three of the six builders applied it. Reproduced by the
+  // reviewer: with every shop active, a suspended-only pharmacy-sales report
+  // still returned the full total AND said "status suspended". An export whose
+  // subtitle contradicts its rows is worse than one that refuses the filter,
+  // because the reader has no way to tell which is true.
+  const shops = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+    shop(index + 1, { createdAt: '2026-10-01T06:00:00.000Z' }),
+  );
+  const sales = Array.from({ length: SUPPRESSION_K }, (_unused, index) => saleTotal(index + 1));
+
+  function build(reportId: string, status?: string) {
+    return buildReportTable(
+      reportId as Parameters<typeof buildReportTable>[0],
+      data({
+        shops,
+        sales,
+        tallies: [{ label: 'shops', counted: shops.length, loaded: shops.length }],
+      }),
+      query({ reportId, format: 'csv', ...(status === undefined ? {} : { status }) }),
+    );
+  }
+
+  test('every report declares whether it can honour the filter', () => {
+    for (const entry of ADMIN_REPORT_DEFINITIONS) {
+      expect(['commercial', 'subscription', null], entry.id).toContain(entry.statusFilter);
+    }
+    // Non-vacuity: both answers are actually used, so this is a real decision
+    // per report rather than a field nobody set.
+    const declared = ADMIN_REPORT_DEFINITIONS.map((entry) => entry.statusFilter);
+    expect(declared.filter((value) => value === null).length).toBeGreaterThan(0);
+    expect(declared.filter((value) => value !== null).length).toBeGreaterThan(0);
+  });
+
+  test('a report that CANNOT filter by status refuses the query', () => {
+    // The exact case the reviewer reproduced.
+    expect(() => build('refund_net_pharmacy_sales', 'suspended')).toThrow(AdminReportFilterError);
+    expect(() => build('subscription_revenue_and_renewals', 'suspended')).toThrow(
+      AdminReportFilterError,
+    );
+  });
+
+  test('and it still builds normally with NO status filter', () => {
+    // The refusal must be about the filter, not about the report.
+    expect(build('refund_net_pharmacy_sales').rows.length).toBeGreaterThan(0);
+  });
+
+  test('the refusal explains itself, rather than reading as a server fault', () => {
+    try {
+      build('refund_net_pharmacy_sales', 'suspended');
+      throw new Error('expected a refusal');
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(AdminReportFilterError);
+      expect((error as Error).message).toContain('cannot be filtered by status');
+      expect((error as Error).message).toContain('Clear the status filter');
+    }
+  });
+
+  test('activity_summary APPLIES the filter to both halves', () => {
+    // It reads `shops`, so it can — and "activity, status suspended" has only
+    // one honest reading: the activity of the shops that match.
+    const all = build('activity_summary');
+    expect(all.rows.length).toBeGreaterThan(0);
+
+    const suspended = build('activity_summary', 'suspended');
+
+    // Every fixture shop is active, so a suspended-only view has no rows at
+    // all — rather than the full total under a "status suspended" subtitle.
+    expect(suspended.rows).toEqual([]);
+    expect(suspended.subtitle).toContain('status suspended');
+    expect(suspended.subtitle).toContain('0 rows');
+  });
+
+  test('MUTATION: the old behaviour returned the full total under that subtitle', () => {
+    // What the defect looked like: the subtitle claimed the scope and the rows
+    // ignored it. Reconstructed so the regression is visible as a comparison.
+    const unfiltered = build('activity_summary');
+    const filtered = build('activity_summary', 'suspended');
+
+    expect(unfiltered.rows.length).toBeGreaterThan(0);
+    expect(filtered.rows.length).toBe(0);
+    expect(filtered.rows).not.toEqual(unfiltered.rows);
   });
 });

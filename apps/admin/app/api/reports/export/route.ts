@@ -1,6 +1,7 @@
 import { adminReportExportQuerySchema } from '@muthoy/validation';
 import { requireAdminPermission } from '../../../../lib/adminAuthz';
 import { platformReportData } from '../../../../lib/adminPlatformQueries';
+import { AdminReportFilterError } from '../../../../lib/adminReports';
 import { ReportCompletenessError, buildReport, reportDownload } from '../../../../lib/adminReports';
 import { isFeatureEnabled } from '../../../../lib/adminSettings';
 import { AdminForbiddenError, AdminUnauthenticatedError } from '../../../../lib/errors';
@@ -36,6 +37,10 @@ const MESSAGES = {
   pdfDisabled: 'PDF export is switched off in Settings. The CSV export is unaffected.',
   incomplete: 'The export was not produced because the read could not be proved complete.',
   failed: 'The report could not be produced. The server log has the details.',
+  // GATE 5 FINDING 9. A filter the report cannot apply is the CALLER's problem
+  // to correct, so it is a 400 with the reason — not a 500, and not a silently
+  // unfiltered file whose subtitle claims a scope its rows do not have.
+  unsupportedFilter: 'That report cannot be filtered by status.',
 } as const;
 
 function problem(status: number, message: string): Response {
@@ -108,6 +113,12 @@ export async function GET(request: Request): Promise<Response> {
       // partial figure. The message carries which table fell short.
       console.error('[admin] report export refused as incomplete:', error.message);
       return problem(409, MESSAGES.incomplete + ' ' + error.message);
+    }
+    if (error instanceof AdminReportFilterError) {
+      // 400: the caller asked for a filter this report cannot apply. Answering
+      // 200 with an unfiltered file whose subtitle says "status suspended"
+      // would be the defect this fixes.
+      return problem(400, MESSAGES.unsupportedFilter + ' ' + error.message);
     }
     console.error('[admin] report export failed:', error);
     return problem(500, MESSAGES.failed);
