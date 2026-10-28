@@ -216,6 +216,58 @@ isolation and the isolated result is the one reported.
 
 ---
 
+## 5b. Gate 5, and the seventeen findings
+
+Reviewer: Codex `gpt-6.1-sol`, `codex exec --sandbox read-only`. **Verdict:
+REVISE, 17 findings (5 P1, 12 P2).** The reviewer could not run Vitest under its
+sandbox (`spawn EPERM`), so it did not independently reproduce the full-suite
+result; it reproduced every defect it reported with Node and in-memory probes.
+
+**All seventeen are resolved.** Each was verified against the code before being
+fixed, and three turned out to need a correction to my own work rather than to
+the code:
+
+| # | Sev | What it was | Where it is fixed |
+|---|---|---|---|
+| 1 | P1 | revoking sessions restored a disabled, narrowed account to its environment role | `d4cca3b` |
+| 2 | P1 | an audit rejection with nobody flushing could crash the login path | `d4cca3b` |
+| 3 | P1 | the app's own medicine writes never set `search_key`, so a renamed medicine kept its old key | `d4cca3b` |
+| 4 | P1 | the k=5 floor was bypassed via union contributors | `d4cca3b` |
+| 5 | P1 | `/revenue` could announce "No billing exception" while three classes went unchecked | `d4cca3b` |
+| 6 | P2 | the Audit Action filter was unusable — dotted namespaces rejected by the field it borrowed | `c13ad08` |
+| 10 | P2 | registrations bucketed by the UTC day, not the Dhaka day, in three places | `c13ad08` |
+| 11 | P2 | the Dashboard counted literal statuses, so an expired row read as active for ever | `c13ad08` |
+| 12 | P2 | my own mutation check never ran a guard against its mutant | `c13ad08` |
+| 7 | P2 | the Analytics range reached the query unvalidated; the 400-day cap was only text | `829e02f` |
+| 9 | P2 | reports ignored the status filter while the subtitle claimed it | `829e02f` |
+| 13 | P2 | route contracts passed without exercising their claimed state | `829e02f` |
+| 16 | P2 | "Support notes" read no notes; owner and activity unselected | `999b41d` |
+| 17 | P2 | §8.6's district and status filters absent | `999b41d` |
+| 8 | P2 | four §8.5 Analytics figures claimed and absent | `1648bae` |
+| 14 | P2 | Support had a status filter and nothing else | `1648bae` |
+| 15 | P2 | §8.8's security history absent | `1648bae` |
+
+### Three of my own things were wrong, and are corrected rather than forced
+
+1. A boundary test assumed an unparseable timestamp survives into a report. It
+   does not — `withinInstantRange` excludes it before bucketing — and my
+   helper's comment claimed the opposite. Both now state the real behaviour.
+2. The strengthened `net` provenance guard fired on my new Analytics prose. The
+   word now stays on the figure whose manifest label carries it, rather than
+   being restated in a description.
+3. A "nothing was queried" assertion counted the §8.11 settings-flag read,
+   which is admin configuration like the role table. It now names the pharmacy
+   tables it actually means.
+
+### And one gap in the shared schema, found while writing the range tests
+
+`isoDate` checked the SHAPE only, so `2026-13-01` and `2026-02-31` passed
+through to Postgres and came back as a query error — the operator was told
+"could not load data" when the truth was "that is not a date". It now
+round-trips the value through `Date.UTC` and compares.
+
+---
+
 ## 6. Preservation, verified
 
 - **No `audit-artifacts/**` file was modified.** The historical H-9 sealed

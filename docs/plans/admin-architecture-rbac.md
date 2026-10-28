@@ -185,7 +185,7 @@ trend is registration metadata and is not.
 |---|---|
 | **Code status** | COMPLETE. Search over name, Latin-script name and phone; district, plan and status filters; sort; `.range()` paging with an **exact count carrying the same filters**. The drill-down adds owner/account detail, contact, subscription status, latest activity, the support-notes block and the consent-gated location block. |
 | **Test evidence** | `adminFilters.test.ts`, `adminQueries.test.ts`, plus contract tests proving a search + plan filter + page all reach the query, that a malformed filter is reported with **no query issued**, that the support block renders the shop's own case, that the location block withholds the coordinate and names E13, and that a role without `maps.read` is told so while the rest of the page still works. |
-| **Missing** | Nothing from §8.2. A **real marker** needs E13. |
+| **Missing** | Nothing from §8.2 — **as of the Gate 5 corrections.** The block headed "Support notes" previously read no notes, only case summaries, and the owner information and latest activity were not even selected. All three are now read: notes per case id (so there is no path to a note without a case belonging to this shop), the owner resolved by id from `users`, and `updated_at` labelled "Last synced change" rather than "last seen". A **real marker** needs E13. |
 | **Hosted** | NOT VERIFIED. |
 | **External** | E13 (location consent), E15. |
 
@@ -228,8 +228,8 @@ This is the only page exempt from the `revenue` word scan, and the exemption is
 | | |
 |---|---|
 | **Code status** | COMPLETE. Daily active pharmacies, new registrations over time, trial-to-paid conversion, subscription growth, plan distribution, the recorded-cancellation series, platform usage, and aggregated pharmacy sales volume — with a date range capped at 400 days. |
-| **Test evidence** | `adminSuppression.test.ts` (16, at the k−1/k boundary with a mutation check for a 4-shop bucket left visible), `adminReports.test.ts`, contract tests. |
-| **Missing** | Nothing from §8.5. |
+| **Test evidence** | `adminSuppression.test.ts` (16, at the k−1/k boundary with a mutation check for a 4-shop bucket left visible), `adminReports.test.ts`, plus four contract tests rendering all four of the figures below against a POPULATED fixture and asserting the three source tables are reached. |
+| **Missing** | Nothing from §8.5 — **as of the Gate 5 corrections.** This page previously claimed four figures it did not render: trial-to-paid conversion, subscription growth, the recorded-cancellation series and the sales-volume count. All four are now built. Conversion is NULL rather than 0% when no trial was ever granted; the cancellation series states in its own description that it is not churn and can only under-report (E12); the volume count excludes refunds. The date range is validated through the shared schema before any read, so the 400-day cap is a rule rather than a caption. |
 | **Hosted** | NOT VERIFIED. |
 | **External** | E15. |
 
@@ -240,7 +240,7 @@ ever appears.
 
 | | |
 |---|---|
-| **Code status** | COMPLETE **as specified**, which means it plots nothing in the shipped state and says exactly why. Leaflet is wired behind the consent predicate, with plan-tier marker colour, a selection summary, drill-down navigation, and district/status filters. |
+| **Code status** | COMPLETE **as specified**, which means it plots nothing in the shipped state and says exactly why. Leaflet is wired behind the consent predicate, with plan-tier marker colour, a selection summary, drill-down navigation, and district/status filters — **the filters were claimed and absent until the Gate 5 corrections**, and are now built in the pure geo library, applied BEFORE the consent gate so the withheld count describes the same population the map does. |
 | **Test evidence** | `adminGeo.test.ts` (30), plus a contract test asserting that with no tile provider configured **`MapLoader` is never rendered** — so the dynamic import, and therefore Leaflet, is never reached — and that the page names E14. |
 | **Missing** | Nothing. **Markers** need E13; **tiles** need E14. |
 | **Hosted** | NOT VERIFIED. |
@@ -258,8 +258,8 @@ either way.
 | | |
 |---|---|
 | **Code status** | COMPLETE. Search and status filters, queue counts, case detail, append-only notes, category/status/assignee transitions, case history, and the account and shop context. |
-| **Test evidence** | `adminSupport.test.ts`, `adminValidation.test.ts`, `adminGrants.test.ts`, contract tests. |
-| **Missing** | Nothing from §8.7. |
+| **Test evidence** | `adminSupport.test.ts` (including the search-escaping and context-shape cases), `adminValidation.test.ts`, `adminGrants.test.ts`, contract tests. |
+| **Missing** | Nothing from §8.7 — **as of the Gate 5 corrections.** This page previously had a status filter and nothing else: the search, the case history and the account context were all claimed and absent. The search is an `ilike` on one column with the pattern escaped by the shared helper; the history IS this case's audit trail rather than a second record that could disagree with it; the context carries no account id, because whether one exists is the support question and which one belongs to the drill-down. |
 | **Hosted** | NOT VERIFIED — the tables exist in **unapplied** migration 35. |
 | **External** | E4-H (applying migration 35 to a hosted project), E15. |
 
@@ -272,8 +272,16 @@ gains no `subscriptions.write` and no unrestricted shop access.
 | | |
 |---|---|
 | **Code status** | COMPLETE. Directory with environment role, assignment role, effective intersected permissions, enabled state and last revocation; the §4.2 matrix rendered from `ROLE_PERMISSIONS`; role narrowing, account disable and per-user session revocation all functional; security audit history filtered to `admins.*`, `login` and `session.*`. |
-| **Test evidence** | `adminIdentityStore.test.ts`, `adminRoles.test.ts` (36), `adminAuthz.test.ts` (50), contract tests including a `read_only` denial. |
-| **Missing** | **Account creation completes outside the panel** by design — §4.3's hash-and-fragment flow, labelled as such on the page. |
+| **Test evidence** | `adminIdentityStore.test.ts` (including the three revocation regression cases below), `adminRoles.test.ts` (36), `adminAuthz.test.ts` (50), `adminAuditViews.test.ts`'s seven security-history cases, contract tests including a `read_only` denial. |
+| **Missing** | **Account creation completes outside the panel** by design — §4.3's hash-and-fragment flow, labelled as such on the page. §8.8's **security history was claimed and absent** until the Gate 5 corrections; it is now built, filtered to `admins.*`, `login` and `session.*` through the same library the Audit page uses. |
+
+**A security defect was found here by the Gate 5 review and fixed.** Revoking an
+admin's sessions wrote the environment role and `isActive: true`
+unconditionally, so revoking a **disabled, narrowed** account replaced the
+narrowing with its environment role — possibly `super_admin` — and re-enabled
+it. A security action that widens authority is worse than no action. The stored
+row's role and enabled state are now preserved and only the revocation point
+moves.
 | **Hosted** | NOT VERIFIED. |
 | **External** | E4-H, E15. |
 
@@ -364,6 +372,37 @@ everybody makes every denial test pass.** The fixture now implements the
 one-row envelope, and nineteen new contract cases assert the positive direction:
 an authorized role reaches the business tables and the fixture's own values
 appear on screen.
+
+---
+
+## 6b. What the Gate 5 review changed, and why this record is now trustworthy
+
+The first version of this document **overstated five pages**. Analytics claimed
+four figures it did not render; Support claimed a search, a case history and an
+account context it did not have; Admins claimed a security history that did not
+exist; the shop drill-down's "Support notes" block read no notes; and Maps
+claimed district and status filters that were absent.
+
+**The founder's decision was that the functionality is implemented, not that
+the document is corrected to match a smaller product.** All five are now built,
+each with positive and negative tests, and the entries above say where each one
+previously overstated and what closed it.
+
+Two defects the same review found were not scope gaps but bugs, and both are
+fixed with regression tests:
+
+- **revoking an admin's sessions restored their access** — see §4, page 8;
+- **the k=5 privacy floor was bypassed** on the activity report, which gated a
+  row on the UNION of its registration and sales contributors, so a day on
+  which five shops registered and one traded published that one shop's
+  activity. The test that should have caught it asserted the bypass and
+  rationalised it as "safe BECAUSE five shops stand behind the row". Each value
+  is now gated by its own contributors.
+
+**The lesson this document already carried is the one that applied again: a
+test that compares the wrong two things passes for the wrong reason.** Three
+separate instances in this batch — the validation drift, the missing
+`maybeSingle()`, and that suppression test.
 
 ---
 
