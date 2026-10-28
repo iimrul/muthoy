@@ -718,6 +718,94 @@ predict the next syntax.
 
 ---
 
+## 6h. ROUND 9: the guard FAILED and needs redesign. Batch 3 is NOT accepted.
+
+Round 9 was a focused adversarial review of the write-position invariant.
+**Verdict: REVISE, with three accepted financial substitutions confirmed by
+React SSR, and a redesign requirement.** This section exists so the state is
+recorded as it is, not as I had hoped.
+
+### What renders wrong money
+
+| Reproduction | Renders |
+|---|---|
+| Dashboard: `const s = stats; Object.assign(s, { ['net' + 'SalesToday']: s.grossSalesToday });` | **৳100.00 gross** where ৳80.00 net belongs |
+| Revenue: suppression input becomes `((_amount: number) => Number(collectedTotalPaisa))(pharmacyNetSalesPaisa)` | **৳230.00 collected payments** under the pharmacy-net label |
+| Dashboard: `value={((_: string) => formatMoney(stats.grossSalesToday))(formatMoney(stats.netSalesToday))}` | gross under the net caption |
+
+All three leave the occurrence counts and the pinned derivations intact, pass
+**all 45 guard tests**, and produce **zero TypeScript diagnostics**.
+
+### Why, and the claim of mine that was false
+
+I stated in the review brief that all three layers fail closed. **Layer 3 does
+not.** `roleOfOccurrence` ends in `return 'read'`, so a path it does not
+recognise is treated as a READ -- default-allow, not default-deny. That is the
+precise failure mode I had asked the reviewer to hunt for, while asserting the
+opposite about my own code.
+
+The deeper reason is not a missing case. Two of the three reproductions are not
+exotic syntax at all:
+
+- `'net' + 'SalesToday'` constructs the property name from two string literals,
+  so **no name-based scan can see it**. Not with more layers.
+- an identity-shaped function call launders the value across a boundary, which
+  a local syntactic check cannot follow.
+
+**Local syntactic occurrence checks cannot establish rendered-value
+provenance.** Nine rounds is now evidence rather than opinion, and my belief
+that layer 3 was "different in kind" was wrong.
+
+### A false positive, too
+
+```ts
+const cache: Record<string, string> = {};
+cache[formatMoney(stats.netSalesToday)] = 'cached';
+```
+
+Only `cache` is written; the anchor supplies its key. Layer 3 reports a write,
+because the ancestor walk does not distinguish "I am the assignment target"
+from "I am inside the target's key expression". So the guard is simultaneously
+too weak and too strict.
+
+### Status
+
+**Batch 3 is NOT accepted and nothing has been pushed.** The remediation plan
+is in §6i. Per CLAUDE.md rule 10, the plan touches money and therefore waits
+for the founder's explicit approval before any code is written.
+
+---
+
+## 6i. The bounded remediation plan
+
+The reviewer's plan, which I agree with, in the order that each step closes a
+specific reproduction:
+
+1. **An opaque, immutable net amount.** `netSalesPaisa` becomes the only
+   producer of a branded net value, preserved through `lib/queries.ts`, the
+   monthly totals in `lib/adminPlatformQueries.ts`, and `suppressBelowK` (which
+   is already generic and should carry it unchanged). This closes
+   reproductions 2 and 3 **at compile time**: `Number(collectedTotalPaisa)` and
+   a plain formatted string are not that type.
+2. **A dedicated net renderer** that accepts only that type, owns its own
+   formatting and caption, and **verifies authenticity at runtime** -- a
+   module-private registry, so a value substituted into the field by
+   `Object.assign` is not a registered net amount and the renderer fails
+   closed. This is what closes reproduction 1, which no static check can.
+3. **Compile-negative and render regressions.** Assert that each gross,
+   collected and helper-laundered substitution produces TypeScript
+   diagnostics, and assert the rendered money through SSR on both real pages.
+   The source scans stay as supplementary checks, not as the guarantee.
+4. **The false positive**, separately and cheaply: distinguish the assignment
+   TARGET from an expression inside the target's computed key.
+
+Scope: `netSalesPaisa`'s home package, `lib/platformStats.ts`,
+`lib/queries.ts`, `lib/adminPlatformQueries.ts`, the money renderer in
+`components/`, `app/page.tsx`, `app/revenue/page.tsx`, plus the new tests.
+**This is money-path production code, so it is a rule-10 approval gate.**
+
+---
+
 ## 7. What would make these pages DONE
 
 | Gate | What it needs | Who |
