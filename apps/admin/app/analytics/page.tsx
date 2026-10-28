@@ -8,7 +8,7 @@ import { parseListQuery } from '../../lib/adminFilters';
 import { requireMetric } from '../../lib/adminMetrics';
 import { analyticsOverview, type AnalyticsOverview } from '../../lib/adminPlatformQueries';
 import { featureState } from '../../lib/adminSettings';
-import { suppressBelowK } from '../../lib/adminSuppression';
+import { SUPPRESSION_K, suppressBelowK } from '../../lib/adminSuppression';
 import { toDisplayMessage } from '../../lib/errors';
 
 // Batch 3 §8.5 — Analytics.
@@ -16,6 +16,11 @@ import { toDisplayMessage } from '../../lib/errors';
 // EVERY SERIES POINT GOES THROUGH `suppressBelowK`, in one place: `toPoints`
 // below. A floor applied in four charts is a floor forgotten in one, and the one
 // it is forgotten in is the one that identifies a pharmacy.
+//
+// The conversion TILE is the one figure that is not a series, so it calls the
+// same gate directly rather than through `toPoints`. It was forgotten exactly
+// as the paragraph above predicts, and the delta review caught it: a single
+// trialed account published "100.0%" and "1 of 1".
 //
 // THE FLOOR IS ON DISTINCT CONTRIBUTING SHOPS, not on the value and not on the
 // row count. A hundred sales rows from one pharmacy is still one pharmacy, and
@@ -173,12 +178,23 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     (bucket) => distinct(bucket.accountIds),
     (bucket) => bucket.accountIds,
   );
+  // Gated on the SELLING shops, not on every contributor to the net total.
+  // One selling shop beside four refund-only shops is one shop's sale count.
   const volume = toPoints(
     pharmacySalesByMonth,
     (bucket) => bucket.month,
     (bucket) => bucket.saleCount,
-    (bucket) => bucket.shopIds,
+    (bucket) => bucket.saleShopIds,
   );
+
+  // §8.5's conversion, through the same floor as every series on this page.
+  // The unit here is the billing ACCOUNT, as it is for growth and
+  // cancellations: the figure describes accounts, so accounts are what the
+  // floor counts.
+  const conversionGate = suppressBelowK({
+    value: conversion.ratio,
+    contributingShopIds: conversion.accountIds,
+  });
 
   const sales = toPoints(
     pharmacySalesByMonth,
@@ -213,22 +229,32 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
           from this page and from the billing page the acceptance record also
           claimed it on. NULL rather than 0% when nobody was ever granted a
           trial: "0% converted" reads as a failure, and "no trials granted yet"
-          is the truth. */}
+          is the truth.
+
+          GATE 5 DELTA FINDING 2: both the percentage AND the numerator /
+          denominator note are now behind the floor. The note was the worse
+          leak of the two — "1 of 1 accounts granted a trial later held a
+          verified payment" states one account's payment activity outright,
+          while the percentage at least needs the denominator to decode. */}
       <div className="mt-6 max-w-md">
         <MetricTile
           metric={requireMetric('trial_to_paid_conversion')}
           value={
-            conversion.ratio === null
+            conversion.ratio === null || conversionGate.suppressed
               ? EMPTY_VALUE
               : (conversion.ratio * 100).toFixed(1) + '%'
           }
           note={
             conversion.ratio === null
               ? 'No account has been granted a launch trial, so there is nothing to convert. This is not a zero.'
-              : formatCount(conversion.numerator)
-                + ' of '
-                + formatCount(conversion.denominator)
-                + ' accounts granted a trial later held a verified payment.'
+              : conversionGate.suppressed
+                ? 'Withheld: fewer than '
+                  + formatCount(SUPPRESSION_K)
+                  + ' accounts have been granted a trial, so a conversion figure here would describe those accounts individually.'
+                : formatCount(conversion.numerator)
+                  + ' of '
+                  + formatCount(conversion.denominator)
+                  + ' accounts granted a trial later held a verified payment.'
           }
         />
       </div>

@@ -26,7 +26,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const cookieStore = vi.hoisted(() => ({ value: undefined as string | undefined }));
 const clientBox = vi.hoisted(() => ({
-  calls: [] as { table: string; columns: string }[],
+  calls: [] as { table: string; columns: string; filters: { method: string; args: unknown[] }[] }[],
   // PER TABLE, and that is not a convenience. One shared array means the
   // authorization read of `admin_role_assignments` receives whatever rows the
   // test set for `shops` — and lib/adminIdentityStore.ts correctly THROWS on a
@@ -105,7 +105,11 @@ vi.mock('../lib/supabaseAdmin', () => ({
     };
 
     const build = (table: string, columns: string) => {
-      clientBox.calls.push({ table, columns });
+      // The FILTER ARGUMENTS are recorded too, because "this read was not
+      // narrowed by registration date" is a claim about the arguments and
+      // cannot be made from the table name alone.
+      const filters: { method: string; args: unknown[] }[] = [];
+      clientBox.calls.push({ table, columns, filters });
       const chain: Record<string, unknown> = {
         then: (resolve: (value: unknown) => unknown) =>
           Promise.resolve(result(table)).then(resolve),
@@ -113,7 +117,10 @@ vi.mock('../lib/supabaseAdmin', () => ({
         single: () => Promise.resolve(singleResult(table)),
       };
       for (const method of ['eq', 'gte', 'lte', 'lt', 'or', 'order', 'not', 'in', 'limit', 'range']) {
-        chain[method] = () => chain;
+        chain[method] = (...args: unknown[]) => {
+          filters.push({ method, args });
+          return chain;
+        };
       }
       return chain;
     };
@@ -493,6 +500,86 @@ describe('§8.5 Analytics renders all four missing figures (Gate 5 finding 8)', 
     expect(html).toContain('Subscription growth, by month');
     expect(html).toContain('Recorded cancellations, by month');
     expect(html).toContain('Pharmacy sales volume, by month');
+  });
+
+  /**
+   * One chart panel's HTML, so an assertion about the sale COUNT cannot be
+   * satisfied by a digit belonging to the money series beside it.
+   */
+  function panel(html: string, headingId: string): string {
+    const start = html.indexOf('aria-labelledby="' + headingId + '"');
+    expect(start, 'no panel ' + headingId).toBeGreaterThan(-1);
+    const next = html.indexOf('aria-labelledby="chart-', start + 1);
+    return next === -1 ? html.slice(start) : html.slice(start, next);
+  }
+
+  function trialedAccounts(count: number): Record<string, unknown>[] {
+    return Array.from({ length: count }, (_unused, index) => ({
+      id: 'ba000000-0000-4000-8000-00000000000' + (index + 1),
+      primary_shop_id: SHOP_ID,
+      launch_trial_granted_at: '2026-08-01T00:00:00.000Z',
+    }));
+  }
+
+  test('ONE trialed account withholds the percentage AND the counts', async () => {
+    // GATE 5 DELTA FINDING 2. The fixture's single account holds a verified
+    // payment, so before the fix this page published "100.0%" and "1 of 1" —
+    // that account's payment activity, under an aggregate's label.
+    clientBox.rowsByTable.billing_accounts = trialedAccounts(1);
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./analytics/page');
+
+    expect(html).toContain('Trial to paid conversion');
+    expect(html).not.toContain('100.0%');
+    expect(html).not.toContain('1 of 1');
+    expect(html).toContain('fewer than 5 accounts have been granted a trial');
+  });
+
+  test('FIVE trialed accounts publish it, so the floor is a floor and not a removal', async () => {
+    // The k boundary from the other side. Without this, the test above would
+    // pass against a page that never shows a conversion figure at all.
+    clientBox.rowsByTable.billing_accounts = trialedAccounts(5);
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./analytics/page');
+
+    // One of the five holds the fixture's verified order: 1/5.
+    expect(html).toContain('20.0%');
+    expect(html).toContain('1 of 5');
+    expect(html).not.toContain('fewer than 5 accounts have been granted a trial');
+  });
+
+  test('refund-only shops do not lift the sale count over the floor', async () => {
+    // GATE 5 DELTA FINDING 3. One shop sold; four others only refunded. The
+    // refund-NET total legitimately has five contributors, but "how many
+    // sales" has exactly one — and before the fix both were gated on the
+    // same list, so the count came out.
+    clientBox.rowsByTable.sales = [
+      {
+        id: 's1',
+        shop_id: SHOP_ID,
+        business_date: '2026-09-10',
+        total: 1000,
+        created_at: '2026-09-10T00:00:00.000Z',
+      },
+    ];
+    clientBox.rowsByTable.sale_refunds = Array.from({ length: 4 }, (_unused, index) => ({
+      id: 'r' + index,
+      shop_id: '7b000000-0000-4000-8000-00000000001' + index,
+      business_date: '2026-09-11',
+      total: 100,
+      created_at: '2026-09-11T00:00:00.000Z',
+    }));
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./analytics/page');
+
+    const volume = panel(html, 'chart-pharmacy-sales-volume-by-month');
+    expect(volume).toContain('2026-09');
+    // Withheld: an em dash in the cell, and the panel says so.
+    expect(volume).toContain('withheld');
+    expect(volume).not.toMatch(/>\s*1\s*</);
   });
 
   test('it reads the sources those figures need', async () => {
@@ -1021,5 +1108,300 @@ describe('§8.9 the audit page filters, and the per-shop view is gated', () => {
 
     expect(block.length).toBeGreaterThan(200);
     expect(block).not.toMatch(/\.(insert|update|delete|upsert)\(/);
+  });
+});
+
+describe('the activity report reads EVERY shop, not only the ones registered in the period', () => {
+  // GATE 5 DELTA FINDING 4, at the layer the defect actually lives in.
+  //
+  // `buildActivitySummary` restricts the sales half to the shops it was
+  // handed. That is correct only if it is handed every shop, and the reader
+  // was narrowing the `shops` read by `created_at` for every report. The
+  // builder test in lib/adminReports.test.ts cannot see this, because it is
+  // handed its fixture directly — so the claim is made here, against the
+  // recorded filter arguments.
+  const shopReads = () => clientBox.calls.filter((call) => call.table === 'shops');
+  const rangedOnRegistration = (call: { filters: { method: string; args: unknown[] }[] }) =>
+    call.filters.some(
+      (filter) =>
+        (filter.method === 'gte' || filter.method === 'lte') && filter.args[0] === 'created_at',
+    );
+
+  beforeEach(() => {
+    setEnvironment({ founder: 'super_admin' });
+    seedPlatform();
+  });
+
+  test('activity_summary puts NO created_at bound on its shops read', async () => {
+    const { platformReportData } = await import('../lib/adminPlatformQueries');
+
+    await platformReportData({
+      reportId: 'activity_summary',
+      format: 'csv',
+      from: '2026-10-01',
+      to: '2026-10-31',
+    });
+
+    const reads = shopReads();
+    expect(reads.length).toBeGreaterThan(0);
+    for (const read of reads) {
+      expect(rangedOnRegistration(read), 'a shops read was narrowed by registration date')
+        .toBe(false);
+    }
+  });
+
+  test('the sales read for the SAME query is still bounded, so the period is not lost', async () => {
+    // Widening the shops read must not widen the report. The period still
+    // decides which sales count; it just no longer decides which shops exist.
+    const { platformReportData } = await import('../lib/adminPlatformQueries');
+
+    await platformReportData({
+      reportId: 'activity_summary',
+      format: 'csv',
+      from: '2026-10-01',
+      to: '2026-10-31',
+    });
+
+    const salesReads = clientBox.calls.filter((call) => call.table === 'sales');
+    expect(salesReads.length).toBeGreaterThan(0);
+    expect(
+      salesReads.some((read) =>
+        read.filters.some(
+          (filter) => filter.method === 'gte' && filter.args[0] === 'business_date',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  test('pharmacy_registrations DOES bound it, so the widening is per report', async () => {
+    // Non-vacuity. Without this, the first test would pass against a reader
+    // that had simply stopped applying ranges to `shops` everywhere — which
+    // would silently break the registration report.
+    const { platformReportData } = await import('../lib/adminPlatformQueries');
+
+    await platformReportData({
+      reportId: 'pharmacy_registrations',
+      format: 'csv',
+      from: '2026-10-01',
+      to: '2026-10-31',
+    });
+
+    const reads = shopReads();
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every(rangedOnRegistration)).toBe(true);
+  });
+});
+
+describe('every analytics series describes the SAME period', () => {
+  // GATE 5 DELTA FINDING 5. The growth and cancellation series were built
+  // from whole-table reads and never consulted the range, so an October
+  // query drew January growth and February cancellations beside October
+  // activity and October sales. Four charts on one page, each about a
+  // different period, with nothing on the page saying so.
+  beforeEach(() => {
+    setEnvironment({ founder: 'super_admin' });
+    seedPlatform();
+    clientBox.rowsByTable.billing_subscriptions = [
+      {
+        id: 'bs000000-0000-4000-8000-00000000000a',
+        billing_account_id: ACCOUNT_ID,
+        tier: 'pro',
+        billing_cycle: 'monthly',
+        status: 'active',
+        // Started in JANUARY and canceled in FEBRUARY: outside any October
+        // query, and the only subscription rows there are.
+        starts_at: '2026-01-15T06:00:00.000Z',
+        paid_through: '2026-02-15T00:00:00.000Z',
+        grace_ends_at: null,
+        canceled_at: '2026-02-20T06:00:00.000Z',
+        provider: 'sslcommerz',
+        created_at: '2026-01-15T06:00:00.000Z',
+      },
+    ];
+  });
+
+  test('an October query yields NO January growth and NO February cancellations', async () => {
+    const { analyticsOverview } = await import('../lib/adminPlatformQueries');
+
+    const overview = await analyticsOverview({ from: '2026-10-01', to: '2026-10-31' });
+
+    expect(overview.subscriptionsStartedByMonth.map((bucket) => bucket.month)).toEqual([]);
+    expect(overview.cancellationsByMonth.map((bucket) => bucket.month)).toEqual([]);
+  });
+
+  test('an unbounded query still shows both, so the bound is a bound and not a deletion', async () => {
+    const { analyticsOverview } = await import('../lib/adminPlatformQueries');
+
+    const overview = await analyticsOverview({});
+
+    expect(overview.subscriptionsStartedByMonth.map((bucket) => bucket.month)).toEqual(['2026-01']);
+    expect(overview.cancellationsByMonth.map((bucket) => bucket.month)).toEqual(['2026-02']);
+  });
+
+  test('a query covering those months shows exactly them', async () => {
+    const { analyticsOverview } = await import('../lib/adminPlatformQueries');
+
+    const overview = await analyticsOverview({ from: '2026-01-01', to: '2026-02-28' });
+
+    expect(overview.subscriptionsStartedByMonth.map((bucket) => bucket.month)).toEqual(['2026-01']);
+    expect(overview.cancellationsByMonth.map((bucket) => bucket.month)).toEqual(['2026-02']);
+  });
+
+  test('registrations outside the period are NOT published', async () => {
+    // GATE 5 SECOND-DELTA FINDING 2. Widening `activity_summary`'s shops read
+    // (to stop the report dropping established sellers) also unbounded THIS
+    // chart, because it grouped those rows without reapplying the period. An
+    // October query drew an August bucket.
+    clientBox.rowsByTable.shops = Array.from({ length: 5 }, (_unused, index) => ({
+      id: '7b000000-0000-4000-8000-00000000002' + index,
+      name: 'Pharmacy ' + index,
+      latitude: null,
+      longitude: null,
+      location_captured_at: null,
+      district: 'Dhaka',
+      plan: 'free',
+      commercial_status: 'active',
+      billing_account_id: null,
+      // AUGUST registrations, outside the October query below.
+      created_at: '2026-08-15T06:00:00.000Z',
+      updated_at: '2026-08-15T06:00:00.000Z',
+    }));
+    const { analyticsOverview } = await import('../lib/adminPlatformQueries');
+
+    const october = await analyticsOverview({ from: '2026-10-01', to: '2026-10-31' });
+    expect(october.registeredByDay.map((bucket) => bucket.day)).toEqual([]);
+
+    // Unbounded, they are all there — so the bound is a bound, not a filter
+    // that drops registrations altogether.
+    const all = await analyticsOverview({});
+    expect(all.registeredByDay.map((bucket) => bucket.day)).toEqual(['2026-08-15']);
+    expect(all.registeredByDay[0]?.shopIds).toHaveLength(5);
+  });
+
+  test('the conversion figure is still "ever", so the bound did not narrow it', async () => {
+    // The read stays whole on purpose. An October query must still be able to
+    // say that an account trialed in August later paid — bounding the month
+    // BUCKETS must not bound the lifetime ratio.
+    clientBox.rowsByTable.billing_accounts = [
+      {
+        id: ACCOUNT_ID,
+        primary_shop_id: SHOP_ID,
+        launch_trial_granted_at: '2026-08-01T00:00:00.000Z',
+      },
+    ];
+    const { analyticsOverview } = await import('../lib/adminPlatformQueries');
+
+    const overview = await analyticsOverview({ from: '2026-10-01', to: '2026-10-31' });
+
+    expect(overview.conversion.denominator).toBe(1);
+    expect(overview.conversion.accountIds).toEqual([ACCOUNT_ID]);
+  });
+});
+
+describe('§8.6 the map filters by SUBSCRIPTION status, not commercial status', () => {
+  // GATE 5 DELTA FINDING 6. The control was labelled "Subscription status"
+  // and offered only `active` and `suspended` — the shop's COMMERCIAL status.
+  // So four of the six lifecycle cohorts could not be asked for, and a
+  // TRIALING pharmacy answered to "active".
+  const TRIALING_SHOP = '7b000000-0000-4000-8000-0000000000aa';
+  const TRIALING_ACCOUNT = 'ba000000-0000-4000-8000-0000000000aa';
+
+  beforeEach(() => {
+    setEnvironment({ founder: 'super_admin' });
+    // Both shops are commercially ACTIVE and differ only in subscription.
+    clientBox.rowsByTable.shops = [
+      {
+        id: SHOP_ID,
+        name: 'Banani Pharmacy',
+        latitude: 23.79,
+        longitude: 90.4,
+        location_captured_at: '2026-10-25T00:00:00.000Z',
+        district: 'Dhaka',
+        plan: 'pro',
+        commercial_status: 'active',
+        billing_account_id: ACCOUNT_ID,
+      },
+      {
+        id: TRIALING_SHOP,
+        name: 'Gulshan Pharmacy',
+        latitude: 23.79,
+        longitude: 90.41,
+        location_captured_at: '2026-10-25T00:00:00.000Z',
+        district: 'Dhaka',
+        plan: 'free',
+        commercial_status: 'active',
+        billing_account_id: TRIALING_ACCOUNT,
+      },
+    ];
+    clientBox.rowsByTable.entitlement_snapshots = [
+      {
+        billing_account_id: ACCOUNT_ID,
+        tier: 'pro',
+        status: 'active',
+        trial_ends_at: null,
+        paid_through: '2026-11-01T00:00:00.000Z',
+        grace_ends_at: null,
+        verified_at: '2026-10-20T00:00:00.000Z',
+      },
+      {
+        billing_account_id: TRIALING_ACCOUNT,
+        tier: 'ultra',
+        status: 'trialing',
+        trial_ends_at: '2026-11-10T00:00:00.000Z',
+        paid_through: null,
+        grace_ends_at: null,
+        verified_at: '2026-10-20T00:00:00.000Z',
+      },
+    ];
+  });
+
+  test('all six lifecycle statuses are offered, and `suspended` is not', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./maps/page');
+
+    for (const status of ['trialing', 'active', 'past_due', 'grace', 'canceled', 'expired']) {
+      expect(html, status + ' is not offered').toContain('value="' + status + '"');
+    }
+    // The commercial value that used to masquerade as a subscription status.
+    expect(html).not.toContain('value="suspended"');
+  });
+
+  test('it reads the entitlement snapshots the filter needs', async () => {
+    await signInAs('founder', 'super_admin');
+
+    await render('./maps/page');
+
+    expect(tablesTouched()).toContain('entitlement_snapshots');
+  });
+
+  // No pharmacy NAME is observable here, and that is the point of E13/E14:
+  // both shops have coordinates and neither has consent, so every marker is
+  // withheld. What the page does publish is HOW MANY are withheld, and
+  // because the filters run BEFORE the consent gate that count describes the
+  // filtered population. So the count is the observable, and which specific
+  // shop matched is asserted in lib/adminGeo.test.ts where ids are visible.
+  test('a status filter narrows the withheld population', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const unfiltered = await render('./maps/page');
+    expect(unfiltered).toContain('2 pharmacies have');
+
+    const trialing = await render('./maps/page', { status: 'trialing' });
+    expect(trialing).toContain('1 pharmacy has');
+
+    const active = await render('./maps/page', { status: 'active' });
+    expect(active).toContain('1 pharmacy has');
+  });
+
+  test('a cohort nobody is in matches nothing, rather than everything', async () => {
+    // Non-vacuity in the other direction: a filter that was ignored would
+    // still show 2, and one that dropped everything would show 0 for
+    // `trialing` too.
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./maps/page', { status: 'expired' });
+
+    expect(html).toContain('No pharmacy has a coordinate on record');
   });
 });

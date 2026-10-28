@@ -388,7 +388,7 @@ describe('the counts are named for what they measure', () => {
 
   test('conversion is null, not zero, when nobody was granted a trial', () => {
     expect(trialToPaidConversion({ accounts: [], orders: [] }))
-      .toEqual({ denominator: 0, numerator: 0, ratio: null });
+      .toEqual({ denominator: 0, numerator: 0, ratio: null, accountIds: [] });
   });
 
   test('conversion counts trialed accounts that later paid', () => {
@@ -401,7 +401,15 @@ describe('the counts are named for what they measure', () => {
       orders: [order({ billingAccountId: 'a1' })],
     });
 
-    expect(result).toEqual({ denominator: 2, numerator: 1, ratio: 0.5 });
+    // `accountIds` is the TRIALED accounts, which is what the k=5 floor on
+    // the Analytics page counts -- a3 was never granted a trial, so it is
+    // not a contributor to this figure.
+    expect(result).toEqual({
+      denominator: 2,
+      numerator: 1,
+      ratio: 0.5,
+      accountIds: ['a1', 'a2'],
+    });
   });
 
   test('an account that paid without a trial does not inflate the numerator', () => {
@@ -410,7 +418,12 @@ describe('the counts are named for what they measure', () => {
       orders: [order({ billingAccountId: 'a2' })],
     });
 
-    expect(result).toEqual({ denominator: 1, numerator: 0, ratio: 0 });
+    expect(result).toEqual({
+      denominator: 1,
+      numerator: 0,
+      ratio: 0,
+      accountIds: ['a1'],
+    });
   });
 
   test('recorded cancellations are bounded by the period, and are NOT churn', () => {

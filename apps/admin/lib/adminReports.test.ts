@@ -19,7 +19,7 @@ import { describe, expect, test } from 'vitest';
 import { asPaisa } from '@muthoy/types';
 import { ADMIN_REPORT_IDS, adminReportExportQuerySchema } from '@muthoy/validation';
 import { requireMetric } from './adminMetrics';
-import { SUPPRESSION_K } from './adminSuppression';
+import { SUPPRESSED_DISPLAY, SUPPRESSION_K } from './adminSuppression';
 import type { PaymentOrderRow, SubscriptionRow } from './adminViews';
 import {
   ADMIN_REPORT_DEFINITIONS,
@@ -778,6 +778,82 @@ describe('the status filter is applied or REFUSED, never claimed falsely (findin
     expect(suspended.rows).toEqual([]);
     expect(suspended.subtitle).toContain('status suspended');
     expect(suspended.subtitle).toContain('0 rows');
+  });
+
+  test('established sellers are NOT dropped from an activity report', () => {
+    // GATE 5 DELTA FINDING 4, the exact case the reviewer reproduced: five
+    // shops that SOLD in October but REGISTERED in August. The fix to finding
+    // 9 restricted the sales half to `data.shops`, and the reader narrows
+    // that read by registration date, so their October sales vanished — with
+    // or without a status filter.
+    //
+    // `platformReportData` now reads every shop for this report (see
+    // REPORTS_READING_ALL_SHOPS), so the builder must handle shops whose
+    // registration falls outside the period rather than treating their
+    // absence as a reason to drop their activity.
+    const established = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      shop(index + 1, { createdAt: '2026-08-15T06:00:00.000Z' }),
+    );
+    const octoberSales = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      saleTotal(index + 1),
+    );
+
+    const table = buildReportTable(
+      'activity_summary',
+      data({
+        shops: established,
+        sales: octoberSales,
+        tallies: [{ label: 'shops', counted: established.length, loaded: established.length }],
+      }),
+      // An OCTOBER query, which is what makes the defect visible: the
+      // reader's range on `shops.created_at` excluded every one of these
+      // August registrations, so the sales half had no shop to match.
+      query({ reportId: 'activity_summary', format: 'csv', from: '2026-10-01', to: '2026-10-31' }),
+    );
+
+    // The activity rows exist, and the active count is the five sellers.
+    expect(table.rows.length).toBeGreaterThan(0);
+    const active = table.rows.map((row) => row[1]);
+    expect(active).toContain(String(SUPPRESSION_K));
+    // And NO registration is claimed in the period, because none happened in
+    // it: widening the read must not smuggle August registrations into an
+    // October report.
+    expect(table.rows.every((row) => row[2] === '0' || row[2] === SUPPRESSED_DISPLAY)).toBe(true);
+  });
+
+  test('a status filter still restricts those established sellers', () => {
+    // The capability finding 9 asked for, on the shops finding 4 restored:
+    // the filter must still work when the sellers registered long before the
+    // period, which is exactly the population the broken version could not
+    // see at all.
+    const established = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      shop(index + 1, { createdAt: '2026-08-15T06:00:00.000Z', commercialStatus: 'suspended' }),
+    );
+    const octoberSales = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      saleTotal(index + 1),
+    );
+
+    const build = (status?: string) =>
+      buildReportTable(
+        'activity_summary',
+        data({
+          shops: established,
+          sales: octoberSales,
+          tallies: [{ label: 'shops', counted: established.length, loaded: established.length }],
+        }),
+        query({
+          reportId: 'activity_summary',
+          format: 'csv',
+          from: '2026-10-01',
+          to: '2026-10-31',
+          ...(status === undefined ? {} : { status }),
+        }),
+      );
+
+    // All five are suspended: a suspended-only view keeps their activity...
+    expect(build('suspended').rows.length).toBeGreaterThan(0);
+    // ...and an active-only view has none of it.
+    expect(build('active').rows).toEqual([]);
   });
 
   test('MUTATION: the old behaviour returned the full total under that subtitle', () => {

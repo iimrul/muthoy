@@ -75,8 +75,11 @@ import { getSupabaseAdmin } from './supabaseAdmin';
 const SHOP_LIST_COLUMNS =
   'id,name,name_en,phone,district,thana,plan,commercial_status,created_at,updated_at';
 
+// ONE LITERAL, not a concatenation: a non-literal column string makes
+// PostgREST infer `GenericStringError[]` for the row and the read loses its
+// type entirely.
 const SHOP_LOCATION_COLUMNS =
-  'id,name,latitude,longitude,location_captured_at,district,plan,commercial_status';
+  'id,name,latitude,longitude,location_captured_at,district,plan,commercial_status,billing_account_id';
 
 function text(value: unknown, fallback = ''): string {
   return value === null || value === undefined ? fallback : String(value);
@@ -236,15 +239,58 @@ export async function listShopDistricts(): Promise<readonly string[]> {
  * want of a consent record, and a zero that came from not looking is not the
  * same claim as a zero that came from looking.
  */
-export async function listShopLocations(): Promise<readonly ShopLocationRow[]> {
-  const rows = await readAllPages<Record<string, unknown>>('shop locations', (from, to) =>
+/**
+ * Each billing account's current subscription status, as a map.
+ *
+ * `entitlement_snapshots.billing_account_id` is that table's PRIMARY KEY
+ * (20260831000000:116), so there is exactly one status per account and this
+ * map cannot silently drop a second one.
+ *
+ * A separate read rather than a PostgREST embed: the shops read is paginated
+ * through `readAllPages`, and an embedded relation would be re-fetched on
+ * every page. One read of a one-row-per-account table is cheaper and keeps the
+ * shops query a plain column list, which the contract test checks against the
+ * canonical SQL.
+ */
+async function subscriptionStatusByAccount(): Promise<ReadonlyMap<string, string>> {
+  const rows = await readAllPages<Record<string, unknown>>('entitlement_snapshots', (from, to) =>
     getSupabaseAdmin()
-      .from('shops')
-      .select(SHOP_LOCATION_COLUMNS)
-      .eq('is_deleted', false)
-      .order('id', { ascending: true })
+      .from('entitlement_snapshots')
+      .select('billing_account_id,status')
+      .order('billing_account_id', { ascending: true })
       .range(from, to),
   );
+  const statuses = new Map<string, string>();
+  for (const row of rows) {
+    const accountId = nullableText(row.billing_account_id);
+    const status = nullableText(row.status);
+    if (accountId !== null && status !== null) statuses.set(accountId, status);
+  }
+  return statuses;
+}
+
+/** One shop row's subscription status, or null when it has no subscription. */
+function subscriptionStatusFor(
+  row: Record<string, unknown>,
+  statuses: ReadonlyMap<string, string>,
+): string | null {
+  const accountId = nullableText(row.billing_account_id);
+  if (accountId === null) return null;
+  return statuses.get(accountId) ?? null;
+}
+
+export async function listShopLocations(): Promise<readonly ShopLocationRow[]> {
+  const [rows, statuses] = await Promise.all([
+    readAllPages<Record<string, unknown>>('shop locations', (from, to) =>
+      getSupabaseAdmin()
+        .from('shops')
+        .select(SHOP_LOCATION_COLUMNS)
+        .eq('is_deleted', false)
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+    subscriptionStatusByAccount(),
+  ]);
 
   return rows.map((row) => ({
     id: text(row.id),
@@ -255,6 +301,7 @@ export async function listShopLocations(): Promise<readonly ShopLocationRow[]> {
     district: nullableText(row.district),
     plan: text(row.plan, 'free'),
     commercialStatus: text(row.commercial_status, 'active'),
+    subscriptionStatus: subscriptionStatusFor(row, statuses),
   }));
 }
 
@@ -446,7 +493,21 @@ export interface AnalyticsOverview {
     totalPaisa: Paisa;
     /** §8.5's sales VOLUME: how many sale rows, beside the refund-net total. */
     saleCount: number;
+    /**
+     * Every shop behind the refund-NET total, which spans both sales and
+     * refunds: a month's net figure is built from refund rows too, so a
+     * refund-only shop is a genuine contributor to it.
+     */
     shopIds: readonly string[];
+    /**
+     * The shops that contributed a SALE row, and only those.
+     *
+     * GATE 5 DELTA FINDING 3. `saleCount` was gated on `shopIds`, so one
+     * selling shop plus four refund-only shops cleared k=5 and published a
+     * sale count of 1 — that shop's. A contributor to the net total is not a
+     * contributor to the count of sales.
+     */
+    saleShopIds: readonly string[];
   }[];
   /** Per plan tier: the shops on it. */
   shopsByPlan: readonly { plan: string; shopIds: readonly string[] }[];
@@ -532,7 +593,41 @@ export async function analyticsOverview(
     createdAt: '',
   }));
 
-  /** Groups subscriptions into months by one of their own timestamps. */
+  /**
+   * Whether a Dhaka day falls inside the requested period.
+   *
+   * GATE 5 SECOND-DELTA FINDING 2. `activity_summary` now reads EVERY shop
+   * (REPORTS_READING_ALL_SHOPS, for the reasons there), and this function's
+   * `registeredByDay` grouped those rows without reapplying the period -- so
+   * widening the read to fix the report's missing sellers published August
+   * registrations under an October query. One predicate, used by every bucket
+   * on this page, so a read that widens again cannot silently unbound a
+   * chart.
+   *
+   * `YYYY-MM-DD` compares lexicographically, so this is a date compare.
+   */
+  const withinPeriod = (day: string): boolean => {
+    if (range.from !== undefined && day < range.from) return false;
+    if (range.to !== undefined && day > range.to) return false;
+    return true;
+  };
+
+  /**
+   * Groups subscriptions into months by one of their own timestamps, WITHIN
+   * the requested period.
+   *
+   * GATE 5 DELTA FINDING 5. These two series ignored the range entirely, so
+   * an October query drew January growth and February cancellations beside
+   * October activity and October sales — four charts on one page disagreeing
+   * about what period they describe, with nothing on the page to say so.
+   *
+   * The ROWS are still read whole, which is what the read's comment is about
+   * and remains right: a subscription that started in September is needed to
+   * know September's month bucket, and the conversion figure is "ever". What
+   * is bounded is which BUCKETS come out, and the bound is applied to the
+   * Dhaka day the bucket is derived from so it agrees with every other series
+   * on the page rather than with a UTC slice.
+   */
   const byMonth = (
     rows: readonly SubscriptionRow[],
     instantOf: (row: SubscriptionRow) => string | null,
@@ -541,7 +636,9 @@ export async function analyticsOverview(
     for (const row of rows) {
       const at = instantOf(row);
       if (at === null || at.length === 0) continue;
-      const month = (dhakaDayLabel(at) ?? at.slice(0, 10)).slice(0, 7);
+      const day = dhakaDayLabel(at) ?? at.slice(0, 10);
+      if (!withinPeriod(day)) continue;
+      const month = day.slice(0, 7);
       const held = months.get(month);
       if (held === undefined) months.set(month, [row.billingAccountId]);
       else held.push(row.billingAccountId);
@@ -551,19 +648,28 @@ export async function analyticsOverview(
       .sort((left, right) => left.month.localeCompare(right.month));
   };
 
-  const months = new Map<string, { totalPaisa: Paisa; saleCount: number; shopIds: string[] }>();
+  const months = new Map<
+    string,
+    { totalPaisa: Paisa; saleCount: number; shopIds: string[]; saleShopIds: string[] }
+  >();
   for (const row of [...sales.sales, ...sales.refunds]) {
     const month = row.businessDate.slice(0, 7);
-    const held = months.get(month) ?? { totalPaisa: asPaisa(0), saleCount: 0, shopIds: [] };
+    const held = months.get(month)
+      ?? { totalPaisa: asPaisa(0), saleCount: 0, shopIds: [], saleShopIds: [] };
     held.shopIds.push(row.shopId);
     months.set(month, held);
   }
   // The COUNT is sale rows only — a refund is not a sale, and adding it would
-  // make "how many sales" grow when money went back out.
+  // make "how many sales" grow when money went back out. Its CONTRIBUTORS are
+  // the selling shops only, for the same reason: a shop that only took money
+  // back did not contribute to how many sales there were.
   for (const row of sales.sales) {
     const month = row.businessDate.slice(0, 7);
     const held = months.get(month);
-    if (held !== undefined) held.saleCount += 1;
+    if (held !== undefined) {
+      held.saleCount += 1;
+      held.saleShopIds.push(row.shopId);
+    }
   }
   for (const [month, held] of months) {
     const monthSales = sales.sales.filter((row) => row.businessDate.startsWith(month));
@@ -587,7 +693,11 @@ export async function analyticsOverview(
     ),
     registeredByDay: toDayEntries(
       groupShops(
-        activity.shops,
+        // The period is reapplied HERE because the underlying read is
+        // deliberately unbounded -- see `withinPeriod`.
+        activity.shops.filter((shop) =>
+          withinPeriod(dhakaDayLabel(shop.createdAt) ?? shop.createdAt.slice(0, 10)),
+        ),
         // The DHAKA day, not the UTC slice (Gate 5 finding 10): a 20:00Z
         // registration belongs to the next Dhaka day, and the Dashboard
         // already filed it that way — so these two views disagreed.
@@ -601,6 +711,7 @@ export async function analyticsOverview(
         totalPaisa: held.totalPaisa,
         saleCount: held.saleCount,
         shopIds: held.shopIds,
+        saleShopIds: held.saleShopIds,
       }))
       .sort((left, right) => left.month.localeCompare(right.month)),
     shopsByPlan: [
@@ -777,6 +888,25 @@ const REPORT_TABLES: ReadonlyMap<
   ['refund_net_pharmacy_sales', ['sales']],
 ]);
 
+/**
+ * Reports whose `shops` read must NOT be narrowed by registration date.
+ *
+ * GATE 5 DELTA FINDING 4 — the fix to finding 9 introduced this defect.
+ *
+ * `activity_summary` reads `shops` for two unrelated purposes: to count
+ * registrations in the period, and to know each selling shop's commercial
+ * status. Narrowing the read by `created_at` serves the first and breaks the
+ * second: five shops that sold in October but registered in August are not in
+ * the window, so their October sales were dropped from the report entirely —
+ * with or without a status filter.
+ *
+ * So this report reads every shop, and `buildActivitySummary` applies the
+ * period to the registration half itself, which it already did. The period is
+ * still applied to `sales` at read time, so the rows this widens are one small
+ * table's.
+ */
+const REPORTS_READING_ALL_SHOPS: ReadonlySet<string> = new Set(['activity_summary']);
+
 const REPORT_SHOP_COLUMNS = 'id,name,district,plan,commercial_status,created_at,updated_at';
 
 const REPORT_SUBSCRIPTION_COLUMNS =
@@ -791,6 +921,7 @@ export async function platformReportData(query: AdminReportExportQuery): Promise
   const supabase = getSupabaseAdmin();
   const needed = REPORT_TABLES.get(query.reportId) ?? [];
   const instants = instantBounds(query);
+  const shopInstants = REPORTS_READING_ALL_SHOPS.has(query.reportId) ? {} : instants;
   const days = dayBounds(query);
   const tallies: SourceTally[] = [];
 
@@ -811,13 +942,13 @@ export async function platformReportData(query: AdminReportExportQuery): Promise
             .eq('is_deleted', false),
         ),
         'created_at',
-        instants,
+        shopInstants,
       ),
       (from, to) =>
         withRange(
           asPageQuery(supabase.from('shops').select(REPORT_SHOP_COLUMNS).eq('is_deleted', false)),
           'created_at',
-          instants,
+          shopInstants,
         )
           .order('id', { ascending: true })
           .range(from, to),
@@ -1144,6 +1275,24 @@ export async function shopLocationFor(shopId: string): Promise<ShopLocationRow |
   const row = (data ?? [])[0];
   if (row === undefined) return null;
 
+  // ONE account's snapshot, by primary key. Defaulting the status instead
+  // would be a lie in either direction: `null` means "never subscribed" and
+  // any string names a lifecycle position this shop may not be in.
+  const accountId = nullableText(row.billing_account_id);
+  let subscriptionStatus: string | null = null;
+  if (accountId !== null) {
+    const snapshot = (await getSupabaseAdmin()
+      .from('entitlement_snapshots')
+      .select('status')
+      .eq('billing_account_id', accountId)
+      .limit(1)) as RowsResponse;
+    if (snapshot.error) {
+      console.error('[admin] entitlement snapshot read failed:', snapshot.error.message);
+      throw new AdminDataError('shop location read failed');
+    }
+    subscriptionStatus = nullableText((snapshot.data ?? [])[0]?.status);
+  }
+
   return {
     id: text(row.id),
     name: text(row.name),
@@ -1153,6 +1302,7 @@ export async function shopLocationFor(shopId: string): Promise<ShopLocationRow |
     district: nullableText(row.district),
     plan: text(row.plan, 'free'),
     commercialStatus: text(row.commercial_status, 'active'),
+    subscriptionStatus,
   };
 }
 

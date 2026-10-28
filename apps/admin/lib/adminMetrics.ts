@@ -282,6 +282,17 @@ export interface ConversionRatio {
   numerator: number;
   /** null when nobody was ever granted a trial — NOT zero. */
   ratio: number | null;
+  /**
+   * The accounts behind the figure, so the caller can apply §8.5's floor.
+   *
+   * GATE 5 DELTA FINDING 2. This returned only finished numbers, and the page
+   * rendered them ungated: one trialed account published "100.0%" and "1 of
+   * 1", which is that account's payment activity. A ratio is as identifying as
+   * a total when the denominator is one. Ids rather than a count, for the same
+   * reason as Aggregate's: a count the caller computes itself can be computed
+   * wrongly.
+   */
+  accountIds: readonly string[];
 }
 
 /**
@@ -304,6 +315,7 @@ export function trialToPaidConversion(input: {
     denominator: trialed.length,
     numerator,
     ratio: trialed.length === 0 ? null : numerator / trialed.length,
+    accountIds: trialed.map((account) => account.id),
   };
 }
 
