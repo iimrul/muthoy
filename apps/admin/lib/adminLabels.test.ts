@@ -1205,6 +1205,106 @@ describe('the net anchors appear ONLY where they are pinned', () => {
     return source.replace(pattern, '$1');
   }
 
+  /**
+   * Whether an occurrence sits in a WRITE position.
+   *
+   * GATE 5 SIXTH-DELTA FINDING, and the eighth break of this guard. The
+   * reviewer replaced the Dashboard's only READ with a write that consumes
+   * it:
+   *
+   *   formatMoney(({ x: stats.netSalesToday } = { x: stats.grossSalesToday }).x)
+   *
+   * The occurrence COUNT is unchanged, because the write replaced the read
+   * rather than adding a mention. The pinned derivations are untouched. And
+   * the classifier missed it because the assignment target is a destructuring
+   * PATTERN rather than an identifier or a member -- so gross sales rendered
+   * as net.
+   *
+   * Seven rounds of enumerating write syntaxes failed because that set is
+   * open. This asks ONE question instead, and it does not care how
+   * complicated the pattern is: **climbing from the occurrence, do we reach
+   * an assignment through its LEFT side, an update operator through its
+   * operand, or a for-of/for-in through its initializer?** Nested
+   * destructuring, array patterns, defaults, rest elements and any
+   * combination of them all answer yes, because they are all *inside* that
+   * left-hand side.
+   *
+   * A declaration site answers separately: it is a binding, and layer 1
+   * checks bindings against the pinned derivations.
+   */
+  type OccurrenceRole = 'read' | 'write' | 'binding';
+
+  function roleOfOccurrence(node: ts.Node): OccurrenceRole {
+    let child: ts.Node = node;
+    let parent: ts.Node | undefined = node.parent;
+
+    while (parent !== undefined) {
+      // A write, however the target is spelled.
+      if (
+        ts.isBinaryExpression(parent)
+        && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+        && parent.left === child
+      ) {
+        return 'write';
+      }
+      if (
+        (ts.isPostfixUnaryExpression(parent) || ts.isPrefixUnaryExpression(parent))
+        && (parent.operator === ts.SyntaxKind.PlusPlusToken
+          || parent.operator === ts.SyntaxKind.MinusMinusToken)
+        && parent.operand === child
+      ) {
+        return 'write';
+      }
+      if (
+        (ts.isForOfStatement(parent) || ts.isForInStatement(parent))
+        && parent.initializer === child
+      ) {
+        return 'write';
+      }
+
+      // A declaration site: layer 1 owns it.
+      if (ts.isVariableDeclaration(parent) && parent.name === child) return 'binding';
+      if (ts.isBindingElement(parent) && parent.name === child) return 'binding';
+      if (ts.isPropertyAssignment(parent) && parent.name === child) return 'binding';
+      if (ts.isPropertyDeclaration(parent) && parent.name === child) return 'binding';
+      if (ts.isEnumMember(parent) && parent.name === child) return 'binding';
+      if (ts.isPropertySignature(parent) && parent.name === child) return 'binding';
+
+      child = parent;
+      parent = parent.parent;
+    }
+
+    return 'read';
+  }
+
+  /** Every anchor occurrence that is a WRITE, with where it is. */
+  function anchorWrites(code: string): { anchor: string; text: string }[] {
+    const source = ts.createSourceFile(
+      'scanned.tsx',
+      code,
+      ts.ScriptTarget.ES2022,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    const writes: { anchor: string; text: string }[] = [];
+    const visit = (node: ts.Node): void => {
+      const text = ts.isIdentifier(node)
+        ? node.text
+        : ts.isStringLiteralLike(node)
+          ? node.text
+          : null;
+      if (text !== null && (MODULE_NET_ANCHORS as readonly string[]).includes(text)) {
+        if (roleOfOccurrence(node) === 'write') {
+          writes.push({ anchor: text, text: node.parent.getText(source).slice(0, 120) });
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(source, visit);
+    return writes;
+  }
+
   /** Every mention of an anchor as an identifier or as a string-literal name. */
   function anchorOccurrences(code: string): Record<string, number> {
     const source = ts.createSourceFile(
@@ -1312,6 +1412,80 @@ describe('the net anchors appear ONLY where they are pinned', () => {
     expect(anchorOccurrences(regexStrippedFor(hidden)).pharmacyNetSalesPaisa).toBe(1);
 
     expect(regexStrippedFor(hidden)).not.toContain('totals.pharmacyNetSalesPaisa = 42;');
+  });
+
+  test('NO anchor is ever written outside its pinned binding', () => {
+    // The whole-tree claim: across every scanned file, an anchor appears only
+    // as a type, as its pinned binding, or as a READ. Any write anywhere is a
+    // finding, whatever syntax spelled it.
+    const writes = SOURCES.flatMap((file) =>
+      anchorWrites(file.contents).map((write) => file.path + ': ' + write.text),
+    );
+    expect(writes, 'an anchor is written somewhere').toEqual([]);
+  });
+
+  test('the reviewer’s replace-the-read write is caught on the REAL Dashboard', () => {
+    // GATE 5 SIXTH-DELTA FINDING, exactly as reproduced: a write that
+    // CONSUMES the only read, so the occurrence count never changes and the
+    // pinned derivations stay intact. Gross sales rendered as net.
+    const page = SOURCES.find((file) => file.path === 'app/page.tsx');
+    expect(page, 'the Dashboard is not in SOURCES').toBeDefined();
+    const real = page?.contents ?? '';
+
+    const READ = 'formatMoney(stats.netSalesToday)';
+    expect(real, 'the Dashboard read is not where this test expects it').toContain(READ);
+    // The page as shipped: one occurrence, and it is a read.
+    expect(anchorOccurrences(real).netSalesToday).toBe(1);
+    expect(anchorWrites(real)).toEqual([]);
+
+    const mutant = real.replace(
+      READ,
+      'formatMoney(({ x: stats.netSalesToday } = { x: stats.grossSalesToday }).x)',
+    );
+    expect(mutant).not.toEqual(real);
+
+    // The count is UNCHANGED -- which is why layer 2 could not see this...
+    expect(anchorOccurrences(mutant).netSalesToday).toBe(1);
+    // ...and the write position is what catches it.
+    expect(anchorWrites(mutant).length, 'the destructuring write was missed').toBe(1);
+  });
+
+  test('the write check does not care how complicated the pattern is', () => {
+    // Nested patterns, arrays, defaults and rest elements are all INSIDE the
+    // left-hand side of the assignment, so each answers the one question the
+    // same way. This is what seven rounds of enumeration could not do.
+    const patterns: readonly string[] = [
+      '({ x: stats.netSalesToday } = { x: 1 });',
+      '[stats.netSalesToday] = [1];',
+      '({ a: { b: stats.netSalesToday } } = { a: { b: 1 } });',
+      '[[stats.netSalesToday]] = [[1]];',
+      '({ x: stats.netSalesToday = 1 } = {});',
+      '[...stats.netSalesToday] = [1];',
+      '({ ...stats.netSalesToday } = {});',
+      'for (stats.netSalesToday of [1]) {}',
+      'stats.netSalesToday++;',
+      'stats.netSalesToday ||= 1;',
+    ];
+
+    const missed = patterns.filter((pattern) => anchorWrites(pattern).length === 0);
+    expect(missed, 'a write pattern was not recognised').toEqual([]);
+    expect(patterns).toHaveLength(10);
+  });
+
+  test('and a genuine READ is still a read, so the check is not just "fail"', () => {
+    // Non-vacuity. A check that called everything a write would pass every
+    // test above and break the real tree.
+    const reads: readonly string[] = [
+      'formatMoney(stats.netSalesToday)',
+      'const shown = stats.netSalesToday;',
+      'send({ total: stats.netSalesToday });',
+      'if (stats.netSalesToday > 0) {}',
+      'const o = { value: stats.netSalesToday };',
+    ];
+
+    for (const read of reads) {
+      expect(anchorWrites(read), read).toEqual([]);
+    }
   });
 
   test('a real comment mentioning an anchor is still NOT an occurrence', () => {
