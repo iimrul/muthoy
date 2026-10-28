@@ -14,11 +14,17 @@ import {
   noLocationConsent,
   type ShopLocationRow,
 } from '../../../lib/adminGeo';
-import { listSupportCaseSummaries, shopLocationFor } from '../../../lib/adminPlatformQueries';
+import {
+  listShopSupportNotes,
+  listSupportCaseSummaries,
+  shopLocationFor,
+  type ShopSupportNote,
+} from '../../../lib/adminPlatformQueries';
 import { getShopDetail } from '../../../lib/adminQueries';
 import type { SupportCaseSummary } from '../../../lib/adminSupport';
 import {
   formatDhakaDate,
+  formatDhakaDateTime,
   isUuid,
   statusLabel,
   tierLabel,
@@ -79,6 +85,9 @@ interface ShopPageProps {
 interface ShopBundle {
   detail: ShopDetailView;
   cases: readonly SupportCaseSummary[];
+  /** The actual notes on those cases, newest first (Gate 5 finding 16). */
+  notes: readonly ShopSupportNote[];
+  casesFollowed: number;
   location: ShopLocationRow | null;
 }
 
@@ -105,7 +114,15 @@ async function loadShop(id: string, mayReadLocation: boolean): Promise<BundleRes
       mayReadLocation ? shopLocationFor(id) : Promise.resolve(null),
     ]);
     if (detail === null) return { ok: true, bundle: null, nowMs: now.getTime() };
-    return { ok: true, bundle: { detail, cases, location }, nowMs: now.getTime() };
+    // The notes come AFTER the cases, because a note is read per case id and
+    // the case ids are what scope it to this shop. There is no path that reads
+    // a note without a case that belongs here.
+    const { notes, casesFollowed } = await listShopSupportNotes(cases);
+    return {
+      ok: true,
+      bundle: { detail, cases, notes, casesFollowed, location },
+      nowMs: now.getTime(),
+    };
   } catch (error: unknown) {
     console.error('[admin] shop detail failed to load:', error);
     return { ok: false, message: toDisplayMessage(error) };
@@ -132,7 +149,7 @@ export default async function ShopDetailPage({ params }: ShopPageProps) {
   if (!result.ok) return <ErrorNotice message={result.message} />;
   if (result.bundle === null) notFound();
 
-  const { detail, cases, location } = result.bundle;
+  const { detail, cases, notes, casesFollowed, location } = result.bundle;
   const { shop } = detail;
 
   const openCases = cases.filter((entry) => entry.isOpen).length;
@@ -148,7 +165,21 @@ export default async function ShopDetailPage({ params }: ShopPageProps) {
         <DetailList
           items={[
             { label: 'Phone', value: formatPhone(shop.phone) },
+            // §8.2's owner information (Gate 5 finding 16). A null name means
+            // the row could not be read, which is not the same as no owner.
+            { label: 'Owner', value: detail.ownerName ?? 'could not be read' },
+            {
+              label: 'Owner phone',
+              value: detail.ownerPhone === null ? 'could not be read' : formatPhone(detail.ownerPhone),
+            },
             { label: 'Registered', value: formatDhakaDate(shop.createdAt) },
+            {
+              // "Last synced change", not "last seen": the schema keeps the
+              // CLIENT's timestamp for last-write-wins and has no updated_at
+              // trigger, so this is the last change that SYNCED.
+              label: 'Last synced change',
+              value: formatDhakaDateTime(detail.lastSyncedChangeAt),
+            },
             { label: 'Plan', value: tierLabel(detail.tier) },
             { label: 'Entitlement status', value: statusLabel(detail.entitlementStatus) },
             { label: 'Access ends', value: formatDhakaDate(detail.accessEndsAt) },
@@ -204,6 +235,39 @@ export default async function ShopDetailPage({ params }: ShopPageProps) {
             emptyMessage="No support case has been opened for this pharmacy. The support tables ship empty, and no history is fabricated."
           />
         </div>
+
+        {/* THE NOTES THEMSELVES (Gate 5 finding 16). This block was called
+            "Support notes" while reading no note at all — only case summaries.
+            A note is what somebody actually wrote down about this pharmacy, and
+            it is what a support conversation is reconstructed from. */}
+        {cases.length === 0 ? null : (
+          <div className="mt-4">
+            <h3 className="text-sm font-semibold">Notes on those cases</h3>
+            {notes.length === 0 ? (
+              <EmptyState message="These cases carry no notes yet. A case can be opened without one, and none is invented here." />
+            ) : (
+              <>
+                <ul className="mt-2 space-y-2">
+                  {notes.map((note) => (
+                    <li key={note.id} className="rounded border border-black/10 bg-white p-3">
+                      <p className="text-sm text-richBlack">{note.body}</p>
+                      <p className="mt-1 text-xs text-midGray">
+                        {note.author} · {formatDhakaDateTime(note.createdAt)} · on{' '}
+                        {note.caseSummary}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+                {casesFollowed < cases.length ? (
+                  <p className="mt-2 text-xs text-midGray">
+                    Notes are shown for the {casesFollowed} most recently updated cases of{' '}
+                    {cases.length}. The rest are on the Support page.
+                  </p>
+                ) : null}
+              </>
+            )}
+          </div>
+        )}
       </section>
 
       <section aria-labelledby="shop-location" className="mt-8">

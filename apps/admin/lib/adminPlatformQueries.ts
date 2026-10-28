@@ -1313,3 +1313,60 @@ export async function shopAuditPage(
     meta: pageMeta(range, countResult.count ?? 0),
   };
 }
+
+// ──────────────────────── §8.2 the drill-down's own support NOTES read
+
+export interface ShopSupportNote {
+  id: string;
+  caseId: string;
+  caseSummary: string;
+  body: string;
+  author: string;
+  createdAt: string;
+}
+
+/**
+ * The NOTES on a shop's support cases, newest first.
+ *
+ * GATE 5 FINDING 16: the drill-down rendered case SUMMARIES and called the
+ * block "Support notes" while reading no note at all. A note is the thing
+ * somebody actually wrote down about this pharmacy, and it is what a support
+ * conversation is reconstructed from.
+ *
+ * Scoped by construction: the case ids come from `listSupportCaseSummaries`
+ * filtered on `shop_id` IN THE QUERY, and the notes are read per case id. There
+ * is no code path that reads a note without first having a case that belongs to
+ * this shop.
+ *
+ * Bounded: `MAX_CASES_FOR_NOTES` cases are followed. A pharmacy with more open
+ * cases than that has a support problem the drill-down is not the place to
+ * read, and the page says the list is truncated rather than implying it is all.
+ */
+const MAX_CASES_FOR_NOTES = 20;
+
+export async function listShopSupportNotes(
+  cases: readonly { id: string; summary: string }[],
+): Promise<{ notes: readonly ShopSupportNote[]; casesFollowed: number }> {
+  const followed = cases.slice(0, MAX_CASES_FOR_NOTES);
+  if (followed.length === 0) return { notes: [], casesFollowed: 0 };
+
+  const perCase = await Promise.all(
+    followed.map(async (entry) => {
+      const rows = await listSupportNotes(entry.id);
+      return rows.map((row) => ({
+        id: row.id,
+        caseId: row.caseId,
+        caseSummary: entry.summary,
+        body: row.body,
+        author: row.author,
+        createdAt: row.createdAt,
+      }));
+    }),
+  );
+
+  const notes = perCase
+    .flat()
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+
+  return { notes, casesFollowed: followed.length };
+}

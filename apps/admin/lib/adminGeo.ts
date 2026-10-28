@@ -267,3 +267,52 @@ export function mapConfiguration(input: {
 
   return { status: 'ready', tileUrl, tileAttribution, markers, withheldForConsent };
 }
+
+// ────────────────────────────────────────────────────── §8.6's own filters
+
+export interface MapFilters {
+  /** An exact district, as the shop rows carry it. */
+  district?: string;
+  /** An exact commercial status. */
+  status?: string;
+}
+
+/**
+ * §8.6's district and subscription-status filters.
+ *
+ * GATE 5 FINDING 17: these were specified and not built, on either the page or
+ * the canvas.
+ *
+ * APPLIED BEFORE THE CONSENT GATE, deliberately. Filtering after it would make
+ * the withheld count describe the whole platform while the map described a
+ * district — two numbers on one screen answering different questions. Narrowing
+ * first means "3 pharmacies in Dhaka are being withheld" is about Dhaka.
+ *
+ * EQUALITY on values that came from the rows themselves, so no pattern is in
+ * play. A district the data does not hold simply matches nothing, which is the
+ * honest answer to a stale bookmark.
+ */
+export function applyMapFilters(
+  rows: readonly ShopLocationRow[],
+  filters: MapFilters,
+): readonly ShopLocationRow[] {
+  const district = filters.district?.trim() ?? '';
+  const status = filters.status?.trim() ?? '';
+  if (district.length === 0 && status.length === 0) return rows;
+
+  return rows.filter((row) => {
+    if (district.length > 0 && (row.district ?? '') !== district) return false;
+    if (status.length > 0 && row.commercialStatus !== status) return false;
+    return true;
+  });
+}
+
+/** The districts present in the rows, for the filter's options. */
+export function mapDistricts(rows: readonly ShopLocationRow[]): readonly string[] {
+  const districts = new Set<string>();
+  for (const row of rows) {
+    const district = row.district?.trim();
+    if (district !== undefined && district.length > 0) districts.add(district);
+  }
+  return [...districts].sort();
+}

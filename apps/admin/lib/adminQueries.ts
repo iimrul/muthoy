@@ -322,7 +322,11 @@ export async function getShopDetail(
 
   const { data: shopData, error: shopError } = await supabase
     .from('shops')
-    .select('id,name,phone,created_at,plan,commercial_status,commercial_reason,archived_at,billing_account_id')
+    // §8.2 (Gate 5 finding 16) adds `owner_id` and `updated_at`: the owner
+    // information and the last synced change were specified and were not read.
+    // ONE LITERAL, deliberately: `.select()` with a concatenated string loses
+    // the row type and comes back as GenericStringError[].
+    .select('id,name,phone,created_at,updated_at,owner_id,plan,commercial_status,commercial_reason,archived_at,billing_account_id')
     .eq('id', id)
     .eq('is_deleted', false)
     .maybeSingle();
@@ -334,6 +338,36 @@ export async function getShopDetail(
   if (!shopData) return null;
 
   const shop = toShopRow(shopData as Record<string, unknown>);
+  const shopRecord = shopData as Record<string, unknown>;
+  const ownerId = shopRecord.owner_id === null || shopRecord.owner_id === undefined
+    ? null
+    : String(shopRecord.owner_id);
+  const lastSyncedChangeAt = shopRecord.updated_at === null || shopRecord.updated_at === undefined
+    ? null
+    : String(shopRecord.updated_at);
+
+  // The owner's own row. Read by id, so one shop's detail cannot contain
+  // another's owner — and a failure to read it is reported as "could not be
+  // read" rather than as "no owner", which are different facts.
+  let ownerName: string | null = null;
+  let ownerPhone: string | null = null;
+  if (ownerId !== null) {
+    const { data: ownerData, error: ownerError } = await supabase
+      .from('users')
+      .select('id,name,phone')
+      .eq('id', ownerId)
+      .eq('is_deleted', false)
+      .maybeSingle();
+    if (ownerError) {
+      console.error('[admin] shop owner lookup failed:', ownerError.message);
+      throw new AdminDataError('shop owner lookup failed');
+    }
+    if (ownerData) {
+      const owner = ownerData as Record<string, unknown>;
+      ownerName = owner.name === null || owner.name === undefined ? null : String(owner.name);
+      ownerPhone = owner.phone === null || owner.phone === undefined ? null : String(owner.phone);
+    }
+  }
 
   const { count: staffCount, error: staffError } = await supabase
     .from('users')
@@ -376,6 +410,9 @@ export async function getShopDetail(
         : entitlement.graceEndsAt ?? entitlement.paidThrough ?? null,
     activeStaffCount: staffCount ?? 0,
     memberships,
+    ownerName,
+    ownerPhone,
+    lastSyncedChangeAt,
     grossSalesTodayPaisa: sumPaisa(saleRows.map((row) => Number(row.total ?? 0))),
     saleCountToday: saleRows.length,
   };

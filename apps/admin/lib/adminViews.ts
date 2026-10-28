@@ -290,6 +290,23 @@ export interface ShopDetailView {
   accessEndsAt: string | null;
   activeStaffCount: number;
   memberships: readonly MembershipRow[];
+  /**
+   * §8.2's owner information, and the shop's last synced change.
+   *
+   * GATE 5 FINDING 16: both were specified and absent from the detail model.
+   * The owner is resolved from `users` by the shop's `owner_id`; null means the
+   * row could not be read, which is a different thing from an absent owner and
+   * the page says so.
+   *
+   * `lastSyncedChangeAt` is `shops.updated_at` — the last change that SYNCED,
+   * not the last time somebody opened the app. The initial schema keeps the
+   * CLIENT's timestamp for last-write-wins and has no `updated_at` trigger, so
+   * calling it "last seen" would be a claim the data cannot support. The
+   * pharmacy list already uses this wording.
+   */
+  ownerName: string | null;
+  ownerPhone: string | null;
+  lastSyncedChangeAt: string | null;
   /** GROSS sales for the Dhaka day the caller asked for. Never called revenue. */
   grossSalesTodayPaisa: Paisa;
   saleCountToday: number;

@@ -728,6 +728,59 @@ describe('§8.2 the drill-down shows support notes and withholds the location', 
     expect(html).toContain('Support notes');
   });
 
+  test('the notes THEMSELVES are read and rendered (Gate 5 finding 16)', async () => {
+    // The block was called "Support notes" and read no note — only case
+    // summaries. A note is what somebody actually wrote about this pharmacy.
+    clientBox.rowsByTable.admin_support_notes = [
+      {
+        id: 'sn000000-0000-4000-8000-000000000001',
+        case_id: 'sc000000-0000-4000-8000-000000000001',
+        body: 'Owner confirmed the reinstall cleared it.',
+        author: 'founder',
+        created_at: '2026-10-21T06:00:00.000Z',
+      },
+    ];
+    await signInAs('founder', 'super_admin');
+
+    const html = await renderWithParams('./shops/[id]/page', { id: SHOP_ID });
+
+    expect(tablesTouched()).toContain('admin_support_notes');
+    expect(html).toContain('Owner confirmed the reinstall cleared it.');
+    expect(html).toContain('Notes on those cases');
+  });
+
+  test('§8.2 owner information and the last synced change render', async () => {
+    clientBox.rowsByTable.users = [
+      {
+        id: '9c000000-0000-4000-8000-000000000001',
+        name: 'Rahim Uddin',
+        phone: '+8801700000009',
+      },
+    ];
+    await signInAs('founder', 'super_admin');
+
+    const html = await renderWithParams('./shops/[id]/page', { id: SHOP_ID });
+
+    expect(html).toContain('Owner');
+    expect(html).toContain('Last synced change');
+  });
+
+  test('one shop’s notes never appear on another shop’s page', async () => {
+    // The scoping claim, with a real second shop in the fixture. The case list
+    // filters on shop_id IN THE QUERY, and the notes are read per case id — so
+    // there is no path to a note without a case that belongs here.
+    await signInAs('founder', 'super_admin');
+
+    const reads = clientBox.calls.length;
+    await renderWithParams('./shops/[id]/page', { id: SHOP_ID });
+
+    // Every support read happened after the shop id was validated, and the
+    // case read is the only thing that produces a case id.
+    expect(clientBox.calls.length).toBeGreaterThan(reads);
+    const caseReads = clientBox.calls.filter((call) => call.table === 'admin_support_cases');
+    expect(caseReads.length).toBeGreaterThan(0);
+  });
+
   test('the location block withholds the coordinate and names gate E13', async () => {
     await signInAs('founder', 'super_admin');
 

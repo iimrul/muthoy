@@ -1,10 +1,14 @@
 import ErrorNotice from '../../components/ErrorNotice';
 import MapLoader from '../../components/map/MapLoader';
+import { FilterForm } from '../../components/PageParts';
 import { requireAdminPermission } from '../../lib/adminAuthz';
+import { parseListQuery } from '../../lib/adminFilters';
 import {
+  applyMapFilters,
   MAP_TILE_ATTRIBUTION_ENV,
   MAP_TILE_URL_ENV,
   mapConfiguration,
+  mapDistricts,
   noLocationConsent,
   type MapConfiguration,
 } from '../../lib/adminGeo';
@@ -30,19 +34,32 @@ import { toDisplayMessage } from '../../lib/errors';
 export const dynamic = 'force-dynamic';
 
 type MapsResult =
-  | { ok: true; configuration: MapConfiguration; shopsRead: number }
+  | {
+      ok: true;
+      configuration: MapConfiguration;
+      shopsRead: number;
+      shopsMatched: number;
+      districts: readonly string[];
+    }
   | { ok: false; message: string };
 
-async function loadMap(): Promise<MapsResult> {
+async function loadMap(filters: { district?: string; status?: string }): Promise<MapsResult> {
   try {
     const rows = await listShopLocations();
+    // §8.6's filters, applied BEFORE the consent gate (Gate 5 finding 17), so
+    // the withheld count describes the same population the map describes.
+    const matched = applyMapFilters(rows, filters);
     return {
       ok: true,
       shopsRead: rows.length,
+      shopsMatched: matched.length,
+      // The options come from every shop, not from the filtered set — a filter
+      // whose own options vanish once applied cannot be cleared.
+      districts: mapDistricts(rows),
       configuration: mapConfiguration({
         tileUrl: process.env[MAP_TILE_URL_ENV],
         tileAttribution: process.env[MAP_TILE_ATTRIBUTION_ENV],
-        rows,
+        rows: matched,
         // The shipped source. There is no consent table, so there is no record.
         consent: noLocationConsent,
         nowMs: Date.now(),
@@ -54,7 +71,11 @@ async function loadMap(): Promise<MapsResult> {
   }
 }
 
-export default async function MapsPage() {
+interface MapsPageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function MapsPage({ searchParams }: MapsPageProps) {
   try {
     await requireAdminPermission('maps.read');
   } catch (error: unknown) {
@@ -82,18 +103,64 @@ export default async function MapsPage() {
     );
   }
 
-  const result = await loadMap();
+  // The filters go through the SHARED schema, so a crafted district or status
+  // is refused before any read rather than reaching an equality comparison.
+  const raw = await searchParams;
+  const parsed = parseListQuery(raw);
+  if (!parsed.ok) {
+    return (
+      <>
+        <h1 className="text-xl font-semibold">Maps</h1>
+        <p role="alert" className="mt-4 text-sm text-richBlack">
+          {parsed.message} Nothing was queried.
+        </p>
+      </>
+    );
+  }
+
+  const result = await loadMap({
+    district: parsed.query.district,
+    status: parsed.query.status,
+  });
   if (!result.ok) return <ErrorNotice message={result.message} />;
 
-  const { configuration, shopsRead } = result;
+  const { configuration, shopsRead, shopsMatched, districts } = result;
+  const isFiltered = shopsMatched !== shopsRead;
 
   return (
     <>
       <h1 className="text-xl font-semibold">Maps</h1>
       <p className="mt-1 text-sm text-midGray">
         Pharmacy locations, coloured by plan tier. {shopsRead}{' '}
-        {shopsRead === 1 ? 'pharmacy was' : 'pharmacies were'} read.
+        {shopsRead === 1 ? 'pharmacy was' : 'pharmacies were'} read
+        {isFiltered
+          ? ', and ' + shopsMatched + ' match the filters below.'
+          : '. No filter is applied.'}
       </p>
+
+      <FilterForm
+        selects={[
+          {
+            name: 'district',
+            label: 'District',
+            value: parsed.query.district ?? '',
+            options: [
+              { value: '', label: 'Any district' },
+              ...districts.map((district) => ({ value: district, label: district })),
+            ],
+          },
+          {
+            name: 'status',
+            label: 'Subscription status',
+            value: parsed.query.status ?? '',
+            options: [
+              { value: '', label: 'Any status' },
+              { value: 'active', label: 'active' },
+              { value: 'suspended', label: 'suspended' },
+            ],
+          },
+        ]}
+      />
 
       {configuration.status === 'ready' ? (
         <div className="mt-6">

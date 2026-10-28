@@ -28,6 +28,8 @@ import {
   markerColorForPlan,
   noLocationConsent,
   plottableMarkers,
+  applyMapFilters,
+  mapDistricts,
 } from './adminGeo';
 
 const NOW = Date.parse('2026-10-25T12:00:00+06:00');
@@ -287,5 +289,102 @@ describe('the tile configuration', () => {
 
   test('the environment variable is NOT NEXT_PUBLIC_, so it is never inlined', () => {
     expect(MAP_TILE_URL_ENV.startsWith('NEXT_PUBLIC_')).toBe(false);
+  });
+});
+
+describe('§8.6 district and subscription-status filters (Gate 5 finding 17)', () => {
+  // These were specified and not built, on either the page or the canvas.
+  function at(over: Partial<ShopLocationRow> = {}): ShopLocationRow {
+    return {
+      id: 'shop-' + (over.district ?? 'x') + (over.commercialStatus ?? 'y'),
+      name: 'Pharmacy',
+      latitude: null,
+      longitude: null,
+      locationCapturedAt: null,
+      district: 'Dhaka',
+      plan: 'free',
+      commercialStatus: 'active',
+      ...over,
+    };
+  }
+
+  const rows = [
+    at({ id: 'a', district: 'Dhaka', commercialStatus: 'active' }),
+    at({ id: 'b', district: 'Dhaka', commercialStatus: 'suspended' }),
+    at({ id: 'c', district: 'Chattogram', commercialStatus: 'active' }),
+    at({ id: 'd', district: null, commercialStatus: 'active' }),
+  ];
+
+  test('no filter returns everything, by identity', () => {
+    expect(applyMapFilters(rows, {})).toBe(rows);
+    expect(applyMapFilters(rows, { district: '', status: '' })).toBe(rows);
+  });
+
+  test('the district filter is exact', () => {
+    expect(applyMapFilters(rows, { district: 'Dhaka' }).map((row) => row.id)).toEqual(['a', 'b']);
+    expect(applyMapFilters(rows, { district: 'Dha' })).toEqual([]);
+  });
+
+  test('the status filter is exact', () => {
+    expect(applyMapFilters(rows, { status: 'suspended' }).map((row) => row.id)).toEqual(['b']);
+  });
+
+  test('the two filters compose — they narrow, never widen', () => {
+    expect(
+      applyMapFilters(rows, { district: 'Dhaka', status: 'suspended' }).map((row) => row.id),
+    ).toEqual(['b']);
+    expect(applyMapFilters(rows, { district: 'Chattogram', status: 'suspended' })).toEqual([]);
+  });
+
+  test('a shop with NO district is excluded by a district filter, not crashed on', () => {
+    expect(applyMapFilters(rows, { district: 'Dhaka' }).map((row) => row.id)).not.toContain('d');
+  });
+
+  test('the options are the districts present, sorted, with blanks dropped', () => {
+    expect(mapDistricts(rows)).toEqual(['Chattogram', 'Dhaka']);
+    expect(mapDistricts([at({ district: '   ' }), at({ district: null })])).toEqual([]);
+  });
+
+  test('filtering happens BEFORE the consent gate, so the counts agree', () => {
+    // A filtered map whose withheld count described the whole platform would
+    // put two numbers answering different questions on one screen.
+    const withCoordinates = [
+      at({ id: 'p', district: 'Dhaka', latitude: 23.79, longitude: 90.4, locationCapturedAt: '2026-10-01T00:00:00.000Z' }),
+      at({ id: 'q', district: 'Chattogram', latitude: 22.35, longitude: 91.8, locationCapturedAt: '2026-10-01T00:00:00.000Z' }),
+    ];
+
+    const all = mapConfiguration({
+      tileUrl: undefined,
+      tileAttribution: undefined,
+      rows: withCoordinates,
+      consent: noLocationConsent,
+      nowMs: Date.parse('2026-10-28T00:00:00.000Z'),
+    });
+    const dhakaOnly = mapConfiguration({
+      tileUrl: undefined,
+      tileAttribution: undefined,
+      rows: applyMapFilters(withCoordinates, { district: 'Dhaka' }),
+      consent: noLocationConsent,
+      nowMs: Date.parse('2026-10-28T00:00:00.000Z'),
+    });
+
+    expect(all.withheldForConsent).toBe(2);
+    expect(dhakaOnly.withheldForConsent).toBe(1);
+  });
+
+  test('a filter does NOT unlock a marker — both gates still hold', () => {
+    // The filters must not become a way past E13/E14.
+    const filtered = mapConfiguration({
+      tileUrl: undefined,
+      tileAttribution: undefined,
+      rows: applyMapFilters(
+        [at({ latitude: 23.79, longitude: 90.4, locationCapturedAt: '2026-10-01T00:00:00.000Z' })],
+        { district: 'Dhaka' },
+      ),
+      consent: noLocationConsent,
+      nowMs: Date.parse('2026-10-28T00:00:00.000Z'),
+    });
+
+    expect(filtered.status).not.toBe('ready');
   });
 });
