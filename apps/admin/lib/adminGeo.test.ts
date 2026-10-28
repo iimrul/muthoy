@@ -30,7 +30,9 @@ import {
   plottableMarkers,
   applyMapFilters,
   mapDistricts,
+  MAP_STATUS_NONE,
 } from './adminGeo';
+import { SUBSCRIPTION_STATUS_FILTERS } from './adminSubscriptionViews';
 
 const NOW = Date.parse('2026-10-25T12:00:00+06:00');
 const TILE_URL = 'https://tiles.example.test/{z}/{x}/{y}.png';
@@ -46,6 +48,9 @@ function shop(overrides: Partial<ShopLocationRow> = {}): ShopLocationRow {
     district: 'Dhaka',
     plan: 'pro',
     commercialStatus: 'active',
+    // A subscribed shop by default, so a test that cares about the
+    // SUBSCRIPTION status has to say which one it means.
+    subscriptionStatus: 'active',
     ...overrides,
   };
 }
@@ -296,7 +301,7 @@ describe('§8.6 district and subscription-status filters (Gate 5 finding 17)', (
   // These were specified and not built, on either the page or the canvas.
   function at(over: Partial<ShopLocationRow> = {}): ShopLocationRow {
     return {
-      id: 'shop-' + (over.district ?? 'x') + (over.commercialStatus ?? 'y'),
+      id: 'shop-' + (over.district ?? 'x') + (over.subscriptionStatus ?? 'y'),
       name: 'Pharmacy',
       latitude: null,
       longitude: null,
@@ -304,15 +309,21 @@ describe('§8.6 district and subscription-status filters (Gate 5 finding 17)', (
       district: 'Dhaka',
       plan: 'free',
       commercialStatus: 'active',
+      subscriptionStatus: 'active',
       ...over,
     };
   }
 
+  // GATE 5 DELTA FINDING 6 shows up in this fixture: every row is
+  // commercially ACTIVE, and they differ only in subscription status. Under
+  // the broken filter, "trialing" matched nothing and "active" matched all of
+  // them — so a trialing pharmacy was published as active.
   const rows = [
-    at({ id: 'a', district: 'Dhaka', commercialStatus: 'active' }),
-    at({ id: 'b', district: 'Dhaka', commercialStatus: 'suspended' }),
-    at({ id: 'c', district: 'Chattogram', commercialStatus: 'active' }),
-    at({ id: 'd', district: null, commercialStatus: 'active' }),
+    at({ id: 'a', district: 'Dhaka', subscriptionStatus: 'active' }),
+    at({ id: 'b', district: 'Dhaka', subscriptionStatus: 'trialing' }),
+    at({ id: 'c', district: 'Chattogram', subscriptionStatus: 'canceled' }),
+    at({ id: 'd', district: null, subscriptionStatus: 'expired' }),
+    at({ id: 'e', district: 'Dhaka', subscriptionStatus: null }),
   ];
 
   test('no filter returns everything, by identity', () => {
@@ -321,19 +332,56 @@ describe('§8.6 district and subscription-status filters (Gate 5 finding 17)', (
   });
 
   test('the district filter is exact', () => {
-    expect(applyMapFilters(rows, { district: 'Dhaka' }).map((row) => row.id)).toEqual(['a', 'b']);
+    expect(applyMapFilters(rows, { district: 'Dhaka' }).map((row) => row.id))
+      .toEqual(['a', 'b', 'e']);
     expect(applyMapFilters(rows, { district: 'Dha' })).toEqual([]);
   });
 
-  test('the status filter is exact', () => {
-    expect(applyMapFilters(rows, { status: 'suspended' }).map((row) => row.id)).toEqual(['b']);
+  test('the status filter matches the SUBSCRIPTION status, not the commercial one', () => {
+    // Every row is commercially 'active'. If this filtered commercial status,
+    // 'trialing' would match nothing and 'active' would match all five.
+    expect(applyMapFilters(rows, { status: 'trialing' }).map((row) => row.id)).toEqual(['b']);
+    expect(applyMapFilters(rows, { status: 'active' }).map((row) => row.id)).toEqual(['a']);
+  });
+
+  test('every one of the six lifecycle statuses can be asked for', () => {
+    // The cohorts the first attempt could not offer at all. The list is the
+    // one §8.3 uses, so the map and the subscriptions page cannot drift — and
+    // it matches entitlement_snapshots' CHECK constraint
+    // (20260831000000:119).
+    expect(SUBSCRIPTION_STATUS_FILTERS).toEqual([
+      'trialing',
+      'active',
+      'past_due',
+      'grace',
+      'canceled',
+      'expired',
+    ]);
+    for (const status of SUBSCRIPTION_STATUS_FILTERS) {
+      // Each is a legal request: it returns the matching rows, never a throw,
+      // and never everything.
+      const matched = applyMapFilters(rows, { status });
+      expect(matched.length).toBeLessThan(rows.length);
+      expect(matched.every((row) => row.subscriptionStatus === status)).toBe(true);
+    }
+    // And four of the six are actually present in this fixture, so the loop
+    // above is not passing on six empty results.
+    const present = SUBSCRIPTION_STATUS_FILTERS.filter(
+      (status) => applyMapFilters(rows, { status }).length > 0,
+    );
+    expect(present).toEqual(['trialing', 'active', 'canceled', 'expired']);
+  });
+
+  test('a shop with NO subscription is its own cohort, not an expired one', () => {
+    expect(applyMapFilters(rows, { status: MAP_STATUS_NONE }).map((row) => row.id)).toEqual(['e']);
+    expect(applyMapFilters(rows, { status: 'expired' }).map((row) => row.id)).toEqual(['d']);
   });
 
   test('the two filters compose — they narrow, never widen', () => {
     expect(
-      applyMapFilters(rows, { district: 'Dhaka', status: 'suspended' }).map((row) => row.id),
+      applyMapFilters(rows, { district: 'Dhaka', status: 'trialing' }).map((row) => row.id),
     ).toEqual(['b']);
-    expect(applyMapFilters(rows, { district: 'Chattogram', status: 'suspended' })).toEqual([]);
+    expect(applyMapFilters(rows, { district: 'Chattogram', status: 'trialing' })).toEqual([]);
   });
 
   test('a shop with NO district is excluded by a district filter, not crashed on', () => {

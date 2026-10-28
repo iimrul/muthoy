@@ -68,6 +68,29 @@ function searchableText(entry: AdminAuditEntry): string {
 }
 
 /**
+ * Entries whose action falls in ANY of several dotted families.
+ *
+ * GATE 5 DELTA FINDING 7. The Admins page used to call `filterAuditEntries`
+ * once per prefix and concatenate the results, which can return the same
+ * entry more than once if two prefixes ever overlap — so it then
+ * de-duplicated on `at + actor + action`. That key is not an identity: two
+ * revocations of DIFFERENT targets by the same actor in the same millisecond
+ * collapsed into one row, and a DENIED attempt collapsed into the successful
+ * one beside it. A security history that silently drops failures is worse
+ * than no history.
+ *
+ * One pass over the entries cannot produce a duplicate, so there is nothing
+ * to de-duplicate and no event can be lost. Order is the entries' own.
+ */
+export function filterAuditEntriesByActionFamilies(
+  entries: readonly AdminAuditEntry[],
+  prefixes: readonly string[],
+): readonly AdminAuditEntry[] {
+  // The same PREFIX semantics as `filterAuditEntries`' `action`, stated once.
+  return entries.filter((entry) => prefixes.some((prefix) => entry.action.startsWith(prefix)));
+}
+
+/**
  * The §8.9a filters: actor, action, outcome, date range and free text.
  *
  * `actor` and `outcome` are EXACT matches, because both come from a select

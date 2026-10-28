@@ -15,6 +15,7 @@ import {
   auditDhakaDay,
   AUDIT_OUTCOMES,
   filterAuditEntries,
+  filterAuditEntriesByActionFamilies,
   formatAuditMeta,
   sliceAuditEntries,
 } from './adminAuditViews';
@@ -317,5 +318,130 @@ describe('§8.8 the Admins page security history (Gate 5 finding 15)', () => {
     for (const prefix of PREFIXES) {
       expect(adminListQuerySchema.safeParse({ action: prefix }).success, prefix).toBe(true);
     }
+  });
+});
+
+describe('action families keep every distinct event (delta finding 7)', () => {
+  // THE DEFECT. The Admins page concatenated one filter call per prefix and
+  // then de-duplicated on `at + actor + action`. Those three fields are not
+  // an identity, so events that differ only in TARGET, OUTCOME or META were
+  // silently dropped — and the dropped ones included denied attempts.
+  const PREFIXES = ['admins.', 'login', 'session.'] as const;
+
+  const AT = '2026-10-25T06:00:00.000Z';
+
+  const twoTargets: AdminAuditEntry[] = [
+    {
+      at: AT,
+      actor: 'founder',
+      role: 'super_admin',
+      actorVerified: true,
+      action: 'admins.revoke_sessions',
+      target: 'ops',
+      outcome: 'success',
+      meta: {},
+    },
+    {
+      // SAME millisecond, SAME actor, SAME action — a different person.
+      at: AT,
+      actor: 'founder',
+      role: 'super_admin',
+      actorVerified: true,
+      action: 'admins.revoke_sessions',
+      target: 'billing_clerk',
+      outcome: 'success',
+      meta: {},
+    },
+  ];
+
+  test('two revocations in the same millisecond are TWO rows', () => {
+    const history = filterAuditEntriesByActionFamilies(twoTargets, PREFIXES);
+
+    expect(history).toHaveLength(2);
+    expect(history.map((entry) => entry.target)).toEqual(['ops', 'billing_clerk']);
+  });
+
+  test('MUTATION: the old key collapsed them into one', () => {
+    // The defect, reconstructed and RUN, so the test above is a comparison
+    // rather than an assertion about code nobody executes.
+    const collapsed = twoTargets.filter(
+      (entry, index, all) =>
+        all.findIndex(
+          (other) =>
+            other.at === entry.at && other.actor === entry.actor && other.action === entry.action,
+        ) === index,
+    );
+
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]?.target).toBe('ops');
+    // And the new path does not agree with it.
+    expect(filterAuditEntriesByActionFamilies(twoTargets, PREFIXES).length)
+      .not.toBe(collapsed.length);
+  });
+
+  test('a DENIED attempt is not absorbed by the success beside it', () => {
+    // The worst case of the same defect: the failure is the entry an operator
+    // most needs to see.
+    const entries: AdminAuditEntry[] = [
+      {
+        at: AT,
+        actor: 'ops',
+        role: 'read_only',
+        actorVerified: true,
+        action: 'admins.set_role',
+        target: 'founder',
+        outcome: 'denied',
+        meta: { reason: 'insufficient role' },
+      },
+      {
+        at: AT,
+        actor: 'ops',
+        role: 'read_only',
+        actorVerified: true,
+        action: 'admins.set_role',
+        target: 'founder',
+        outcome: 'success',
+        meta: {},
+      },
+    ];
+
+    const history = filterAuditEntriesByActionFamilies(entries, PREFIXES);
+
+    expect(history.map((entry) => entry.outcome)).toEqual(['denied', 'success']);
+  });
+
+  test('entries outside the families are still excluded', () => {
+    // Non-vacuity: a function that returned its input would pass every test
+    // above.
+    const entries: AdminAuditEntry[] = [
+      ...twoTargets,
+      {
+        at: AT,
+        actor: 'founder',
+        role: 'super_admin',
+        actorVerified: true,
+        action: 'settings.updated',
+        target: null,
+        outcome: 'success',
+        meta: {},
+      },
+    ];
+
+    const history = filterAuditEntriesByActionFamilies(entries, PREFIXES);
+
+    expect(history).toHaveLength(2);
+    expect(history.every((entry) => entry.action !== 'settings.updated')).toBe(true);
+  });
+
+  test('an overlapping prefix does not duplicate an entry', () => {
+    // Why the de-duplication was there in the first place. One pass cannot
+    // duplicate, so the reason is gone rather than worked around.
+    const history = filterAuditEntriesByActionFamilies(twoTargets, [
+      'admins.',
+      'admins.revoke',
+      'admins.revoke_sessions',
+    ]);
+
+    expect(history).toHaveLength(2);
   });
 });

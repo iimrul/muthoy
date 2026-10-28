@@ -65,7 +65,25 @@ export interface ShopLocationRow {
   district: string | null;
   plan: string;
   commercialStatus: string;
+  /**
+   * The shop's SUBSCRIPTION status, from its billing account's entitlement
+   * snapshot. `null` when the shop has no billing account, or has one with no
+   * snapshot yet — which is a real cohort on a platform where a shop can
+   * exist before it ever subscribes, and not the same thing as 'expired'.
+   *
+   * GATE 5 DELTA FINDING 6. §8.6 asks for a subscription-status filter, and
+   * the first attempt labelled one "Subscription status" while matching
+   * `commercialStatus` — so a TRIALING shop matched "active", and the
+   * trialing, canceled and expired cohorts could not be asked for at all.
+   * Commercial status is an administrative flag on the shop; subscription
+   * status is the account's position in the billing lifecycle. They are
+   * different facts and one cannot stand in for the other.
+   */
+  subscriptionStatus: string | null;
 }
+
+/** The option a filter uses to ask for "no subscription at all". */
+export const MAP_STATUS_NONE = 'none';
 
 /**
  * Gate E13's record, declared here so the predicate that needs it is written
@@ -281,7 +299,8 @@ export interface MapFilters {
  * §8.6's district and subscription-status filters.
  *
  * GATE 5 FINDING 17: these were specified and not built, on either the page or
- * the canvas.
+ * the canvas. GATE 5 DELTA FINDING 6: the status half then filtered the wrong
+ * column under the right label — see `ShopLocationRow.subscriptionStatus`.
  *
  * APPLIED BEFORE THE CONSENT GATE, deliberately. Filtering after it would make
  * the withheld count describe the whole platform while the map described a
@@ -302,7 +321,14 @@ export function applyMapFilters(
 
   return rows.filter((row) => {
     if (district.length > 0 && (row.district ?? '') !== district) return false;
-    if (status.length > 0 && row.commercialStatus !== status) return false;
+    if (status.length > 0) {
+      // "No subscription" is an explicit choice rather than the absence of
+      // one, so a shop that has never subscribed can be asked for.
+      const matches = status === MAP_STATUS_NONE
+        ? row.subscriptionStatus === null
+        : row.subscriptionStatus === status;
+      if (!matches) return false;
+    }
     return true;
   });
 }

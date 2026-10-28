@@ -5,6 +5,7 @@ import { requireAdminPermission } from '../../lib/adminAuthz';
 import { parseListQuery } from '../../lib/adminFilters';
 import {
   applyMapFilters,
+  MAP_STATUS_NONE,
   MAP_TILE_ATTRIBUTION_ENV,
   MAP_TILE_URL_ENV,
   mapConfiguration,
@@ -13,6 +14,7 @@ import {
   type MapConfiguration,
 } from '../../lib/adminGeo';
 import { listShopLocations } from '../../lib/adminPlatformQueries';
+import { SUBSCRIPTION_STATUS_FILTERS } from '../../lib/adminSubscriptionViews';
 import { featureState } from '../../lib/adminSettings';
 import { toDisplayMessage } from '../../lib/errors';
 
@@ -153,10 +155,18 @@ export default async function MapsPage({ searchParams }: MapsPageProps) {
             name: 'status',
             label: 'Subscription status',
             value: parsed.query.status ?? '',
+            // GATE 5 DELTA FINDING 6: these were `active` and `suspended` —
+            // the shop's COMMERCIAL status under a subscription label, so the
+            // trialing, past_due, grace, canceled and expired cohorts could
+            // not be asked for, and a trialing pharmacy answered to "active".
+            // The list is §8.3's, so the two pages cannot drift.
             options: [
               { value: '', label: 'Any status' },
-              { value: 'active', label: 'active' },
-              { value: 'suspended', label: 'suspended' },
+              ...SUBSCRIPTION_STATUS_FILTERS.map((status) => ({
+                value: status,
+                label: status,
+              })),
+              { value: MAP_STATUS_NONE, label: 'no subscription' },
             ],
           },
         ]}

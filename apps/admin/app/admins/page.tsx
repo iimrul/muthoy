@@ -2,7 +2,7 @@ import DataTable, { type DataColumn } from '../../components/DataTable';
 import ErrorNotice from '../../components/ErrorNotice';
 import { EmptyState } from '../../components/PageParts';
 import { recentAdminAudit, type AdminAuditEntry } from '../../lib/adminAudit';
-import { filterAuditEntries, formatAuditMeta } from '../../lib/adminAuditViews';
+import { filterAuditEntriesByActionFamilies, formatAuditMeta } from '../../lib/adminAuditViews';
 import {
   resolveEffectiveAuthority,
   type AdminRoleAssignment,
@@ -142,16 +142,14 @@ export default async function AdminsPage({ searchParams }: AdminsPageProps) {
 
   // §8.8's security history. The filter lives in lib/adminAuditViews.ts, so
   // this page and the Audit page cannot disagree about what an entry is.
-  const securityHistory = SECURITY_ACTION_PREFIXES.flatMap((prefix) =>
-    filterAuditEntries(recentAdminAudit.entries(), { action: prefix }),
-  ).filter(
-    // One entry can match only one prefix, but a de-duplication costs nothing
-    // and makes the flatMap safe if a prefix is ever widened.
-    (entry, index, all) =>
-      all.findIndex(
-        (other) =>
-          other.at === entry.at && other.actor === entry.actor && other.action === entry.action,
-      ) === index,
+  // GATE 5 DELTA FINDING 7: this was a per-prefix concatenation followed by a
+  // de-duplication on `at + actor + action` — a key that is not an identity,
+  // so two revocations of different targets in the same millisecond became
+  // one row and a denied attempt vanished into the success beside it. One
+  // pass cannot duplicate, so nothing needs removing.
+  const securityHistory = filterAuditEntriesByActionFamilies(
+    recentAdminAudit.entries(),
+    SECURITY_ACTION_PREFIXES,
   );
 
   // `sessionIssuedAtMs` is the instant the rows were read, deliberately: the
@@ -418,7 +416,19 @@ export default async function AdminsPage({ searchParams }: AdminsPageProps) {
             <DataTable
               columns={SECURITY_COLUMNS}
               rows={securityHistory}
-              rowKey={(entry) => entry.at + entry.actor + entry.action}
+              // Every field the row DISPLAYS, so two genuinely different
+              // events cannot share a key and be dropped by React either.
+              rowKey={(entry) =>
+                [
+                  entry.at,
+                  entry.actor,
+                  entry.role ?? '',
+                  entry.action,
+                  entry.target ?? '',
+                  entry.outcome,
+                  JSON.stringify(entry.meta),
+                ].join('|')
+              }
               emptyMessage="This instance has recorded no role change, login or session event yet."
             />
           </div>
