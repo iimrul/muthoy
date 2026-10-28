@@ -268,6 +268,254 @@ round-trips the value through `Date.UTC` and compares.
 
 ---
 
+## 5c. The delta review, and the four fixes that were wrong
+
+The delta review of §5b's seventeen fixes returned **REVISE with eight
+findings** — three P1 and five P2 — and **four of them said a §5b fix was
+incomplete or wrong.** All four calls were correct.
+
+This is the part worth recording, because it is not the same failure as
+§5b's. §5b was mostly *absent* work claimed as present. This round was work
+that was present, tested, passing — and wrong.
+
+### The pattern: a test that asserts what the fix did
+
+Four round-1 fixes had tests. The tests passed. They asserted **what the fix
+did rather than what the requirement was**:
+
+- the revocation fix was "read the row and write the role back", and its test
+  asserted that the stored role was written. That is precisely the behaviour
+  the delta review rejected: writing a value read a moment earlier loses a
+  disable committed in between. The test could not fail, because it was a
+  description of the implementation.
+- the provenance guard's fix was "require a derivation token", and its test
+  asserted that the token appeared. A fabrication satisfies that. One anchor's
+  required token was even its own name, so `const netSalesToday = 42` passed.
+
+§4 of this document already recorded "a test that compares the wrong two
+things passes for the wrong reason". The sharper version is: **a test written
+after the fix, from the fix, tends to assert the fix.** The test has to come
+from the requirement, or from the broken behaviour, to be able to fail.
+
+So every round-2 fix carries a test that is **run against the previous
+behaviour** and fails on it — including two reconstructed-and-executed
+mutations (the old de-duplication key; the old co-occurrence check) rather
+than mutations merely described. And each production fix was mutated back, with
+the failures counted: P1 2 and P1 3 one each, P2 4 one of three, P2 5 one of
+four, P2 6 four library plus two page.
+
+### Two were privacy failures on the same page
+
+The conversion tile and the sales-volume count both reached §8.5's Analytics
+page in round 1 **without the k=5 floor** — on a page whose own header comment
+asserts that every figure goes through it, and immediately below the paragraph
+explaining that a floor applied in four places is a floor forgotten in one. It
+was forgotten in the fifth and sixth. The note `1 of 1 accounts granted a trial
+later held a verified payment` was the worst single line in the batch.
+
+### One fix caused a new defect
+
+§5b's status-filter fix restricted the activity report's sales half to the
+shops in the report data — correct only if that is every shop. The reader
+narrows the `shops` read by registration date, so **five pharmacies that traded
+in October but registered in August disappeared from an October report**, with
+or without a status filter. A fix that silently drops data is worse than the
+inconsistency it was fixing.
+
+### One was a label standing in for a feature
+
+Maps' "Subscription status" filter matched the shop's **commercial** status and
+offered only two of the six lifecycle values. A trialing pharmacy answered to
+"active". Per the founder's standing decision the filter was **implemented**
+rather than relabelled: the map now carries each shop's real subscription
+status from its entitlement snapshot. No migration was added — the H-9 chain
+is hash-sealed — so the status is assembled from `entitlement_snapshots` keyed
+by `shops.billing_account_id`.
+
+### Step 10 again: a full-suite run that FAILED, and why it is not suppressed
+
+The first full-suite run of this round came back **exit 1** — 4 files, 4 tests,
+6505 passing. Recorded here because a failing gate that is only mentioned when
+it turns green is not a gate.
+
+Every failure was `Hook timed out in 60000ms` in a `beforeEach` calling
+`createHarness()` (PGlite startup) under `backend/supabase/pgtest/`. **No
+assertion failed**, and nothing in `apps/admin` failed. That run took 2214s
+against the previous round's 827s, because the admin suite and `next build`
+were running alongside it.
+
+Three things establish contention rather than a defect, and none of them is
+"it passed the second time":
+
+1. the four files pass **in isolation** — 68 tests, exit 0, 140s;
+2. the clean re-run is the **same code and the same command** with nothing
+   competing: 288 files, 6509 tests, 0 failed, exit 0, **750.64s** — three
+   times faster;
+3. **no import path connects them to this batch.** All 16 changed tracked files
+   are under `apps/admin/**`; the only `apps/admin` mentions anywhere in the
+   pgtest tree are two comments in `batch2-admin-acl.pgtest.ts`, which is not
+   one of the four files.
+
+`hookTimeout`, `vitest.config.ts` and the reporter configuration were **not
+touched**. Raising the hook timeout would have converted a true statement about
+this machine into a false statement about the code, and the 60s hook timeout is
+load-bearing: it is what makes a genuinely hung harness visible at all.
+
+§5.3 already records two suites that fail only under CPU contention. This is the
+third instance of the same machine-level effect, and the standing lesson is
+that **the full suite must be the only heavy thing running** when it is the
+gate.
+
+### A third review, and the lesson restated once more
+
+The review of this round's fixes returned **REVISE with three findings**, and
+**two of them were again mine from the round before**:
+
+- the revocation fix was correct about the UPDATE and wrong about the zero-row
+  branch: any row found afterwards was read as "already revoked", so a
+  concurrent first insert made the function report success while sessions
+  stayed valid;
+- the provenance fix was correct to go per-binding and wrong about the type
+  exemption: "starts with a capital" is satisfied by `GROSS_TOTAL`, and the
+  reviewer passed a fabricated value through the real Revenue page;
+- and the report fix had **unbounded a chart** that shares the read it widened.
+
+The pattern across all three rounds is worth stating plainly, because it is the
+transferable part: **each fix was sound where I was looking and wrong one step
+to the side.** Fix the write, miss the read-then-write race. Fix the race, miss
+the zero-row branch. Fix the report, break the chart that shares its read.
+Require a derivation, leave an exemption any SCREAMING_CASE constant satisfies.
+
+What catches that is not more care at the point of the fix. It is asking, for
+every fix, *what else reads this* and *what is the next-door case* — which is
+what the reviewer did each time, and what the mutation checks now do
+mechanically: every fix in this round was reverted and the failing tests
+counted (3, 1, and 2 respectively).
+
+### The fourth round: when the instrument is wrong, more care does not help
+
+The fourth review returned **one** finding. The two substantive fixes were
+accepted; the provenance guard failed for the **fourth** time, to a
+destructuring rename and a substring collision, both reproduced against the
+real Revenue page.
+
+Four rounds on one guard, each fix closing the syntactic form in front of it:
+
+| Round | Bypass |
+|---|---|
+| 1 | the anchor's name appearing anywhere in the file |
+| 2 | an anchor whose required token was its own name; co-occurrence across a file |
+| 3 | an uppercase initializer (`GROSS_TOTAL`) read as a type annotation |
+| 4 | a destructuring rename; an identifier that merely CONTAINS the token |
+
+Rounds 1-3 were me trying harder at the same technique. The actual problem is
+that **a regex over source text cannot soundly answer "is this value derived
+from that expression"** — that is a question about syntax, and a pattern match
+is the wrong instrument. Each new regex was a correct answer to the last
+counterexample and no answer at all to the next one.
+
+So the guard now parses, using the TypeScript compiler already in the
+toolchain. Two things fell out of that immediately, which is the usual sign of
+having picked the right instrument: the `DECLARABLE_AS` allow-list §5c's round
+introduced became unnecessary — a `PropertySignature` simply is not a value
+binding — and the substring problem disappeared, because comparing identifier
+nodes is comparing whole names.
+
+**The transferable lesson, and the one worth carrying into Batch 4:** three
+rounds of "fix the counterexample" is the signal to change technique, not to
+look harder. The counterexamples were not getting more obscure — a rename is
+ordinary TypeScript — they were simply outside what the instrument could see.
+
+### The fifth round: a blacklist of fabrications is the wrong shape
+
+Two more bypasses, same guard: a `typeof` inside a type assertion supplying the
+derivation token for a literal `42`, and an assignment through a member rather
+than a bare identifier. Both reproduced against the real Revenue page.
+
+§above said the lesson was "change the instrument", and that was only half of
+it. Parsing WAS the right instrument. The logic was still a blacklist — and
+four of the five breaks were me enumerating ways to fabricate a number.
+
+**That set is unbounded. The set of legitimate derivations in this repository
+is two.** So the guard is now a whitelist: a binding passes only if its
+initializer is one of two pinned expressions, and every other form fails by
+default, including forms nobody has thought of. Fail-closed by construction.
+
+| Round | Technique | Broken by |
+|---|---|---|
+| 1 | name present in file | a fabrication beside an unrelated mention |
+| 2 | required token per anchor | a token that was the anchor's own name |
+| 3 | per-binding regex | an uppercase initializer read as a type |
+| 4 | regex + operator | a destructuring rename; a substring collision |
+| 5 | AST + identifier compare | a `typeof` in a type node; a member assignment |
+| 6 | AST + **pinned derivations** | — |
+
+Rounds 1-5 share a shape: each was a correct answer to the last counterexample
+and no answer to the next. The question "what else could fabricate this?" has
+no end; the question "what is allowed to produce this?" has two answers.
+
+**Two defects in my own test surfaced while writing round 6**, both worth
+keeping:
+
+1. the mutant loop asserted one fabrication at a time, so the FIRST failure
+   aborted the test — a newly-opened bypass could hide behind an older one. It
+   now collects all accepted fabrications and reports them together. This is
+   also what proved the round-5 check accepts exactly 2 of the 11 known
+   fabrications while the whitelist accepts 0;
+2. the "real shapes still pass" inputs were source FRAGMENTS, meaningless
+   against a whitelist that compares complete initializers. They are now four
+   real files, plus a non-vacuity check that every pin is matched by a real
+   binding — so a pin that has stopped protecting anything fails rather than
+   passing quietly.
+
+### The sixth round: the guard's own INPUT was corruptible
+
+I asked the reviewer to attack detection, because a whitelist of derivations
+makes fabrication forms irrelevant while leaving an unmodelled binding SITE as
+the only way past. He returned six holes, and the first is the one that
+matters most: **the comment stripper deleted everything after `//` on a line,
+so a string containing those two characters hid the code after it.** A guard
+whose input can be corrupted is not a guard.
+
+That is a REPEAT of a lesson this repository already learned in the H-9 source
+scanner, where a line-prefix comment test was found unsound and replaced with
+lexer-verified offsets. Same mistake, different file, nine days apart. Worth
+recording plainly: **"a regex cannot distinguish a comment from a string" is
+now a twice-paid lesson here.**
+
+Comments now come from the parser's own trivia ranges. A raw
+`ts.createScanner` loop was tried first and desynchronised inside a file —
+`reduce<Paisa>(` under the JSX language variant was enough — after which later
+comments came back as ordinary tokens and their prose was scanned as code. It
+passed 36 tests while doing so, and was caught only because an unrelated
+assertion started flagging `lib/platformStats.ts`. That near-miss is in the
+code comment, because it is the more instructive half of the story.
+
+The other five findings were five more write syntaxes. Rather than enumerate
+them and wait for a seventh round, the guard gained a second, independent
+layer: **the anchors' occurrences are pinned per file and per count** — five
+mentions across four files. Every fabrication must mention an anchor to bind
+it, so a new mention anywhere fails; and a mention that DISAPPEARS fails too,
+which is what would have caught the comment-stripper bug by itself.
+
+Two whitelists now, answering two different questions:
+
+| Layer | Question | Fails closed on |
+|---|---|---|
+| pinned derivations | what may a binding BE? | any initializer that is not the pinned expression |
+| pinned occurrences | where may the name APPEAR? | any new or missing mention, in any syntax |
+
+Neither layer requires anyone to predict the next syntax, which is the first
+time in six rounds that has been true.
+
+### And `tsc` caught what Vitest could not
+
+Four of the new audit fixtures omitted a required `actorVerified` field. The
+tests passed, because Vitest does not typecheck. `tsc --noEmit` failed. Worth
+recording as a standing reason not to treat a green suite as a green tree.
+
+---
+
 ## 6. Preservation, verified
 
 - **No `audit-artifacts/**` file was modified.** The historical H-9 sealed

@@ -228,8 +228,8 @@ This is the only page exempt from the `revenue` word scan, and the exemption is
 | | |
 |---|---|
 | **Code status** | COMPLETE. Daily active pharmacies, new registrations over time, trial-to-paid conversion, subscription growth, plan distribution, the recorded-cancellation series, platform usage, and aggregated pharmacy sales volume — with a date range capped at 400 days. |
-| **Test evidence** | `adminSuppression.test.ts` (16, at the k−1/k boundary with a mutation check for a 4-shop bucket left visible), `adminReports.test.ts`, plus four contract tests rendering all four of the figures below against a POPULATED fixture and asserting the three source tables are reached. |
-| **Missing** | Nothing from §8.5 — **as of the Gate 5 corrections.** This page previously claimed four figures it did not render: trial-to-paid conversion, subscription growth, the recorded-cancellation series and the sales-volume count. All four are now built. Conversion is NULL rather than 0% when no trial was ever granted; the cancellation series states in its own description that it is not churn and can only under-report (E12); the volume count excludes refunds. The date range is validated through the shared schema before any read, so the 400-day cap is a rule rather than a caption. |
+| **Test evidence** | `adminSuppression.test.ts` (16, at the k−1/k boundary with a mutation check for a 4-shop bucket left visible), `adminReports.test.ts`, plus contract tests rendering all four of the figures below against a POPULATED fixture, asserting the three source tables are reached, and — after the DELTA review — asserting the conversion figure at ONE trialed account (withheld, counts and all) and at FIVE (published), that refund-only shops do not lift the sale count over the floor, and that the growth and cancellation series carry the queried period. |
+| **Missing** | Nothing from §8.5 — **as of the Gate 5 DELTA corrections.** This page previously claimed four figures it did not render: trial-to-paid conversion, subscription growth, the recorded-cancellation series and the sales-volume count. All four are now built. Conversion is NULL rather than 0% when no trial was ever granted; the cancellation series states in its own description that it is not churn and can only under-report (E12); the volume count excludes refunds. The date range is validated through the shared schema before any read, so the 400-day cap is a rule rather than a caption. **Three of those four figures were then wrong in ways the delta review caught** (§6c, P1 2 and 3, P2 5): the conversion tile bypassed the k=5 floor entirely and published "1 of 1" for a single account; the sale count was gated on contributors to the refund-net total rather than on sellers; and the growth and cancellation series ignored the validated range, so an October query drew January growth. All three are fixed. |
 | **Hosted** | NOT VERIFIED. |
 | **External** | E15. |
 
@@ -240,8 +240,8 @@ ever appears.
 
 | | |
 |---|---|
-| **Code status** | COMPLETE **as specified**, which means it plots nothing in the shipped state and says exactly why. Leaflet is wired behind the consent predicate, with plan-tier marker colour, a selection summary, drill-down navigation, and district/status filters — **the filters were claimed and absent until the Gate 5 corrections**, and are now built in the pure geo library, applied BEFORE the consent gate so the withheld count describes the same population the map does. |
-| **Test evidence** | `adminGeo.test.ts` (30), plus a contract test asserting that with no tile provider configured **`MapLoader` is never rendered** — so the dynamic import, and therefore Leaflet, is never reached — and that the page names E14. |
+| **Code status** | COMPLETE **as specified**, which means it plots nothing in the shipped state and says exactly why. Leaflet is wired behind the consent predicate, with plan-tier marker colour, a selection summary, drill-down navigation, and district/subscription-status filters — **the filters were claimed and absent until the Gate 5 corrections, and the status half then filtered the WRONG COLUMN until the delta review** (§6c, P2 6): it matched the shop's commercial status under a "Subscription status" label, so a trialing pharmacy answered to "active" and four of the six lifecycle cohorts could not be asked for. The page now carries each shop's real subscription status from its entitlement snapshot and offers all six, plus "no subscription" as its own cohort. Both filters are applied BEFORE the consent gate, so the withheld count describes the same population the map does. |
+| **Test evidence** | `adminGeo.test.ts` (40), plus a contract test asserting that with no tile provider configured **`MapLoader` is never rendered** — so the dynamic import, and therefore Leaflet, is never reached — and that the page names E14. After the delta review: a fixture in which every shop is commercially `active` and they differ only in subscription status, so a filter on the wrong column is visible; the six statuses asserted against `entitlement_snapshots`' own CHECK constraint; and page-level tests on the withheld count, since no pharmacy NAME is observable through the consent gate. |
 | **Missing** | Nothing. **Markers** need E13; **tiles** need E14. |
 | **Hosted** | NOT VERIFIED. |
 | **External** | E13, E14 (an approved tile provider), E15. |
@@ -272,16 +272,24 @@ gains no `subscriptions.write` and no unrestricted shop access.
 | | |
 |---|---|
 | **Code status** | COMPLETE. Directory with environment role, assignment role, effective intersected permissions, enabled state and last revocation; the §4.2 matrix rendered from `ROLE_PERMISSIONS`; role narrowing, account disable and per-user session revocation all functional; security audit history filtered to `admins.*`, `login` and `session.*`. |
-| **Test evidence** | `adminIdentityStore.test.ts` (including the three revocation regression cases below), `adminRoles.test.ts` (36), `adminAuthz.test.ts` (50), `adminAuditViews.test.ts`'s seven security-history cases, contract tests including a `read_only` denial. |
-| **Missing** | **Account creation completes outside the panel** by design — §4.3's hash-and-fragment flow, labelled as such on the page. §8.8's **security history was claimed and absent** until the Gate 5 corrections; it is now built, filtered to `admins.*`, `login` and `session.*` through the same library the Audit page uses. |
+| **Test evidence** | `adminIdentityStore.test.ts` (61, including the revocation regression cases below and nine on the dedicated revocation writer), `adminRoles.test.ts` (36), `adminAuthz.test.ts` (50), `adminAuditViews.test.ts` (35, including the security-history cases and the delta review's de-duplication mutation), contract tests including a `read_only` denial. |
+| **Missing** | **Account creation completes outside the panel** by design — §4.3's hash-and-fragment flow, labelled as such on the page. §8.8's **security history was claimed and absent** until the Gate 5 corrections; it is now built, filtered to `admins.*`, `login` and `session.*` through the same library the Audit page uses. **That history then dropped real events** until the delta review (§6c, P2 7): its de-duplication key was `at + actor + action`, so two revocations of different targets in one millisecond became one row and a DENIED attempt collapsed into the success beside it. The concatenation that made de-duplication necessary is gone. |
 
-**A security defect was found here by the Gate 5 review and fixed.** Revoking an
-admin's sessions wrote the environment role and `isActive: true`
-unconditionally, so revoking a **disabled, narrowed** account replaced the
-narrowing with its environment role — possibly `super_admin` — and re-enabled
-it. A security action that widens authority is worse than no action. The stored
-row's role and enabled state are now preserved and only the revocation point
-moves.
+**A security defect was found here by the Gate 5 review, and the first fix for
+it was itself wrong.** Revoking an admin's sessions wrote the environment role
+and `isActive: true` unconditionally, so revoking a **disabled, narrowed**
+account replaced the narrowing with its environment role — possibly
+`super_admin` — and re-enabled it. A security action that widens authority is
+worse than no action.
+
+The first fix READ the row and wrote those two values back. The delta review
+rejected that correctly: it is a lost update, and a disable committed between
+the read and the write is overwritten by stale values. **Preserving a value
+read a moment ago is not the same as not touching it.** The revocation now
+writes exactly `sessions_revoked_at` and `updated_at`, names neither authority
+column, and enforces forward-only in the WHERE clause rather than from a read
+— see §6c, P1 1. `writeRoleAssignment` no longer writes the revocation column,
+so the two writers cannot overwrite each other.
 | **Hosted** | NOT VERIFIED. |
 | **External** | E4-H, E15. |
 
@@ -309,7 +317,7 @@ View (b) is read-only **in the database**: §3.5 revokes every privilege on
 |---|---|
 | **Code status** | COMPLETE. Six platform reports, date-range and status filters, CSV and PDF export. |
 | **Test evidence** | `adminCsv.test.ts` (23, with a planted `=cmd\|…` payload and a legitimate negative number that must survive readable), `adminPdf.test.ts` (output parsed back, with a corrupted-`xref` mutation check), `adminReports.test.ts`, `reportExportRoute.test.ts`, contract tests. |
-| **Missing** | Nothing from §8.10. |
+| **Missing** | Nothing from §8.10. The Gate 5 corrections made each report declare whether it can honour a status filter, and **that fix then broke the activity report** until the delta review (§6c, P2 4): restricting its sales half to the shops in the report data dropped every pharmacy that traded in the period but registered before it, with or without a filter. That report now reads every shop while the period still bounds the sales, with a reader-level test on the recorded filter arguments and a non-vacuity test that the registration report still IS bounded. |
 | **Hosted** | NOT VERIFIED. |
 | **External** | E15. |
 
@@ -403,6 +411,310 @@ fixed with regression tests:
 test that compares the wrong two things passes for the wrong reason.** Three
 separate instances in this batch — the validation drift, the missing
 `maybeSingle()`, and that suppression test.
+
+---
+
+## 6c. What the Gate 5 DELTA review changed — four of those fixes were wrong
+
+The delta review of §6b's fixes returned **REVISE with eight findings: three P1
+and five P2**. Four of them said a fix from the first round was *incomplete*,
+which is a more serious result than the first round's: a wrong fix is harder to
+see than a missing feature, because the record already says it is done.
+
+They are listed here by what was actually wrong, because "resolved" is not a
+finding count.
+
+### The three P1s
+
+1. **Revoking sessions could still restore access.** §6b records this as fixed.
+   It was not. The first fix READ the assignment row and wrote the stored
+   `role` and `is_active` back, which is a lost update: a disable or a
+   narrowing committed between the read and the write is overwritten by stale
+   values. **Preserving a value read a moment ago is not the same as not
+   touching it.** The revocation now issues an UPDATE over exactly
+   `sessions_revoked_at` and `updated_at` and names neither authority column,
+   so neither can be lost; forward-only moved from a `Math.max` over that read
+   into the WHERE clause, because a point computed from a stale read can move
+   BACKWARDS under concurrency and revive sessions an earlier revocation
+   killed. `writeRoleAssignment` no longer writes the revocation column at
+   all, so the two writers cannot overwrite each other.
+
+2. **Analytics published one account's payment activity.** The trial-to-paid
+   conversion tile was added in the first round with no k=5 gate at all — on a
+   page whose own header comment claims every figure goes through the floor. A
+   single trialed account rendered `100.0%` and, worse, the note `1 of 1
+   accounts granted a trial later held a verified payment`. Both are now behind
+   the floor, counted on distinct billing accounts.
+
+3. **Refund-only shops lifted the sale count over the floor.** The monthly
+   bucket carries every shop behind the refund-NET total, which legitimately
+   spans sales and refunds. The sale COUNT was gated on that same list, so one
+   selling shop beside four refund-only shops cleared k=5 and published that
+   one shop's count. The count now has its own contributor list.
+
+### The five P2s
+
+4. **The activity report silently omitted established pharmacies** — caused by
+   §6b's own status-filter fix. Restricting the sales half to `data.shops` is
+   only correct if that is every shop, and the reader narrows the `shops` read
+   by registration date. Five shops that sold in October but registered in
+   August vanished from an October report, with or without a status filter.
+   That report now reads every shop; the period still bounds the sales.
+
+5. **Two Analytics series ignored the validated range**, so an October query
+   drew January growth and February cancellations beside October activity.
+   Four charts on one page, each about a different period.
+
+6. **Maps' "Subscription status" filter filtered commercial status**, offering
+   only `active` and `suspended`. A trialing pharmacy answered to "active", and
+   the trialing, past_due, grace, canceled and expired cohorts could not be
+   asked for at all. The map now carries each shop's real subscription status
+   from its entitlement snapshot, and offers all six lifecycle statuses plus
+   "no subscription" — which is its own cohort, not an expired one.
+
+7. **The Admins security history dropped real events.** Its de-duplication key
+   was `at + actor + action`, which is not an identity: two revocations of
+   different targets in the same millisecond became one row, and a DENIED
+   attempt collapsed into the success beside it. The per-prefix concatenation
+   that made de-duplication necessary is gone, so nothing needs removing.
+
+8. **The `net` provenance guard still accepted fabricated figures.** §6b's fix
+   required a derivation token but tested CO-OCCURRENCE over the whole file.
+   `netSalesToday`'s required token was its own name, so `const netSalesToday =
+   42` passed trivially; and a fabricated pharmacy anchor passed in any file
+   that mentioned `pharmacySalesByMonth` anywhere, for any reason. The check is
+   now per BINDING: wherever an anchor is assigned a value, the derivation must
+   be in the same statement.
+
+### What this round changes about how to read this record
+
+§6b closed by saying "a test that compares the wrong two things passes for the
+wrong reason". This round adds the sharper version: **four of its fixes had
+tests, and the tests passed, because they asserted what the fix did rather than
+what the requirement was.** The revocation test asserted that the right role
+was written — which is exactly the behaviour that was wrong. The provenance
+guard asserted that two names appeared — which a fabrication satisfies.
+
+So each fix in this round is accompanied by a test that is **run against the
+previous behaviour** and fails on it:
+
+- the revocation's regression test applies the recorded UPDATE to a
+  concurrently-disabled row, and a negative control applies the FIRST FIX's
+  shape to the same row and shows it coming back as an enabled `super_admin`;
+- the k=5 tests assert the figure at k-1 AND at k, so a page that simply never
+  shows the figure fails;
+- the provenance mutation runs all three fabrications through the guard, and
+  asserts the old co-occurrence check accepted one of them;
+- the audit-history mutation runs the old de-duplication key and shows it
+  returning one row where two events happened.
+
+Nothing in this round is device-verified or hosted-verified. **Gate E15 remains
+open and no page here is DONE** — see §7.
+
+---
+
+## 6d. The SECOND delta review — three more, two of them again mine
+
+The review of §6c's fixes returned **REVISE with three findings** (1 P1, 2 P2).
+**Two said a §6c fix was still incomplete**, and one was a new regression §6c
+had introduced. The reviewer reproduced all three in memory against the real
+files.
+
+1. **P1 — the revocation could report success without revoking.** §6c's fix
+   made the UPDATE safe, and then mishandled the zero-row case: finding ANY row
+   afterwards was taken as "already revoked at or past this point". A
+   concurrent first INSERT lands a row whose cutoff is `null` or earlier, so
+   the function returned `already_later`, the caller audited **success**, and
+   every existing session stayed valid. A revocation that reports success
+   without revoking is the worst outcome this operation has. It now returns a
+   success effect only when it moved the cutoff itself, inserted the row
+   itself, or **read a cutoff at or past the one requested**; anything else is
+   retried, and exhausting the attempts throws. Failing closed is right: the
+   caller turns a throw into an audited failure, which is true, where
+   `already_later` was false.
+
+2. **P2 — §6c's report fix unbounded the Analytics registrations chart.**
+   Widening `activity_summary`'s shops read (so the report stopped dropping
+   established sellers) also widened what the registrations series grouped,
+   because that series never reapplied the period. An October query drew an
+   August bucket with five contributors. There is now ONE period predicate on
+   that page, used by every bucket, so a read that widens again cannot silently
+   unbound a chart.
+
+3. **P2 — the provenance guard still accepted fabricated money.** §6c's
+   per-binding check exempted "a right-hand side starting with a capital" as a
+   type annotation — which `GROSS_TOTAL` satisfies. The reviewer took the real
+   Revenue page, replaced only the derivation with `const GROSS_TOTAL = 42;
+   const pharmacyNetSalesPaisa = GROSS_TOTAL;`, and the guard **and** link 2b
+   both passed it. Only a `:` can introduce a type and a `=` never can, so the
+   binding operator is now captured, and the `:` case is an explicit list of
+   declarable types rather than a shape. Link 2b now also requires the page's
+   binding to be clean, instead of merely containing two names.
+
+**Three rounds, and the same shape each time:** the fix was sound where I was
+looking and wrong one step to the side. Round 1 fixed the write and left the
+read-then-write race. Round 2 fixed the race and left the zero-row branch.
+Round 2 fixed the report and broke the chart that shares its read. Round 2
+required a derivation token and left an exemption that any SCREAMING_CASE
+constant satisfies.
+
+Each of the three is mutation-verified: reverting the cutoff check fails three
+tests, reverting the registrations filter fails one, and the two new fabricated
+money mutants fail against the old exemption.
+
+---
+
+## 6e. The THIRD delta — one finding, and a method that was wrong
+
+The review of §6d's fixes returned **REVISE with one P2**. The P1 revocation
+fix and the registrations fix were accepted. The provenance guard was not, for
+the **fourth** time, with two new bypasses the reviewer reproduced against the
+real Revenue page:
+
+- `const { totalPaisa: pharmacyNetSalesPaisa } = { totalPaisa: 42 };` — in a
+  destructuring RENAME the anchor sits after the colon, so a regex looking for
+  the anchor followed by `:` or `=` found **no binding at all** and had nothing
+  to check;
+- `const pharmacySalesByMonthGross = 42; const pharmacyNetSalesPaisa =
+  pharmacySalesByMonthGross;` — `String.includes` is a substring test, and
+  that identifier **contains** the required derivation token.
+
+Four attempts at one guard, each closing the form in front of it and leaving
+the one beside it: co-occurrence over a file; an anchor whose token was its own
+name; an uppercase initializer read as a type; and now a rename and a substring.
+
+**The lesson is not "write a better regex".** A regex over source text cannot
+soundly answer *is this value derived from that expression* — the question is
+about syntactic structure, and a pattern match is the wrong instrument for it.
+The guard now parses, with the TypeScript compiler that already builds this
+project:
+
+- a binding is a `VariableDeclaration`, a `BindingElement` (which is what a
+  destructuring rename **is**), a `PropertyAssignment`, or an assignment
+  expression whose target is the anchor;
+- a `PropertySignature` declares a type and binds no value, so
+  `netSalesToday: Paisa;` needs no derivation — and the allow-list of
+  "declarable types" that §6d introduced is **gone**, because the parser knows
+  the difference without being told;
+- the derivation must appear in the initializer as a whole IDENTIFIER or
+  property name. `pharmacySalesByMonthGross` is simply a different identifier
+  from `pharmacySalesByMonth`, which no substring test can know.
+
+Three things are asserted about this rather than claimed. The reviewer's two
+replacements are applied to the **real** `app/revenue/page.tsx` source and the
+guard refuses both while accepting the page as shipped. The regex finder is
+reconstructed and **run**, showing it returns zero bindings for the rename —
+so "a regex cannot do this" is demonstrated, not asserted. And the substring
+collision is shown explicitly: `includes` says yes, the whole-identifier
+comparison says no.
+
+---
+
+## 6f. The FOURTH delta — and the guard was inverted
+
+Two more P2s, both on the same guard, both reproduced against the real Revenue
+page:
+
+- `42 as (typeof result.pharmacy.pharmacySalesByMonth)[number]['totalPaisa']`
+  — the identifier walk descended into the TYPE node, so a type annotation
+  supplied the derivation token for the literal `42`;
+- `totals.pharmacyNetSalesPaisa = 42` — only an assignment to a bare
+  identifier was modelled, so a write through a MEMBER escaped entirely.
+
+That is five rounds, and §6e's "change the instrument" was only half the
+lesson. Parsing was the right instrument; **the logic was still a blacklist.**
+Four of the five breaks were me enumerating ways to fabricate a number — and
+that set is unbounded, while the set of LEGITIMATE derivations in this entire
+repository is **two**:
+
+| Anchor | Where | Derivation |
+|---|---|---|
+| `netSalesToday` | `lib/queries.ts:156` | `netSalesPaisa(grossSalesToday, refundsToday)` |
+| `pharmacyNetSalesPaisa` | `app/revenue/page.tsx:176` | the `reduce` over `pharmacySalesByMonth`'s tallied totals |
+
+So the question is **inverted**. A binding passes only if its initializer is
+one of those two pinned expressions, compared whitespace-insensitively.
+Everything else fails by default — including forms nobody has thought of yet.
+That is fail-closed by construction instead of by exhaustive enumeration, and
+it is the only version of this guard that does not invite a sixth round.
+
+Detection still has to be complete, because an unmodelled binding SITE is now
+the only way past. The modelled sites are: a variable declaration, a binding
+element (destructuring, including a rename), an object-literal property, and an
+assignment under any assignment operator to a bare identifier, a member, or an
+element access with a literal name.
+
+Two further things were fixed in the test itself, both found by writing it:
+
+- the mutant loop asserted one fabrication at a time, so the **first** failure
+  aborted the test and a newly-opened bypass could hide behind an older one. It
+  now collects every accepted fabrication and reports them together — which is
+  how the two new bypasses were confirmed to be bypasses of the previous check
+  (it accepts exactly 2 of the 11; the whitelist accepts 0);
+- the "real shapes still pass" cases were source FRAGMENTS, which are
+  meaningless against a whitelist comparing complete initializers. They are now
+  four real FILES, plus a non-vacuity check that every pin is actually matched
+  by a binding somewhere in the tree — so a pin that silently stops protecting
+  anything fails this test rather than passing quietly.
+
+**The cost, stated:** a legitimate change to either derivation fails this test
+until its pin is updated. That is the correct friction for the one guard
+standing between a fabricated number and the word "net".
+
+---
+
+## 6g. The FIFTH delta — six holes in detection, and the answer that ends it
+
+I asked the reviewer to attack DETECTION, since a whitelist of derivations
+makes fabrication FORMS irrelevant but leaves an unmodelled binding SITE as the
+only way past. He found six immediately:
+
+1. **the scanner's own input was corruptible** — comments were stripped with a
+   regex that deleted everything after `//` on a line, so a string literal
+   CONTAINING those two characters truncated the line and hid the code after
+   it: `{ pharmacyNetSalesPaisa, note: "//" }; totals.pharmacyNetSalesPaisa =
+   42;` vanished before any check ran;
+2. quoted and computed property names (`{ "pharmacyNetSalesPaisa": 42 }`);
+3. class fields and enum members;
+4. parenthesised, asserted and non-null-asserted assignment targets;
+5. array/object destructuring targets and for-of loop writes;
+6. prefix and postfix updates (`totals.x++`).
+
+Finding 1 is the serious one, and it is a repeat: **this repository already
+learned in the H-9 source scanner that a regex cannot tell a comment from a
+string**, and the fix there was the same fix as here. Comments now come from the
+PARSER's own trivia ranges. A raw `ts.createScanner` loop was tried first and
+desynchronised partway through a file — `reduce<Paisa>(` under the JSX variant
+was enough — after which later comments were handed back as ordinary tokens;
+that near-miss is recorded in the code, because it passed 36 tests while
+silently scanning comment prose as code.
+
+Findings 2-6 are six more write syntaxes, and TypeScript has more. So rather
+than keep enumerating, the guard gained a second layer that **no write syntax
+can dodge**: the anchors' OCCURRENCES are pinned, file by file, count by count.
+
+| Anchor | File | Occurrences |
+|---|---|---|
+| `netSalesToday` | `lib/platformStats.ts` | 1 (the type) |
+| | `lib/queries.ts` | 1 (the assignment) |
+| | `app/page.tsx` | 1 (the read) |
+| `pharmacyNetSalesPaisa` | `app/revenue/page.tsx` | 2 (the binding, the read) |
+
+Five mentions in four files. Every fabrication, whatever its shape, must
+mention an anchor in order to bind it — so any NEW mention anywhere fails, and
+any mention that DISAPPEARS fails too, which is what would have caught finding
+1 on its own. Eleven write forms are run through this check and each is shown
+to add an occurrence; a comment mentioning an anchor is shown NOT to.
+
+The classifier was also extended for the cheap cases (2, 3, 4 and 6), so the
+failure message names the construct. Findings 5's exotic targets are caught by
+the occurrence pins rather than the classifier, and that division is stated in
+the code rather than left as a silent gap.
+
+**The whole guard now has two independent layers:** what a binding may be
+(pinned derivations) and where an anchor may appear at all (pinned
+occurrences). Both are whitelists; both fail closed; neither requires anyone to
+predict the next syntax.
 
 ---
 
