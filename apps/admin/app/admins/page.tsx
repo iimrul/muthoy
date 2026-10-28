@@ -1,5 +1,8 @@
+import DataTable, { type DataColumn } from '../../components/DataTable';
 import ErrorNotice from '../../components/ErrorNotice';
 import { EmptyState } from '../../components/PageParts';
+import { recentAdminAudit, type AdminAuditEntry } from '../../lib/adminAudit';
+import { filterAuditEntries, formatAuditMeta } from '../../lib/adminAuditViews';
 import {
   resolveEffectiveAuthority,
   type AdminRoleAssignment,
@@ -35,6 +38,30 @@ import { assignAdminRoleAction, revokeAdminSessionsAction } from '../adminFormAc
 // password.
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * §8.8's three families: role management, logins and session events.
+ *
+ * GATE 5 FINDING 15: this history was specified and absent. Matched by PREFIX
+ * against the recorded action name, so a new `admins.*` or `session.*` action
+ * appears the day it is added rather than the day somebody remembers to list
+ * it here. `login` is dotless and is matched whole.
+ */
+const SECURITY_ACTION_PREFIXES = ['admins.', 'login', 'session.'] as const;
+
+const SECURITY_COLUMNS: readonly DataColumn<AdminAuditEntry>[] = [
+  { heading: 'When', cell: (entry) => formatDhakaDateTime(entry.at) },
+  { heading: 'Actor', cell: (entry) => entry.actor },
+  {
+    heading: 'Actor verified',
+    cell: (entry) => (entry.actorVerified ? 'verified session' : 'claimed, unverified'),
+  },
+  { heading: 'Role', cell: (entry) => entry.role ?? '—' },
+  { heading: 'Action', cell: (entry) => entry.action },
+  { heading: 'Target', cell: (entry) => entry.target ?? '—' },
+  { heading: 'Outcome', cell: (entry) => entry.outcome },
+  { heading: 'Detail', cell: (entry) => formatAuditMeta(entry) },
+];
 
 type AdminsResult =
   | { ok: true; assignments: readonly AdminRoleAssignment[]; nowMs: number }
@@ -112,6 +139,20 @@ export default async function AdminsPage({ searchParams }: AdminsPageProps) {
   const environmentRoles = parseAdminRoles(process.env.ADMIN_ROLES);
   const byUsername = new Map(result.assignments.map((row) => [row.username, row]));
   const matrix = permissionMatrix();
+
+  // §8.8's security history. The filter lives in lib/adminAuditViews.ts, so
+  // this page and the Audit page cannot disagree about what an entry is.
+  const securityHistory = SECURITY_ACTION_PREFIXES.flatMap((prefix) =>
+    filterAuditEntries(recentAdminAudit.entries(), { action: prefix }),
+  ).filter(
+    // One entry can match only one prefix, but a de-duplication costs nothing
+    // and makes the flatMap safe if a prefix is ever widened.
+    (entry, index, all) =>
+      all.findIndex(
+        (other) =>
+          other.at === entry.at && other.actor === entry.actor && other.action === entry.action,
+      ) === index,
+  );
 
   // `sessionIssuedAtMs` is the instant the rows were read, deliberately: the
   // question this column answers is what a session minted now would be allowed
@@ -354,6 +395,34 @@ export default async function AdminsPage({ searchParams }: AdminsPageProps) {
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* §8.8's SECURITY AUDIT HISTORY (Gate 5 finding 15), filtered to the
+          three families this page is responsible for. It reuses
+          lib/adminAuditViews.ts rather than re-implementing a filter, so the
+          Audit page and this one cannot disagree about what an entry is. */}
+      <section aria-labelledby="security-history" className="mt-8">
+        <h2 id="security-history" className="text-base font-semibold">
+          Security history
+        </h2>
+        <p className="mt-1 text-sm text-midGray">
+          Role changes, logins and session events recorded by THIS server instance, newest first.
+          Failed and denied attempts are included — a denial is the entry most worth keeping. It
+          is not the durable record: that is the structured line written to stderr, and the
+          Postgres audit table ships in migration 35, which is not yet applied.
+        </p>
+        {securityHistory.length === 0 ? (
+          <EmptyState message="This instance has recorded no role change, login or session event yet." />
+        ) : (
+          <div className="mt-3">
+            <DataTable
+              columns={SECURITY_COLUMNS}
+              rows={securityHistory}
+              rowKey={(entry) => entry.at + entry.actor + entry.action}
+              emptyMessage="This instance has recorded no role change, login or session event yet."
+            />
+          </div>
+        )}
       </section>
 
       <section aria-labelledby="provisioning" className="mt-8">

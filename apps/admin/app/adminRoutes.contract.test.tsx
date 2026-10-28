@@ -472,6 +472,70 @@ describe('the pharmacy list pushes its filters into the query', () => {
   });
 });
 
+describe('§8.5 Analytics renders all four missing figures (Gate 5 finding 8)', () => {
+  // All four were specified, none rendered, and the acceptance record claimed
+  // them. Rendered against a POPULATED fixture, because an empty platform
+  // would show the empty state and prove nothing.
+  beforeEach(() => {
+    setEnvironment({ founder: 'super_admin' });
+    seedPlatform();
+    clientBox.rowsByTable.billing_accounts = [
+      { id: ACCOUNT_ID, primary_shop_id: SHOP_ID, launch_trial_granted_at: '2026-08-01T00:00:00.000Z' },
+    ];
+  });
+
+  test('conversion, growth, cancellations and sales volume all appear', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./analytics/page');
+
+    expect(html).toContain('Trial to paid conversion');
+    expect(html).toContain('Subscription growth, by month');
+    expect(html).toContain('Recorded cancellations, by month');
+    expect(html).toContain('Pharmacy sales volume, by month');
+  });
+
+  test('it reads the sources those figures need', async () => {
+    await signInAs('founder', 'super_admin');
+
+    await render('./analytics/page');
+
+    const touched = new Set(clientBox.calls.map((call) => call.table));
+    for (const table of ['billing_accounts', 'billing_subscriptions', 'payment_orders']) {
+      expect(touched.has(table), 'analytics never read ' + table).toBe(true);
+    }
+  });
+
+  test('a malformed range is refused and NOTHING is queried', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./analytics/page', { from: '2026-13-01' });
+
+    expect(html).toContain('role="alert"');
+    // The claim is that no PHARMACY DATA was read. `admin_platform_settings`
+    // is read first and legitimately: §8.11's flag decides whether this page
+    // exists at all, and it is admin configuration rather than business data —
+    // the same category as the role table the exclusion list already names.
+    const touched = new Set(clientBox.calls.map((call) => call.table));
+    for (const table of ['shops', 'sales', 'billing_subscriptions', 'payment_orders']) {
+      expect(touched.has(table), table + ' was read despite a refused range').toBe(false);
+    }
+  });
+
+  test('an oversized range is refused too, with the cap stated', async () => {
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./analytics/page', { from: '2020-01-01', to: '2026-01-01' });
+
+    expect(html).toContain('role="alert"');
+    expect(html).toContain('400');
+    const touched = new Set(clientBox.calls.map((call) => call.table));
+    for (const table of ['shops', 'sales', 'billing_subscriptions', 'payment_orders']) {
+      expect(touched.has(table), table + ' was read despite an oversized range').toBe(false);
+    }
+  });
+});
+
 describe('the shipped Maps state plots nothing and loads no map', () => {
   test('with no tile provider configured, MapLoader is never rendered', async () => {
     setEnvironment({ founder: 'super_admin' });

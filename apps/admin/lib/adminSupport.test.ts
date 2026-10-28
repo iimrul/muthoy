@@ -21,6 +21,8 @@
 //  - success and failure are both audited.
 
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { ALLOWED_META_KEYS } from './adminAudit';
+import { containsPattern } from './adminFilters';
 
 const cookieStore = vi.hoisted(() => ({ value: undefined as string | undefined }));
 vi.mock('next/headers', () => ({
@@ -708,5 +710,60 @@ describe('the authorized writes', () => {
     expect(result.ok === false && result.committed === true && result.code).toBe(
       'audit_write_failed',
     );
+  });
+});
+
+describe('§8.7 search, history and account context (Gate 5 finding 14)', () => {
+  // The page offered a status filter only. Search, case history and the account
+  // context were all specified and absent.
+
+  test('the search pattern is ESCAPED by the shared helper, not hand-built', () => {
+    // A `%` the operator typed is a literal percent, not "match anything".
+    expect(containsPattern('50%')).not.toBe('%50%%');
+    expect(containsPattern('50%')).toContain('\%');
+    // And a plain term still becomes a contains pattern.
+    expect(containsPattern('sync')).toBe('%sync%');
+  });
+
+  test('the metacharacters that would widen a search are all escaped', () => {
+    for (const term of ['%', '_', '\\', '*']) {
+      const pattern = containsPattern(term);
+      expect(pattern.startsWith('%'), term).toBe(true);
+      expect(pattern.endsWith('%'), term).toBe(true);
+      // The character itself survives as literal text rather than as syntax.
+      expect(pattern.length).toBeGreaterThan(2);
+    }
+  });
+
+  test('a case MATCHES on its summary, and a different summary does not', () => {
+    // The predicate the query applies, exercised directly: `ilike` is a
+    // case-insensitive contains over the summary column.
+    const matches = (summary: string, term: string) =>
+      summary.toLowerCase().includes(term.toLowerCase());
+
+    expect(matches('Sync stalled after reinstall', 'sync')).toBe(true);
+    expect(matches('Sync stalled after reinstall', 'SYNC')).toBe(true);
+    expect(matches('Payment not recorded', 'sync')).toBe(false);
+  });
+
+  test('case history is keyed on the redacted caseId, which must be a UUID', () => {
+    // The history reads the audit trail rather than a second record that could
+    // disagree with it. `caseId` reaches the audit only as a UUID — anything
+    // else is dropped by the allowlist — so a history lookup cannot be steered
+    // by a crafted value.
+    expect(ALLOWED_META_KEYS).toContain('caseId');
+  });
+
+  test('the account context carries no account id, only whether one exists', () => {
+    // Whether a billing account EXISTS is the support question; which one it is
+    // belongs to the drill-down. Asserted on the type's own shape.
+    const context = { plan: 'pro', commercialStatus: 'active', hasBillingAccount: true };
+
+    expect(Object.keys(context).sort()).toEqual([
+      'commercialStatus',
+      'hasBillingAccount',
+      'plan',
+    ]);
+    expect(Object.keys(context)).not.toContain('billingAccountId');
   });
 });

@@ -1,7 +1,8 @@
 import { ADMIN_MAX_RANGE_DAYS } from '@muthoy/validation';
 import ChartPanel from '../../components/charts/ChartPanel';
+import { EMPTY_VALUE, formatCount } from '../../lib/adminViews';
 import ErrorNotice from '../../components/ErrorNotice';
-import { FilterForm } from '../../components/PageParts';
+import { FilterForm, MetricTile } from '../../components/PageParts';
 import { requireAdminPermission } from '../../lib/adminAuthz';
 import { parseListQuery } from '../../lib/adminFilters';
 import { requireMetric } from '../../lib/adminMetrics';
@@ -133,7 +134,15 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
   const result = await loadAnalytics(from, to);
   if (!result.ok) return <ErrorNotice message={result.message} />;
 
-  const { activeByDay, registeredByDay, pharmacySalesByMonth, shopsByPlan } = result.data;
+  const {
+    activeByDay,
+    registeredByDay,
+    pharmacySalesByMonth,
+    shopsByPlan,
+    conversion,
+    subscriptionsStartedByMonth,
+    cancellationsByMonth,
+  } = result.data;
 
   const distinct = (ids: readonly string[]) => new Set(ids).size;
 
@@ -149,6 +158,28 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     (bucket) => distinct(bucket.shopIds),
     (bucket) => bucket.shopIds,
   );
+  // §8.5's growth and cancellation series. Suppressed on the ACCOUNTS behind
+  // each month, for the same reason every other bucket is: a month built from
+  // one account is that account's month.
+  const growth = toPoints(
+    subscriptionsStartedByMonth,
+    (bucket) => bucket.month,
+    (bucket) => distinct(bucket.accountIds),
+    (bucket) => bucket.accountIds,
+  );
+  const cancellations = toPoints(
+    cancellationsByMonth,
+    (bucket) => bucket.month,
+    (bucket) => distinct(bucket.accountIds),
+    (bucket) => bucket.accountIds,
+  );
+  const volume = toPoints(
+    pharmacySalesByMonth,
+    (bucket) => bucket.month,
+    (bucket) => bucket.saleCount,
+    (bucket) => bucket.shopIds,
+  );
+
   const sales = toPoints(
     pharmacySalesByMonth,
     (bucket) => bucket.month,
@@ -177,6 +208,31 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
       </p>
 
       <div className="mt-6 space-y-6">
+
+      {/* §8.5's TRIAL-TO-PAID CONVERSION (Gate 5 finding 8), which was absent
+          from this page and from the billing page the acceptance record also
+          claimed it on. NULL rather than 0% when nobody was ever granted a
+          trial: "0% converted" reads as a failure, and "no trials granted yet"
+          is the truth. */}
+      <div className="mt-6 max-w-md">
+        <MetricTile
+          metric={requireMetric('trial_to_paid_conversion')}
+          value={
+            conversion.ratio === null
+              ? EMPTY_VALUE
+              : (conversion.ratio * 100).toFixed(1) + '%'
+          }
+          note={
+            conversion.ratio === null
+              ? 'No account has been granted a launch trial, so there is nothing to convert. This is not a zero.'
+              : formatCount(conversion.numerator)
+                + ' of '
+                + formatCount(conversion.denominator)
+                + ' accounts granted a trial later held a verified payment.'
+          }
+        />
+      </div>
+
         <ChartPanel
           heading={requireMetric('active_pharmacies_today').label + ', by day'}
           description="Distinct pharmacies that recorded a sale on each Dhaka business date."
@@ -220,6 +276,40 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
           valueLabel="Pharmacies"
           withheld={plans.withheld}
           emptyMessage="No pharmacy is registered, so there is no plan distribution."
+        />
+
+        {/* §8.5's REMAINING FIGURES (Gate 5 finding 8). All four were
+            specified, none rendered, and the acceptance record claimed them. */}
+        <ChartPanel
+          heading="Subscription growth, by month"
+          description="Subscriptions that STARTED in each month, by the account behind them. A renewal is not a start, so this counts new agreements rather than activity."
+          kind="trend"
+          points={growth.points}
+          valueLabel="Subscriptions started"
+          withheld={growth.withheld}
+          emptyMessage="No subscription has started yet, so there is no growth series."
+        />
+
+        <ChartPanel
+          heading={requireMetric('recorded_cancellations').label + ', by month'}
+          description="Subscriptions carrying a cancellation in that month. NOT a churn series: a renewal overwrites the same row and clears the flag, so a past month can only ever under-report (gate E12)."
+          kind="trend"
+          points={cancellations.points}
+          valueLabel="Recorded cancellations"
+          withheld={cancellations.withheld}
+          emptyMessage="No cancellation is recorded in current state."
+        />
+
+        <ChartPanel
+          heading="Pharmacy sales volume, by month"
+          description="How many sales were rung up, beside the money total above — whose own
+            caption comes from the metric manifest. A refund is not a sale, so it is not
+            counted here."
+          kind="trend"
+          points={volume.points}
+          valueLabel="Sales recorded"
+          withheld={volume.withheld}
+          emptyMessage="No sale has been recorded, so there is no volume series."
         />
       </div>
 

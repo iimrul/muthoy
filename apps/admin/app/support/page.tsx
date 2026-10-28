@@ -6,16 +6,22 @@ import {
 } from '@muthoy/validation';
 import ErrorNotice from '../../components/ErrorNotice';
 import { EmptyState, FilterForm } from '../../components/PageParts';
+import { recentAdminAudit } from '../../lib/adminAudit';
 import { requireAdminPermission } from '../../lib/adminAuthz';
 import { outcomeNote } from '../../lib/adminOutcomes';
-import { getSupportCaseDetail, listSupportCaseSummaries } from '../../lib/adminPlatformQueries';
+import {
+  getSupportCaseDetail,
+  listSupportCaseSummaries,
+  supportCaseContext,
+  type SupportCaseContext,
+} from '../../lib/adminPlatformQueries';
 import {
   SUPPORT_EMPTY_REASON,
   supportQueueCounts,
   type SupportCaseDetail,
   type SupportCaseSummary,
 } from '../../lib/adminSupport';
-import { isUuid } from '../../lib/adminViews';
+import { formatDhakaDateTime, isUuid } from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
 import {
   addSupportNoteAction,
@@ -52,19 +58,36 @@ const STATUS_OPTIONS = [
 interface SupportResult {
   cases: readonly SupportCaseSummary[];
   detail: SupportCaseDetail | null;
+  /** §8.7's account and shop context for the open case (Gate 5 finding 14). */
+  context: SupportCaseContext | null;
   /** Set when a `?case=` id was given but matched nothing. */
   missingCase: boolean;
 }
 
 type LoadResult = { ok: true; data: SupportResult } | { ok: false; message: string };
 
-async function loadSupport(status: string, caseId: string | null): Promise<LoadResult> {
+async function loadSupport(
+  status: string,
+  search: string,
+  caseId: string | null,
+): Promise<LoadResult> {
   try {
-    const cases = await listSupportCaseSummaries(status.length > 0 ? { status } : {});
-    if (caseId === null) return { ok: true, data: { cases, detail: null, missingCase: false } };
+    // §8.7's search and status filters, BOTH pushed into the query (Gate 5
+    // finding 14). The escaping lives in lib/adminFilters.ts; this page never
+    // builds a pattern.
+    const cases = await listSupportCaseSummaries({
+      ...(status.length > 0 ? { status } : {}),
+      ...(search.length > 0 ? { search } : {}),
+    });
+    if (caseId === null) {
+      return { ok: true, data: { cases, detail: null, context: null, missingCase: false } };
+    }
 
     const detail = await getSupportCaseDetail(caseId);
-    return { ok: true, data: { cases, detail, missingCase: detail === null } };
+    // The context is read only once a case is actually open, and only for that
+    // case's own shop.
+    const context = detail === null ? null : await supportCaseContext(detail.case.shopId);
+    return { ok: true, data: { cases, detail, context, missingCase: detail === null } };
   } catch (error: unknown) {
     console.error('[admin] the support queue failed to load:', error);
     return { ok: false, message: toDisplayMessage(error) };
@@ -93,6 +116,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
 
   const params = await searchParams;
   const status = firstParam(params.status);
+  const search = firstParam(params.search).slice(0, 120);
   const requestedCase = firstParam(params.case);
   // Validated BEFORE it reaches a query, and a malformed id is reported rather
   // than passed down to produce a database error.
@@ -104,10 +128,22 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
     note_add: 'The note is saved, and cannot be edited or deleted.',
   });
 
-  const result = await loadSupport(status, caseId);
+  const result = await loadSupport(status, search, caseId);
   if (!result.ok) return <ErrorNotice message={result.message} />;
 
-  const { cases, detail, missingCase } = result.data;
+  const { cases, detail, context, missingCase } = result.data;
+
+  // §8.7's CASE HISTORY (Gate 5 finding 14). Every transition and note is
+  // audited, so the history IS this case's audit trail — not a second record
+  // that could disagree with it. There is no transition table, and inventing
+  // one would be a schema change with no authority behind it. Matched on the
+  // redacted `caseId` meta key, which lib/adminAudit.ts allows only as a UUID.
+  const caseHistory =
+    detail === null
+      ? []
+      : recentAdminAudit
+          .entries()
+          .filter((entry) => String(entry.meta.caseId ?? '') === detail.case.id);
   const counts = supportQueueCounts(cases);
 
   return (
@@ -144,12 +180,17 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
       ) : null}
 
       <FilterForm
+        search={{ value: search, label: 'Search summaries', placeholder: 'sync, reinstall…' }}
         selects={[{ name: 'status', label: 'Status', value: status, options: STATUS_OPTIONS }]}
       />
 
       {cases.length === 0 ? (
         <EmptyState
-          message={status.length > 0 ? 'No case has that status.' : SUPPORT_EMPTY_REASON}
+          message={
+            search.length > 0 || status.length > 0
+              ? 'No case matches these filters. The filters are applied in the query, so this is the real count.'
+              : SUPPORT_EMPTY_REASON
+          }
         />
       ) : (
         <table className="mt-4 w-full text-sm">
@@ -221,6 +262,56 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
               Open this pharmacy
             </Link>
           </p>
+
+          {/* §8.7's ACCOUNT AND SHOP CONTEXT (Gate 5 finding 14). Specified and
+              absent. Deliberately thin: the plan and the commercial status are
+              what a support conversation turns on, and the full billing picture
+              is one click away on the pharmacy's own page rather than
+              duplicated — and possibly contradicted — here. */}
+          <dl className="mt-3 grid gap-2 rounded border border-black/10 bg-offWhite p-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-midGray">Plan</dt>
+              <dd className="mt-0.5">{context?.plan ?? 'could not be read'}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-midGray">Commercial status</dt>
+              <dd className="mt-0.5">{context?.commercialStatus ?? 'could not be read'}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-midGray">Billing account</dt>
+              <dd className="mt-0.5">
+                {context === null
+                  ? 'could not be read'
+                  : context.hasBillingAccount
+                    ? 'linked'
+                    : 'none'}
+              </dd>
+            </div>
+          </dl>
+
+          {/* §8.7's CASE HISTORY (Gate 5 finding 14). Every transition and note
+              is audited, so the history IS the audit trail for this case id —
+              not a second record that could disagree with it. There is no
+              transition table, and inventing one would be a schema change with
+              no authority behind it. */}
+          <div className="mt-4">
+            <h3 className="text-sm font-semibold">Case history</h3>
+            {caseHistory.length === 0 ? (
+              <p role="status" className="mt-1 text-sm text-midGray">
+                This instance has recorded no change to this case. The audit is held in memory
+                here, so a restart clears it; the durable record is the structured stderr line.
+              </p>
+            ) : (
+              <ul className="mt-2 space-y-1 text-sm">
+                {caseHistory.map((item) => (
+                  <li key={item.at + item.action}>
+                    {formatDhakaDateTime(item.at)} · {item.actor} · {item.action} ·{' '}
+                    {item.outcome}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
 
           {canWrite ? (
             <form action={updateSupportCaseAction} className="mt-4 flex flex-wrap items-end gap-3">

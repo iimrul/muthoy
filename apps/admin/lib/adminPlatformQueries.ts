@@ -34,6 +34,8 @@ import { alignToWindow, dhakaDayLabel, trendDays, type DayBucket } from './admin
 import type { ShopLocationRow } from './adminGeo';
 import {
   collectedPaymentsByMonth,
+  trialToPaidConversion,
+  type ConversionRatio,
   collectedSubscriptionPaymentsPaisa,
   expiredWithoutCancellation,
   monthlyRecurringRevenue,
@@ -290,7 +292,7 @@ async function shopNamesFor(ids: readonly string[]): Promise<ReadonlyMap<string,
 }
 
 export async function listSupportCaseSummaries(
-  query: { status?: string; shopId?: string } = {},
+  query: { status?: string; shopId?: string; search?: string } = {},
   now: Date = new Date(),
 ): Promise<readonly SupportCaseSummary[]> {
   const cases = await readSupportCases(query);
@@ -442,10 +444,22 @@ export interface AnalyticsOverview {
   pharmacySalesByMonth: readonly {
     month: string;
     totalPaisa: Paisa;
+    /** §8.5's sales VOLUME: how many sale rows, beside the refund-net total. */
+    saleCount: number;
     shopIds: readonly string[];
   }[];
   /** Per plan tier: the shops on it. */
   shopsByPlan: readonly { plan: string; shopIds: readonly string[] }[];
+  /**
+   * §8.5's four remaining figures (Gate 5 finding 8). All four were specified
+   * and none rendered, while the acceptance record claimed them.
+   */
+  /** Trial-to-paid conversion. `ratio` is null when no trial was ever granted. */
+  conversion: ConversionRatio;
+  /** Per month: subscriptions that STARTED — §8.5's subscription growth. */
+  subscriptionsStartedByMonth: readonly { month: string; accountIds: readonly string[] }[];
+  /** Per month: subscriptions carrying a `canceled_at` in that month. */
+  cancellationsByMonth: readonly { month: string; accountIds: readonly string[] }[];
 }
 
 function groupShops<T>(
@@ -483,17 +497,73 @@ export async function analyticsOverview(
   range: { from?: string; to?: string } = {},
 ): Promise<AnalyticsOverview> {
   const base = { format: 'csv' as const, ...range };
-  const [activity, sales] = await Promise.all([
+  const supabase = getSupabaseAdmin();
+  const [activity, sales, accountRows, subscriptionRows, orderRows] = await Promise.all([
     platformReportData({ ...base, reportId: 'activity_summary' }),
     platformReportData({ ...base, reportId: 'refund_net_pharmacy_sales' }),
+    // §8.5's conversion needs the trial grants, and its growth and cancellation
+    // series need the subscription lifecycle columns. Read whole rather than
+    // windowed: a conversion is "ever", and a subscription that STARTED before
+    // the window still contributes to the month it started in.
+    readAllPages<Record<string, unknown>>('billing_accounts', (from, to) =>
+      asPageQuery(
+        supabase.from('billing_accounts').select('id,launch_trial_granted_at'),
+      )
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+    readAllPages<Record<string, unknown>>('billing_subscriptions', (from, to) =>
+      asPageQuery(supabase.from('billing_subscriptions').select(REPORT_SUBSCRIPTION_COLUMNS))
+        .order('id', { ascending: true })
+        .range(from, to),
+    ).then((rows) => rows.map(toSubscriptionRow)),
+    readAllPages<Record<string, unknown>>('payment_orders', (from, to) =>
+      asPageQuery(supabase.from('payment_orders').select(REPORT_ORDER_COLUMNS))
+        .order('id', { ascending: true })
+        .range(from, to),
+    ).then((rows) => rows.map(toPaymentOrderRow)),
   ]);
 
-  const months = new Map<string, { totalPaisa: Paisa; shopIds: string[] }>();
+  const accounts = accountRows.map((row) => ({
+    id: text(row.id),
+    principalOwnerUserId: '',
+    primaryShopId: '',
+    launchTrialGrantedAt: nullableText(row.launch_trial_granted_at),
+    createdAt: '',
+  }));
+
+  /** Groups subscriptions into months by one of their own timestamps. */
+  const byMonth = (
+    rows: readonly SubscriptionRow[],
+    instantOf: (row: SubscriptionRow) => string | null,
+  ): readonly { month: string; accountIds: readonly string[] }[] => {
+    const months = new Map<string, string[]>();
+    for (const row of rows) {
+      const at = instantOf(row);
+      if (at === null || at.length === 0) continue;
+      const month = (dhakaDayLabel(at) ?? at.slice(0, 10)).slice(0, 7);
+      const held = months.get(month);
+      if (held === undefined) months.set(month, [row.billingAccountId]);
+      else held.push(row.billingAccountId);
+    }
+    return [...months.entries()]
+      .map(([month, accountIds]) => ({ month, accountIds }))
+      .sort((left, right) => left.month.localeCompare(right.month));
+  };
+
+  const months = new Map<string, { totalPaisa: Paisa; saleCount: number; shopIds: string[] }>();
   for (const row of [...sales.sales, ...sales.refunds]) {
     const month = row.businessDate.slice(0, 7);
-    const held = months.get(month) ?? { totalPaisa: asPaisa(0), shopIds: [] };
+    const held = months.get(month) ?? { totalPaisa: asPaisa(0), saleCount: 0, shopIds: [] };
     held.shopIds.push(row.shopId);
     months.set(month, held);
+  }
+  // The COUNT is sale rows only — a refund is not a sale, and adding it would
+  // make "how many sales" grow when money went back out.
+  for (const row of sales.sales) {
+    const month = row.businessDate.slice(0, 7);
+    const held = months.get(month);
+    if (held !== undefined) held.saleCount += 1;
   }
   for (const [month, held] of months) {
     const monthSales = sales.sales.filter((row) => row.businessDate.startsWith(month));
@@ -526,7 +596,12 @@ export async function analyticsOverview(
       ),
     ),
     pharmacySalesByMonth: [...months.entries()]
-      .map(([month, held]) => ({ month, totalPaisa: held.totalPaisa, shopIds: held.shopIds }))
+      .map(([month, held]) => ({
+        month,
+        totalPaisa: held.totalPaisa,
+        saleCount: held.saleCount,
+        shopIds: held.shopIds,
+      }))
       .sort((left, right) => left.month.localeCompare(right.month)),
     shopsByPlan: [
       ...groupShops(
@@ -537,6 +612,9 @@ export async function analyticsOverview(
     ]
       .map(([plan, shopIds]) => ({ plan, shopIds }))
       .sort((left, right) => left.plan.localeCompare(right.plan)),
+    conversion: trialToPaidConversion({ accounts, orders: orderRows }),
+    subscriptionsStartedByMonth: byMonth(subscriptionRows, (row) => row.startsAt),
+    cancellationsByMonth: byMonth(subscriptionRows, (row) => row.canceledAt),
   };
 }
 
@@ -1369,4 +1447,52 @@ export async function listShopSupportNotes(
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 
   return { notes, casesFollowed: followed.length };
+}
+
+// ──────────────────────── §8.7 the support detail's account context
+
+export interface SupportCaseContext {
+  plan: string;
+  commercialStatus: string;
+  /** Whether a billing account EXISTS, not which one. */
+  hasBillingAccount: boolean;
+}
+
+/**
+ * The shop context a support conversation turns on.
+ *
+ * GATE 5 FINDING 14: §8.7's "account and shop context" was specified and
+ * absent from the case detail.
+ *
+ * DELIBERATELY THIN. The plan, the commercial status and whether a billing
+ * account exists are what somebody answering a support case needs in front of
+ * them; the full billing picture is one click away on the pharmacy's own page
+ * rather than duplicated — and possibly contradicted — here. The account id
+ * itself is not rendered: whether one EXISTS is the support question, and which
+ * one is the drill-down's business.
+ *
+ * Returns null when the shop row cannot be read, so the page can say "could not
+ * be read" rather than implying a free plan.
+ */
+export async function supportCaseContext(shopId: string): Promise<SupportCaseContext | null> {
+  const { data, error } = (await getSupabaseAdmin()
+    .from('shops')
+    .select('id,plan,commercial_status,billing_account_id')
+    .eq('id', shopId)
+    .eq('is_deleted', false)
+    .limit(1)) as RowsResponse;
+
+  if (error) {
+    console.error('[admin] support case context read failed:', error.message);
+    throw new AdminDataError('support case context read failed');
+  }
+
+  const row = (data ?? [])[0];
+  if (row === undefined) return null;
+
+  return {
+    plan: text(row.plan, 'free'),
+    commercialStatus: text(row.commercial_status, 'active'),
+    hasBillingAccount: nullableText(row.billing_account_id) !== null,
+  };
 }

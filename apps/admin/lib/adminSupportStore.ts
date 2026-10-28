@@ -30,6 +30,7 @@ import 'server-only';
 // the only tables named here are the two admin ones. A support admin writing a
 // note touches `admin_support_notes` and nothing a pharmacy owns.
 
+import { containsPattern } from './adminFilters';
 import { AdminDataError } from './errors';
 import { getSupabaseAdmin } from './supabaseAdmin';
 import {
@@ -68,6 +69,15 @@ export interface SupportCaseQuery {
   status?: string;
   /** An exact shop id, for the drill-down's support block. */
   shopId?: string;
+  /**
+   * §8.7's free-text search over the case SUMMARY.
+   *
+   * GATE 5 FINDING 14: specified and absent — the page offered a status filter
+   * only. The pattern is built by `containsPattern` from lib/adminFilters.ts,
+   * which owns the LIKE escaping, so `%`, `_`, `\` and PostgREST's `*` alias
+   * are literal text rather than wildcards the operator did not type.
+   */
+  search?: string;
 }
 
 /**
@@ -89,6 +99,12 @@ export async function listSupportCases(
   }
   if (query.shopId !== undefined && query.shopId.length > 0) {
     request = request.eq('shop_id', query.shopId);
+  }
+  if (query.search !== undefined && query.search.trim().length > 0) {
+    // `ilike` on ONE column, with the pattern escaped by the shared helper. A
+    // single column means no `.or()` is built here, so the filter-grammar
+    // injection surface lib/adminFilters.ts guards does not arise at all.
+    request = request.ilike('summary', containsPattern(query.search.trim()));
   }
 
   const { data, error } = await request

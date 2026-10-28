@@ -252,3 +252,70 @@ describe('every RENDERED filter option survives the shared schema (Gate 5 findin
     }
   });
 });
+
+describe('§8.8 the Admins page security history (Gate 5 finding 15)', () => {
+  // Specified and absent. The page filters to three families through the SAME
+  // library the Audit page uses, so the two cannot disagree about what an entry
+  // is — which is why the filtering is tested here rather than re-implemented
+  // on the page.
+  const PREFIXES = ['admins.', 'login', 'session.'] as const;
+
+  const entries: AdminAuditEntry[] = [
+    entry({ action: 'admins.role_assigned', actor: 'founder', outcome: 'success' }),
+    entry({ action: 'admins.revoke_sessions', actor: 'founder', outcome: 'success' }),
+    entry({ action: 'login', actor: 'ops', outcome: 'failure', actorVerified: false }),
+    entry({ action: 'session.role_revoked', actor: 'ops', outcome: 'denied' }),
+    // The ones that must NOT appear: these belong to other pages.
+    entry({ action: 'settings.updated', actor: 'founder', outcome: 'success' }),
+    entry({ action: 'payments.order_expired', actor: 'founder', outcome: 'success' }),
+    entry({ action: 'support.note_added', actor: 'ops', outcome: 'success' }),
+  ];
+
+  function history(): readonly AdminAuditEntry[] {
+    return PREFIXES.flatMap((prefix) => filterAuditEntries(entries, { action: prefix }));
+  }
+
+  test('POSITIVE: every role, login and session event is included', () => {
+    expect(history().map((item) => item.action).sort()).toEqual([
+      'admins.revoke_sessions',
+      'admins.role_assigned',
+      'login',
+      'session.role_revoked',
+    ]);
+  });
+
+  test('NEGATIVE: settings, payment and support events are excluded', () => {
+    const actions = history().map((item) => item.action);
+
+    expect(actions).not.toContain('settings.updated');
+    expect(actions).not.toContain('payments.order_expired');
+    expect(actions).not.toContain('support.note_added');
+  });
+
+  test('a DENIED session event is kept — that is the entry most worth having', () => {
+    expect(history().some((item) => item.outcome === 'denied')).toBe(true);
+  });
+
+  test('a FAILED login is kept, with its actor marked unverified', () => {
+    const failedLogin = history().find((item) => item.action === 'login');
+
+    expect(failedLogin?.outcome).toBe('failure');
+    expect(failedLogin?.actorVerified).toBe(false);
+  });
+
+  test('the prefixes are matched as prefixes, so a NEW action in a family appears', () => {
+    // The point of a prefix: a family gains an action without this list
+    // changing. A list of exact names would have gone stale silently.
+    const withNew = [...entries, entry({ action: 'admins.account_disabled' })];
+    const matched = PREFIXES.flatMap((prefix) => filterAuditEntries(withNew, { action: prefix }));
+
+    expect(matched.map((item) => item.action)).toContain('admins.account_disabled');
+  });
+
+  test('every prefix the page uses survives the shared schema', () => {
+    // Otherwise this page would hit finding 6's defect from the other side.
+    for (const prefix of PREFIXES) {
+      expect(adminListQuerySchema.safeParse({ action: prefix }).success, prefix).toBe(true);
+    }
+  });
+});
