@@ -157,8 +157,6 @@ export interface RoleAssignmentWrite {
   username: string;
   role: AdminRole;
   isActive: boolean;
-  /** Epoch milliseconds, or null to leave the existing revocation point alone. */
-  revokeSessionsAtMs: number | null;
   /** The acting admin, recorded once at insert and immutable thereafter. */
   assignedBy: string;
 }
@@ -169,9 +167,11 @@ export type RoleAssignmentWriteEffect = 'created' | 'updated';
  * Creates the row, or narrows the existing one. Returns which happened, so the
  * caller's audit entry says the true thing.
  *
- * `revokeSessionsAtMs` is forward-only: a value lower than the row already
- * carries is ignored rather than applied, because moving a revocation point
- * BACKWARDS would revive sessions an earlier revocation had already killed.
+ * This function owns `role` and `is_active` and NOTHING else. It deliberately
+ * does not write `sessions_revoked_at`: a role change that carried the
+ * revocation point forward from an earlier read would silently lose a
+ * revocation committed in between. `revokeRoleAssignmentSessions` owns that
+ * column, and the two never write the same column as each other.
  */
 export async function writeRoleAssignment(
   input: RoleAssignmentWrite,
@@ -181,20 +181,12 @@ export async function writeRoleAssignment(
   const nowIso = nowFor(deps).toISOString();
   const existing = await readRoleAssignment(input.username, deps);
 
-  const existingRevokedMs = existing?.sessionsRevokedAtMs ?? null;
-  const revokedAtMs = input.revokeSessionsAtMs === null
-    ? existingRevokedMs
-    : existingRevokedMs === null
-      ? input.revokeSessionsAtMs
-      : Math.max(existingRevokedMs, input.revokeSessionsAtMs);
-  const revokedAtIso = revokedAtMs === null ? null : new Date(revokedAtMs).toISOString();
-
   if (existing === null) {
     const { error } = await client.from('admin_role_assignments').insert({
       username: input.username,
       role: input.role,
       is_active: input.isActive,
-      sessions_revoked_at: revokedAtIso,
+      sessions_revoked_at: null,
       assigned_by: input.assignedBy,
       assigned_at: nowIso,
       updated_at: nowIso,
@@ -206,13 +198,13 @@ export async function writeRoleAssignment(
     return 'created';
   }
 
-  // Exactly the four columns the grant permits, and no others.
+  // Three of the four columns the grant permits. `sessions_revoked_at` is
+  // deliberately absent -- see the note above the signature.
   const { error } = await client
     .from('admin_role_assignments')
     .update({
       role: input.role,
       is_active: input.isActive,
-      sessions_revoked_at: revokedAtIso,
       updated_at: nowIso,
     })
     .eq('username', input.username);
@@ -221,4 +213,124 @@ export async function writeRoleAssignment(
     throw new AdminDataError('admin role assignment write failed');
   }
   return 'updated';
+}
+
+export interface SessionRevocationWrite {
+  username: string;
+  /** Epoch milliseconds. Every session issued at or before this is refused. */
+  revokeAtMs: number;
+  /**
+   * The account's standing authority, used ONLY when there is no row to
+   * update. It is never applied to an existing row.
+   */
+  standingRole: AdminRole;
+  /** The acting admin, recorded once at insert and immutable thereafter. */
+  assignedBy: string;
+}
+
+export type SessionRevocationEffect = 'created' | 'advanced' | 'already_later';
+
+/**
+ * Moves an account's revocation point forward.
+ *
+ * GATE 5 DELTA FINDING 1 -- the fix the first attempt got wrong.
+ *
+ * That attempt READ the row, then wrote `role` and `is_active` back from the
+ * read. That is a lost update: a disable or a narrowing committed between the
+ * read and the write is overwritten by stale values, so revoking sessions
+ * could re-enable a disabled account or restore a role that had just been
+ * narrowed. Preserving values read a moment ago is not the same as not
+ * touching them.
+ *
+ * So this issues an UPDATE over exactly two columns -- the revocation point
+ * and `updated_at` -- and NEVER names `role` or `is_active`. A concurrent
+ * disable or narrowing cannot be lost, because nothing here can write it.
+ *
+ * Forward-only is enforced in the WHERE clause rather than from a read, for
+ * the same reason: a point computed with Math.max over a stale read can move
+ * BACKWARDS under concurrency and revive sessions an earlier revocation had
+ * already killed. `sessions_revoked_at IS NULL OR < new` is evaluated by the
+ * database against the committed row.
+ *
+ * Zero rows updated means the row does not exist, or it already carries a
+ * revocation at or past this point. Those are distinguished by a read -- but
+ * the read's answer is CHECKED rather than assumed:
+ *
+ * GATE 5 SECOND-DELTA FINDING 1. This previously returned `already_later` for
+ * any row it found after a zero-row update. A concurrent FIRST INSERT lands a
+ * row whose cutoff is null or earlier, so the function reported success, the
+ * caller audited success, and every existing session stayed valid. A
+ * revocation that reports success without revoking is the worst possible
+ * outcome for this operation.
+ *
+ * So the loop below only returns a success effect when it has either moved the
+ * cutoff itself, inserted the row itself, or READ a cutoff at or past the one
+ * requested. Anything else is retried, and exhausting the attempts THROWS.
+ * Failing closed is right here: the caller turns a throw into an audited
+ * failure and an error message, which is a true statement, where
+ * `already_later` would have been a false one.
+ */
+const REVOCATION_ATTEMPTS = 3;
+
+export async function revokeRoleAssignmentSessions(
+  input: SessionRevocationWrite,
+  deps?: AdminIdentityStoreDeps,
+): Promise<SessionRevocationEffect> {
+  const client = clientFor(deps);
+  const revokeAtIso = new Date(input.revokeAtMs).toISOString();
+
+  for (let attempt = 0; attempt < REVOCATION_ATTEMPTS; attempt += 1) {
+    const nowIso = nowFor(deps).toISOString();
+
+    const { data, error } = await client
+      .from('admin_role_assignments')
+      .update({ sessions_revoked_at: revokeAtIso, updated_at: nowIso })
+      .eq('username', input.username)
+      // Quoted so the timestamp's punctuation cannot be read as filter syntax.
+      .or('sessions_revoked_at.is.null,sessions_revoked_at.lt."' + revokeAtIso + '"')
+      .select('username');
+    if (error) {
+      console.error('[admin] admin_role_assignments revoke failed:', error.message);
+      throw new AdminDataError('admin role assignment write failed');
+    }
+    if ((data ?? []).length > 0) return 'advanced';
+
+    const existing = await readRoleAssignment(input.username, deps);
+
+    if (existing === null) {
+      const { error: insertError } = await client.from('admin_role_assignments').insert({
+        username: input.username,
+        role: input.standingRole,
+        is_active: true,
+        sessions_revoked_at: revokeAtIso,
+        assigned_by: input.assignedBy,
+        assigned_at: nowIso,
+        updated_at: nowIso,
+      });
+      if (insertError === null) return 'created';
+      // A concurrent insert won the race. The row now exists, so the next
+      // attempt's UPDATE is the right move -- not an error.
+      console.error(
+        '[admin] admin_role_assignments revoke insert retried:',
+        insertError.message,
+      );
+      continue;
+    }
+
+    // The ONLY read that justifies reporting success without a write.
+    if (
+      existing.sessionsRevokedAtMs !== null
+      && existing.sessionsRevokedAtMs >= input.revokeAtMs
+    ) {
+      return 'already_later';
+    }
+
+    // A row exists whose cutoff is null or earlier, yet the UPDATE matched
+    // nothing. Retry: either a concurrent writer is mid-flight, or the filter
+    // did not do what it claims -- and in both cases reporting success here
+    // would be a lie.
+  }
+
+  console.error('[admin] admin_role_assignments revoke did not converge');
+  throw new AdminDataError('admin role assignment write failed');
 }

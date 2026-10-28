@@ -8,11 +8,14 @@
 //  - a NARROWED super_admin is denied too — the intersection is not advisory;
 //  - an admin cannot change their own role or revoke their own sessions;
 //  - the target must already exist in ADMIN_ROLES;
-//  - the update touches EXACTLY the four columns the grant permits, so
+//  - a role change touches EXACTLY `role`, `is_active` and `updated_at`, so
 //    `username`, `assigned_by` and `assigned_at` cannot be rewritten by the
-//    panel even if a future edit tried;
-//  - revocation is forward-only, so it cannot revive sessions an earlier
-//    revocation killed;
+//    panel even if a future edit tried -- and NEITHER can the revocation
+//    point, which belongs to the other writer;
+//  - a revocation touches EXACTLY `sessions_revoked_at` and `updated_at`, so
+//    a concurrent disable or narrowing cannot be lost;
+//  - revocation is forward-only, enforced in the WHERE clause rather than
+//    from a read, so it cannot revive sessions an earlier revocation killed;
 //  - a malformed row THROWS rather than reading as "no narrowing row";
 //  - success and failure are both audited.
 
@@ -36,6 +39,7 @@ const {
   listRoleAssignments,
   parseRoleAssignmentRow,
   readRoleAssignment,
+  revokeRoleAssignmentSessions,
   writeRoleAssignment,
 } = await import('./adminIdentityStore');
 const { assignAdminRole, revokeAdminSessions } = await import('./adminIdentityActions');
@@ -81,6 +85,24 @@ interface ClientOptions {
   rows?: Record<string, unknown>[];
   selectError?: string;
   writeError?: string;
+  /**
+   * The rows an UPDATE ... RETURNING answers with. Defaults to `rows`, which
+   * is the ordinary case: the row exists and the filter matches it. Set it to
+   * [] to model the two zero-row cases -- no such row, or a revocation point
+   * already at or past the one being written.
+   */
+  updated?: Record<string, unknown>[];
+  /**
+   * One `updated` answer PER UPDATE, consumed in order, so a retry can be
+   * given a different outcome from the attempt before it. Without this a
+   * concurrency test can only describe one round trip, and the defect being
+   * regressed here only appears across two.
+   */
+  updatedSequence?: Record<string, unknown>[][];
+  /** One `rows` answer PER SELECT, consumed in order, for the same reason. */
+  rowsSequence?: Record<string, unknown>[][];
+  /** An error for the FIRST insert only, modelling a lost insert race. */
+  firstInsertError?: string;
 }
 
 /**
@@ -91,10 +113,26 @@ interface ClientOptions {
 function createClient(options: ClientOptions = {}) {
   const calls: ClientCall[] = [];
   const rows = options.rows ?? [];
+  // Sequenced answers are consumed per call; the last one repeats, so a test
+  // only has to describe the rounds that differ.
+  let selectIndex = 0;
+  let updateIndex = 0;
+  let insertCount = 0;
+
+  function nextFrom<T>(
+    sequence: readonly T[] | undefined,
+    index: number,
+    fallback: T,
+  ): T {
+    if (sequence === undefined || sequence.length === 0) return fallback;
+    return sequence[Math.min(index, sequence.length - 1)] ?? fallback;
+  }
 
   function result(): { data: unknown[] | null; error: { message: string } | null } {
+    const answer = nextFrom(options.rowsSequence, selectIndex, rows);
+    selectIndex += 1;
     return options.selectError === undefined
-      ? { data: rows, error: null }
+      ? { data: answer, error: null }
       : { data: null, error: { message: options.selectError } };
   }
 
@@ -130,17 +168,46 @@ function createClient(options: ClientOptions = {}) {
         },
         insert(values: Record<string, unknown>) {
           calls.push({ op: 'insert', table, values, filters: [] });
+          insertCount += 1;
+          if (insertCount === 1 && options.firstInsertError !== undefined) {
+            return Promise.resolve({
+              data: null,
+              error: { message: options.firstInsertError },
+            });
+          }
           return Promise.resolve(writeResult());
         },
         update(values: Record<string, unknown>) {
           const call: ClientCall = { op: 'update', table, values, filters: [] };
           calls.push(call);
-          return {
-            eq: (...args: unknown[]) => {
-              call.filters.push({ method: 'eq', args });
-              return Promise.resolve(writeResult());
+          // Filters chain and the builder is awaitable at any point, like
+          // PostgREST's: `.eq(...)` alone is a write, `.select(...)` makes it
+          // an UPDATE ... RETURNING.
+          const chain: Record<string, unknown> = {
+            then: (resolve: (value: unknown) => unknown) =>
+              Promise.resolve(writeResult()).then(resolve),
+            select: (...args: unknown[]) => {
+              call.filters.push({ method: 'select', args });
+              const answer = nextFrom(
+                options.updatedSequence,
+                updateIndex,
+                options.updated ?? rows,
+              );
+              updateIndex += 1;
+              return Promise.resolve(
+                options.writeError === undefined
+                  ? { data: answer, error: null }
+                  : { data: null, error: { message: options.writeError } },
+              );
             },
           };
+          for (const method of ['eq', 'or']) {
+            chain[method] = (...args: unknown[]) => {
+              call.filters.push({ method, args });
+              return chain;
+            };
+          }
+          return chain;
         },
       };
     },
@@ -250,7 +317,7 @@ describe('writeRoleAssignment', () => {
     const { client, calls } = createClient({ rows: [] });
 
     const effect = await writeRoleAssignment(
-      { username: 'ops', role: 'support', isActive: true, revokeSessionsAtMs: null, assignedBy: 'founder' },
+      { username: 'ops', role: 'support', isActive: true, assignedBy: 'founder' },
       { client, now: () => NOW },
     );
 
@@ -267,7 +334,7 @@ describe('writeRoleAssignment', () => {
     });
   });
 
-  test('updates EXACTLY the four columns the grant permits', async () => {
+  test('updates EXACTLY role, is_active and updated_at', async () => {
     const { client, calls } = createClient({ rows: [row()] });
 
     const effect = await writeRoleAssignment(
@@ -275,7 +342,6 @@ describe('writeRoleAssignment', () => {
         username: 'ops',
         role: 'support',
         isActive: false,
-        revokeSessionsAtMs: null,
         assignedBy: 'someone_else',
       },
       { client, now: () => NOW },
@@ -286,7 +352,6 @@ describe('writeRoleAssignment', () => {
     expect(Object.keys(update?.values ?? {}).sort()).toEqual([
       'is_active',
       'role',
-      'sessions_revoked_at',
       'updated_at',
     ]);
     // The attribution is immutable BY PRIVILEGE; this proves the code never
@@ -297,71 +362,289 @@ describe('writeRoleAssignment', () => {
     expect(update?.filters).toEqual([{ method: 'eq', args: ['username', 'ops'] }]);
   });
 
+  test('a role change never names the revocation point, so it cannot carry a stale one forward', async () => {
+    // The grant permits this column, so only the code keeps it out. A role
+    // change that wrote back a revocation point it had read a moment earlier
+    // would silently undo a revocation committed in between.
+    const existing = '2026-10-25T05:00:00.000Z';
+    const { client, calls } = createClient({ rows: [row({ sessions_revoked_at: existing })] });
+
+    await writeRoleAssignment(
+      { username: 'ops', role: 'read_only', isActive: true, assignedBy: 'founder' },
+      { client, now: () => NOW },
+    );
+
+    const update = calls.find((call) => call.op === 'update');
+    expect(update?.values).not.toHaveProperty('sessions_revoked_at');
+  });
+
   test('never issues a delete or a truncate', async () => {
     const { client, calls } = createClient({ rows: [row()] });
     await writeRoleAssignment(
-      { username: 'ops', role: 'support', isActive: false, revokeSessionsAtMs: null, assignedBy: 'founder' },
+      { username: 'ops', role: 'support', isActive: false, assignedBy: 'founder' },
       { client, now: () => NOW },
     );
     expect(calls.map((call) => call.op).sort()).toEqual(['select', 'update']);
   });
 
-  test('a null revocation point leaves the existing one alone', async () => {
-    const existing = '2026-10-25T05:00:00.000Z';
-    const { client, calls } = createClient({ rows: [row({ sessions_revoked_at: existing })] });
-
-    await writeRoleAssignment(
-      { username: 'ops', role: 'read_only', isActive: true, revokeSessionsAtMs: null, assignedBy: 'founder' },
-      { client, now: () => NOW },
-    );
-
-    const update = calls.find((call) => call.op === 'update');
-    expect(update?.values?.sessions_revoked_at).toBe(existing);
-  });
-
-  test('revocation is FORWARD-ONLY: an earlier instant cannot revive sessions', async () => {
-    const existing = '2026-10-25T05:00:00.000Z';
-    const { client, calls } = createClient({ rows: [row({ sessions_revoked_at: existing })] });
-
-    await writeRoleAssignment(
-      {
-        username: 'ops',
-        role: 'read_only',
-        isActive: true,
-        revokeSessionsAtMs: Date.parse('2026-10-24T00:00:00.000Z'),
-        assignedBy: 'founder',
-      },
-      { client, now: () => NOW },
-    );
-
-    const update = calls.find((call) => call.op === 'update');
-    expect(update?.values?.sessions_revoked_at).toBe(existing);
-  });
-
-  test('a later instant does move the revocation point', async () => {
-    const { client, calls } = createClient({
-      rows: [row({ sessions_revoked_at: '2026-10-24T00:00:00.000Z' })],
-    });
-
-    await writeRoleAssignment(
-      {
-        username: 'ops',
-        role: 'read_only',
-        isActive: true,
-        revokeSessionsAtMs: NOW.getTime(),
-        assignedBy: 'founder',
-      },
-      { client, now: () => NOW },
-    );
-
-    const update = calls.find((call) => call.op === 'update');
-    expect(update?.values?.sessions_revoked_at).toBe(NOW.toISOString());
-  });
-
   test('a failing write throws without leaking the driver message', async () => {
     const { client } = createClient({ rows: [], writeError: 'permission denied for table' });
     await expect(writeRoleAssignment(
-      { username: 'ops', role: 'support', isActive: true, revokeSessionsAtMs: null, assignedBy: 'founder' },
+      { username: 'ops', role: 'support', isActive: true, assignedBy: 'founder' },
+      { client, now: () => NOW },
+    )).rejects.toThrow('admin role assignment write failed');
+  });
+});
+
+describe('revokeRoleAssignmentSessions — a security action must not widen authority', () => {
+  const REVOKE_AT = Date.parse('2026-10-25T06:00:00.000Z');
+
+  /**
+   * Applies a recorded UPDATE to the row a CONCURRENT transaction committed,
+   * which is the only way to show a lost update rather than assert around it.
+   */
+  function applyTo(
+    committed: Record<string, unknown>,
+    values: Record<string, unknown> | undefined,
+  ): Record<string, unknown> {
+    return { ...committed, ...(values ?? {}) };
+  }
+
+  test('writes EXACTLY the revocation point and updated_at', async () => {
+    const { client, calls } = createClient({ rows: [row()] });
+
+    const effect = await revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'super_admin', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    );
+
+    expect(effect).toBe('advanced');
+    const update = calls.find((call) => call.op === 'update');
+    expect(Object.keys(update?.values ?? {}).sort()).toEqual([
+      'sessions_revoked_at',
+      'updated_at',
+    ]);
+    expect(update?.values).not.toHaveProperty('role');
+    expect(update?.values).not.toHaveProperty('is_active');
+  });
+
+  test('a disable committed concurrently is NOT overwritten', async () => {
+    // GATE 5 DELTA FINDING 1, reproduced as the reviewer described it: a
+    // disabled read_only account must not come back as an enabled
+    // super_admin because its sessions were revoked.
+    const { client, calls } = createClient({ rows: [row()] });
+
+    await revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'super_admin', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    );
+
+    const concurrentlyDisabled = row({ role: 'read_only', is_active: false });
+    const after = applyTo(
+      concurrentlyDisabled,
+      calls.find((call) => call.op === 'update')?.values,
+    );
+
+    expect(after.is_active).toBe(false);
+    expect(after.role).toBe('read_only');
+    expect(after.sessions_revoked_at).toBe(new Date(REVOKE_AT).toISOString());
+  });
+
+  test('the shape the first fix used WOULD have overwritten it', () => {
+    // The negative control for the test above. Without it, that test passes
+    // for any update whatsoever, including one that writes nothing at all.
+    const concurrentlyDisabled = row({ role: 'read_only', is_active: false });
+    const firstFixValues = {
+      role: 'super_admin',
+      is_active: true,
+      sessions_revoked_at: new Date(REVOKE_AT).toISOString(),
+      updated_at: NOW.toISOString(),
+    };
+
+    const after = applyTo(concurrentlyDisabled, firstFixValues);
+
+    expect(after.is_active).toBe(true);
+    expect(after.role).toBe('super_admin');
+  });
+
+  test('forward-only lives in the WHERE clause, not in a read', async () => {
+    const { client, calls } = createClient({ rows: [row()] });
+
+    await revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'support', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    );
+
+    const update = calls.find((call) => call.op === 'update');
+    expect(update?.filters).toEqual([
+      { method: 'eq', args: ['username', 'ops'] },
+      {
+        method: 'or',
+        args: [
+          'sessions_revoked_at.is.null,sessions_revoked_at.lt."'
+          + new Date(REVOKE_AT).toISOString() + '"',
+        ],
+      },
+      { method: 'select', args: ['username'] },
+    ]);
+  });
+
+  test('matching a row needs NO read, so there is no read-then-write window', async () => {
+    const { client, calls } = createClient({ rows: [row()] });
+
+    await revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'support', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    );
+
+    expect(calls.map((call) => call.op)).toEqual(['update']);
+  });
+
+  test('a row already revoked at or past this point is left alone', async () => {
+    // Zero rows matched, but the row exists: nothing to do, and NO insert.
+    const { client, calls } = createClient({
+      rows: [row({ sessions_revoked_at: '2026-10-26T00:00:00.000Z' })],
+      updated: [],
+    });
+
+    const effect = await revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'super_admin', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    );
+
+    expect(effect).toBe('already_later');
+    expect(calls.map((call) => call.op)).toEqual(['update', 'select']);
+    expect(calls.some((call) => call.op === 'insert')).toBe(false);
+  });
+
+  test('no row at all inserts the standing authority, enabled', async () => {
+    const { client, calls } = createClient({ rows: [], updated: [] });
+
+    const effect = await revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'support', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    );
+
+    expect(effect).toBe('created');
+    expect(calls.find((call) => call.op === 'insert')?.values).toEqual({
+      username: 'ops',
+      role: 'support',
+      is_active: true,
+      sessions_revoked_at: new Date(REVOKE_AT).toISOString(),
+      assigned_by: 'founder',
+      assigned_at: NOW.toISOString(),
+      updated_at: NOW.toISOString(),
+    });
+  });
+
+  test('never issues a delete or a truncate', async () => {
+    const { client, calls } = createClient({ rows: [row()] });
+    await revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'support', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    );
+    expect(calls.every((call) => call.op === 'update' || call.op === 'select')).toBe(true);
+  });
+
+  test('a row found with a NULL cutoff is not reported as already revoked', async () => {
+    // GATE 5 SECOND-DELTA FINDING 1. The update matched nothing and the read
+    // found a row -- which the previous version took as "already revoked at or
+    // past this point" and reported SUCCESS for. A concurrent first insert
+    // lands exactly that row with a null cutoff, so the caller audited a
+    // successful revocation while every existing session stayed valid.
+    //
+    // There is no outcome here that can honestly be called success, so the
+    // function fails closed.
+    const { client, calls } = createClient({
+      rows: [row({ sessions_revoked_at: null })],
+      updated: [],
+    });
+
+    await expect(revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'support', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    )).rejects.toThrow('admin role assignment write failed');
+
+    // It did not quietly give up after one look: the attempts are real.
+    expect(calls.filter((call) => call.op === 'update').length).toBeGreaterThan(1);
+    // And it never invented a row on top of the one that exists.
+    expect(calls.some((call) => call.op === 'insert')).toBe(false);
+  });
+
+  test('a row found with an EARLIER cutoff is not reported as already revoked either', async () => {
+    // The second case the reviewer reproduced. An earlier cutoff means the
+    // sessions this call was asked to kill are still valid.
+    const { client } = createClient({
+      rows: [row({ sessions_revoked_at: '2026-10-24T00:00:00.000Z' })],
+      updated: [],
+    });
+
+    await expect(revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'support', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    )).rejects.toThrow('admin role assignment write failed');
+  });
+
+  test('a cutoff at EXACTLY the requested instant IS already revoked', async () => {
+    // The boundary. `>=` is the right comparison: a session refused from this
+    // instant onwards is what was asked for, so there is nothing to do.
+    const { client, calls } = createClient({
+      rows: [row({ sessions_revoked_at: new Date(REVOKE_AT).toISOString() })],
+      updated: [],
+    });
+
+    const effect = await revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'support', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    );
+
+    expect(effect).toBe('already_later');
+    expect(calls.some((call) => call.op === 'insert')).toBe(false);
+  });
+
+  test('a retry CONVERGES when the concurrent writer is done', async () => {
+    // Failing closed must not mean failing on any contention at all. The
+    // first update matches nothing and the row has a null cutoff; by the
+    // second attempt the concurrent transaction has committed and the update
+    // lands.
+    const { client, calls } = createClient({
+      rows: [row({ sessions_revoked_at: null })],
+      updatedSequence: [[], [row()]],
+    });
+
+    const effect = await revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'support', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    );
+
+    expect(effect).toBe('advanced');
+    expect(calls.filter((call) => call.op === 'update')).toHaveLength(2);
+  });
+
+  test('a LOST INSERT race retries the update rather than throwing', async () => {
+    // No row, so this attempt inserts -- and loses to a concurrent insert.
+    // The row now exists, so the right next move is the UPDATE, not an error.
+    const { client, calls } = createClient({
+      rows: [],
+      rowsSequence: [[], [row({ sessions_revoked_at: null })]],
+      updatedSequence: [[], [row()]],
+      firstInsertError: 'duplicate key value violates unique constraint',
+    });
+
+    const effect = await revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'support', assignedBy: 'founder' },
+      { client, now: () => NOW },
+    );
+
+    expect(effect).toBe('advanced');
+    expect(calls.filter((call) => call.op === 'insert')).toHaveLength(1);
+    expect(calls.filter((call) => call.op === 'update')).toHaveLength(2);
+  });
+
+  test('a failing revoke throws without leaking the driver message', async () => {
+    const { client } = createClient({ rows: [row()], writeError: 'permission denied for table' });
+    await expect(revokeRoleAssignmentSessions(
+      { username: 'ops', revokeAtMs: REVOKE_AT, standingRole: 'support', assignedBy: 'founder' },
       { client, now: () => NOW },
     )).rejects.toThrow('admin role assignment write failed');
   });
@@ -584,53 +867,42 @@ describe('revokeAdminSessions', () => {
     expect(insert?.values?.is_active).toBe(true);
   });
 
-  test('a DISABLED, NARROWED account stays disabled and narrowed', async () => {
-    // GATE 5 FINDING 1, as a regression test.
+  test.each([
+    ['a DISABLED, NARROWED account', { role: 'read_only', is_active: false }],
+    ['an ENABLED, narrowed account', { role: 'support', is_active: true }],
+  ])('%s keeps its role and enabled state through a revocation', async (_label, stored) => {
+    // GATE 5 FINDING 1 and its DELTA, as one regression test.
     //
-    // This previously wrote `role: environmentRole, isActive: true`
+    // The original defect wrote `role: environmentRole, isActive: true`
     // unconditionally, so revoking the sessions of a disabled `read_only`
     // account whose environment role is `super_admin` RE-ENABLED it and
     // restored full authority. A security action that widens authority is
     // worse than no action at all.
+    //
+    // The first fix read the row and wrote those two values BACK, which the
+    // delta review correctly rejected: a disable committed between the read
+    // and the write would be lost. So the assertion is no longer "the right
+    // values were written" but the stronger "those columns are not written at
+    // all" — the environment role here is super_admin, so if either column
+    // were in the update, it could only widen.
     await signInAs('founder', 'super_admin');
-    const { client, calls } = createClient({
-      rows: [row({ role: 'read_only', is_active: false })],
-    });
+    const { client, calls } = createClient({ rows: [row(stored)] });
 
     const result = await revokeAdminSessions(
-      // The environment says super_admin; the stored row says disabled
-      // read_only. The row wins for role and enabled state.
       { username: 'ops' },
       deps(client, { founder: 'super_admin', ops: 'super_admin' }),
     );
 
     expect(result.ok).toBe(true);
-    const write =
-      calls.find((call) => call.op === 'update') ?? calls.find((call) => call.op === 'insert');
-    expect(write?.values?.role, 'the narrowing must survive a revocation').toBe('read_only');
-    expect(write?.values?.is_active, 'a disabled account must stay disabled').toBe(false);
+    const update = calls.find((call) => call.op === 'update');
+    expect(update?.values, 'a revocation must not name the role').not.toHaveProperty('role');
+    expect(update?.values, 'a revocation must not name the enabled state')
+      .not.toHaveProperty('is_active');
     // And the revocation itself still happened — the fix must not make the
     // action a no-op.
-    expect(write?.values?.sessions_revoked_at).toBe(NOW.toISOString());
-  });
-
-  test('an ENABLED, narrowed account keeps its narrowing too', async () => {
-    // The other half: the role is preserved even when the account is enabled,
-    // so the fix is not "only disabled rows are protected".
-    await signInAs('founder', 'super_admin');
-    const { client, calls } = createClient({
-      rows: [row({ role: 'support', is_active: true })],
-    });
-
-    await revokeAdminSessions(
-      { username: 'ops' },
-      deps(client, { founder: 'super_admin', ops: 'super_admin' }),
-    );
-
-    const write =
-      calls.find((call) => call.op === 'update') ?? calls.find((call) => call.op === 'insert');
-    expect(write?.values?.role).toBe('support');
-    expect(write?.values?.is_active).toBe(true);
+    expect(update?.values?.sessions_revoked_at).toBe(NOW.toISOString());
+    // No insert: the row exists, so the standing authority is never applied.
+    expect(calls.some((call) => call.op === 'insert')).toBe(false);
   });
 
   test('an admin cannot revoke their OWN sessions', async () => {

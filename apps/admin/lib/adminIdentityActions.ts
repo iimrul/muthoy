@@ -45,6 +45,7 @@ import { requireAdminPermission, type AdminAuthzDeps, type AdminEnvironment } fr
 import { parseAdminRoles } from './adminRoles';
 import {
   readRoleAssignment,
+  revokeRoleAssignmentSessions,
   writeRoleAssignment,
   type AdminIdentityStoreDeps,
 } from './adminIdentityStore';
@@ -171,7 +172,7 @@ export async function assignAdminRole(
   try {
     const existingRole = (await readRoleAssignment(username, storeDeps(deps)))?.role;
     const effect = await writeRoleAssignment(
-      { username, role, isActive, revokeSessionsAtMs: null, assignedBy: session.username },
+      { username, role, isActive, assignedBy: session.username },
       storeDeps(deps),
     );
     const durability = await audit(
@@ -282,28 +283,29 @@ export async function revokeAdminSessions(
   try {
     const revokeAt = (deps?.now?.() ?? new Date()).getTime();
 
-    // GATE 5 FINDING 1 — a confirmed security defect, fixed here.
+    // GATE 5 FINDING 1, and the DELTA finding that the first fix was
+    // incomplete — a confirmed security defect, fixed properly here.
     //
-    // This previously wrote `role: environmentRole` and `isActive: true`
-    // unconditionally, so revoking the sessions of a DISABLED, NARROWED account
-    // silently restored both: the narrowing was replaced by the environment
-    // role — possibly super_admin — and the account was re-enabled. A security
-    // action must never widen authority.
+    // The original defect wrote `role: environmentRole` and `isActive: true`
+    // unconditionally, so revoking the sessions of a DISABLED, NARROWED
+    // account silently restored both. The first fix READ the row and wrote
+    // those two values back — which still loses a disable or a narrowing
+    // committed between the read and the write.
     //
-    // So the existing row's role and enabled state are READ and PRESERVED, and
-    // only the revocation point moves. With no row, the environment role and
-    // `isActive: true` are correct: that is the account's standing authority,
-    // and a first revocation must not invent a narrowing nobody asked for.
-    const existing = await readRoleAssignment(username, storeDeps(deps));
-    await writeRoleAssignment(
+    // The revocation now names neither column, so neither can be lost. What
+    // the account's role and enabled state are is not this action's business;
+    // where its sessions stop being valid is. `standingRole` is used only when
+    // there is no row at all, where the environment role is the account's
+    // standing authority and a first revocation must not invent a narrowing
+    // nobody asked for.
+    await revokeRoleAssignmentSessions(
       {
         username,
+        revokeAtMs: revokeAt,
         // Already proven to be one of the four by parseAdminRoles.
-        role:
-          existing?.role
-          ?? (environmentRole as Parameters<typeof writeRoleAssignment>[0]['role']),
-        isActive: existing?.isActive ?? true,
-        revokeSessionsAtMs: revokeAt,
+        standingRole: environmentRole as Parameters<
+          typeof revokeRoleAssignmentSessions
+        >[0]['standingRole'],
         assignedBy: session.username,
       },
       storeDeps(deps),
