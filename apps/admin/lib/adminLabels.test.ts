@@ -14,6 +14,7 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import ts from 'typescript';
 import { describe, expect, test } from 'vitest';
 import { ADMIN_METRICS } from './adminMetrics';
 
@@ -28,8 +29,62 @@ interface SourceFile {
   code: string;
 }
 
+/**
+ * Comments removed by the LEXER, not by a regex.
+ *
+ * GATE 5 FIFTH-DELTA FINDING. The regex deleted everything after `//` on a
+ * line, so a string literal CONTAINING those two characters truncated the
+ * line and hid the code after it: `{ pharmacyNetSalesPaisa, note: "//" };
+ * totals.pharmacyNetSalesPaisa = 42;` vanished before any check ran. A guard
+ * whose INPUT can be corrupted is not a guard, and this repository has
+ * learned the same lesson once before, in the H-9 source scanner.
+ *
+ * The TypeScript scanner knows what a comment is and what a string is. Each
+ * comment is replaced by a single space so offsets stay plausible and tokens
+ * either side cannot fuse into one word.
+ */
 function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  // Comment ranges come from the PARSER, not from a hand-rolled scan.
+  //
+  // A raw `ts.createScanner` loop was the first attempt and it desynchronised
+  // partway through a file -- `reduce<Paisa>(` under the JSX language variant
+  // was enough -- after which later comments were returned as ordinary tokens
+  // and their prose was scanned as code. The parser's own trivia ranges cannot
+  // drift from the parse, because they ARE the parse.
+  const file = ts.createSourceFile(
+    'scanned.tsx',
+    source,
+    ts.ScriptTarget.ES2022,
+    true,
+    ts.ScriptKind.TSX,
+  );
+
+  const ranges: ts.CommentRange[] = [];
+  const collectAt = (position: number): void => {
+    ranges.push(
+      ...(ts.getLeadingCommentRanges(source, position) ?? []),
+      ...(ts.getTrailingCommentRanges(source, position) ?? []),
+    );
+  };
+  const visit = (node: ts.Node): void => {
+    collectAt(node.pos);
+    node.forEachChild(visit);
+  };
+  visit(file);
+  collectAt(file.endOfFileToken.pos);
+
+  // Blanked to the SAME LENGTH, so every offset in the file still lines up and
+  // two tokens either side of a comment cannot fuse into one word.
+  const LF = String.fromCharCode(10);
+  const CR = String.fromCharCode(13);
+  const SPACE = String.fromCharCode(32);
+  const out = source.split('');
+  for (const range of ranges) {
+    for (let index = range.pos; index < range.end && index < out.length; index += 1) {
+      if (out[index] !== LF && out[index] !== CR) out[index] = SPACE;
+    }
+  }
+  return out.join('');
 }
 
 function collect(directory: string): SourceFile[] {
@@ -47,6 +102,11 @@ function collect(directory: string): SourceFile[] {
 }
 
 const SOURCES = SCANNED.flatMap((directory) => collect(join(ADMIN_ROOT, directory)));
+
+// The net-money anchors, at module scope so the provenance guard and the
+// occurrence pins below cannot drift apart into two different lists.
+const MODULE_NET_FIELD = 'netSalesToday';
+const MODULE_NET_ANCHORS = [MODULE_NET_FIELD, 'pharmacyNetSalesPaisa'] as const;
 
 describe('the GROSS boundary', () => {
   test('finds the admin source tree', () => {
@@ -486,7 +546,7 @@ describe('the GROSS boundary', () => {
   // Link 2: that field may only be produced by the shared definition.
   // Chained, the word cannot reach a page unless the number behind it came from
   // @muthoy/utils — which is what the blanket ban could never check.
-  const NET_FIELD = 'netSalesToday';
+  const NET_FIELD = MODULE_NET_FIELD;
 
   // Batch 3 §8.4 adds a SECOND net figure, on the one page that renders both
   // families: W4-04's refund-net pharmacy takings. The chain is EXTENDED, not
@@ -494,31 +554,233 @@ describe('the GROSS boundary', () => {
   // number behind it also comes from the shared `netSalesPaisa`. Two anchors,
   // each with provenance, is still "the word cannot attach to a figure that
   // was not computed by the one definition".
-  const NET_ANCHORS = [NET_FIELD, 'pharmacyNetSalesPaisa'] as const;
+  const NET_ANCHORS = MODULE_NET_ANCHORS;
 
   /**
-   * An anchor only counts if the number behind it has PROVENANCE.
+   * The expression each anchor must be DERIVED FROM wherever it is bound.
    *
-   * GATE 5 FINDING 12. Link 1 originally accepted a file that merely CONTAINED
-   * an anchor's name, so a fabricated `pharmacyNetSalesPaisa = 42` would have
-   * licensed the word `net` on any page. Each anchor now carries the
-   * expression it must be derived from, and naming it without deriving it
-   * fails.
+   * GATE 5 FINDING 12, and the DELTA finding that the first fix was still too
+   * weak. Link 1 originally accepted a file that merely CONTAINED an anchor's
+   * name. The first fix added a required token but still tested CO-OCCURRENCE
+   * over the whole file, which the delta review broke twice over:
+   *
+   *   - `netSalesToday`'s required token was its own name, so
+   *     `const netSalesToday = 42` satisfied it trivially;
+   *   - a fabricated `pharmacyNetSalesPaisa = 42` passed in any file that
+   *     mentioned `pharmacySalesByMonth` anywhere else, for any reason.
+   *
+   * Co-occurrence is not derivation. The check is now per BINDING: every
+   * place an anchor is assigned a value must carry its derivation in the SAME
+   * statement. Reading an anchor is not a binding and needs no derivation —
+   * link 2 pins the one file allowed to assign it — and a TYPE declaration is
+   * not a binding either, which is why `netSalesToday: Paisa;` is not an
+   * offender.
    */
-  const ANCHOR_PROVENANCE: Readonly<Record<string, string>> = {
-    // queries.ts assigns it from the shared subtraction; platformStats declares
-    // the type. Either file satisfies the anchor by carrying the name, and
-    // link 2 below pins which file may assign it.
-    netSalesToday: 'netSalesToday',
-    // The pharmacy anchor must be SUMMED FROM the tallied monthly totals, which
-    // lib/adminPlatformQueries.ts produces through netSalesPaisa.
-    pharmacyNetSalesPaisa: 'pharmacySalesByMonth',
+  /**
+   * The derivations an anchor may be bound to. A WHITELIST, deliberately.
+   *
+   * GATE 5 FOURTH-DELTA FINDING. This guard has now been broken five times,
+   * and every break was a fabrication form the check did not model:
+   *
+   *   1. the anchor's name appearing anywhere in the file;
+   *   2. an anchor whose required token was its own name; co-occurrence;
+   *   3. an uppercase initializer read as a type annotation;
+   *   4. a destructuring rename, and an identifier CONTAINING the token;
+   *   5. a `typeof` inside a type assertion supplying the token for the
+   *      value `42`, and an assignment through a MEMBER rather than a bare
+   *      identifier.
+   *
+   * Four of those five were me enumerating ways to fabricate. **That set is
+   * unbounded; the set of legitimate derivations is two.** So the question is
+   * inverted: a binding passes only if its initializer is one of the
+   * derivations pinned here, and ANY other form fails by default -- including
+   * forms nobody has thought of yet. Fail-closed by construction rather than
+   * by exhaustive blacklist.
+   *
+   * The cost is that a legitimate change to a derivation fails this test until
+   * the pin is updated. That is the right amount of friction for the one guard
+   * standing between a fabricated number and the word "net".
+   *
+   * Whitespace is stripped entirely, so reformatting does not break a pin.
+   */
+  const PINNED_DERIVATIONS: Readonly<Record<string, readonly string[]>> = {
+    // lib/queries.ts: the shared subtraction, called directly.
+    netSalesToday: ['netSalesPaisa(grossSalesToday,refundsToday)'],
+    // app/revenue/page.tsx: summed from the tallied monthly totals, each of
+    // which lib/adminPlatformQueries.ts produced through netSalesPaisa.
+    pharmacyNetSalesPaisa: [
+      'result.pharmacy.pharmacySalesByMonth.reduce((total,month)=>total+Number(month.totalPaisa),0,)',
+    ],
   };
 
-  function anchoredWithProvenance(code: string): boolean {
-    return NET_ANCHORS.some(
-      (anchor) => code.includes(anchor) && code.includes(ANCHOR_PROVENANCE[anchor] ?? anchor),
+  function normalize(text: string): string {
+    return text.replace(/\s+/g, '');
+  }
+
+  interface AnchorBinding {
+    anchor: string;
+    /** The initializer, whitespace-stripped, for comparison against the pins. */
+    normalized: string;
+    /** The initializer as written, for the failure message. */
+    text: string;
+  }
+
+  /**
+   * A property or binding name, including the QUOTED and COMPUTED forms.
+   *
+   * FIFTH-DELTA FINDING: `{ "pharmacyNetSalesPaisa": 42 }` and
+   * `{ ["pharmacyNetSalesPaisa"]: 42 }` are not Identifier names, so an
+   * identifier-only check saw no property at all.
+   */
+  function nameOf(node: ts.PropertyName | ts.BindingName): string | null {
+    if (ts.isIdentifier(node)) return node.text;
+    if (ts.isStringLiteralLike(node)) return node.text;
+    if (ts.isComputedPropertyName(node) && ts.isStringLiteralLike(node.expression)) {
+      return node.expression.text;
+    }
+    return null;
+  }
+
+  function isAnchor(name: string): boolean {
+    return (NET_ANCHORS as readonly string[]).includes(name);
+  }
+
+  /**
+   * Every place this file BINDS a value to one of the anchors.
+   *
+   * Detection must be COMPLETE, because an unmodelled binding site is the one
+   * remaining way past a whitelist. The sites are: a variable declaration, a
+   * binding element (destructuring, including a rename), an object-literal
+   * property, and an assignment -- to a bare identifier, to a member, or
+   * through an element access with a literal name, under ANY assignment
+   * operator rather than `=` alone.
+   */
+  function anchorBindings(code: string): AnchorBinding[] {
+    const source = ts.createSourceFile(
+      'scanned.tsx',
+      code,
+      ts.ScriptTarget.ES2022,
+      true,
+      ts.ScriptKind.TSX,
     );
+    const bindings: AnchorBinding[] = [];
+
+    const record = (anchor: string, initializer: ts.Node | undefined): void => {
+      const text = initializer === undefined ? '<no initializer>' : initializer.getText(source);
+      bindings.push({ anchor, normalized: normalize(text), text });
+    };
+
+    /**
+     * The anchor a write targets, for `x`, `a.x` and `a['x']` -- after
+     * UNWRAPPING the forms that merely wrap a target.
+     *
+     * FIFTH-DELTA FINDING: `(totals.x) = 42`, `(totals.x as T) = 42` and
+     * `totals!.x = 42` all hid the member behind a wrapper node.
+     */
+    const unwrapTarget = (node: ts.Expression): ts.Expression => {
+      let current = node;
+      for (;;) {
+        if (ts.isParenthesizedExpression(current)) current = current.expression;
+        else if (ts.isAsExpression(current)) current = current.expression;
+        else if (ts.isTypeAssertionExpression(current)) current = current.expression;
+        else if (ts.isNonNullExpression(current)) current = current.expression;
+        else if (ts.isSatisfiesExpression(current)) current = current.expression;
+        else return current;
+      }
+    };
+
+    const assignmentTarget = (expression: ts.Expression): string | null => {
+      const node = unwrapTarget(expression);
+      if (ts.isIdentifier(node) && isAnchor(node.text)) return node.text;
+      if (ts.isPropertyAccessExpression(node) && isAnchor(node.name.text)) return node.name.text;
+      if (
+        ts.isElementAccessExpression(node)
+        && ts.isStringLiteralLike(node.argumentExpression)
+        && isAnchor(node.argumentExpression.text)
+      ) {
+        return node.argumentExpression.text;
+      }
+      return null;
+    };
+
+    const visit = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node)) {
+        const name = nameOf(node.name);
+        if (name !== null && isAnchor(name)) record(name, node.initializer);
+      }
+
+      // A destructuring rename binds the anchor to whatever the object was.
+      if (ts.isBindingElement(node)) {
+        const name = nameOf(node.name);
+        if (name !== null && isAnchor(name)) {
+          const declaration = node.parent.parent;
+          record(
+            name,
+            ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined,
+          );
+        }
+      }
+
+      if (ts.isPropertyAssignment(node)) {
+        const name = nameOf(node.name);
+        if (name !== null && isAnchor(name)) record(name, node.initializer);
+      }
+
+      // FIFTH-DELTA FINDING: a class field and an enum member both carry a
+      // value and were not modelled at all.
+      if (ts.isPropertyDeclaration(node) || ts.isEnumMember(node)) {
+        const name = nameOf(node.name);
+        if (name !== null && isAnchor(name)) record(name, node.initializer);
+      }
+
+      // Any assignment operator, and any of the three target shapes.
+      if (
+        ts.isBinaryExpression(node)
+        && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+      ) {
+        const target = assignmentTarget(node.left);
+        if (target !== null) record(target, node.right);
+      }
+
+      // FIFTH-DELTA FINDING: `totals.x++` and `--totals.x` write without any
+      // assignment operator. The value they produce is not pinned, so the
+      // node itself is recorded as the initializer and fails.
+      if (ts.isPostfixUnaryExpression(node) || ts.isPrefixUnaryExpression(node)) {
+        const isUpdate =
+          node.operator === ts.SyntaxKind.PlusPlusToken
+          || node.operator === ts.SyntaxKind.MinusMinusToken;
+        if (isUpdate) {
+          const target = assignmentTarget(node.operand);
+          if (target !== null) record(target, node);
+        }
+      }
+
+      // A `PropertySignature` (`netSalesToday: Paisa;`) declares a type and
+      // binds no value, so it is deliberately not a binding.
+
+      ts.forEachChild(node, visit);
+    };
+
+    ts.forEachChild(source, visit);
+    return bindings;
+  }
+
+  /** Bindings whose initializer is not one of the pinned derivations. */
+  function fabricatedBindings(code: string): AnchorBinding[] {
+    return anchorBindings(code).filter(
+      (binding) => !(PINNED_DERIVATIONS[binding.anchor] ?? []).includes(binding.normalized),
+    );
+  }
+
+  function anchoredWithProvenance(code: string): boolean {
+    const names = NET_ANCHORS.filter((anchor) =>
+      new RegExp('(?:^|[^A-Za-z0-9_])' + anchor + '(?![A-Za-z0-9_])').test(code),
+    );
+    if (names.length === 0) return false;
+    // Naming an anchor while fabricating it anywhere in the file is worse
+    // than not naming it at all.
+    return fabricatedBindings(code).length === 0;
   }
 
   test('link 1: `net` appears only alongside a net-typed, PROVENANCED field', () => {
@@ -532,19 +794,240 @@ describe('the GROSS boundary', () => {
     ).toEqual([]);
   });
 
-  test('MUTATION: a FABRICATED anchor does not license the word', () => {
-    // The hole finding 12 named: the name alone used to be enough.
-    const fabricated = 'const pharmacyNetSalesPaisa = 42; const label = "Net takings";';
+  test('MUTATION: every fabrication the reviewers found is now rejected', () => {
+    // Each mutant is RUN through the guard, not described. The first is the
+    // hole finding 12 named; the next two are the ones the delta review
+    // found still open after that fix.
+    // A newline, named, because a literal escape inside these fixture
+    // strings is one escaping level too many to keep straight.
+    const NEWLINE = String.fromCharCode(10);
+    const mutants: readonly { label: string; code: string }[] = [
+      {
+        label: 'finding 12: the name alone',
+        code: 'const pharmacyNetSalesPaisa = 42; const label = "Net takings";',
+      },
+      {
+        label: 'delta: an anchor whose required token was its own name',
+        code: 'const netSalesToday = 42; const label = "Net sales today";',
+      },
+      {
+        label: 'delta: a fabricated anchor beside an UNRELATED mention',
+        code: [
+          'const pharmacyNetSalesPaisa = 42;',
+          '// pharmacySalesByMonth is mentioned here for an unrelated reason',
+          'const label = "Net takings";',
+        ].join('\n'),
+      },
+      {
+        // SECOND-DELTA FINDING 3, the reviewer's exact counterexample: an
+        // uppercase identifier read as a type annotation.
+        label: 'second delta: a fabricated value behind an UPPERCASE name',
+        code: 'const GROSS_TOTAL = 42;\nconst pharmacyNetSalesPaisa = GROSS_TOTAL;',
+      },
+      {
+        // The same trick, with the real page's derivation token present
+        // elsewhere in the file for good measure.
+        label: 'second delta: the same, with the derivation token nearby',
+        code: [
+          'const TOTALS = 42;',
+          'const pharmacyNetSalesPaisa = TOTALS;',
+          'const unrelated = result.pharmacy.pharmacySalesByMonth.length;',
+        ].join('\n'),
+      },
+      {
+        // THIRD-DELTA FINDING, bypass 1: a destructuring RENAME. The anchor
+        // sits after the colon, so a regex looking for `anchor` followed by
+        // `:` or `=` found no binding at all.
+        label: 'third delta: a destructuring rename',
+        code: 'const { totalPaisa: pharmacyNetSalesPaisa } = { totalPaisa: 42 };',
+      },
+      {
+        // THIRD-DELTA FINDING, bypass 2: a SUBSTRING collision. The
+        // fabricated value is named so that it contains the derivation
+        // token, which `String.includes` cannot tell apart.
+        label: 'third delta: an identifier that merely contains the token',
+        code: [
+          'const pharmacySalesByMonthGross = 42;',
+          'const pharmacyNetSalesPaisa = pharmacySalesByMonthGross;',
+        ].join('\n'),
+      },
+      {
+        // The shorthand form of the rename, for completeness.
+        label: 'third delta: a destructuring shorthand off a literal',
+        code: 'const { pharmacyNetSalesPaisa } = { pharmacyNetSalesPaisa: 42 };',
+      },
+      {
+        // FOURTH-DELTA FINDING, bypass 1: the derivation token supplied by a
+        // TYPE, for a value that is the literal 42. The old check walked into
+        // type nodes; a whitelist never looks at them, because the initializer
+        // text simply is not the pinned expression.
+        label: 'fourth delta: a typeof inside a type assertion',
+        code:
+          'const pharmacyNetSalesPaisa = 42 as '
+          + "(typeof result.pharmacy.pharmacySalesByMonth)[number]['totalPaisa'];",
+      },
+      {
+        // FOURTH-DELTA FINDING, bypass 2: a write through a MEMBER rather
+        // than a bare identifier.
+        label: 'fourth delta: an assignment through a member',
+        code: [
+          'const totals = { pharmacyNetSalesPaisa };',
+          'totals.pharmacyNetSalesPaisa = 42;',
+        ].join(NEWLINE),
+      },
+      {
+        // FIFTH-DELTA FINDINGS 2-6, now modelled by the classifier as well as
+        // caught by the occurrence pins below.
+        label: 'fifth delta: a quoted property name',
+        code: 'const pharmacyNetSalesPaisa = { "pharmacyNetSalesPaisa": 42 }.pharmacyNetSalesPaisa;',
+      },
+      {
+        label: 'fifth delta: a class field',
+        code: 'class C { pharmacyNetSalesPaisa = 42; }',
+      },
+      {
+        label: 'fifth delta: an enum member',
+        code: 'enum E { pharmacyNetSalesPaisa = 42 }',
+      },
+      {
+        label: 'fifth delta: a parenthesised member target',
+        code: '(totals.pharmacyNetSalesPaisa) = 42;',
+      },
+      {
+        label: 'fifth delta: a non-null asserted member target',
+        code: 'totals!.pharmacyNetSalesPaisa = 42;',
+      },
+      {
+        label: 'fifth delta: a postfix update',
+        code: 'totals.pharmacyNetSalesPaisa++;',
+      },
+      {
+        label: 'fifth delta: a prefix update',
+        code: '--totals.pharmacyNetSalesPaisa;',
+      },
+      {
+        // The element-access form of the same write, and a compound
+        // operator -- both now modelled rather than left for a sixth round.
+        label: 'fourth delta: element access and a compound operator',
+        code: [
+          "totals['pharmacyNetSalesPaisa'] = 42;",
+          'totals.pharmacyNetSalesPaisa += 42;',
+        ].join(NEWLINE),
+      },
+    ];
 
-    expect(
-      NET_ANCHORS.some((anchor) => fabricated.includes(anchor)),
-      'the old check would have accepted this',
-    ).toBe(true);
-    expect(anchoredWithProvenance(fabricated), 'the new check must reject it').toBe(false);
+    // Collected rather than asserted one at a time: a `for` loop of
+    // expectations stops at the FIRST failure, so a newly-opened bypass could
+    // hide behind an older one. This reports every mutant the guard accepts.
+    const accepted = mutants
+      .filter((mutant) => anchoredWithProvenance(mutant.code))
+      .map((mutant) => mutant.label);
+    expect(accepted, 'the guard accepted a fabrication').toEqual([]);
+    // Non-vacuity: the list is the eleven fabrications five review rounds
+    // found, and a list that silently shrank would weaken this test.
+    expect(mutants).toHaveLength(18);
 
-    // And the real derivation passes.
-    const real = 'const pharmacyNetSalesPaisa = result.pharmacy.pharmacySalesByMonth.reduce(';
-    expect(anchoredWithProvenance(real)).toBe(true);
+    // The old CO-OCCURRENCE check accepted the third one, so this is a real
+    // strengthening rather than a restatement.
+    const DERIVATION_TOKEN: Readonly<Record<string, string>> = {
+      netSalesToday: 'netSalesPaisa',
+      pharmacyNetSalesPaisa: 'pharmacySalesByMonth',
+    };
+    const coOccurrence = (code: string) =>
+      NET_ANCHORS.some(
+        (anchor) => code.includes(anchor) && code.includes(DERIVATION_TOKEN[anchor] ?? anchor),
+      );
+    expect(coOccurrence(mutants[2]?.code ?? ''), 'the old check accepted this').toBe(true);
+
+    // And the REGEX binding finder is structurally blind to a destructuring
+    // rename: the anchor is not followed by `:` or `=`, so it sees no binding
+    // to check. Reconstructed and RUN, because "a regex cannot do this" is a
+    // claim that should be demonstrated rather than asserted.
+    const regexBindings = (code: string) =>
+      NET_ANCHORS.flatMap((anchor) => [
+        ...code.matchAll(
+          new RegExp('(?:^|[^A-Za-z0-9_.])' + anchor + '\s*([:=])\s*([^;\n]*)', 'g'),
+        ),
+      ]);
+    const rename = 'const { totalPaisa: pharmacyNetSalesPaisa } = { totalPaisa: 42 };';
+    expect(regexBindings(rename), 'the regex found no binding to check').toEqual([]);
+    // The parser finds it, and rejects it.
+    expect(anchorBindings(rename)).toHaveLength(1);
+    expect(fabricatedBindings(rename)).toHaveLength(1);
+
+    // The substring collision, likewise: `includes` cannot separate these two
+    // identifiers, and a whole-identifier comparison can.
+    const collision = 'const pharmacyNetSalesPaisa = pharmacySalesByMonthGross;';
+    expect('pharmacySalesByMonthGross'.includes('pharmacySalesByMonth')).toBe(true);
+    expect(anchorBindings(collision)[0]?.normalized).toBe('pharmacySalesByMonthGross');
+    expect(fabricatedBindings(collision)).toHaveLength(1);
+
+    // And every REAL FILE in the tree still passes. Whole files, not
+    // fragments: under a whitelist the complete initializer is the thing being
+    // compared, so a truncated snippet is not a meaningful input.
+    for (const path of [
+      'app/revenue/page.tsx',
+      'lib/queries.ts',
+      'lib/platformStats.ts',
+      'app/page.tsx',
+    ]) {
+      const file = SOURCES.find((entry) => entry.path === path);
+      expect(file, path + ' is not in SOURCES').toBeDefined();
+      expect(fabricatedBindings(file?.code ?? ''), path).toEqual([]);
+    }
+
+    // NON-VACUITY for the pins themselves: each pinned derivation must
+    // actually be found in the tree. A pin nobody matches is a pin that has
+    // silently stopped protecting anything, which is how this guard would rot.
+    for (const anchor of NET_ANCHORS) {
+      const pins = PINNED_DERIVATIONS[anchor] ?? [];
+      expect(pins.length, anchor + ' has no pinned derivation').toBeGreaterThan(0);
+      const matched = SOURCES.flatMap((file) => anchorBindings(file.code))
+        .filter((binding) => binding.anchor === anchor)
+        .map((binding) => binding.normalized);
+      expect(
+        matched.length,
+        anchor + ' is never bound anywhere, so its pin is unverified',
+      ).toBeGreaterThan(0);
+      for (const bound of matched) {
+        expect(pins, anchor + ' is bound to an unpinned derivation: ' + bound)
+          .toContain(bound);
+      }
+    }
+  });
+
+  test('the reviewer’s own reproduction, run against the REAL Revenue page', () => {
+    // THIRD-DELTA FINDING, as the reviewer produced it: take the actual page,
+    // replace ONLY the anchor's derivation, and ask the guard. He did this in
+    // memory and the guard accepted both forms. It must reject both now, and
+    // accept the page as it really is.
+    const page = SOURCES.find((file) => file.path === 'app/revenue/page.tsx');
+    expect(page, 'the Revenue page is not in SOURCES').toBeDefined();
+    const real = page?.code ?? '';
+
+    // The page as shipped: a clean binding.
+    expect(fabricatedBindings(real)).toEqual([]);
+
+    const derivation = /const pharmacyNetSalesPaisa = result\.pharmacy\.pharmacySalesByMonth[\s\S]*?\n  \);/;
+    expect(derivation.test(real), 'the derivation is not where this test expects it').toBe(true);
+
+    for (const [label, fabrication] of [
+      [
+        'a destructuring rename',
+        'const { totalPaisa: pharmacyNetSalesPaisa } = { totalPaisa: 42 };',
+      ],
+      [
+        'an identifier containing the token',
+        'const pharmacySalesByMonthGross = 42;\n  const pharmacyNetSalesPaisa = pharmacySalesByMonthGross;',
+      ],
+    ] as const) {
+      const mutant = real.replace(derivation, fabrication);
+      expect(mutant, label).not.toEqual(real);
+      // The word `net` is still all over this page, so link 1 must now refuse
+      // it rather than license it.
+      expect(fabricatedBindings(mutant).length, label).toBeGreaterThan(0);
+      expect(anchoredWithProvenance(mutant), label).toBe(false);
+    }
   });
 
   test('link 2b: the pharmacy anchor is produced by the shared netSalesPaisa too', () => {
@@ -557,6 +1040,10 @@ describe('the GROSS boundary', () => {
     const page = SOURCES.find((file) => file.path === 'app/revenue/page.tsx');
     expect(page?.code).toContain('pharmacyNetSalesPaisa');
     expect(page?.code).toContain('pharmacySalesByMonth');
+    // SECOND-DELTA FINDING 3: containing both names was all this asked, so a
+    // page whose anchor was fabricated satisfied link 2b as well. The binding
+    // itself must be clean.
+    expect(fabricatedBindings(page?.code ?? '')).toEqual([]);
 
     const queries = SOURCES.find((file) => file.path === 'lib/adminPlatformQueries.ts');
     expect(queries?.code, 'the month total must come from the shared definition')
@@ -671,5 +1158,170 @@ describe('CLAUDE.md rule 6: money renders in DM Mono', () => {
       && file.path !== 'app/layout.tsx');
 
     expect(offenders.map((file) => file.path)).toEqual([]);
+  });
+});
+
+describe('the net anchors appear ONLY where they are pinned', () => {
+  // GATE 5 FIFTH-DELTA FINDINGS 2-6, as one structural answer.
+  //
+  // Those five findings were five more ways to WRITE a value: a quoted or
+  // computed property name, a class field, an enum member, a parenthesised or
+  // asserted assignment target, an array/object destructuring target, a
+  // for-of loop variable, and a prefix/postfix update. Modelling each is the
+  // same losing game as before -- the set of write syntaxes in TypeScript is
+  // large and grows with the language.
+  //
+  // So this asks a question no write syntax can dodge: WHERE DOES THIS NAME
+  // APPEAR AT ALL? Every fabrication, whatever its shape, must mention the
+  // anchor somewhere in order to bind it. Pinning the exact occurrences means
+  // any new mention anywhere fails, and any DISAPPEARING mention fails too --
+  // which is also what catches an input-corruption bug like the comment
+  // stripper that used to delete code after a string containing two slashes.
+  //
+  // Five occurrences in four files. A legitimate edit updates this map, and
+  // that is the intended cost.
+  const ANCHOR_OCCURRENCES: Readonly<Record<string, Readonly<Record<string, number>>>> = {
+    netSalesToday: {
+      // The type declaration, the assignment from the shared subtraction, and
+      // the Dashboard's single read.
+      'lib/platformStats.ts': 1,
+      'lib/queries.ts': 1,
+      'app/page.tsx': 1,
+    },
+    pharmacyNetSalesPaisa: {
+      // The binding and the one read that feeds the suppressed tile.
+      'app/revenue/page.tsx': 2,
+    },
+  };
+
+  /**
+   * The OLD regex stripper, reconstructed so the fix is a comparison rather
+   * than a claim. Built from character codes because the pattern is nothing
+   * but escapes.
+   */
+  function regexStrippedFor(source: string): string {
+    const slash = String.fromCharCode(92);
+    const pattern = new RegExp('(^|[^:])' + slash + '/' + slash + '/.*$', 'gm');
+    return source.replace(pattern, '$1');
+  }
+
+  /** Every mention of an anchor as an identifier or as a string-literal name. */
+  function anchorOccurrences(code: string): Record<string, number> {
+    const source = ts.createSourceFile(
+      'scanned.tsx',
+      code,
+      ts.ScriptTarget.ES2022,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    const counts: Record<string, number> = {};
+    const visit = (node: ts.Node): void => {
+      const text = ts.isIdentifier(node)
+        ? node.text
+        : ts.isStringLiteralLike(node)
+          ? node.text
+          : null;
+      if (text !== null && (MODULE_NET_ANCHORS as readonly string[]).includes(text)) {
+        counts[text] = (counts[text] ?? 0) + 1;
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(source, visit);
+    return counts;
+  }
+
+  function occurrencesAcrossTree(): Record<string, Record<string, number>> {
+    const found: Record<string, Record<string, number>> = {};
+    for (const anchor of MODULE_NET_ANCHORS) found[anchor] = {};
+    for (const file of SOURCES) {
+      for (const [anchor, count] of Object.entries(anchorOccurrences(file.contents))) {
+        (found[anchor] ??= {})[file.path] = count;
+      }
+    }
+    return found;
+  }
+
+  test('the tree matches the pinned occurrences EXACTLY', () => {
+    expect(occurrencesAcrossTree()).toEqual(ANCHOR_OCCURRENCES);
+  });
+
+  test('every pin is non-empty, so the map cannot silently become a no-op', () => {
+    for (const anchor of MODULE_NET_ANCHORS) {
+      const pinned = ANCHOR_OCCURRENCES[anchor] ?? {};
+      expect(Object.keys(pinned).length, anchor + ' is pinned nowhere').toBeGreaterThan(0);
+      for (const [path, count] of Object.entries(pinned)) {
+        expect(count, anchor + ' in ' + path).toBeGreaterThan(0);
+        expect(SOURCES.map((file) => file.path), path).toContain(path);
+      }
+    }
+  });
+
+  test('each of the fifth round’s write forms ADDS an occurrence', () => {
+    // Every one of these is invisible to a binding classifier that does not
+    // model its syntax, and every one of them is visible here.
+    const page = SOURCES.find((file) => file.path === 'app/revenue/page.tsx');
+    const real = page?.contents ?? '';
+    const baseline = anchorOccurrences(real).pharmacyNetSalesPaisa ?? 0;
+    expect(baseline).toBe(2);
+
+    const writes: readonly [string, string][] = [
+      ['a quoted property name', 'const o = { "pharmacyNetSalesPaisa": 42 };'],
+      ['a computed property name', 'const o = { ["pharmacyNetSalesPaisa"]: 42 };'],
+      ['a class field', 'class C { pharmacyNetSalesPaisa = 42; }'],
+      ['an enum member', 'enum E { pharmacyNetSalesPaisa = 42 }'],
+      ['a parenthesised target', '(totals.pharmacyNetSalesPaisa) = 42;'],
+      ['a non-null asserted target', 'totals!.pharmacyNetSalesPaisa = 42;'],
+      ['an array destructuring target', '[totals.pharmacyNetSalesPaisa] = [42];'],
+      ['an object destructuring target', '({ x: totals.pharmacyNetSalesPaisa } = { x: 42 });'],
+      ['a for-of loop target', 'for (totals.pharmacyNetSalesPaisa of [42]) {}'],
+      ['a postfix update', 'totals.pharmacyNetSalesPaisa++;'],
+      ['a prefix update', '--totals.pharmacyNetSalesPaisa;'],
+    ];
+
+    const missed: string[] = [];
+    for (const [label, write] of writes) {
+      const mutant = real + String.fromCharCode(10) + write;
+      const after = anchorOccurrences(mutant).pharmacyNetSalesPaisa ?? 0;
+      if (after <= baseline) missed.push(label);
+    }
+
+    expect(missed, 'a write form added no occurrence').toEqual([]);
+    expect(writes).toHaveLength(11);
+  });
+
+  test('a string containing two slashes no longer hides the code after it', () => {
+    // GATE 5 FIFTH-DELTA FINDING 1. The old regex stripper deleted the rest of
+    // the line after `//`, wherever those characters appeared -- including
+    // inside a string. The write below was erased before any check saw it.
+    const SLASHES = String.fromCharCode(47) + String.fromCharCode(47);
+    // ONE line, as the reviewer wrote it: the regex truncated from the two
+    // slashes to the end of the LINE, so the write had to share the line to
+    // disappear. On its own line it survived -- which is exactly the kind of
+    // near-miss that makes a corrupted input hard to notice.
+    const hidden =
+      'const totals = { pharmacyNetSalesPaisa, note: "'
+      + SLASHES
+      + '" }; totals.pharmacyNetSalesPaisa = 42;';
+
+    // The parser-driven stripper leaves the string and the write intact.
+    expect(stripComments(hidden)).toContain('totals.pharmacyNetSalesPaisa = 42;');
+    // And the occurrence count sees BOTH mentions: the shorthand property
+    // (one identifier node) and the member write. The old stripper left only
+    // the first, which is exactly how the write hid.
+    expect(anchorOccurrences(stripComments(hidden)).pharmacyNetSalesPaisa).toBe(2);
+    expect(anchorOccurrences(regexStrippedFor(hidden)).pharmacyNetSalesPaisa).toBe(1);
+
+    expect(regexStrippedFor(hidden)).not.toContain('totals.pharmacyNetSalesPaisa = 42;');
+  });
+
+  test('a real comment mentioning an anchor is still NOT an occurrence', () => {
+    // The other half: prose about a figure must not count as using it, or the
+    // pins would change every time someone wrote a comment.
+    const commented =
+      '/* pharmacyNetSalesPaisa is described here */'
+      + String.fromCharCode(10)
+      + 'const unrelated = 1;';
+
+    expect(anchorOccurrences(stripComments(commented))).toEqual({});
   });
 });
