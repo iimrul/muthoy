@@ -43,6 +43,32 @@ interface SourceFile {
  * comment is replaced by a single space so offsets stay plausible and tokens
  * either side cannot fuse into one word.
  */
+/**
+ * One parse per distinct source string, shared by every layer of the guard.
+ *
+ * Measured reason: this file has four parse sites and three tree-wide checks
+ * over 82 scanned files, which came to roughly 328 full TypeScript parses per
+ * run. Under load that pushed a single test past Vitest's 5s default and made
+ * the guard a flake generator -- it failed inside a contended full-suite run
+ * while passing 45/45 on its own. Caching is the fix; raising the timeout
+ * would have hidden a cost I had actually introduced.
+ */
+const PARSE_CACHE = new Map<string, ts.SourceFile>();
+
+function parseOnce(code: string): ts.SourceFile {
+  const cached = PARSE_CACHE.get(code);
+  if (cached !== undefined) return cached;
+  const parsed = ts.createSourceFile(
+    'scanned.tsx',
+    code,
+    ts.ScriptTarget.ES2022,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  PARSE_CACHE.set(code, parsed);
+  return parsed;
+}
+
 function stripComments(source: string): string {
   // Comment ranges come from the PARSER, not from a hand-rolled scan.
   //
@@ -51,13 +77,7 @@ function stripComments(source: string): string {
   // was enough -- after which later comments were returned as ordinary tokens
   // and their prose was scanned as code. The parser's own trivia ranges cannot
   // drift from the parse, because they ARE the parse.
-  const file = ts.createSourceFile(
-    'scanned.tsx',
-    source,
-    ts.ScriptTarget.ES2022,
-    true,
-    ts.ScriptKind.TSX,
-  );
+  const file = parseOnce(source);
 
   const ranges: ts.CommentRange[] = [];
   const collectAt = (position: number): void => {
@@ -656,13 +676,7 @@ describe('the GROSS boundary', () => {
    * operator rather than `=` alone.
    */
   function anchorBindings(code: string): AnchorBinding[] {
-    const source = ts.createSourceFile(
-      'scanned.tsx',
-      code,
-      ts.ScriptTarget.ES2022,
-      true,
-      ts.ScriptKind.TSX,
-    );
+    const source = parseOnce(code);
     const bindings: AnchorBinding[] = [];
 
     const record = (anchor: string, initializer: ts.Node | undefined): void => {
@@ -1280,13 +1294,7 @@ describe('the net anchors appear ONLY where they are pinned', () => {
 
   /** Every anchor occurrence that is a WRITE, with where it is. */
   function anchorWrites(code: string): { anchor: string; text: string }[] {
-    const source = ts.createSourceFile(
-      'scanned.tsx',
-      code,
-      ts.ScriptTarget.ES2022,
-      true,
-      ts.ScriptKind.TSX,
-    );
+    const source = parseOnce(code);
     const writes: { anchor: string; text: string }[] = [];
     const visit = (node: ts.Node): void => {
       const text = ts.isIdentifier(node)
@@ -1307,13 +1315,7 @@ describe('the net anchors appear ONLY where they are pinned', () => {
 
   /** Every mention of an anchor as an identifier or as a string-literal name. */
   function anchorOccurrences(code: string): Record<string, number> {
-    const source = ts.createSourceFile(
-      'scanned.tsx',
-      code,
-      ts.ScriptTarget.ES2022,
-      true,
-      ts.ScriptKind.TSX,
-    );
+    const source = parseOnce(code);
     const counts: Record<string, number> = {};
     const visit = (node: ts.Node): void => {
       const text = ts.isIdentifier(node)
