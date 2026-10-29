@@ -94,6 +94,6 @@
     "backend/supabase/pgtest/checkFile.ts": "7318a1baabe1b8ce6503669c5f9721936ab1d7a04b08bca2db68ad63bc39d0a0",
     "backend/supabase/pgtest/e4-admin-platform.pgtest.ts": "fe8ab794b63cba7ad898aa64285258ff7d55ea757175561481cd2557585c9ed9",
     "backend/supabase/pgtest/e4-chain-succession.pgtest.ts": "177c5a56f2d679c7f6cfab2184d71b83987c8a05cc6f789687ce48eed0cd4329",
-    ".gitattributes": "c518ac61eae77847f7552cdf4efa89143c8830299c4a2bc1402fb5528a440a21"
+    ".gitattributes": "1fb9331e11aaebe9786d9364b874985a3a274f7b2afb67050e51adcf2dc331a4"
   }
 }

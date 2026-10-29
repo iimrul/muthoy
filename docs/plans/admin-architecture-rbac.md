@@ -874,6 +874,135 @@ is the shape of reproduction B. Neither was fixed, only moved.
 
 ---
 
+## 6k. ROUND 11: five HIGH and three MEDIUM, and the lesson applied a third time
+
+Round 11 reviewed `ac8c9bd`. It did not accept it. Eight findings, all real,
+all fixed in `5f36b3d` and `de95ebb`. The reviewer's own summary of the net
+work was exact: *"Card fix holds. Chart/export helpers still stop before
+output."*
+
+### The two that are §6i again
+
+| # | Sink | What the reviewer substituted | What was published |
+|---|---|---|---|
+| 3 | the Analytics chart | `netChartPoints(salesBuckets).map((point) => ({ ...point, value: 230 }))` -- and, separately, `format={(_value) => "230.00"}` and a heading swapped for `requireMetric('mrr').label` | ৳80.00 plotted as ৳230.00; the table beside it falsified; authentic net money captioned "Monthly recurring run rate" |
+| 4 | the CSV **and PDF** export | `((_: string) => exportTaka(sumPaisaOf(monthSales)))(netExportTaka(total))` | ৳400.00 exported as ৳500.00 under "Pharmacy sales, net of refunds (BDT)", zero diagnostics, no forged box |
+
+Round 10's sinks took opaque amounts and owned the conversion. They then
+handed back a **plain array** and a **plain string**, and the caller owned
+everything after that. The boundary had moved one step three times running, so
+"the output" had to be defined as the thing a human actually reads:
+
+- the EXPORT cell is now opaque. `netExportCell` mints a registered, frozen
+  cell; `netCellText` is the only reader and it verifies first. A report column
+  the definition declares as refund-net money is resolved through that function
+  on the rows that **become the bytes**, so a plain string standing there
+  throws. Suppression mints `withheldNetCell()` rather than `''`: accepting a
+  bare empty string would have meant teaching the verifier to accept plain
+  strings, which is the hole it exists to close.
+- the CHART goes through `components/NetSalesTrend.tsx`, shaped exactly like
+  the card this same review confirmed holds. Opaque buckets and a metric ID in;
+  no prop for a number, a formatter or a caption.
+
+**What is still not enforced, stated rather than implied away.** No type stops
+a page from rendering some other component and captioning it by hand. What is
+enforced: the canonical net caption resolves in exactly one place per renderer,
+and a `NetSales` cannot become a number or a string anywhere else. The source
+scan is a review aid, not the guarantee — that distinction is the whole history
+of §6i.
+
+### The two privacy findings, which were worse
+
+**Finding 1 — the Dashboard had no k floor at all.** With one contributing
+pharmacy it rendered ৳80.00, and its composition line carried gross ৳100.00
+and refunds ৳20.00, while Analytics withheld that same bucket. One verdict now
+gates three outputs, because each discloses the others: the headline, the
+composition (gross less refunds **is** the amount), and today's active-pharmacy
+count (a count of 1 beside a withheld figure names the pharmacy whose takings
+were withheld — Gate 5 finding 4 restated). The contributor set is collected
+from the same two reads that produce the figure, and counts the refund side as
+well as the sales side.
+
+**Finding 2 — overlapping periods defeated the floor.** Five pharmacies take
+৳500 on October 1; one takes ৳80 on October 2.
+
+```
+October 2 alone  -> withheld (one contributor)
+October 1 alone  -> 500.00
+October 1 to 2   -> 580.00        580 - 500 = the withheld 80.00
+```
+
+Both requests are individually legitimate, so per-request suppression could
+never have stopped this. The fix is that **a published bucket no longer depends
+on the request**: a month-grained report answers only for whole months and
+refuses a part-month range, rather than snapping outward and contradicting its
+own caption. And a total is gated by **composition**, not by its union of
+contributors — Revenue's all-time total was released while a month inside it
+was withheld, and a visible total minus the visible months is the withheld
+month.
+
+The residual is recorded in `adminSuppression.ts` rather than hidden:
+differencing along dimensions other than the period — two status-filtered
+queries whose difference is a small group — is the general query-auditing
+problem and is **not** solved. The period dimension is closed.
+
+### The audit pair, which were scope rather than safety
+
+**Finding 5.** §8.9's durable sink was written and never read. `/audit`,
+`/admins`, `/support` and `/subscriptions` all rendered the in-process ring, so
+the history a reader saw was whatever that process had done since it started:
+different on another instance, empty after a restart. Applying migration 35
+could never have supplied the missing reader. `readAdminAuditLog` reads the
+table, bounded at 500, newest first, filtering by action prefix server-side —
+one query per prefix, because a dotted pattern inside a PostgREST `or` filter
+is exactly how Gate 5 finding 6 made the Action filter unusable. A failed read
+**throws**; the pages fall back to the ring only behind a visible notice that
+names gate E4-H, never silently.
+
+**Finding 6.** `audit.export` was declared in the permission list, granted to
+`super_admin` alone, documented in §4.4 — and checked by nothing. A permission
+with no enforcement point is not an access control. `app/api/audit/export/route.ts`
+re-checks the permission itself, audits its own export and awaits that write
+before sending any bytes, and returns 503 rather than exporting a short file
+that would look complete. The guard written for it asserts the **class**: every
+name in `ADMIN_PERMISSIONS` must be enforced by shipped code, and it would have
+failed at the previous HEAD.
+
+### The two reporting-honesty findings
+
+**Finding 7.** Snapshot reports printed whatever range was requested while
+their builders ignored dates entirely, so five subscriptions begun in October
+2026 appeared beneath "2020-01-01 to 2020-01-02" and read as historical
+evidence. They refuse a period now instead of claiming one.
+
+**Finding 8.** Collected payments bucketed on the **UTC** month. Five payments
+verified at `2026-09-30T20:00:00Z` are October 1 in Dhaka, and an October
+report exported `2026-09,500.00,5`. Both the totals and the contributor
+grouping use the Dhaka month, derived from `dhakaDayLabel` so a month can never
+disagree with the day inside it.
+
+### Three flaws of my own, and one wrong number
+
+1. Two assertions fired on my own explanatory **comments** — the third time.
+   Those comments document each exploit by quoting it, so rewording them was
+   the wrong fix; the "this call is gone" assertions now read code only,
+   through the parser's own trivia ranges.
+2. One test asserted that `2026-02-29` reached the month-end gate. It does not:
+   the shared query schema rejects an impossible calendar date first, which is
+   the better layer. The test now records the division of labour.
+3. I told the reviewer that `vitest.config.ts` had gained "exactly one line"
+   across §6i. It gained **six** — one `include` entry and a five-line comment.
+   The substantive change is the one entry, but the number I gave was wrong.
+
+Also corrected while checking the outgoing range: `.gitattributes` claimed the
+E4 source hashes live in `audit-artifacts/e4/`, a path that cannot exist
+because `.gitignore` ignores `audit-artifacts/` wholesale. The manifest is at
+`backend/supabase/migrations/e4-source-hashes.json`, and
+`scripts/e4-evidence-manifest.mjs` already recorded why. A comment nothing
+reads had been pointing an auditor at nothing.
+
+---
+
 ## 7. What would make these pages DONE
 
 | Gate | What it needs | Who |
