@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import DataTable, { type DataColumn } from '../../components/DataTable';
+import AuditSourceNotice from '../../components/AuditSourceNotice';
 import ErrorNotice from '../../components/ErrorNotice';
 import { EmptyState, FilterForm, Pager } from '../../components/PageParts';
 import { formatMoney } from '@muthoy/utils';
-import { recentAdminAudit, type AdminAuditEntry } from '../../lib/adminAudit';
+import type { AdminAuditEntry } from '../../lib/adminAudit';
+import { auditHistory } from '../../lib/adminAuditStore';
 import { requireAdminPermission } from '../../lib/adminAuthz';
 import { parseListQuery } from '../../lib/adminFilters';
 import { subscriptionsOverview, type SubscriptionsOverview } from '../../lib/adminPlatformQueries';
@@ -203,11 +205,11 @@ export default async function SubscriptionsPage({ searchParams }: SubscriptionsP
   // §8.3's change history. The actions are matched by PREFIX against the
   // recorded action name, so a new subscription action is included the day it
   // is added rather than the day somebody remembers to list it here.
-  const changes = recentAdminAudit
-    .entries()
-    .filter((entry) =>
-      SUBSCRIPTION_AUDIT_PREFIXES.some((prefix) => entry.action.startsWith(prefix)),
-    );
+  // ROUND 11 FINDING 5: the DURABLE log.
+  const history = await auditHistory({ actionPrefixes: SUBSCRIPTION_AUDIT_PREFIXES });
+  const changes = history.entries.filter((entry) =>
+    SUBSCRIPTION_AUDIT_PREFIXES.some((prefix) => entry.action.startsWith(prefix)),
+  );
 
   return (
     <>
@@ -295,17 +297,15 @@ export default async function SubscriptionsPage({ searchParams }: SubscriptionsP
           Change history
         </h2>
         <p className="mt-1 text-sm text-midGray">
-          Subscription, payment and account actions recorded by THIS server instance, newest first.
-          It is not the durable record — the structured line written to stderr is, kept by the host
-          platform&apos;s log retention. The Postgres audit table ships in migration 35 and is not
-          yet applied to any hosted project.
+          Subscription, payment and account actions, newest first.
         </p>
+        <AuditSourceNotice unavailable={history.unavailable} />
         <div className="mt-3">
           <DataTable
             columns={AUDIT_COLUMNS}
             rows={changes}
             rowKey={(entry) => entry.at + entry.actor + entry.action}
-            emptyMessage="This instance has recorded no subscription, payment or account action yet."
+            emptyMessage="No subscription, payment or account action has been recorded yet."
           />
         </div>
       </section>

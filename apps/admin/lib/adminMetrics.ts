@@ -30,6 +30,7 @@
 // pharmacy-sales label says revenue and no subscription label says sales.
 
 import { addPaisa, asPaisa, type Paisa } from '@muthoy/types';
+import { dhakaMonthLabel } from './adminDashboard';
 import type {
   AccountRow,
   EntitlementRow,
@@ -244,15 +245,23 @@ export function collectedSubscriptionPaymentsPaisa(orders: readonly PaymentOrder
   return total;
 }
 
-/** The same cash, bucketed by the calendar month of `verified_at`. */
+/**
+ * The same cash, bucketed by the DHAKA calendar month of `verified_at`.
+ *
+ * ROUND 11 FINDING 8. This sliced the ISO string, which is the UTC month, so
+ * five payments verified at `2026-09-30T20:00:00Z` — October 1 in Dhaka — were
+ * filed under `2026-09`, and an October report exported `2026-09,500.00,5`.
+ * Every other period in this product is the Dhaka business day; a monthly
+ * money figure on a different calendar is money in the wrong month.
+ */
 export function collectedPaymentsByMonth(
   orders: readonly PaymentOrderRow[],
 ): readonly { month: string; totalPaisa: Paisa; orderCount: number }[] {
   const buckets = new Map<string, { totalPaisa: Paisa; orderCount: number }>();
   for (const order of orders) {
     if (order.status !== 'verified' || order.verifiedAt === null) continue;
-    const month = order.verifiedAt.slice(0, 7);
-    if (!/^\d{4}-\d{2}$/.test(month)) continue;
+    const month = dhakaMonthLabel(order.verifiedAt);
+    if (month === null || !/^\d{4}-\d{2}$/.test(month)) continue;
     const held = buckets.get(month) ?? { totalPaisa: ZERO, orderCount: 0 };
     buckets.set(month, {
       totalPaisa: addPaisa(held.totalPaisa, order.amountPaisa),

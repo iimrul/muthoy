@@ -1,7 +1,8 @@
 import DataTable, { type DataColumn } from '../../components/DataTable';
 import ErrorNotice from '../../components/ErrorNotice';
 import { EmptyState, FilterForm, Pager } from '../../components/PageParts';
-import { recentAdminAudit, type AdminAuditEntry } from '../../lib/adminAudit';
+import type { AdminAuditEntry } from '../../lib/adminAudit';
+import { auditHistory, AUDIT_READ_LIMIT } from '../../lib/adminAuditStore';
 import {
   auditActionNamespaces,
   auditActors,
@@ -37,6 +38,31 @@ import { toDisplayMessage } from '../../lib/errors';
 // line. Claiming otherwise would be the one thing an audit page must not do.
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * The export URL, carrying the filters this view is showing.
+ *
+ * Round 11 finding 6. Built from the raw params rather than from the parsed
+ * query so the file matches the SCREEN: a param the page ignored must not
+ * silently widen the download.
+ */
+function auditExportHref(raw: Record<string, string | string[] | undefined>): string {
+  const params = new URLSearchParams();
+  const carry: readonly [string, string][] = [
+    ['actor', 'district'],
+    ['outcome', 'status'],
+    ['action', 'action'],
+    ['from', 'from'],
+    ['to', 'to'],
+    ['search', 'search'],
+  ];
+  for (const [exportKey, pageKey] of carry) {
+    const value = firstParam(raw, pageKey);
+    if (value.length > 0) params.set(exportKey, value);
+  }
+  const query = params.toString();
+  return '/api/audit/export' + (query.length > 0 ? '?' + query : '');
+}
 
 const COLUMNS: readonly DataColumn<AdminAuditEntry>[] = [
   { heading: 'When', cell: (entry) => formatDhakaDateTime(entry.at) },
@@ -148,7 +174,12 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
   }
 
   const query = parsed.query;
-  const entries = recentAdminAudit.entries();
+  // ROUND 11 FINDING 5: the DURABLE log, with the in-process ring only as a
+  // clearly-stated fallback. This page used to read the ring and nothing else,
+  // so the history it showed was whatever this process had done since it
+  // started -- a different answer on every instance, and none after a restart.
+  const history = await auditHistory();
+  const entries = history.entries;
   const actorFilter = firstParam(raw, 'district');
   const outcomeFilter = firstParam(raw, 'status');
   // Its OWN schema field, because action names carry dots (finding 6).
@@ -184,13 +215,35 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
         Logins, authorization denials and write actions, newest first. Failed and denied
         operations are included — a denial is the entry most worth keeping.
       </p>
-      <p className="mt-2 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] p-4 text-sm text-[#92400E]">
-        <strong>This view is not the record.</strong> It holds the most recent entries from THIS
-        server instance in memory only: a restart clears it, and another instance has its own. The
-        durable record is the structured line written to stderr, kept by the host platform&apos;s
-        log retention. The Postgres audit table ships in migration 35, which is not yet applied to
-        any hosted project — so no durable audit persistence is claimed here.
-      </p>
+      {/* ROUND 11 FINDING 5: which SOURCE answered, stated either way. The
+          page used to carry the "not the record" banner unconditionally,
+          because it only ever read the in-process ring. It now reads the
+          durable table first, so the banner appears only when that read
+          failed -- and then it appears, rather than the volatile view passing
+          itself off as the history. */}
+      {permissions.includes('audit.export') ? (
+        <p className="mt-2 text-sm">
+          <a href={auditExportHref(raw)} className="underline">
+            Download this view as CSV
+          </a>{' '}
+          <span className="text-xs text-midGray">
+            — super_admin only, and the download is itself audited.
+          </span>
+        </p>
+      ) : null}
+
+      {history.unavailable === null ? (
+        <p className="mt-2 text-xs text-midGray">
+          Read from the durable <code>admin_audit_log</code> table, newest first, up to{' '}
+          {AUDIT_READ_LIMIT} entries. The structured stderr line remains the record of account.
+        </p>
+      ) : (
+        <p className="mt-2 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] p-4 text-sm text-[#92400E]">
+          <strong>This view is not the record.</strong> {history.unavailable} The durable record
+          is the structured line written to stderr, kept by the host platform&apos;s log
+          retention.
+        </p>
+      )}
 
       <FilterForm
         search={{

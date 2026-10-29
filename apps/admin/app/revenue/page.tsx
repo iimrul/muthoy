@@ -12,7 +12,7 @@ import {
   type AnalyticsOverview,
   type RevenueOverview,
 } from '../../lib/adminPlatformQueries';
-import { suppressBelowK } from '../../lib/adminSuppression';
+import { suppressTotalAcrossBuckets } from '../../lib/adminSuppression';
 import { exportTaka } from '../../lib/adminReports';
 import { formatCount } from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
@@ -172,7 +172,10 @@ export default async function RevenuePage() {
   // k-suppressed like every other cross-pharmacy aggregate: the total derives
   // from the shops behind it, and a total built from fewer than five shops is
   // those shops' takings wearing a platform label.
-  const pharmacyShopIds = result.pharmacy.pharmacySalesByMonth.flatMap((month) => month.shopIds);
+  //
+  // Round 11 finding 2: the UNION of every month's shops used to be the gate's
+  // input. It is gone, because a union large enough to clear the floor says
+  // nothing about whether each month inside the total clears it.
   // §6i: aggregated by `sumNetSales`, which verifies every part, rather than
   // by a `reduce` that coerced each month's total with `Number(...)`.
   //
@@ -186,10 +189,23 @@ export default async function RevenuePage() {
   const pharmacyNetSales = sumNetSales(
     result.pharmacy.pharmacySalesByMonth.map((month) => month.totalPaisa),
   );
-  const pharmacySales = suppressBelowK({
-    value: pharmacyNetSales,
-    contributingShopIds: pharmacyShopIds,
-  });
+  // ROUND 11 FINDING 2 — the total is gated by COMPOSITION, not by its union.
+  //
+  // This gated on `pharmacyShopIds`, the union across every month, which
+  // clears the floor whenever ANY month does. So an all-time total was
+  // published while Analytics withheld one of its months — and the visible
+  // total minus the visible months is the withheld month. The two screens
+  // together disclosed exactly what the floor withheld on one of them.
+  //
+  // `suppressTotalAcrossBuckets` withholds the total unless every month in it
+  // is releasable on its own.
+  const pharmacySales = suppressTotalAcrossBuckets(
+    pharmacyNetSales,
+    result.pharmacy.pharmacySalesByMonth.map((month) => ({
+      value: month.totalPaisa,
+      contributingShopIds: month.shopIds,
+    })),
+  );
 
   return (
     <>

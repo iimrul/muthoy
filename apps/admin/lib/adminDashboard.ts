@@ -280,6 +280,23 @@ export function dhakaDayLabel(isoTimestamp: string): string | null {
 }
 
 /**
+ * The Dhaka calendar MONTH a UTC instant falls in, as `YYYY-MM`.
+ *
+ * ROUND 11 FINDING 8. Two places sliced the ISO string — `collectedPaymentsByMonth`
+ * for the totals, and the report's own contributor grouping — so both used the
+ * UTC month. Five payments verified at `2026-09-30T20:00:00Z` belong to October 1
+ * in Dhaka, and an October report exported them as `2026-09,500.00,5`: money
+ * filed in the wrong reporting month, and a contributor set that could drift
+ * into a different month from the total it was gating.
+ *
+ * Derived from `dhakaDayLabel` rather than repeating the offset arithmetic, so
+ * the month a figure lands in can never disagree with the day it lands on.
+ */
+export function dhakaMonthLabel(isoTimestamp: string): string | null {
+  return dhakaDayLabel(isoTimestamp)?.slice(0, 7) ?? null;
+}
+
+/**
  * The Dhaka days of the trend window, oldest first, as `YYYY-MM-DD`.
  *
  * Stepped back from Dhaka noon on the anchor day, so a whole-day subtraction

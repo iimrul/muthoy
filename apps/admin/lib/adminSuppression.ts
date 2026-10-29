@@ -73,6 +73,44 @@ export function suppressSeriesBelowK<T>(
 }
 
 /**
+ * A TOTAL over buckets, withheld when any of its buckets is withheld.
+ *
+ * ROUND 11 FINDING 2. Gating a total on its own union of contributors is not
+ * enough, because the union is large whenever any bucket is. The Revenue
+ * page's all-time pharmacy total cleared the floor on the union while one of
+ * its months was withheld on Analytics — and a visible total minus the visible
+ * months IS the withheld month. Publishing an aggregate while withholding a
+ * part of it publishes that part by subtraction as soon as the other parts are
+ * visible.
+ *
+ * So the rule is composition, not union: **a total is released only if every
+ * bucket inside it is releasable.** That is deliberately stricter than k on
+ * the union, and it is the only form that survives someone holding two of this
+ * product's own screens side by side.
+ *
+ * WHAT THIS DOES NOT COVER, stated rather than implied: differencing along
+ * dimensions other than the period — two status-filtered queries whose
+ * difference is a small group, for instance — is the general query-auditing
+ * problem and is not solved here. The period dimension is closed because a
+ * published bucket no longer depends on the requested window; see
+ * `assertAnswerablePeriod` in adminReports.ts.
+ */
+export function suppressTotalAcrossBuckets<T>(
+  total: T,
+  buckets: readonly Aggregate<unknown>[],
+  k: number = SUPPRESSION_K,
+): Suppressed<T> {
+  const union = distinctCount(buckets.flatMap((bucket) => [...bucket.contributingShopIds]));
+  const anyBucketWithheld = buckets.some(
+    (bucket) => distinctCount(bucket.contributingShopIds) < k,
+  );
+  if (anyBucketWithheld || union < k) {
+    return { suppressed: true, value: null, contributorCount: union };
+  }
+  return { suppressed: false, value: total, contributorCount: union };
+}
+
+/**
  * The rendering form: the value's own text, or the em dash.
  *
  * `format` is only called for a value that survived, so a formatter cannot be

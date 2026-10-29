@@ -123,10 +123,14 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
     throw new AdminDataError('shop count query failed');
   }
 
+  // ROUND 11 FINDING 1: `shop_id` comes back as well, so the figure and its
+  // k-anonymity gate are derived from ONE windowing of these two tables. The
+  // column list stays a single literal — a concatenated string makes PostgREST
+  // infer `GenericStringError[]` and the row type collapses.
   const saleRows = await readAllPages<SaleTotalRow>('sales', (from, to) =>
     supabase
       .from('sales')
-      .select('total')
+      .select('total, shop_id')
       .eq('is_deleted', false)
       .eq('business_date', day.businessDate)
       .order('id', { ascending: true })
@@ -139,7 +143,7 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
   const refundRows = await readAllPages<SaleRefundTotalRow>('sale_refunds', (from, to) =>
     supabase
       .from('sale_refunds')
-      .select('total_amount')
+      .select('total_amount, shop_id')
       .eq('is_deleted', false)
       .eq('business_date', day.businessDate)
       .order('id', { ascending: true })
@@ -149,11 +153,22 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
   const grossSalesToday = sumSaleTotals(saleRows);
   const refundsToday = sumRefundTotals(refundRows);
 
+  // BOTH SIDES. A pharmacy that only refunded today still contributed to the
+  // net figure, so counting the sales side alone would clear the floor on a
+  // day whose refunds came from a shop the sales side could not see.
+  const netContributorShopIds = [
+    ...new Set([
+      ...saleRows.map((row) => row.shop_id),
+      ...refundRows.map((row) => row.shop_id),
+    ]),
+  ];
+
   return {
     totalShops: count ?? 0,
     grossSalesToday,
     refundsToday,
     netSalesToday: netSalesPaisa(grossSalesToday, refundsToday),
+    netContributorShopIds,
     day,
   };
 }

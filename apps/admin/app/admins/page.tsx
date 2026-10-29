@@ -1,7 +1,9 @@
 import DataTable, { type DataColumn } from '../../components/DataTable';
+import AuditSourceNotice from '../../components/AuditSourceNotice';
 import ErrorNotice from '../../components/ErrorNotice';
 import { EmptyState } from '../../components/PageParts';
-import { recentAdminAudit, type AdminAuditEntry } from '../../lib/adminAudit';
+import type { AdminAuditEntry } from '../../lib/adminAudit';
+import { auditHistory } from '../../lib/adminAuditStore';
 import { filterAuditEntriesByActionFamilies, formatAuditMeta } from '../../lib/adminAuditViews';
 import {
   resolveEffectiveAuthority,
@@ -147,8 +149,12 @@ export default async function AdminsPage({ searchParams }: AdminsPageProps) {
   // so two revocations of different targets in the same millisecond became
   // one row and a denied attempt vanished into the success beside it. One
   // pass cannot duplicate, so nothing needs removing.
+  // ROUND 11 FINDING 5: the DURABLE log. Filtered server-side by the same
+  // prefixes, so a long history is not truncated to whatever fits in one
+  // process's ring before the filter runs.
+  const history = await auditHistory({ actionPrefixes: SECURITY_ACTION_PREFIXES });
   const securityHistory = filterAuditEntriesByActionFamilies(
-    recentAdminAudit.entries(),
+    history.entries,
     SECURITY_ACTION_PREFIXES,
   );
 
@@ -404,13 +410,12 @@ export default async function AdminsPage({ searchParams }: AdminsPageProps) {
           Security history
         </h2>
         <p className="mt-1 text-sm text-midGray">
-          Role changes, logins and session events recorded by THIS server instance, newest first.
-          Failed and denied attempts are included — a denial is the entry most worth keeping. It
-          is not the durable record: that is the structured line written to stderr, and the
-          Postgres audit table ships in migration 35, which is not yet applied.
+          Role changes, logins and session events, newest first. Failed and denied attempts are
+          included — a denial is the entry most worth keeping.
         </p>
+        <AuditSourceNotice unavailable={history.unavailable} />
         {securityHistory.length === 0 ? (
-          <EmptyState message="This instance has recorded no role change, login or session event yet." />
+          <EmptyState message="No role change, login or session event has been recorded yet." />
         ) : (
           <div className="mt-3">
             <DataTable

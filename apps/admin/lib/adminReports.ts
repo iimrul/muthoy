@@ -39,16 +39,27 @@
 // exactly like a real absence.
 
 import { addPaisa, asPaisa, type Paisa } from '@muthoy/types';
-import { netExportTaka, netSalesPaisa } from '@muthoy/utils';
+import {
+  netCellText,
+  netExportCell,
+  netSalesPaisa,
+  withheldNetCell,
+  type NetExportCell,
+} from '@muthoy/utils';
 import { ADMIN_REPORT_IDS, type AdminReportExportQuery } from '@muthoy/validation';
 import { CSV_CONTENT_TYPE, contentDisposition, toCsv, type CsvDocument } from './adminCsv';
-import { dhakaDayLabel } from './adminDashboard';
+import { dhakaDayLabel, dhakaMonthLabel } from './adminDashboard';
 import { dhakaDayEndIso, dhakaDayStartIso } from './adminFilters';
-import { collectedPaymentsByMonth, requireMetric, type Metric } from './adminMetrics';
+import {
+  collectedPaymentsByMonth,
+  NET_SALES_METRIC_IDS,
+  requireMetric,
+  type Metric,
+} from './adminMetrics';
 import { PDF_CONTENT_TYPE, PDF_LATIN1_NOTICE, toPdf } from './adminPdf';
 import {
+  SUPPRESSED_EXPORT,
   SUPPRESSION_K,
-  exportSuppressed,
   suppressBelowK,
   type Aggregate,
 } from './adminSuppression';
@@ -189,10 +200,88 @@ export interface ReportDefinition {
    * query rather than quietly widening it.
    */
   statusFilter: 'commercial' | 'subscription' | null;
+  /**
+   * The bucket this report's rows are, which is NOT the same thing as the
+   * range a caller may ask for.
+   *
+   * ROUND 11 FINDING 2 — OVERLAPPING PERIODS DEFEAT k=5. The pharmacy-sales
+   * report buckets by MONTH while the caller picks arbitrary DAYS, so the
+   * single `2026-10` row held whatever fell inside the window and the floor
+   * was applied to the window's contributors. The reviewer exploited exactly
+   * that:
+   *
+   *   five pharmacies take ৳500 on October 1; one takes ৳80 on October 2
+   *   October 2 alone   -> withheld, one contributor
+   *   October 1 alone   -> 500.00
+   *   October 1 to 2    -> 580.00    and 580 − 500 = the withheld 80.00
+   *
+   * Per-request suppression cannot stop that, because the two requests are
+   * individually legitimate. What stops it is making the published bucket
+   * INDEPENDENT OF THE REQUEST: a month-grained report answers only for whole
+   * months, so a month's row carries the same value in every window that
+   * contains it and no pair of windows differs by a withheld bucket.
+   *
+   *   'day'      — the row IS the atomic bucket, so any day range is safe.
+   *   'month'    — whole months only; a partial month is refused.
+   *   'snapshot' — current state, no period dimension at all (see finding 7).
+   */
+  period: 'day' | 'month' | 'snapshot';
 }
 
 function definition(entry: ReportDefinition): ReportDefinition {
   return Object.freeze(entry);
+}
+
+/** The last Dhaka day of the month a `YYYY-MM-DD` day falls in. */
+function monthEnd(day: string): string {
+  const year = Number(day.slice(0, 4));
+  const month = Number(day.slice(5, 7));
+  // Day 0 of the NEXT month is the last day of this one, which also gets
+  // February and leap years right without a table.
+  const last = new Date(Date.UTC(year, month, 0));
+  return last.toISOString().slice(0, 10);
+}
+
+/**
+ * Refuses a range a report cannot answer without becoming reconstructable.
+ *
+ * Refusing rather than snapping outward: a report that silently widened the
+ * range would return rows outside the range its own subtitle states, which is
+ * Gate 5 finding 9 — an export whose caption contradicts its rows — and the
+ * reader would have no way to tell.
+ */
+function assertAnswerablePeriod(
+  entry: ReportDefinition,
+  query: AdminReportExportQuery,
+): void {
+  if (entry.period === 'snapshot') {
+    // ROUND 11 FINDING 7. These builders read CURRENT state and ignore dates
+    // entirely, while the subtitle printed whatever range was asked for — so
+    // five subscriptions that began in October 2026 appeared under
+    // "2020-01-01 to 2020-01-02", reading as historical evidence. The report
+    // cannot honour a period, so it says so instead of implying one.
+    if (query.from !== undefined || query.to !== undefined) {
+      throw new AdminReportFilterError(
+        'The ' + entry.title + ' report is a snapshot of current state, not a history: '
+        + 'its rows carry no date, so a date range would be printed in the caption without '
+        + 'being applied to the figures. Clear the dates, or use a report with a period.',
+      );
+    }
+    return;
+  }
+
+  if (entry.period !== 'month') return;
+
+  const starts = query.from === undefined || query.from.endsWith('-01');
+  const ends = query.to === undefined || query.to === monthEnd(query.to);
+  if (starts && ends) return;
+
+  throw new AdminReportFilterError(
+    'The ' + entry.title + ' report is grouped by month, so it answers for whole months '
+    + 'only. A part-month range would make each month’s figure depend on the window, '
+    + 'and two overlapping windows would then differ by a withheld month. Use the first day '
+    + 'of a month as the start and the last day of a month as the end.',
+  );
 }
 
 /**
@@ -213,6 +302,7 @@ const MONEY_UNIT_SUFFIX = ' (BDT)';
 export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.freeze([
   definition({
     id: 'pharmacy_registrations',
+    period: 'day',
     title: 'Pharmacy registrations',
     kind: 'registration_metadata',
     columns: ['Registered', 'Pharmacy', 'District', 'Plan', 'Commercial status'],
@@ -222,6 +312,7 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
   }),
   definition({
     id: 'subscriptions',
+    period: 'snapshot',
     title: 'Subscriptions by tier, cycle and status',
     kind: 'aggregate',
     columns: ['Tier', 'Billing cycle', 'Status', 'Accounts'],
@@ -231,6 +322,7 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
   }),
   definition({
     id: 'subscription_revenue_and_renewals',
+    period: 'month',
     // The heading is the MANIFEST's label, resolved at module load.
     title: requireMetric('collected_subscription_payments_trend').label,
     kind: 'aggregate',
@@ -245,6 +337,7 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
   }),
   definition({
     id: 'plan_distribution',
+    period: 'snapshot',
     title: 'Plan distribution',
     kind: 'aggregate',
     columns: ['Plan', 'Pharmacies'],
@@ -254,6 +347,7 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
   }),
   definition({
     id: 'activity_summary',
+    period: 'day',
     title: 'Activity summary',
     kind: 'aggregate',
     columns: ['Day', 'Pharmacies with recorded sales', 'New registrations'],
@@ -263,6 +357,7 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
   }),
   definition({
     id: 'refund_net_pharmacy_sales',
+    period: 'month',
     title: requireMetric('pharmacy_sales_net').label,
     kind: 'aggregate',
     columns: ['Month', requireMetric('pharmacy_sales_net').label + MONEY_UNIT_SUFFIX],
@@ -359,10 +454,28 @@ function groupContributors<T>(
   return buckets;
 }
 
+/**
+ * One exported cell: plain text, or an OPAQUE refund-net cell.
+ *
+ * §6i ROUND 11. `values` used to be `readonly string[]`, and any string
+ * satisfies a string, so the reviewer put an identity-shaped call between the
+ * net sink and the row —
+ *
+ *   values: [((_: string) => exportTaka(sumPaisaOf(monthSales)))(netExportTaka(total))]
+ *
+ * — and a GROSS monthly sum was exported under the heading "Pharmacy sales,
+ * net of refunds (BDT)", in the CSV and in the PDF, with no type error.
+ *
+ * A net cell is now a value only `netExportCell` can mint, and the columns a
+ * report declares as refund-net money are resolved through `netCellText`,
+ * which verifies. A plain string standing in one of those columns throws.
+ */
+type ReportCell = string | NetExportCell;
+
 interface AggregateRow {
   key: string;
   /** The already-formatted cells after the key, in column order. */
-  values: readonly string[];
+  values: readonly ReportCell[];
   contributorIds: readonly string[];
   /**
    * Optional PER-VALUE contributors, index-aligned with `values`.
@@ -376,18 +489,88 @@ interface AggregateRow {
 }
 
 /**
+ * Which `values` indexes carry refund-net money, derived from the definition.
+ *
+ * DERIVED rather than declared per report, so a new money report cannot forget
+ * the field and quietly publish an unverified net column. The two things it
+ * reads — the report's `metricId` and the column heading built from that
+ * metric's label — are already in the definition, and the net report's own
+ * entry is asserted non-empty in the tests, so this cannot silently return
+ * nothing.
+ *
+ * `columns[0]` is the key column and `values` is index-aligned with
+ * `columns[1...]`, hence the offset.
+ */
+function netValueIndexes(entry: ReportDefinition): readonly number[] {
+  if (entry.metricId === null) return [];
+  if (!(NET_SALES_METRIC_IDS as readonly string[]).includes(entry.metricId)) return [];
+  const heading = requireMetric(entry.metricId).label + MONEY_UNIT_SUFFIX;
+  return entry.columns
+    .map((column, index) => (column === heading ? index - 1 : -1))
+    .filter((index) => index >= 0);
+}
+
+/**
+ * Turns the assembled cells into the exported text, verifying the net columns.
+ *
+ * THIS IS WHERE PROVENANCE ENDS — at the row that becomes CSV bytes and PDF
+ * content, not one step before it. Every cell in a declared refund-net column
+ * goes through `netCellText`, which throws unless the cell was minted by the
+ * net export sink (or by the withheld-cell mint, which suppression uses). A
+ * plain string there is a thrown error rather than a published figure.
+ */
+function toTextRows(
+  rows: readonly (readonly ReportCell[])[],
+  netIndexes: readonly number[],
+): readonly (readonly string[])[] {
+  const netColumns = new Set(netIndexes.map((index) => index + 1));
+  return rows.map((row) =>
+    row.map((cell, column) => {
+      if (netColumns.has(column)) return netCellText(cell);
+      if (typeof cell !== 'string') {
+        // A net cell in a column nobody declared as net: it would stringify as
+        // "[object Object]", and more to the point it means the definition and
+        // the builder disagree about which column holds the money.
+        throw new Error(
+          'A refund-net cell appeared in column ' + column + ', which is not declared as one.',
+        );
+      }
+      return cell;
+    }),
+  );
+}
+
+/**
  * Applies the k floor to every aggregate row, in ONE place.
  *
  * A row below k has every value column EMPTIED — not zeroed. `exportSuppressed`
  * is what writes the empty cell, so a formatter cannot be the thing that leaks
  * a suppressed figure. The KEY stays, because the existence of a bucket is not
  * the disclosure and an operator needs to see that a month exists at all.
+ *
+ * §6i ROUND 11: a suppressed NET column gets `withheldNetCell()` rather than
+ * `''`. The cell still has to satisfy `netCellText`, and letting a bare empty
+ * string through would have meant teaching the verifier to accept a plain
+ * string — which is the hole it exists to close.
  */
-function suppressRows(rows: readonly AggregateRow[]): {
-  rows: readonly (readonly string[])[];
+function suppressRows(
+  rows: readonly AggregateRow[],
+  netIndexes: readonly number[],
+): {
+  rows: readonly (readonly ReportCell[])[];
   suppressedBuckets: number;
 } {
-  const out: (readonly string[])[] = [];
+  // The withheld cell for one value column.
+  //
+  // This replaces the `exportSuppressed(gated, …)` call that used to write it.
+  // That helper returns `SUPPRESSED_EXPORT` — a plain `''` — and never calls
+  // its formatter for a suppressed value, so there was no way to ask it for a
+  // withheld NET cell. The property it existed for is kept exactly: the
+  // suppressed value is never passed to a formatter, because it is never
+  // passed anywhere. `SUPPRESSED_EXPORT` is still what a non-net column gets.
+  const suppressedCell = (index: number): ReportCell =>
+    netIndexes.includes(index) ? withheldNetCell() : SUPPRESSED_EXPORT;
+  const out: (readonly ReportCell[])[] = [];
   let suppressedBuckets = 0;
 
   for (const row of rows) {
@@ -413,7 +596,7 @@ function suppressRows(rows: readonly AggregateRow[]): {
         if (contributors === undefined) return { cell: value, suppressed: false };
         const gated = suppressBelowK({ value, contributingShopIds: contributors });
         return {
-          cell: gated.suppressed ? exportSuppressed(gated, () => '') : value,
+          cell: gated.suppressed ? suppressedCell(index) : value,
           suppressed: gated.suppressed,
         };
       });
@@ -422,14 +605,14 @@ function suppressRows(rows: readonly AggregateRow[]): {
       continue;
     }
 
-    const aggregate: Aggregate<readonly string[]> = {
+    const aggregate: Aggregate<readonly ReportCell[]> = {
       value: row.values,
       contributingShopIds: row.contributorIds,
     };
     const gated = suppressBelowK(aggregate);
     if (gated.suppressed) {
       suppressedBuckets += 1;
-      out.push([row.key, ...row.values.map(() => exportSuppressed(gated, () => ''))]);
+      out.push([row.key, ...row.values.map((_value, index) => suppressedCell(index))]);
       continue;
     }
     out.push([row.key, ...row.values]);
@@ -513,7 +696,11 @@ function buildSubscriptionPaymentsByMonth(
   const months = collectedPaymentsByMonth(verified);
   const contributors = groupContributors(
     verified,
-    (order) => order.verifiedAt?.slice(0, 7) ?? null,
+    // Round 11 finding 8: the DHAKA month, the same one `collectedPaymentsByMonth`
+    // files the totals under. A UTC slice here would have put a contributor in
+    // one month and the money it contributed to in another, so the floor would
+    // have been applied to the wrong set.
+    (order) => (order.verifiedAt === null ? null : dhakaMonthLabel(order.verifiedAt)),
     (order) => order.billingAccountId,
   );
 
@@ -610,19 +797,20 @@ function buildPharmacySalesByMonth(
     const total = netSalesPaisa(sumPaisaOf(monthSales), sumPaisaOf(monthRefunds));
     return {
       key: month,
-      // §6i ROUND 10: `netExportTaka` takes the OPAQUE amount and owns the
-      // conversion.
+      // §6i ROUND 11: the cell is OPAQUE, and `toTextRows` verifies it on the
+      // way to the bytes.
       //
-      // This used to unwrap the amount and hand the number to the generic
-      // taka formatter, and that shape left a gap between the unwrap and the
-      // formatter wide enough to put any `Paisa` through. The reviewer did
-      // exactly that -- an identity-shaped call returning a GROSS monthly sum
-      // -- and the CSV exported 500.00 instead of 400.00 under the heading
-      // "Pharmacy sales, net of refunds (BDT)", with zero type errors.
+      // Round 10 made the sink take the opaque amount and own the conversion,
+      // which closed the gap between the unwrap and the formatter. It still
+      // returned a `string` into `values: string[]`, and any string satisfies
+      // a string, so the reviewer put the identity-shaped call one step LATER:
       //
-      // The sink cannot be handed a number at all, so there is nothing for an
-      // identity-shaped call to substitute.
-      values: [netExportTaka(total)],
+      //   ((_: string) => exportTaka(sumPaisaOf(monthSales)))(netExportTaka(total))
+      //
+      // and the CSV and the PDF both exported 500.00 instead of 400.00 under
+      // "Pharmacy sales, net of refunds (BDT)", with zero type errors and no
+      // forged box. A plain string cannot stand in this column now.
+      values: [netExportCell(total)],
       contributorIds: [
         ...monthSales.map((row) => row.shopId),
         ...monthRefunds.map((row) => row.shopId),
@@ -663,6 +851,11 @@ export function buildReportTable(
     // must not produce an empty report that looks like no data.
     throw new Error('No builder is registered for report: ' + entry.id);
   }
+  // Round 11 findings 2 and 7, refused BEFORE a row is built for the same
+  // reason the status filter is: a row that exists is a row something can
+  // return, and a reconstructable row is worse than a refusal.
+  assertAnswerablePeriod(entry, query);
+
   // Refused BEFORE a row is built, so no partially-filtered table can exist.
   if (query.status !== undefined && query.status.length > 0 && entry.statusFilter === null) {
     throw new AdminReportFilterError(
@@ -674,10 +867,20 @@ export function buildReportTable(
 
   const built = builder(data, query);
 
-  const { rows, suppressedBuckets } =
+  // §6i round 11: the net columns are resolved — and verified — HERE, on the
+  // rows that become the exported bytes.
+  const netIndexes = netValueIndexes(entry);
+  const { cells, suppressedBuckets } =
     entry.kind === 'aggregate'
-      ? suppressRows(built)
-      : { rows: built.map((row) => [row.key, ...row.values]), suppressedBuckets: 0 };
+      ? (() => {
+          const gated = suppressRows(built, netIndexes);
+          return { cells: gated.rows, suppressedBuckets: gated.suppressedBuckets };
+        })()
+      : {
+          cells: built.map((row) => [row.key, ...row.values]),
+          suppressedBuckets: 0,
+        };
+  const rows = toTextRows(cells, netIndexes);
 
   const parts = [rangeCaption(query), rows.length + ' rows'];
   if (query.status !== undefined && query.status.length > 0) {

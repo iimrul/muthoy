@@ -4,9 +4,10 @@ import {
   ADMIN_SUPPORT_PRIORITY_VALUES,
   ADMIN_SUPPORT_STATUS_VALUES,
 } from '@muthoy/validation';
+import AuditSourceNotice from '../../components/AuditSourceNotice';
 import ErrorNotice from '../../components/ErrorNotice';
 import { EmptyState, FilterForm } from '../../components/PageParts';
-import { recentAdminAudit } from '../../lib/adminAudit';
+import { auditHistory } from '../../lib/adminAuditStore';
 import { requireAdminPermission } from '../../lib/adminAuthz';
 import { outcomeNote } from '../../lib/adminOutcomes';
 import {
@@ -138,12 +139,15 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
   // that could disagree with it. There is no transition table, and inventing
   // one would be a schema change with no authority behind it. Matched on the
   // redacted `caseId` meta key, which lib/adminAudit.ts allows only as a UUID.
+  // ROUND 11 FINDING 5: the DURABLE log, so a case's transition history
+  // survives a restart and is the same on every instance.
+  const history = await auditHistory({ actionPrefixes: ['support.'] });
   const caseHistory =
     detail === null
       ? []
-      : recentAdminAudit
-          .entries()
-          .filter((entry) => String(entry.meta.caseId ?? '') === detail.case.id);
+      : history.entries.filter(
+          (entry) => String(entry.meta.caseId ?? '') === detail.case.id,
+        );
   const counts = supportQueueCounts(cases);
 
   return (
@@ -296,10 +300,10 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
               no authority behind it. */}
           <div className="mt-4">
             <h3 className="text-sm font-semibold">Case history</h3>
+            <AuditSourceNotice unavailable={history.unavailable} />
             {caseHistory.length === 0 ? (
               <p role="status" className="mt-1 text-sm text-midGray">
-                This instance has recorded no change to this case. The audit is held in memory
-                here, so a restart clears it; the durable record is the structured stderr line.
+                No change to this case has been recorded.
               </p>
             ) : (
               <ul className="mt-2 space-y-1 text-sm">

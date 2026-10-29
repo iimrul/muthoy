@@ -20,8 +20,12 @@ import {
   requireMetric,
 } from '../lib/adminMetrics';
 import { dashboardOverview, type DashboardOverview } from '../lib/adminPlatformQueries';
-import { suppressSeriesBelowK } from '../lib/adminSuppression';
-import { formatCount, formatDhakaDate } from '../lib/adminViews';
+import {
+  SUPPRESSION_K,
+  suppressBelowK,
+  suppressSeriesBelowK,
+} from '../lib/adminSuppression';
+import { EMPTY_VALUE, formatCount, formatDhakaDate } from '../lib/adminViews';
 import { toDisplayMessage } from '../lib/errors';
 import type { PlatformStats } from '../lib/platformStats';
 import { getPlatformStats } from '../lib/queries';
@@ -142,6 +146,29 @@ export default async function DashboardPage() {
   const today = overview.activeByDay[overview.activeByDay.length - 1];
   const activeToday = today === undefined ? 0 : distinctShopCount(today);
 
+  // ROUND 11 FINDING 1 — THE DASHBOARD'S OWN k FLOOR.
+  //
+  // This page applied none. With a single contributing pharmacy it rendered
+  // ৳80.00 as the headline and, in the composition line, gross ৳100.00 and
+  // refunds ৳20.00 — while Analytics withheld that same bucket. Two pages
+  // disagreeing about whether a figure may be shown is a privacy failure.
+  //
+  // ONE verdict gates THREE things, because any one of them discloses the
+  // other two:
+  //
+  //   - the net headline;
+  //   - the composition, which carries gross and refunds and therefore the
+  //     net figure by subtraction. Hiding only the headline leaks the amount;
+  //   - today's ACTIVE PHARMACY COUNT, because "1" beside a withheld figure
+  //     says that one identifiable pharmacy's takings are the withheld
+  //     number. This is Gate 5 finding 4 again: the floor belongs on the
+  //     contributors to the VALUE, and a count of them is a value.
+  const gatedNetToday = suppressBelowK({
+    value: stats.netSalesToday,
+    contributingShopIds: stats.netContributorShopIds,
+  });
+  const netTodayWithheld = gatedNetToday.suppressed;
+
   const alerts = dashboardAlerts({ shops, subscriptions, entitlements, orders, events }, nowMs);
   const raisedAlerts = alerts.filter((alert) => alert.count > 0).length;
 
@@ -200,8 +227,15 @@ export default async function DashboardPage() {
         />
         <MetricTile
           metric={requireMetric('active_pharmacies_today')}
-          value={formatCount(activeToday)}
-          note="Distinct pharmacies that recorded a sale on this business date."
+          // Round 11 finding 1: withheld under the same verdict as the net
+          // figure. A count of 1 beside a withheld amount names the pharmacy
+          // whose takings were withheld.
+          value={netTodayWithheld ? EMPTY_VALUE : formatCount(activeToday)}
+          note={
+            netTodayWithheld
+              ? 'Withheld: fewer than five pharmacies recorded a sale on this business date.'
+              : 'Distinct pharmacies that recorded a sale on this business date.'
+          }
           href="/analytics"
         />
         <MetricTile
@@ -256,7 +290,16 @@ export default async function DashboardPage() {
         <NetSalesCard
           metricId="pharmacy_sales_net_today"
           amount={stats.netSalesToday}
-          composition={`All shops · ${stats.day.businessDate} (Asia/Dhaka) · gross ${formatMoney(stats.grossSalesToday)} less refunds ${formatMoney(stats.refundsToday)}`}
+          withheld={netTodayWithheld}
+          // Round 11 finding 1: the composition is WITHHELD with the figure.
+          // Gross less refunds IS the net figure, so publishing the two sides
+          // under a withheld headline discloses exactly what the floor exists
+          // to withhold.
+          composition={
+            netTodayWithheld
+              ? `All shops · ${stats.day.businessDate} (Asia/Dhaka) · withheld: fewer than ${SUPPRESSION_K} pharmacies contributed`
+              : `All shops · ${stats.day.businessDate} (Asia/Dhaka) · gross ${formatMoney(stats.grossSalesToday)} less refunds ${formatMoney(stats.refundsToday)}`
+          }
         />
       </div>
 

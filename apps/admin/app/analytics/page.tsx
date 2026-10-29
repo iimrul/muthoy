@@ -1,6 +1,6 @@
-import { netChartPoints } from '@muthoy/utils';
 import { ADMIN_MAX_RANGE_DAYS } from '@muthoy/validation';
 import ChartPanel from '../../components/charts/ChartPanel';
+import NetSalesTrend from '../../components/NetSalesTrend';
 import { EMPTY_VALUE, formatCount } from '../../lib/adminViews';
 import ErrorNotice from '../../components/ErrorNotice';
 import { FilterForm, MetricTile } from '../../components/PageParts';
@@ -197,19 +197,24 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     contributingShopIds: conversion.accountIds,
   });
 
-  // §6i ROUND 10: the net series goes through `netChartPoints`, the sink
-  // that owns the conversion, NOT through the generic numeric `toPoints`.
+  // §6i ROUND 11: this page no longer holds the net series' POINTS at all.
   //
-  // `toPoints` takes a `(bucket) => number` selector, and that selector is a
-  // place a caller can put anything. The reviewer put an identity-shaped call
-  // there -- `((_: number) => 230)(Number(netSalesAmount(...)) / 100)` -- and
-  // the series published 230.00 under this page's pharmacy-net caption with
-  // zero type errors.
+  // Round 10 moved the conversion into `netChartPoints`, a sink taking opaque
+  // amounts, which closed the numeric selector the reviewer had used. Round 11
+  // then showed the sink stopped one step short of the output, because it
+  // handed back a plain array and this page owned it from there:
   //
-  // The sink takes the OPAQUE amounts instead and divides by 100 itself, so
-  // there is no numeric selector to substitute. Suppression is applied FIRST,
-  // on the shops behind each month, and passed in as a flag -- a withheld
-  // bucket comes back null rather than 0, exactly as before.
+  //   points: netChartPoints(salesBuckets).map((point) => ({
+  //     ...point, value: point.value === null ? null : 230,
+  //   })),
+  //
+  // plotted 230.00 under the canonical caption. A lying `format` prop and a
+  // swapped heading worked for the same reason -- the page held the formatter
+  // and the words too.
+  //
+  // So the page hands the BUCKETS to `NetSalesTrend` and nothing else. It
+  // cannot pass a number, a formatter or a caption, because that component has
+  // no prop for any of them.
   const salesBuckets = pharmacySalesByMonth.map((bucket) => {
     const gated = suppressBelowK({
       value: bucket.totalPaisa,
@@ -221,10 +226,6 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
       suppressed: gated.suppressed,
     };
   });
-  const sales = {
-    points: netChartPoints(salesBuckets),
-    withheld: salesBuckets.filter((bucket) => bucket.suppressed).length,
-  };
   const plans = toPoints(
     shopsByPlan,
     (bucket) => bucket.plan,
@@ -302,19 +303,16 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
           emptyMessage="No pharmacy registered in this range."
         />
 
-        <ChartPanel
-          heading={requireMetric('pharmacy_sales_net').label + ', by month'}
-          // The family is named in the description as well as in the label:
-          // this is a PHARMACY's takings, not Muthoy's money, and the two are
-          // never added together.
-          description="Refund-subtracted takings across pharmacies, in taka. This is the pharmacies' own money, not Muthoy's — Muthoy's own figures are on the billing page."
-          kind="trend"
-          points={sales.points}
-          valueLabel="Taka"
-          isMoney
-          withheld={sales.withheld}
+        {/* §6i round 11: buckets in, nothing else. The heading, the series
+            name, the description, the conversion and the per-point formatting
+            all live inside NetSalesTrend, which resolves them from the §5.2
+            manifest entry named by the ID. There is no points prop to map
+            over, no format prop to falsify and no heading prop to swap. */}
+        <NetSalesTrend
+          metricId="pharmacy_sales_net"
+          buckets={salesBuckets}
+          grain="month"
           emptyMessage="No sale has been recorded in this range, so there is no sales series."
-          format={(value) => value.toFixed(2)}
         />
 
         <ChartPanel

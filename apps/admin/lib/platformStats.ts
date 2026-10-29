@@ -59,17 +59,37 @@ export interface PlatformStats {
    * verifies provenance before it formats, so neither substitution survives.
    */
   netSalesToday: NetSales;
+  /**
+   * The DISTINCT pharmacies behind today's net figure — sales side and refund
+   * side together.
+   *
+   * ROUND 11 FINDING 1. The Dashboard had no contributor set at all, so it
+   * applied no k floor: with one contributing pharmacy it rendered ৳80.00 and,
+   * in the composition line, gross ৳100.00 and refunds ৳20.00 — while
+   * Analytics withheld that very bucket. Two pages disagreeing about whether a
+   * figure may be shown is a privacy failure, not an inconsistency.
+   *
+   * Collected from the SAME two reads that produce the figure, rather than
+   * from the analytics overview's activity buckets. The figure and its gate
+   * have to come from one windowing of one pair of tables, which is the half
+   * of W4-04 that is easy to get wrong.
+   *
+   * These ids are never rendered. They exist to be counted.
+   */
+  netContributorShopIds: readonly string[];
   day: DhakaDayRange;
 }
 
-/** A `sales` row narrowed to the only column the dashboard total needs. */
+/** A `sales` row narrowed to the columns the dashboard total and its gate need. */
 export interface SaleTotalRow {
   total: number;
+  shop_id: string;
 }
 
 /** A `sale_refunds` row narrowed the same way. */
 export interface SaleRefundTotalRow {
   total_amount: number;
+  shop_id: string;
 }
 
 const EMPTY_VALUE = '—';
@@ -97,7 +117,7 @@ export function dhakaDayRange(now: Date = new Date()): DhakaDayRange {
  * non-integer coming back from Postgres throws instead of silently seeding
  * float drift into a money figure (packages/types/money.ts).
  */
-export function sumSaleTotals(rows: readonly SaleTotalRow[]): Paisa {
+export function sumSaleTotals(rows: readonly { total: number }[]): Paisa {
   return rows.reduce<Paisa>((runningTotal, row) => addPaisa(runningTotal, asPaisa(row.total)), ZERO_PAISA);
 }
 
@@ -111,7 +131,7 @@ export function sumSaleTotals(rows: readonly SaleTotalRow[]): Paisa {
  * the type system noticing. The duplication here is four tokens; the bug it
  * prevents is a revenue figure that is silently gross.
  */
-export function sumRefundTotals(rows: readonly SaleRefundTotalRow[]): Paisa {
+export function sumRefundTotals(rows: readonly { total_amount: number }[]): Paisa {
   return rows.reduce<Paisa>(
     (runningTotal, row) => addPaisa(runningTotal, asPaisa(row.total_amount)),
     ZERO_PAISA,
