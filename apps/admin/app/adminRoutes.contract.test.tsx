@@ -116,10 +116,17 @@ vi.mock('../lib/supabaseAdmin', () => ({
       // an EMPTY page proves exhaustion, would see the same rows forever and
       // hit its ceiling.
       const advanced = () => filters.some((entry) => entry.method === 'gt');
+      const pageResult = () => {
+        const response = result(table);
+        const range = filters.find((entry) => entry.method === 'range');
+        if (response.data === null || range === undefined) return response;
+        const [from, to] = range.args as [number, number];
+        return { ...response, data: response.data.slice(from, to + 1) };
+      };
       const chain: Record<string, unknown> = {
         then: (resolve: (value: unknown) => unknown) =>
           Promise.resolve(
-            advanced() ? { data: [], error: null, count: 0 } : result(table),
+            advanced() ? { data: [], error: null, count: 0 } : pageResult(),
           ).then(resolve),
         maybeSingle: () => Promise.resolve(singleResult(table)),
         single: () => Promise.resolve(singleResult(table)),

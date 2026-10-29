@@ -74,6 +74,18 @@ describe('linkDeviceToShop Owner token postcondition', () => {
     mocks.refreshSession.mockResolvedValue(refreshed(FULL));
   });
 
+  it('drops a linking response after a handover before persisting its secret or refreshing auth', async () => {
+    let active = true;
+    let release!: (value: { data: typeof LINK_RESPONSE; error: null }) => void;
+    mocks.invoke.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    const work = linkDeviceToShop(SHOP_ID, OWNER_ID, { isStillActive: () => active });
+    active = false;
+    release({ data: LINK_RESPONSE, error: null });
+    await expect(work).rejects.toMatchObject({ name: 'StaleSessionError' });
+    expect(mocks.recordBoundInstallation).not.toHaveBeenCalled();
+    expect(mocks.refreshSession).not.toHaveBeenCalled();
+  });
+
   it('accepts a complete matching Owner token and forwards ownerUserId', async () => {
     await expect(linkDeviceToShop(SHOP_ID, OWNER_ID)).resolves.toMatchObject({
       appUserId: OWNER_ID,

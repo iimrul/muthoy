@@ -278,6 +278,7 @@ describe('the support payloads', () => {
     // a shopless case would pass here and fail at the insert, which is the one
     // failure a shared schema exists to make impossible.
     expect(adminSupportCaseCreateSchema.safeParse({
+      requestId: UUID,
       category: 'payment',
       priority: 'normal',
       summary: 'Payment stuck',
@@ -286,6 +287,7 @@ describe('the support payloads', () => {
 
   test('a shop-scoped case needs a real id, not a label', () => {
     expect(adminSupportCaseCreateSchema.safeParse({
+      requestId: UUID,
       shopId: UUID,
       category: 'sync',
       priority: 'high',
@@ -293,6 +295,7 @@ describe('the support payloads', () => {
     }).success).toBe(true);
 
     expect(adminSupportCaseCreateSchema.safeParse({
+      requestId: UUID,
       shopId: 'Banani Pharmacy',
       category: 'sync',
       priority: 'high',
@@ -310,13 +313,14 @@ describe('the support payloads', () => {
     ['a whitespace summary', { shopId: UUID, category: 'payment', priority: 'normal', summary: '   ' }],
     ['an over-long summary', { shopId: UUID, category: 'payment', priority: 'normal', summary: 'x'.repeat(2_001) }],
   ])('refuses %s', (_label, payload) => {
-    expect(adminSupportCaseCreateSchema.safeParse(payload).success).toBe(false);
+    expect(adminSupportCaseCreateSchema.safeParse({ requestId: UUID, ...payload }).success).toBe(false);
   });
 
   test('a summary at the CHECK bound is accepted, not refused one short of it', () => {
     // The app cap and the column's cap are the same number on purpose: a
     // tighter app cap would refuse an edit to a row the table already holds.
     expect(adminSupportCaseCreateSchema.safeParse({
+      requestId: UUID,
       shopId: UUID,
       category: 'data',
       priority: 'low',
@@ -347,12 +351,12 @@ describe('the support payloads', () => {
   });
 
   test('a note cannot be empty and cannot be unbounded', () => {
-    expect(adminSupportNoteCreateSchema.safeParse({ caseId: UUID, body: 'Called the owner.' }).success)
+    expect(adminSupportNoteCreateSchema.safeParse({ requestId: UUID, caseId: UUID, body: 'Called the owner.' }).success)
       .toBe(true);
-    expect(adminSupportNoteCreateSchema.safeParse({ caseId: UUID, body: '  ' }).success).toBe(false);
-    expect(adminSupportNoteCreateSchema.safeParse({ caseId: UUID, body: 'x'.repeat(8_000) }).success)
+    expect(adminSupportNoteCreateSchema.safeParse({ requestId: UUID, caseId: UUID, body: '  ' }).success).toBe(false);
+    expect(adminSupportNoteCreateSchema.safeParse({ requestId: UUID, caseId: UUID, body: 'x'.repeat(8_000) }).success)
       .toBe(true);
-    expect(adminSupportNoteCreateSchema.safeParse({ caseId: UUID, body: 'x'.repeat(8_001) }).success)
+    expect(adminSupportNoteCreateSchema.safeParse({ requestId: UUID, caseId: UUID, body: 'x'.repeat(8_001) }).success)
       .toBe(false);
   });
 });

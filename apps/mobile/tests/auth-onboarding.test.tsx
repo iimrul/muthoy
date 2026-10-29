@@ -240,6 +240,22 @@ describe('OTP verification', () => {
     deps.params = { phone: '+8801712345678', shopName: 'Rahim Pharmacy' };
   });
 
+  it('drops a restored-shop hydration after the session changes, without linking or navigating', async () => {
+    deps.verifyOtp.mockResolvedValueOnce({ user: { app_metadata: { shop_id: 'old-shop' } } });
+    deps.pullChanges.mockImplementationOnce(async (_shopId, _cursor, isCancelled: () => boolean) => {
+      expect(isCancelled()).toBe(false);
+      useSessionStore.setState({ epoch: 1 });
+      expect(isCancelled()).toBe(true);
+    });
+    render(createElement(OtpVerifyScreen));
+    await act(async () => {
+      fireEvent.change(otpField(), { target: { value: '123456' } });
+    });
+    expect(deps.pullChanges).toHaveBeenCalledTimes(1);
+    expect(deps.markShopCloudLinked).not.toHaveBeenCalled();
+    expect(deps.replace).not.toHaveBeenCalled();
+  });
+
   it('shows the number it texted and runs the canonical onboarding on a full code', async () => {
     render(createElement(OtpVerifyScreen));
     expect(screen.getByText('+880 1712-345678')).toBeTruthy();
@@ -251,7 +267,9 @@ describe('OTP verification', () => {
     await waitFor(() => expect(deps.replace).toHaveBeenCalledWith('/'));
     expect(deps.verifyOtp).toHaveBeenCalledWith('+8801712345678', '123456');
     expect(deps.createShopAndOwner).toHaveBeenCalledWith({ shopName: 'Rahim Pharmacy', phone: '+8801712345678' });
-    expect(deps.linkDeviceToShop).toHaveBeenCalledWith('shop-new', 'owner-new', { onboarding: { shop: 'payload' } });
+    expect(deps.linkDeviceToShop).toHaveBeenCalledWith('shop-new', 'owner-new', {
+      onboarding: { shop: 'payload' }, isStillActive: expect.any(Function),
+    });
     expect(deps.markShopCloudLinked).toHaveBeenCalledWith('shop-new');
   });
 

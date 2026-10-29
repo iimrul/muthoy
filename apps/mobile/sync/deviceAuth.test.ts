@@ -73,7 +73,7 @@ vi.mock('../state/sessionStore', () => ({
   },
 }));
 
-const { DeviceLoginError, loginOnNewDevice, recoverOwnerPin } = await import('./deviceAuth');
+const { DeviceLoginError, hydrateAuthenticatedDevice, loginOnNewDevice, recoverOwnerPin } = await import('./deviceAuth');
 
 beforeEach(() => {
   vi.stubGlobal('__DEV__', true);
@@ -120,6 +120,22 @@ afterEach(() => {
 });
 
 describe('fresh-device auth orchestration', () => {
+  it.each([false, true])('cancels full hydration at the write boundary after a handover (timing=%s)', async (timed) => {
+    const timing = timed ? {
+      measure: async <T,>(_stage: string, operation: () => Promise<T>) => operation(),
+    } as AuthTimingTrace : undefined;
+    mocks.pullChanges.mockImplementationOnce(async (_shopId, _cursor, isCancelled: () => boolean) => {
+      expect(isCancelled()).toBe(false);
+      mocks.epoch += 1;
+      expect(isCancelled()).toBe(true);
+    });
+    await expect(hydrateAuthenticatedDevice({
+      shopId: SHOP_ID, userId: USER_ID, role: 'owner', accessToken: 'access', refreshToken: 'refresh',
+    }, '1234', timing)).rejects.toMatchObject({ name: 'StaleSessionError' });
+    expect(mocks.refreshBillingStatus).not.toHaveBeenCalled();
+    expect(mocks.markShopCloudLinked).not.toHaveBeenCalled();
+  });
+
   it('times but preserves session, hydration, and local bcrypt validation ordering', async () => {
     const stages: string[] = [];
     const timing: AuthTimingTrace = {
@@ -167,7 +183,7 @@ describe('fresh-device auth orchestration', () => {
     expect(mocks.setSession).toHaveBeenCalledBefore(mocks.pullChanges);
     expect(mocks.inspectBinding).toHaveBeenCalledWith({ userId: USER_ID, shopId: SHOP_ID });
     expect(mocks.inspectBinding).toHaveBeenCalledBefore(mocks.pullChanges);
-    expect(mocks.pullChanges).toHaveBeenCalledWith(SHOP_ID, null, undefined, timing);
+    expect(mocks.pullChanges).toHaveBeenCalledWith(SHOP_ID, null, expect.any(Function), timing);
     expect(mocks.pullChanges).toHaveBeenCalledBefore(mocks.refreshBillingStatus);
     expect(mocks.refreshBillingStatus).toHaveBeenCalledWith(
       SHOP_ID,
@@ -304,6 +320,19 @@ describe('fresh-device auth orchestration', () => {
 });
 
 describe('owner recovery is the only explicit attempt-budget reset', () => {
+  it('cancels recovery hydration after a handover without marking setup complete', async () => {
+    mocks.pullChanges.mockImplementationOnce(async (_shopId, _cursor, isCancelled: () => boolean) => {
+      expect(isCancelled()).toBe(false);
+      mocks.epoch += 1;
+      expect(isCancelled()).toBe(true);
+    });
+    await expect(recoverOwnerPin('+8801712345678', '2468'))
+      .rejects.toMatchObject({ name: 'StaleSessionError' });
+    expect(mocks.markShopCloudLinked).not.toHaveBeenCalled();
+    expect(mocks.refreshBillingStatus).not.toHaveBeenCalled();
+    expect(mocks.login).not.toHaveBeenCalled();
+  });
+
   it('clears at the valid server-success commit point, before session setup', async () => {
     await recoverOwnerPin('+8801712345678', '2468');
     expect(mocks.clearPinAttempts).toHaveBeenCalledWith(`scope:${SHOP_ID}`);

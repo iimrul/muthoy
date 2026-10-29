@@ -14,7 +14,7 @@
 // Revocation is ADMIN_SESSION_EPOCH: bumping it rejects every live session
 // without a table. HONEST LIMIT: it is all-or-nothing, and it takes effect only
 // once the new environment is live (deployment propagation on a host such as
-// Vercel). Per-user revocation needs the Batch 3 session table.
+// Vercel). Node permission gates also enforce the per-user assignment cutoff.
 
 import { constantTimeEquals } from './basicAuth';
 import { AdminConfigError } from './errors';
@@ -73,8 +73,8 @@ export function readSessionSecret(env: SessionEnvironment): string {
 export function readSessionEpoch(env: SessionEnvironment): number {
   const raw = env.ADMIN_SESSION_EPOCH?.trim();
   if (!raw) return 0;
-  if (!/^\d+$/.test(raw)) {
-    throw new AdminConfigError('ADMIN_SESSION_EPOCH must be a non-negative integer');
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new AdminConfigError('ADMIN_SESSION_EPOCH must be a non-negative safe integer');
   }
   return Number(raw);
 }
@@ -172,9 +172,10 @@ function parsePayload(body: string): AdminSessionPayload | null {
   };
 }
 
-export async function verifyAdminSession(
+async function verifySession(
   token: string | null | undefined,
   options: { secret: string; epoch: number; now: number },
+  forRevocation: boolean,
 ): Promise<SessionVerification> {
   if (!token) return { ok: false, reason: 'absent' };
 
@@ -216,8 +217,27 @@ export async function verifyAdminSession(
   // secret, or from a broken clock. Either way it is not a session this
   // deployment issued.
   if (payload.exp - payload.iat > ABSOLUTE_TTL_MS) return { ok: false, reason: 'malformed' };
-  if (options.now - payload.lastSeen >= IDLE_TTL_MS) return { ok: false, reason: 'idle' };
+  if (!forRevocation && options.now - payload.lastSeen >= IDLE_TTL_MS) return { ok: false, reason: 'idle' };
   return { ok: true, payload };
+}
+
+export async function verifyAdminSession(
+  token: string | null | undefined,
+  options: { secret: string; epoch: number; now: number },
+): Promise<SessionVerification> {
+  return verifySession(token, options, false);
+}
+
+/**
+ * Revocation only: an idle browser copy may have a recently refreshed stolen
+ * sibling. Its authenticated iat can still revoke both. This grants no access;
+ * absolute expiry, signature, epoch and timestamp checks remain mandatory.
+ */
+export async function verifyAdminSessionForRevocation(
+  token: string | null | undefined,
+  options: { secret: string; epoch: number; now: number },
+): Promise<SessionVerification> {
+  return verifySession(token, options, true);
 }
 
 export function newSessionPayload(
@@ -238,7 +258,9 @@ export function touchedSessionPayload(
   payload: AdminSessionPayload,
   now: number,
 ): AdminSessionPayload {
-  return { ...payload, lastSeen: now };
+  // A verifier may lag the signer within CLOCK_SKEW_MS. Never move lastSeen
+  // backwards: doing so could put it before iat and invalidate our own cookie.
+  return { ...payload, lastSeen: Math.max(payload.lastSeen, now) };
 }
 
 export interface SessionCookieOptions {

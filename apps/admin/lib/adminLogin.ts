@@ -39,17 +39,20 @@ import 'server-only';
 import { pbkdf2Sync } from 'node:crypto';
 import { constantTimeEquals } from './basicAuth';
 import { recordAdminAction, type AdminAuditSink } from './adminAudit';
-import { durableAuditSinks } from './adminAuditStore';
+import { durableAuditSinks, recordAdminActionDurably } from './adminAuditStore';
 import { loadAdminIdentity, type AdminAccount } from './adminIdentity';
+import { parseAdminRoles } from './adminRoles';
+import { revokeRoleAssignmentSessions, type AdminIdentityStoreDeps } from './adminIdentityStore';
 import {
   ADMIN_SESSION_COOKIE,
-  verifyAdminSession,
+  verifyAdminSessionForRevocation,
   EXPIRED_SESSION_COOKIE_OPTIONS,
   newSessionPayload,
   readSessionEpoch,
   readSessionSecret,
   sessionCookieOptions,
   signAdminSession,
+  type AdminSessionPayload,
   type SessionCookieOptions,
 } from './adminSession';
 import { AdminConfigError } from './errors';
@@ -73,6 +76,25 @@ export const BACKOFF_CAP_MS = 60 * 1_000;
 export const SOURCE_WINDOW_MS = 15 * 60 * 1_000;
 export const SOURCE_BUDGET = 30;
 const MAX_FIELD_LENGTH = 256;
+/**
+ * Both forms on this route are a handful of short fields, so a body larger
+ * than this is not a login attempt.
+ *
+ * WHY IT EXISTS. The source budget used to be the FIRST thing this handler
+ * did, and its comment said why: "it runs before the KDF, so a flood cannot
+ * spend CPU without spending budget." Round 1A moved it below the logout
+ * branch, correctly -- an exhausted budget must not trap an operator in a
+ * session they cannot end -- but the logout signal lives in the body, so
+ * `readFields` became reachable by any unauthenticated request. The budget is
+ * still ahead of the KDF, which was the expensive half; this ceiling covers
+ * the half that moved.
+ *
+ * RESIDUAL, stated rather than implied: a request that declares no length
+ * (chunked transfer) is bounded only by the platform's own body limit. Both
+ * of this panel's forms are native HTML POSTs, which always declare one, so
+ * refusing an undeclared length would cost more than it buys.
+ */
+const MAX_SESSION_BODY_BYTES = 4_096;
 const MAX_SOURCE_BUCKETS = 10_000;
 
 interface UsernameThrottle {
@@ -104,6 +126,8 @@ export interface LoginDeps {
   derive?: (password: string, saltHex: string) => string;
   throttles?: LoginThrottles;
   sinks?: readonly AdminAuditSink[];
+  /** Logout uses the same monotonic cutoff store as administrator revocation. */
+  identityStore?: AdminIdentityStoreDeps;
 }
 
 export function derivePasswordHash(password: string, saltHex: string): string {
@@ -221,8 +245,8 @@ interface AuditCall {
 }
 
 /**
- * Batch 3 §8.9. `actorVerified` is FALSE for every entry on this path, and
- * that is the whole reason the column exists.
+ * Batch 3 §8.9. Credential attempts use `actorVerified: false`. Logout has
+ * its own awaited record because it verifies a cookie and writes a cutoff.
  *
  * A login attempt by nature PRECEDES a session, so `call.actor` is either
  * 'unknown' or the username the request CLAIMED — never a value proven by a
@@ -272,14 +296,15 @@ async function readFields(request: Request): Promise<Record<string, string>> {
 }
 
 /**
- * The username a REQUEST can prove, or null. Reads the cookie off the request
+ * The session a REQUEST can prove, or null. Reads the cookie off the request
  * header and verifies its signature and expiries; a request that proves nothing
  * gets null rather than whatever it claimed.
  */
 async function verifiedActor(
   request: Request,
   env: AdminEnvironment,
-): Promise<string | null> {
+  now: number,
+): Promise<AdminSessionPayload | null> {
   const header = request.headers.get('cookie');
   if (!header) return null;
   const pair = header.split(';')
@@ -288,12 +313,12 @@ async function verifiedActor(
   if (!pair) return null;
 
   try {
-    const verified = await verifyAdminSession(pair.slice(ADMIN_SESSION_COOKIE.length + 1), {
+    const verified = await verifyAdminSessionForRevocation(pair.slice(ADMIN_SESSION_COOKIE.length + 1), {
       secret: readSessionSecret(env),
       epoch: readSessionEpoch(env),
-      now: Date.now(),
+      now,
     });
-    return verified.ok ? verified.payload.sub : null;
+    return verified.ok ? verified.payload : null;
   } catch {
     // An unconfigured panel cannot prove an actor either.
     return null;
@@ -311,20 +336,18 @@ export async function handleAdminSessionRequest(
   const sinks = deps.sinks;
   const source = clientSource(request);
 
-  // 1. Source budget first: keyed on nothing from the body, so it bounds
-  //    enumeration even when every username tried is unknown. It also runs
-  //    before the KDF, so a flood cannot spend CPU without spending budget.
-  if (!consumeSourceBudget(throttles, source, now)) {
-    audit({ actor: 'unknown', action: 'login.throttled', outcome: 'failure', now, meta: { source, reason: 'source_budget' } }, sinks);
-    return plain(429, 'Too many attempts. Try again later.\n');
-  }
-
-  // 2. CSRF: this route cannot rely on a session cookie it has not issued yet,
+  // CSRF: this route cannot rely on a session cookie it has not issued yet,
   //    so the Origin header is the check. A missing Origin is a rejection.
   const origin = request.headers.get('origin');
   if (!origin || !allowedOrigins(request, env).has(origin.replace(/\/$/, ''))) {
     audit({ actor: 'unknown', action: 'login.bad_origin', outcome: 'failure', now, meta: { source } }, sinks);
     return plain(403, 'Request origin is not allowed.\n');
+  }
+
+  const declaredLength = Number(request.headers.get('content-length') ?? Number.NaN);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_SESSION_BODY_BYTES) {
+    audit({ actor: 'unknown', action: 'login.oversized', outcome: 'failure', now, meta: { source } }, sinks);
+    return plain(413, 'That request is too large.\n');
   }
 
   const fields = await readFields(request);
@@ -335,18 +358,47 @@ export async function handleAdminSessionRequest(
     // be written by a stranger is worse than no log, because it is believed.
     // Clearing the cookie still happens either way: a logout must work even
     // when the session it is clearing is already invalid.
-    const actor = await verifiedActor(request, env);
-    audit({
+    const session = await verifiedActor(request, env, now);
+    const actor = session?.sub ?? null;
+    let confirmed = true;
+    if (session) {
+      try {
+        const standingRole = parseAdminRoles(env.ADMIN_ROLES).get(session.sub);
+        if (!standingRole) throw new AdminConfigError('Logout subject has no environment role');
+        // Revoke this cookie and older ones, including copies refreshed by Edge.
+        // A newer login survives. The store never widens or re-enables a row.
+        await revokeRoleAssignmentSessions({
+          username: session.sub,
+          standingRole,
+          assignedBy: session.sub,
+          revokeAtMs: session.iat,
+        }, { ...deps.identityStore, now: deps.identityStore?.now ?? (() => new Date(now)) });
+      } catch {
+        confirmed = false;
+        console.error('[admin] logout session revocation could not be confirmed');
+      }
+    }
+    const recorded = await recordAdminActionDurably({
       actor: actor ?? 'unknown',
+      actorVerified: session !== null,
       action: 'logout',
-      outcome: actor === null ? 'failure' : 'success',
+      outcome: actor === null || !confirmed ? 'failure' : 'success',
       now,
-      meta: { source, ...(actor === null ? { reason: 'no_valid_session' } : {}) },
+      meta: { source, ...(actor === null ? { reason: 'no_valid_session' } : !confirmed ? { reason: 'revocation_unconfirmed' } : {}) },
     }, sinks);
     return redirect(
-      '/login?signedOut=1',
+      !confirmed ? '/login?signOutUnconfirmed=1'
+        : recorded.durability === 'failed' ? '/login?signOutUnrecorded=1'
+          : '/login?signedOut=1',
       serializeCookie(ADMIN_SESSION_COOKIE, '', EXPIRED_SESSION_COOKIE_OPTIONS),
     );
+  }
+
+  // Login budget precedes the KDF. Logout must remain possible after a burst
+  // of failed credentials and does not consume the credential budget itself.
+  if (!consumeSourceBudget(throttles, source, now)) {
+    audit({ actor: 'unknown', action: 'login.throttled', outcome: 'failure', now, meta: { source, reason: 'source_budget' } }, sinks);
+    return plain(429, 'Too many attempts. Try again later.\n');
   }
 
   // 3. Configuration. Fails closed exactly as the panel does with no
@@ -366,8 +418,12 @@ export async function handleAdminSessionRequest(
     throw error;
   }
 
-  const username = (fields.username ?? '').slice(0, MAX_FIELD_LENGTH);
-  const password = (fields.password ?? '').slice(0, MAX_FIELD_LENGTH);
+  const username = fields.username ?? '';
+  const suppliedPassword = fields.password ?? '';
+  const fieldsValid = username.length <= MAX_FIELD_LENGTH && suppliedPassword.length <= MAX_FIELD_LENGTH;
+  // Bound KDF work without authenticating a truncated credential as the full
+  // submitted password. Invalid lengths still pay exactly one KDF.
+  const password = suppliedPassword.slice(0, MAX_FIELD_LENGTH);
   const account = username.length > 0 ? identity.accounts.get(username) ?? null : null;
   const record = account ?? DUMMY_ACCOUNT;
 
@@ -378,7 +434,7 @@ export async function handleAdminSessionRequest(
     ? true
     : usernameAttemptAllowed(throttles, account.username, now);
 
-  if (account === null || !passwordMatches || !attemptAllowed) {
+  if (!fieldsValid || account === null || !passwordMatches || !attemptAllowed) {
     if (account !== null) recordUsernameFailure(throttles, account.username, now);
     audit({
       actor: account?.username ?? 'unknown',

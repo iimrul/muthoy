@@ -84,6 +84,34 @@ describe('offline multi-shop reconnect', () => {
     useSessionStore.setState({ session: null, epoch: 0, authorityTransitioning: false });
   });
 
+  it('cancels target hydration when the phone changes hands during a switch', async () => {
+    useSessionStore.setState({ session: OWNER_SESSION, epoch: 0 });
+    commercial.requireShopSwitchAccess.mockResolvedValue(undefined);
+    commercial.membershipForSwitch.mockResolvedValue(undefined);
+    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({
+      data: { actor_user_id: 'owner-2', role: 'owner', billing_account_id: 'account-1' },
+      error: null,
+    });
+    vi.mocked(inspectCloudActorBinding).mockResolvedValue({
+      status: 'matched', actorUserId: 'owner-2', shopId: 'shop-2',
+    });
+    Object.assign(supabase, {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({ data: { session: { access_token: 'old-token' } }, error: null }),
+        refreshSession: vi.fn().mockResolvedValue({ error: null }),
+      },
+      functions: { invoke: vi.fn().mockResolvedValue({ error: null }) },
+    });
+    vi.mocked(pullChanges).mockImplementationOnce(async (_shopId, _cursor, isCancelled) => {
+      expect(isCancelled?.()).toBe(false);
+      useSessionStore.getState().login({ ...OWNER_SESSION, userId: 'incoming-owner' });
+      expect(isCancelled?.()).toBe(true);
+    });
+    await expect(switchActiveShop('shop-2', true)).rejects.toThrow(/active user changed/);
+    expect(markShopCloudLinked).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().session?.userId).toBe('incoming-owner');
+  });
+
   it('records the cloud link only after the server confirmed the switch and hydration finished', async () => {
     // The physical defect: a switched-to shop hydrated fine but kept
     // cloud_linked_at NULL, so the next cold start read it as an unfinished

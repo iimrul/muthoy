@@ -118,11 +118,11 @@ export async function openSupportCase(
     );
     return { ok: false, message: 'That case is not a valid request. Every case needs a shop.' };
   }
-  const { shopId, category, priority, summary } = parsed.data;
+  const { requestId, shopId, category, priority, summary } = parsed.data;
 
   try {
-    const caseId = await insertSupportCase(
-      { shopId, category, priority, summary, openedBy: session.username },
+    const { caseId, replayed } = await insertSupportCase(
+      { requestId, shopId, category, priority, summary, openedBy: session.username },
       storeDeps(deps),
     );
     const durability = await audit(
@@ -135,7 +135,7 @@ export async function openSupportCase(
         // in the history of the case it opened.
         target: caseId,
         outcome: 'success',
-        reason: category + ' ' + priority,
+        reason: (replayed ? 'already applied ' : '') + category + ' ' + priority,
         caseId,
         shopId,
       },
@@ -291,7 +291,7 @@ export async function addSupportNote(
     );
     return { ok: false, message: 'That note is not a valid request.' };
   }
-  const { caseId, body } = parsed.data;
+  const { requestId, caseId, body } = parsed.data;
 
   try {
     const existing = await readSupportCase(caseId, storeDeps(deps));
@@ -311,7 +311,10 @@ export async function addSupportNote(
       return { ok: false, message: 'No such support case exists.' };
     }
 
-    await insertSupportNote({ caseId, body, author: session.username }, storeDeps(deps));
+    const { replayed } = await insertSupportNote(
+      { requestId, caseId, body, author: session.username },
+      storeDeps(deps),
+    );
     const durability = await audit(
       {
         actor: session.username,
@@ -320,7 +323,7 @@ export async function addSupportNote(
         target: caseId,
         outcome: 'success',
         // The LENGTH, never the text. A note's content belongs in the note.
-        reason: body.length + ' characters',
+        reason: (replayed ? 'already applied ' : '') + body.length + ' characters',
         caseId,
         shopId: existing.shopId,
       },

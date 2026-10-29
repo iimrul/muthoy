@@ -16,6 +16,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = await searchParams;
   const failed = params.error === 'invalid';
   const signedOut = params.signedOut === '1';
+  const signOutUnconfirmed = params.signOutUnconfirmed === '1';
+  const signOutUnrecorded = params.signOutUnrecorded === '1';
 
   return (
     <div className="mx-auto max-w-sm">
@@ -33,6 +35,18 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       {signedOut ? (
         <p role="status" className="mt-4 rounded border border-black/10 px-3 py-2 text-sm text-midGray">
           You have been signed out.
+        </p>
+      ) : null}
+      {signOutUnconfirmed ? (
+        <p role="alert" className="mt-4 rounded border border-error/30 bg-error/5 px-3 py-2 text-sm text-error">
+          The browser cookie was cleared, but server sign-out could not be confirmed.
+          Ask another administrator to revoke your sessions.
+        </p>
+      ) : null}
+      {signOutUnrecorded ? (
+        <p role="alert" className="mt-4 rounded border border-error/30 bg-error/5 px-3 py-2 text-sm text-error">
+          You have been signed out, but the audit log could not record it.
+          The server log holds the record. You do not need to retry sign-out.
         </p>
       ) : null}
 

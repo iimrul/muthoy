@@ -348,7 +348,10 @@ export async function resolveConflict(
       if (hasGroupedOutboxRow(shopId, tableName, row.rowId)) {
         throw new ConflictGroupedOperationError();
       }
-      applyConflictRemoteRow(tx, tableName, parseJsonObject(row.remoteValue));
+      applyConflictRemoteRow(tx, tableName, parseJsonObject(row.remoteValue), {
+        shopId,
+        rowId: row.rowId,
+      });
       const superseded = tx
         .select({
           id: syncQueue.id,

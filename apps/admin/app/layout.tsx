@@ -117,7 +117,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
                 <form method="post" action="/api/admin/session">
                   <input type="hidden" name="intent" value="logout" />
                   <input type="hidden" name="username" value={signedIn.username} />
-                  <button type="submit" className="text-sm text-midGray underline hover:text-richBlack">
+                  <button type="submit" title="Ends this and your older sessions. Newer sign-ins remain active." className="text-sm text-midGray underline hover:text-richBlack">
                     Sign out
                   </button>
                 </form>

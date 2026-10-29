@@ -220,6 +220,7 @@ export async function listSupportNotes(
 // ─────────────────────────────────────────────────────────────────── writing
 
 export interface SupportCaseInsert {
+  requestId: string;
   shopId: string;
   category: SupportCategory;
   priority: SupportPriority;
@@ -238,18 +239,14 @@ export interface SupportCaseInsert {
 export async function insertSupportCase(
   input: SupportCaseInsert,
   deps?: AdminSupportStoreDeps,
-): Promise<string> {
+): Promise<{ caseId: string; replayed: boolean }> {
   const nowIso = nowFor(deps).toISOString();
-  // ROUND 14 FINDING 9: INSERT ... RETURNING id.
-  //
-  // This returned void, so the opening audit entry had no case id to record --
-  // it filed `target: shopId` and no `meta.caseId`, and the case-history
-  // reader matches on the case id in both. Every successful opening event
-  // therefore failed to appear in the history of the case it opened, which is
-  // the one event a case's history most obviously needs.
-  const { data, error } = await clientFor(deps)
+  // The form keeps this UUID across resubmission; the primary key is the
+  // atomic replay guard, including concurrent requests and lost responses.
+  const { error } = await clientFor(deps)
     .from('admin_support_cases')
     .insert({
+      id: input.requestId,
       shop_id: input.shopId,
       category: input.category,
       priority: input.priority,
@@ -257,22 +254,28 @@ export async function insertSupportCase(
       opened_by: input.openedBy,
       opened_at: nowIso,
       updated_at: nowIso,
-    })
-    .select('id')
-    .single();
+    });
 
   if (error) {
+    if (error.code === '23505') {
+      const existing = await readSupportCase(input.requestId, deps);
+      if (
+        existing !== null
+        && existing.id === input.requestId
+        && existing.shopId === input.shopId
+        && existing.category === input.category
+        && existing.priority === input.priority
+        && existing.summary === input.summary
+        && existing.openedBy === input.openedBy
+      ) {
+        return { caseId: input.requestId, replayed: true };
+      }
+      throw new AdminDataError('support case request id is already in use');
+    }
     console.error('[admin] admin_support_cases insert failed:', error.message);
     throw new AdminDataError('support case write failed');
   }
-  const caseId = (data as { id?: unknown } | null)?.id;
-  if (typeof caseId !== 'string' || caseId.length === 0) {
-    // The row committed but its id did not come back, so the audit entry could
-    // not name it. Raising is right: a case nobody can find in the history is
-    // worse than a refused open the operator can retry.
-    throw new AdminDataError('support case write returned no id');
-  }
-  return caseId;
+  return { caseId: input.requestId, replayed: false };
 }
 
 export interface SupportCaseUpdate {
@@ -317,6 +320,7 @@ export async function updateSupportCase(
 }
 
 export interface SupportNoteInsert {
+  requestId: string;
   caseId: string;
   body: string;
   author: string;
@@ -335,8 +339,9 @@ export interface SupportNoteInsert {
 export async function insertSupportNote(
   input: SupportNoteInsert,
   deps?: AdminSupportStoreDeps,
-): Promise<void> {
+): Promise<{ replayed: boolean }> {
   const { error } = await clientFor(deps).from('admin_support_notes').insert({
+    id: input.requestId,
     case_id: input.caseId,
     body: input.body,
     author: input.author,
@@ -344,7 +349,29 @@ export async function insertSupportNote(
   });
 
   if (error) {
+    if (error.code === '23505') {
+      const existing = await clientFor(deps)
+        .from('admin_support_notes')
+        .select(SUPPORT_NOTE_COLUMNS)
+        .eq('id', input.requestId)
+        .limit(1);
+      if (existing.error) {
+        throw new AdminDataError('support note replay could not be checked');
+      }
+      const row = existing.data?.[0] as Record<string, unknown> | undefined;
+      if (
+        row !== undefined
+        && row.id === input.requestId
+        && row.case_id === input.caseId
+        && row.body === input.body
+        && row.author === input.author
+      ) {
+        return { replayed: true };
+      }
+      throw new AdminDataError('support note request id is already in use');
+    }
     console.error('[admin] admin_support_notes insert failed:', error.message);
     throw new AdminDataError('support note write failed');
   }
+  return { replayed: false };
 }

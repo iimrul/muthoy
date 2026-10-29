@@ -13,6 +13,7 @@
 // so a mismatch can be audited.
 
 import { AdminConfigError } from './errors';
+import { isAdminUsername } from '@muthoy/validation';
 
 export const ADMIN_ROLE_NAMES = ['super_admin', 'billing', 'support', 'read_only'] as const;
 export type AdminRole = (typeof ADMIN_ROLE_NAMES)[number];
@@ -193,8 +194,20 @@ export function parseAdminRoles(raw: string | undefined): Map<string, AdminRole>
     if (username === '__proto__' || username === 'constructor' || username === 'prototype') {
       throw new AdminConfigError('ADMIN_ROLES contains a reserved username');
     }
-    if (username.trim() !== username || username.length === 0) {
-      throw new AdminConfigError('ADMIN_ROLES has a username with leading or trailing space');
+    if (!isAdminUsername(username)) {
+      // NAMES THE OFFENDER, because this refusal is new and it fails the whole
+      // panel closed at boot. A username with an interior space used to log in
+      // perfectly well and merely could not be revoked; now it stops the panel
+      // starting, which is the right direction -- configuration must not accept
+      // an account management cannot revoke -- but a founder who cannot read
+      // code would otherwise face a dead panel and a sentence that does not say
+      // which value to change. `getErrorMessage` replaces this with a fixed
+      // sentence for the browser, so the detail stays in the server log.
+      throw new AdminConfigError(
+        'ADMIN_ROLES has a username that cannot be managed: '
+        + JSON.stringify(username)
+        + '. An admin username needs 1-64 characters and no whitespace.',
+      );
     }
     if (!isAdminRole(role)) {
       throw new AdminConfigError(`ADMIN_ROLES has an unknown role for ${username}`);

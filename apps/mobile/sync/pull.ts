@@ -13,6 +13,7 @@ import { applyPulledDeviceAuthority } from "./deviceRegistry";
 import { invokeSyncWithClaimRefresh, SyncHaltedError } from "./invoke";
 import { isSupabaseConfigured } from "./supabaseClient";
 import type { AuthTimingTrace } from "../dev/authTiming";
+import { assertSyncPayloadIdentity } from "../domain/syncPayload";
 
 interface PullChange {
   updatedAt: string;
@@ -117,7 +118,7 @@ function parseCursor(value: unknown): PullCursor | null {
   };
 }
 
-function parsePullPage(value: unknown): PullPage {
+function parsePullPage(value: unknown, shopId: string): PullPage {
   if (!value || typeof value !== "object") {
     throw new Error("Sync pull returned an invalid response.");
   }
@@ -150,6 +151,10 @@ function parsePullPage(value: unknown): PullPage {
     ) {
       throw new Error("Sync pull returned an invalid change.");
     }
+    assertSyncPayloadIdentity(change.tableName, change.payload, {
+      shopId,
+      rowId: change.rowId,
+    });
     return {
       tableName: change.tableName,
       rowId: change.rowId,
@@ -192,7 +197,8 @@ async function fetchPullPage(
   timing?: AuthTimingTrace,
   includeAccess = false,
   actorUserId?: string,
-): Promise<PullPage> {
+  isCancelled: () => boolean = () => false,
+): Promise<PullPage | null> {
   const { data, error } = await invokeSyncWithClaimRefresh({
     action: "pull",
     shopId,
@@ -208,10 +214,13 @@ async function fetchPullPage(
     ...(includeAccess ? { includeAccess: true } : {}),
     ...(timing ? { _timingId: timing.correlationId } : {}),
   });
+  // Even the authority mirror is a local write. Drop a stale response before
+  // parsing or persisting any part of the outgoing actor's page.
+  if (isCancelled()) return null;
   if (error) {
     throw error;
   }
-  const page = parsePullPage(data);
+  const page = parsePullPage(data, shopId);
   // Recorded BEFORE the rows are applied, so a revoked device persists its own
   // quarantine even if applying the page then fails. sync/deviceRegistry.ts
   // enforces the monotonic guard, so a stale page cannot lift a revocation.
@@ -276,6 +285,7 @@ function requireNextCursor(page: PullPage): PullCursor {
  * that row comes back as `deferred` for the caller to carry forward.
  */
 function applyChanges(
+  shopId: string,
   changes: PullChange[],
   moreToCome: boolean,
 ): PullChange[] {
@@ -287,7 +297,7 @@ function applyChanges(
       tableName: change.tableName,
       row: change.payload,
     })),
-    { moreToCome },
+    { moreToCome, expectedShopId: shopId },
   );
   return changes.filter((_, index) => results[index] === "deferred");
 }
@@ -309,7 +319,8 @@ async function pullFullHydration(
     if (isCancelled()) {
       return;
     }
-    const page = await fetchPullPage(shopId, cursor, timing, first, actorUserId);
+    const page = await fetchPullPage(shopId, cursor, timing, first, actorUserId, isCancelled);
+    if (!page) return;
     accessVersion = requireStableAccessVersion(accessVersion, page);
     access = access ?? page.access;
     first = false;
@@ -347,7 +358,7 @@ async function pullFullHydration(
   // so nothing detected it — the owner simply saw wrong stock with no way to
   // tell it apart from the truth. All or nothing instead: a failed hydration
   // rolls back to an empty shop and no cursor, so the next login starts over.
-  applyChanges(discoveredChanges, false);
+  applyChanges(shopId, discoveredChanges, false);
   // A fresh hydration cannot hold anything it was not just sent, so this is a
   // no-op in practice. It runs anyway so both pull paths obey one rule.
   reconcileLocalAccess(shopId, access);
@@ -377,7 +388,8 @@ async function pullIncremental(
     if (isCancelled()) {
       return;
     }
-    const page = await fetchPullPage(shopId, cursor, undefined, first, actorUserId);
+    const page = await fetchPullPage(shopId, cursor, undefined, first, actorUserId, isCancelled);
+    if (!page) return;
     accessVersion = requireStableAccessVersion(accessVersion, page);
     access = access ?? page.access;
     first = false;
@@ -387,7 +399,7 @@ async function pullIncremental(
     if (isCancelled()) {
       return;
     }
-    deferred = applyChanges([...deferred, ...page.changes], page.hasMore);
+    deferred = applyChanges(shopId, [...deferred, ...page.changes], page.hasMore);
 
     if (page.changes.length > 0) {
       cursor = requireNextCursor(page);

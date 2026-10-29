@@ -20,7 +20,7 @@ import { getSupabaseAdmin } from './supabaseAdmin';
 // PostgREST caps a single response, so every list is read in pages — otherwise
 // a busy day would silently report only the first page of sales as the total.
 const PAGE_SIZE = 1000;
-const MAX_PAGES = 200;
+const MAX_ROWS = 200_000;
 
 interface PageResult<T> {
   data: T[] | null;
@@ -33,9 +33,13 @@ type PageReader<T> = (from: number, to: number) => PromiseLike<PageResult<T>>;
 export async function readAllPages<T>(label: string, readPage: PageReader<T>): Promise<T[]> {
   const rows: T[] = [];
 
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    const from = page * PAGE_SIZE;
-    const { data, error } = await readPage(from, from + PAGE_SIZE - 1);
+  // PostgREST may cap a response below PAGE_SIZE. Only an empty page proves
+  // exhaustion, and advancing by the requested size would skip capped rows.
+  // Bound rows, rather than requests, so a smaller server cap does not lower
+  // the amount this reader can legitimately return.
+  while (rows.length <= MAX_ROWS) {
+    const from = rows.length;
+    const { data, error } = await readPage(from, Math.min(from + PAGE_SIZE - 1, MAX_ROWS));
 
     if (error) {
       console.error(`[admin] ${label} query failed:`, error.message);
@@ -43,14 +47,11 @@ export async function readAllPages<T>(label: string, readPage: PageReader<T>): P
     }
 
     const batch = data ?? [];
+    if (batch.length === 0) return rows;
     rows.push(...batch);
-
-    if (batch.length < PAGE_SIZE) {
-      return rows;
-    }
   }
 
-  console.error(`[admin] ${label} exceeded ${MAX_PAGES} pages of ${PAGE_SIZE} rows`);
+  console.error(`[admin] ${label} exceeded ${MAX_ROWS} rows`);
   throw new AdminDataError(`${label} result set is larger than this page can read`);
 }
 
@@ -153,8 +154,8 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
 
   // ROUND 13 FINDING 3 — THE DASHBOARD IS INSIDE THE COMPLETENESS GATE TOO.
   //
-  // `readAllPages` stops when a page comes back shorter than `PAGE_SIZE`,
-  // which is correct for a finished read and indistinguishable from a CAPPED
+  // `readAllPages` originally stopped when a page came back shorter than
+  // `PAGE_SIZE`, making a finished read indistinguishable from a CAPPED
   // one. With six pharmacies selling 100.00 each and a transport returning
   // five rows, the Dashboard published 500.00 and refused nothing, while the
   // matching report correctly rejected `counted: 6, loaded: 5`. Round 12 put

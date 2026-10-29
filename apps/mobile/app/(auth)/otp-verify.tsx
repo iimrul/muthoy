@@ -20,6 +20,7 @@ import {
 } from "../../db/auth";
 import type { CatalogKey } from "../../i18n/catalog";
 import { useI18n } from "../../state/localeStore";
+import { captureSession } from "../../state/sessionGuard";
 import { LinkDeviceServerError, linkDeviceToShop } from "../../sync/linkDevice";
 import { resendOtp, sendOtp, verifyOtp } from "../../sync/otp";
 import { OTP_RESEND_COOLDOWN_SECONDS } from "../../sync/otpPolicy";
@@ -136,6 +137,7 @@ export default function OtpVerifyScreen() {
       ) {
         return;
       }
+      const guard = captureSession();
       setIsSubmitting(true);
       setError(null);
       let session = verifiedSessionRef.current;
@@ -147,9 +149,11 @@ export default function OtpVerifyScreen() {
         }
         try {
           session = await verifyOtp(phone, parsed.data);
+          guard.assertLive();
           verifiedSessionRef.current = session;
           setHasVerifiedSession(true);
         } catch (cause) {
+          if (!guard.isStillActive()) return;
           // Typed by sync/otp.ts from the auth error's status and code — wrong
           // and expired told apart by when the code was sent, and a check
           // that never happened never shown as a wrong code.
@@ -166,16 +170,19 @@ export default function OtpVerifyScreen() {
         const linkedShopId = session.user.app_metadata.shop_id;
 
         if (resumeShopId) {
-          await linkDeviceToShop(resumeShopId, resumeOwnerUserId);
+          await linkDeviceToShop(resumeShopId, resumeOwnerUserId, {
+            isStillActive: guard.isStillActive,
+          });
           completedShopId = resumeShopId;
         } else if (typeof linkedShopId === "string" && linkedShopId.length > 0) {
           setIsRestoring(true);
-          await pullChanges(linkedShopId, null);
+          await pullChanges(linkedShopId, null, () => !guard.isStillActive());
           completedShopId = linkedShopId;
         } else {
           let shopId = pendingShopIdRef.current;
           if (!shopId) {
             const created = await createShopAndOwner({ shopName: shopName!, phone });
+            guard.assertLive();
             shopId = created.shopId;
             pendingShopIdRef.current = shopId;
             pendingOwnerUserIdRef.current = created.userId;
@@ -190,12 +197,19 @@ export default function OtpVerifyScreen() {
           const onboarding = ownerUserId
             ? await getOwnerOnboardingPayload(shopId, ownerUserId)
             : undefined;
-          await linkDeviceToShop(shopId, ownerUserId, { onboarding });
+          guard.assertLive();
+          await linkDeviceToShop(shopId, ownerUserId, {
+            onboarding,
+            isStillActive: guard.isStillActive,
+          });
           completedShopId = shopId;
         }
+        guard.assertLive();
         await markShopCloudLinked(completedShopId);
+        guard.assertLive();
         router.replace("/");
       } catch (cause) {
+        if (!guard.isStillActive()) return;
         const failure = setupFailureKey(cause);
         if (failure.codeExpired) {
           // Back to a fresh code. The pending shop/owner refs are kept, so the
@@ -207,8 +221,10 @@ export default function OtpVerifyScreen() {
         }
         setError(failure.key);
       } finally {
-        setIsSubmitting(false);
-        setIsRestoring(false);
+        guard.ifLive(() => {
+          setIsSubmitting(false);
+          setIsRestoring(false);
+        });
       }
     },
     [isSendingRecoveryOtp, isSubmitting, phone, resumeShopId, resumeOwnerUserId, shopName],

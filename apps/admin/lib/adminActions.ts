@@ -93,6 +93,16 @@ async function audit(
   return result.durability;
 }
 
+function refreshCommittedPage(path: string, deps: AdminActionDeps): void {
+  try {
+    (deps.revalidate ?? revalidatePath)(path);
+  } catch (error: unknown) {
+    // The mutation and audit have already completed. A cache error must not
+    // replace their known outcome with a thrown action that invites a retry.
+    console.error('[admin] committed action page refresh failed:', error);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // E11 — WITHDRAWN. `refreshEntitlementSnapshot` used to live here, calling
 // b4_refresh_entitlement_snapshot(uuid). It is removed, and the RPC is named in
@@ -170,7 +180,7 @@ export async function reconcilePlanLimits(
   }
 
   const durability = await audit({ actor: session.username, role: session.role, action: 'subscription.reconcile_limits', target: accountId, outcome: 'success' }, deps.sinks);
-  (deps.revalidate ?? revalidatePath)('/accounts/' + accountId);
+  refreshCommittedPage('/accounts/' + accountId, deps);
   // §8.9d. The RPC already committed, so a failed audit is reported as
   // applied-but-unrecorded rather than as a failure that invites a retry.
   return resultForDurability(durability, 'Plan limits reconciled.');
@@ -231,7 +241,7 @@ export async function expireStalePaymentOrder(
   }
 
   const durability = await audit({ actor: session.username, role: session.role, action: 'payment.expire_stale_order', target: orderId, outcome: 'success' }, deps.sinks);
-  (deps.revalidate ?? revalidatePath)('/payments');
+  refreshCommittedPage('/payments', deps);
   // §8.9d. The update already committed. Retrying is harmless here — the guard
   // makes a second attempt a no-op — but the reader is still told the truth,
   // because the shape must not depend on whether THIS write happens to be

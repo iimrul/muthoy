@@ -34,6 +34,7 @@ import { SESSION_ENV_NAMES, sessionEnvDiagnostics } from './adminSession';
 import { SUPABASE_ENV_NAMES, supabaseEnvDiagnostics } from './env';
 import { AdminDataError } from './errors';
 import { getSupabaseAdmin } from './supabaseAdmin';
+import { readAllPages } from './queries';
 
 /** The three editable flags, in the migration's own spelling. */
 export const ADMIN_FEATURE_FLAG_KEYS = [
@@ -134,16 +135,15 @@ export const ADMIN_SETTING_COLUMNS = 'key,value,updated_by,updated_at';
 export async function readSettings(
   deps?: AdminSettingsDeps,
 ): Promise<ReadonlyMap<AdminSettingKey, AdminSettingRow>> {
-  const { data, error } = await clientFor(deps)
-    .from('admin_platform_settings')
-    .select(ADMIN_SETTING_COLUMNS)
-    .order('key', { ascending: true })
-    .range(0, 99);
-
-  if (error) {
-    console.error('[admin] admin_platform_settings read failed:', error.message);
-    throw new AdminDataError('platform settings read failed');
-  }
+  const client = clientFor(deps);
+  // An omitted false flag looks like an absent row and defaults to enabled,
+  // so even this six-key table must exhaust a capped response before deciding.
+  const data = await readAllPages<Record<string, unknown>>('platform settings', (from, to) =>
+    client.from('admin_platform_settings')
+      .select(ADMIN_SETTING_COLUMNS)
+      .order('key', { ascending: true })
+      .range(from, to),
+  );
 
   const rows = new Map<AdminSettingKey, AdminSettingRow>();
   for (const raw of data ?? []) {

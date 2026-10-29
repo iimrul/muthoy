@@ -21,6 +21,7 @@ import 'server-only';
 // rejection.
 
 import { AdminConfigError } from './errors';
+import { isAdminUsername } from '@muthoy/validation';
 import { parseAdminRoles, type AdminRole } from './adminRoles';
 
 export interface AdminAccount {
@@ -90,7 +91,7 @@ export function parseAdminAccounts(raw: string | undefined): Map<string, AdminAc
     }
 
     const username = candidate.username;
-    if (typeof username !== 'string' || username.length === 0 || username.trim() !== username) {
+    if (!isAdminUsername(username)) {
       throw new AdminConfigError('ADMIN_ACCOUNTS has an invalid username');
     }
     const lowercase = username.toLowerCase();

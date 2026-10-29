@@ -375,9 +375,11 @@ describe('the three query values map to three distinct notices', () => {
     expect(notice.toLowerCase()).toContain('do not retry');
   });
 
-  test('the failure notice says nothing was changed, because nothing was', () => {
-    expect((outcomeNote({ failed: 'reconcile' }) ?? '').toLowerCase())
-      .toContain('nothing was changed');
+  test('a failure cannot promise rollback after an uncertain transport response', () => {
+    const note = (outcomeNote({ failed: 'reconcile' }) ?? '').toLowerCase();
+    expect(note).toContain('could not be confirmed');
+    expect(note).toContain('check its current state');
+    expect(note).not.toContain('nothing was changed');
   });
 
   test('no outcome in the URL is no notice', () => {

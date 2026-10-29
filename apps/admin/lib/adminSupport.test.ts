@@ -523,6 +523,7 @@ describe('the authorized writes', () => {
   }
 
   const validCase = {
+    requestId: CASE_ID,
     shopId: SHOP_ID,
     category: 'sync',
     priority: 'normal',
@@ -582,7 +583,7 @@ describe('the authorized writes', () => {
     const { client, calls } = createClient({ rows: [] });
 
     const result = await openSupportCase(
-      { category: 'sync', priority: 'normal', summary: 'Sync stalled' },
+      { requestId: CASE_ID, category: 'sync', priority: 'normal', summary: 'Sync stalled' },
       deps(client, { 'support-a': 'support' }),
     );
 
@@ -600,6 +601,7 @@ describe('the authorized writes', () => {
     const insert = calls.find((call) => call.op === 'insert');
     expect(Object.keys(insert?.values ?? {}).sort()).toEqual([
       'category',
+      'id',
       'opened_at',
       'opened_by',
       'priority',
@@ -711,7 +713,7 @@ describe('the authorized writes', () => {
     const { client, calls } = createClient({ rows: [caseRow()] });
 
     const result = await addSupportNote(
-      { caseId: CASE_ID, body: 'Called the owner.' },
+      { requestId: NOTE_ID, caseId: CASE_ID, body: 'Called the owner.' },
       deps(client, { 'support-a': 'support' }),
     );
 
@@ -727,7 +729,7 @@ describe('the authorized writes', () => {
     const { client } = createClient({ rows: [caseRow()] });
     const secret = 'The owner said his daughter runs the shop on Fridays.';
 
-    await addSupportNote({ caseId: CASE_ID, body: secret }, deps(client, { 'support-a': 'support' }));
+    await addSupportNote({ requestId: NOTE_ID, caseId: CASE_ID, body: secret }, deps(client, { 'support-a': 'support' }));
 
     // The whole entry, serialised: the note's content must appear nowhere.
     expect(JSON.stringify(recentAdminAudit.entries())).not.toContain('daughter');
@@ -741,7 +743,7 @@ describe('the authorized writes', () => {
     const { client, calls } = createClient({ rows: [] });
 
     const result = await addSupportNote(
-      { caseId: CASE_ID, body: 'Called the owner.' },
+      { requestId: NOTE_ID, caseId: CASE_ID, body: 'Called the owner.' },
       deps(client, { 'support-a': 'support' }),
     );
 
@@ -754,7 +756,7 @@ describe('the authorized writes', () => {
     const { client, calls } = createClient({ rows: [caseRow()] });
 
     const result = await addSupportNote(
-      { caseId: CASE_ID, body: '   ' },
+      { requestId: NOTE_ID, caseId: CASE_ID, body: '   ' },
       deps(client, { 'support-a': 'support' }),
     );
 
@@ -767,7 +769,7 @@ describe('the authorized writes', () => {
     const { client } = createClient({ rows: [caseRow()], writeError: 'permission denied' });
 
     const result = await addSupportNote(
-      { caseId: CASE_ID, body: 'Called the owner.' },
+      { requestId: NOTE_ID, caseId: CASE_ID, body: 'Called the owner.' },
       deps(client, { 'support-a': 'support' }),
     );
 
@@ -787,7 +789,7 @@ describe('the authorized writes', () => {
     };
 
     const result = await addSupportNote(
-      { caseId: CASE_ID, body: 'Called the owner.' },
+      { requestId: NOTE_ID, caseId: CASE_ID, body: 'Called the owner.' },
       {
         client,
         env: envFor({ 'support-a': 'support' }),

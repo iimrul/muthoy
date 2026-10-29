@@ -10,7 +10,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import ts from 'typescript';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { ADMIN_ROLE_NAME_VALUES } from '@muthoy/validation';
+import { ADMIN_ROLE_NAME_VALUES, adminSessionRevocationSchema } from '@muthoy/validation';
 import { AdminConfigError } from './errors';
 import {
   ADMIN_PERMISSIONS,
@@ -166,6 +166,24 @@ describe('intersectPermissions — a row can only narrow', () => {
 });
 
 describe('the role table — invariants that outlive any one matrix', () => {
+  test.each(['u'.repeat(65), 'ops user', 'ops\tuser', '__proto__', 'constructor', 'prototype', '\u0000', '\uD800', '\uDC00'])(
+    'a configured account must be addressable by revocation: %j', (username) => {
+      expect(adminSessionRevocationSchema.safeParse({ username }).success).toBe(false);
+      expect(() => parseAdminRoles(JSON.stringify({ [username]: 'support' }))).toThrow(AdminConfigError);
+    },
+  );
+
+  test('a maximum-length manageable username remains valid', () => {
+    const username = 'u'.repeat(64);
+    expect(adminSessionRevocationSchema.safeParse({ username }).success).toBe(true);
+    expect(parseAdminRoles(JSON.stringify({ [username]: 'support' })).get(username)).toBe('support');
+  });
+
+  test.each(['পরিচালক', 'admin\u{1F600}'])('keeps well-formed Unicode usernames manageable: %s', (username) => {
+    expect(adminSessionRevocationSchema.safeParse({ username }).success).toBe(true);
+    expect(parseAdminRoles(JSON.stringify({ [username]: 'support' })).get(username)).toBe('support');
+  });
+
   test('billing and support are NOT ordered — neither contains the other', () => {
     // This is why a role mismatch cannot be resolved by "the lower-privilege of
     // the two wins": there is no lower. Either ranking preserves authority the

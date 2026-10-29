@@ -74,6 +74,14 @@ describe('configuration', () => {
   test('the cookie name is stable', () => {
     expect(ADMIN_SESSION_COOKIE).toBe('muthoy_admin_session');
   });
+
+  test('epoch bumps cannot alias through number rounding or overflow', () => {
+    expect(readSessionEpoch({ ADMIN_SESSION_EPOCH: String(Number.MAX_SAFE_INTEGER) }))
+      .toBe(Number.MAX_SAFE_INTEGER);
+    for (const bad of ['9007199254740992', '9007199254740993', '9'.repeat(400)]) {
+      expect(() => readSessionEpoch({ ADMIN_SESSION_EPOCH: bad })).toThrow(AdminConfigError);
+    }
+  });
 });
 
 describe('a signed session round-trips', () => {
@@ -113,6 +121,23 @@ describe('a signed session round-trips', () => {
       ok: false,
       reason: 'expired',
     });
+  });
+
+  test.each([1, 5_000, CLOCK_SKEW_MS])('refresh tolerates a signer %i ms ahead', async (skew) => {
+    const payload = newSessionPayload({ sub: 'founder', role: 'billing', epoch: 0, now: NOW + skew });
+    const refreshed = touchedSessionPayload(payload, NOW);
+    expect(refreshed.iat).toBe(payload.iat);
+    expect(refreshed.exp).toBe(payload.exp);
+    expect(refreshed.lastSeen).toBe(payload.lastSeen);
+    expect(await verifyAdminSession(await signAdminSession(refreshed, SECRET), {
+      secret: SECRET, epoch: 0, now: NOW,
+    })).toEqual({ ok: true, payload: refreshed });
+  });
+
+  test('refresh preserves a later lastSeen after a host clock moves backwards', () => {
+    const payload = newSessionPayload({ sub: 'founder', role: 'billing', epoch: 0, now: NOW });
+    const first = touchedSessionPayload(payload, NOW + 10_000);
+    expect(touchedSessionPayload(first, NOW + 1_000)).toEqual(first);
   });
 });
 

@@ -142,6 +142,8 @@ export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type RemoteRowResult = "applied" | "skipped_stale" | "deferred";
 
 export interface ApplyRemoteRowsOptions {
+  /** The requested tenant, including permissions whose tenant comes from roles. */
+  expectedShopId?: string;
   /**
    * True when the caller is mid-pagination and more pages are still coming,
    * so a row whose parent has not arrived can wait for one of them.
@@ -715,12 +717,17 @@ export function applyConflictRemoteRow(
   tx: DbTransaction,
   tableName: SyncTableName,
   snakeCaseRow: Record<string, unknown>,
+  expected?: { shopId: string; rowId: string },
 ): void {
   const row = canonicalizeRemoteRow(tableName, toCamelCaseRow(snakeCaseRow));
   const rowId = row.id;
   if (typeof rowId !== "string") {
     throw new Error(`Conflict snapshot for ${tableName} has no id`);
   }
+  if (expected && rowId !== expected.rowId) {
+    throw new Error("Conflict snapshot does not match its row identity");
+  }
+  assertRemoteRowTenant(tx, tableName, row, expected?.shopId);
   upsertRemoteRow(tx, tableName, {
     ...row,
     ...preservedLocalFields(tx, tableName, rowId),
@@ -893,15 +900,54 @@ function normalizeScalar(value: unknown): unknown {
   return value;
 }
 
+function remoteRowTenant(
+  tx: DbTransaction,
+  tableName: SyncTableName,
+  row: Record<string, unknown>,
+): string {
+  const tenant = tableName === "shops" ? row.id
+    : tableName === "permissions"
+      ? typeof row.roleId === "string"
+        ? tx.select({ shopId: roles.shopId }).from(roles)
+          .where(eq(roles.id, row.roleId)).get()?.shopId
+        : undefined
+      : row.shopId;
+  if (typeof tenant !== "string" || !tenant) {
+    throw new Error(`Remote ${tableName} row has no shop identity`);
+  }
+  return tenant;
+}
+
+/** A UUID already held by one shop can never be reassigned by a remote row. */
+function assertRemoteRowTenant(
+  tx: DbTransaction,
+  tableName: SyncTableName,
+  row: Record<string, unknown>,
+  expectedShopId?: string,
+): void {
+  const tenant = remoteRowTenant(tx, tableName, row);
+  const local = typeof row.id === "string"
+    ? readCompleteRowOrNull(tx, tableName, row.id) : null;
+  if (
+    (expectedShopId !== undefined && tenant !== expectedShopId) ||
+    (local && remoteRowTenant(tx, tableName, local) !== tenant)
+  ) {
+    throw new Error(`Remote ${tableName} row does not belong to this shop`);
+  }
+}
+
 function applyToTable<T extends SyncTableName>(
   tx: DbTransaction,
   tableName: T,
   row: Record<string, unknown>,
+  expectedShopId?: string,
 ): RemoteRowResult {
   const rowId = row.id;
   if (typeof rowId !== "string") {
     throw new Error(`Remote ${tableName} row has no id`);
   }
+  // Before conflict recording and stale-row exits, not merely before upsert.
+  assertRemoteRowTenant(tx, tableName, row, expectedShopId);
 
   if (tableName === "inventory_movements") {
     // A movement whose batch is not here YET, rather than not here at all.
@@ -1342,12 +1388,14 @@ function upsertRemoteRow(
 export function applyRemoteRow(
   tableName: SyncTableName,
   snakeCaseRow: Record<string, unknown>,
+  expectedShopId?: string,
 ): RemoteRowResult {
   return db.transaction((tx) =>
     applyToTable(
       tx,
       tableName,
       canonicalizeRemoteRow(tableName, toCamelCaseRow(snakeCaseRow)),
+      expectedShopId,
     ),
   );
 }
@@ -1392,6 +1440,7 @@ export function applyRemoteRows(
           change.tableName,
           toCamelCaseRow(change.row),
         ),
+        options.expectedShopId,
       );
       if (result === "deferred" && !options.moreToCome) {
         // Thrown from INSIDE the transaction, deliberately: every row applied

@@ -51,7 +51,7 @@ vi.mock('./cursorStore', () => ({
 import { pullChanges } from './pull';
 
 const SHOP = 'shop-1';
-const START_CURSOR = { updatedAt: '2026-01-01T00:00:00Z', tableName: 'sales', rowId: 'r0' };
+const START_CURSOR = { updatedAt: '2026-01-01T00:00:00Z', tableName: 'sales', rowId: 'r0' } as const;
 
 function page(
   rowId: string,
@@ -62,7 +62,7 @@ function page(
   const cursor = { updatedAt: `2026-01-0${rowId.slice(1)}T00:00:00Z`, tableName: 'sales', rowId };
   return {
     data: {
-      changes: [{ ...cursor, payload: { id: rowId } }],
+      changes: [{ ...cursor, payload: { id: rowId, shop_id: SHOP } }],
       hasMore,
       nextCursor: cursor,
       accessVersion,
@@ -78,6 +78,21 @@ beforeEach(() => {
 });
 
 describe('pullChanges honours the device-handover kill switch', () => {
+  it.each([null, START_CURSOR])('rejects crossed payloads before applying or advancing %s', async (cursor) => {
+    for (const payload of [
+      { id: 'r1', shop_id: 'another-shop' },
+      { id: 'different-row', shop_id: SHOP },
+      { id: 'r1' },
+    ]) {
+      const response = page('r1', false);
+      response.data.changes[0]!.payload = payload as typeof response.data.changes[0]['payload'];
+      mocks.invoke.mockResolvedValueOnce(response);
+      await expect(pullChanges(SHOP, cursor)).rejects.toThrow(/shop|identity/);
+      expect(mocks.applyRemoteRows).not.toHaveBeenCalled();
+      expect(mocks.setLastPulledCursor).not.toHaveBeenCalled();
+    }
+  });
+
   it('drops the page that arrives after the handover: no apply, no cursor write', async () => {
     let releasePage: () => void = () => undefined;
     mocks.invoke.mockReturnValueOnce(

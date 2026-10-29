@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isAdminUsername } from './adminUsername';
 
 // Batch 3 §8.13 — the admin panel's write payloads and query shapes.
 //
@@ -15,12 +16,9 @@ import { z } from 'zod';
 const adminUsername = z
   .string()
   .trim()
-  .min(1, 'An admin username is required')
-  .max(64, 'An admin username is at most 64 characters')
-  .regex(/^\S+$/, 'An admin username contains no whitespace')
   .refine(
-    (value) => value !== '__proto__' && value !== 'constructor' && value !== 'prototype',
-    { message: 'That username is reserved' },
+    isAdminUsername,
+    { message: 'An admin username needs 1–64 non-whitespace characters and cannot use a reserved name' },
   );
 
 /**
@@ -119,6 +117,8 @@ const supportSummary = z.string().trim().min(1, 'A summary is required').max(2_0
 const supportBody = z.string().trim().min(1, 'A note cannot be empty').max(8_000);
 
 export const adminSupportCaseCreateSchema = z.object({
+  // Persisted as the row id, so replaying one form cannot create another case.
+  requestId: adminUuid,
   // REQUIRED, because `shop_id uuid not null` is. Every case is about a shop;
   // a nullable field here would accept a platform-wide case the table refuses
   // to store.
@@ -144,6 +144,7 @@ export const adminSupportCaseUpdateSchema = z.object({
 });
 
 export const adminSupportNoteCreateSchema = z.object({
+  requestId: adminUuid,
   caseId: adminUuid,
   body: supportBody,
 });

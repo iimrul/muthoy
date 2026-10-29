@@ -77,6 +77,7 @@ export async function setFeatureFlagAction(formData: FormData): Promise<void> {
 
 export async function openSupportCaseAction(formData: FormData): Promise<void> {
   const result = await openSupportCase({
+    requestId: String(formData.get('requestId') ?? ''),
     shopId: String(formData.get('shopId') ?? ''),
     category: String(formData.get('category') ?? ''),
     priority: String(formData.get('priority') ?? ''),
@@ -101,7 +102,11 @@ export async function updateSupportCaseAction(formData: FormData): Promise<void>
 
 export async function addSupportNoteAction(formData: FormData): Promise<void> {
   const caseId = String(formData.get('caseId') ?? '');
-  const result = await addSupportNote({ caseId, body: String(formData.get('body') ?? '') });
+  const result = await addSupportNote({
+    requestId: String(formData.get('requestId') ?? ''),
+    caseId,
+    body: String(formData.get('body') ?? ''),
+  });
   redirect('/support' + outcomeQuery('note_add', outcomeFor(result)) + '&case=' + caseId);
 }
 

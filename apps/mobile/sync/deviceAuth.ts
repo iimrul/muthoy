@@ -479,9 +479,9 @@ export async function hydrateAuthenticatedDevice(
   // makes for an owner restoring onto a new phone — one hydration path, not two.
   try {
     if (timing) {
-      await timing.measure('full_hydration', () => pullChanges(response.shopId, null, undefined, timing));
+      await timing.measure('full_hydration', () => pullChanges(response.shopId, null, () => !ownsHydration(), timing));
     } else {
-      await pullChanges(response.shopId, null);
+      await pullChanges(response.shopId, null, () => !ownsHydration());
     }
     guard.assertLive();
   } catch (error) {
@@ -688,7 +688,7 @@ export async function recoverOwnerPin(phone: string, newPin: string): Promise<vo
   // (forgotten PIN on the usual handset). pullChanges with an explicit null
   // covers both: a full hydration is what makes the new hash present locally,
   // and on an already-populated device it is an idempotent re-apply.
-  await pullChanges(response.shopId, null);
+  await pullChanges(response.shopId, null, () => !guard.isStillActive());
   guard.assertLive();
   await requireLoginStep(
     'commercial_identity_hydration',

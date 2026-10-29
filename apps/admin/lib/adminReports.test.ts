@@ -965,13 +965,19 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     }
   });
 
-  test('a whole month ANSWERS when the published day is itself withheld', () => {
-    // ROUND 14's relaxation: a month is constrained only against a day whose
-    // money is published SOMEWHERE ELSE, which in the shipped panel is today's
-    // net on the Dashboard. The fixture's second day stands in for that, so
-    // the rule is exercised at a fixed date rather than against whatever day
-    // the suite happens to run on.
-    const published = { publishedMoneyDays: ['2026-10-02'] };
+  test('a wider overlapping range gives October the SAME answer', () => {
+    // WHAT THIS TEST USED TO BE, because the history is the useful part: it
+    // was 'a whole month ANSWERS when the published day is itself withheld',
+    // and it injected a `publishedMoneyDays` set so round 14's rule could be
+    // exercised at a fixed date. Round 15 replaced that rule with the
+    // refund-side one, which made the injected set unread, and my round 2 of
+    // the dual protocol deleted the parameter -- so the test as written could
+    // no longer fail for its stated reason.
+    //
+    // What it pins NOW is the differencing property that still matters and was
+    // already half-measured here: October read through a September-October
+    // range must equal October read on its own. If a wider window ever
+    // answered differently, the difference would be September.
     const whole = buildReportTable(
       'refund_net_pharmacy_sales',
       october(),
@@ -981,7 +987,6 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
         from: '2026-10-01',
         to: '2026-10-31',
       }),
-      published,
     );
     const wider = buildReportTable(
       'refund_net_pharmacy_sales',
@@ -992,18 +997,12 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
         from: '2026-09-01',
         to: '2026-10-31',
       }),
-      published,
     );
 
-    // ROUND 13 FINDING 2 made this withhold; ROUND 14's relaxation makes it
-    // answer again, and the reasoning is the point.
-    //
-    // October 2 has ONE contributor, so the Dashboard WITHHOLDS that day.
-    // There is therefore no published figure to subtract from the month, and
-    // withholding the month too would hide a legitimate six-pharmacy total for
-    // no privacy gain -- the over-withholding the reviewer reproduced. The
-    // case where the published day IS releasable, and the remainder is not, is
-    // the test below.
+    // 580.00 both ways. The fixture has no refunds, so under the refund-side
+    // rule there is nothing a net figure could disclose and the month answers
+    // -- which is also why ROUND 13 FINDING 2's withholding and ROUND 14's
+    // relaxation of it are both now history rather than behaviour.
     expect(reportTextRows(whole)).toEqual([['2026-10', '580.00']]);
     expect(reportTextRows(wider).find((row) => row[0] === '2026-10')).toEqual([
       '2026-10',
@@ -1016,29 +1015,24 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       'refund_net_pharmacy_sales',
       october(),
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
-      { publishedMoneyDays: ['2026-10-02'] },
     );
 
     // Accepted rather than refused -- the range IS whole months -- and
-    // answered, because the published day is one the Dashboard withholds.
+    // answered, because this fixture has no refund to disclose.
     expect(reportTextRows(open)).toEqual([['2026-10', '580.00']]);
   });
 
-  test('a month is NOT withheld against a day nothing publishes', () => {
-    // ROUND 14's relaxation, pinned from the other side. The same fixture with
-    // no published day IS releasable: 580.00 cannot be differenced against a
-    // figure that appears nowhere, and withholding it would hide a legitimate
-    // total for no privacy gain. This is the over-withholding the reviewer
-    // reproduced, and the reason the rule takes a published set at all.
-    const open = buildReportTable(
-      'refund_net_pharmacy_sales',
-      october(),
-      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
-      { publishedMoneyDays: [] },
-    );
-
-    expect(reportTextRows(open)).toEqual([['2026-10', '580.00']]);
-  });
+  // RETIRED: 'a month is NOT withheld against a day nothing publishes'.
+  //
+  // It passed `{ publishedMoneyDays: [] }` and asserted 580.00, to pin round
+  // 14's relaxation from the other side. Once round 15 keyed the rule to the
+  // refund side, that argument stopped being read, so the test and
+  // 'a sales-only month has no refund to disclose, so it answers' below became
+  // the same assertion with different prose -- and the one with the argument
+  // read as though the empty set were doing the work. The surviving test is
+  // the honest one. What the rule distinguishes now is pinned by
+  // 'a money bucket at k ANSWERS when k pharmacies refunded' and
+  // 'one refunding pharmacy anywhere in the month withholds it'.
 
   test('a sales-only month has no refund to disclose, so it answers', () => {
     // ROUND 15 FINDINGS 1 and 2 replaced the published-day rule with the

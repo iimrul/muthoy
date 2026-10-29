@@ -70,6 +70,11 @@ describe('parseAdminAccounts', () => {
     ['a numeric hash', { username: 'founder', salt: SALT, hash: 12345 }],
     ['an empty username', { username: '', salt: SALT, hash: HASH }],
     ['a padded username', { username: ' founder', salt: SALT, hash: HASH }],
+    ['an unmanageable username', { username: 'u'.repeat(65), salt: SALT, hash: HASH }],
+    ['an internal-space username', { username: 'ops user', salt: SALT, hash: HASH }],
+    ['a reserved username', { username: 'constructor', salt: SALT, hash: HASH }],
+    ['a NUL username', { username: '\u0000', salt: SALT, hash: HASH }],
+    ['an unpaired surrogate username', { username: '\uD800', salt: SALT, hash: HASH }],
     ['a numeric username', { username: 7, salt: SALT, hash: HASH }],
   ])('refuses %s', (_label, entry) => {
     expect(() => parseAdminAccounts(JSON.stringify([entry]))).toThrow(AdminConfigError);

@@ -316,3 +316,45 @@ describe('expireStalePaymentOrder — the only direct write in the panel', () =>
     }]);
   });
 });
+
+describe('committed write outcome survives a page refresh failure', () => {
+  test.each(['payment', 'reconcile'] as const)('%s keeps its known audit outcome', async (action) => {
+    await signInAs('super_admin');
+    const { client, rpcCalls, updateCalls } = createClient();
+    const revalidate = vi.fn(() => { throw new Error('cache unavailable'); });
+    const run = action === 'payment'
+      ? () => expireStalePaymentOrder(ORDER, { ...deps('super_admin', client), revalidate })
+      : () => reconcilePlanLimits(ACCOUNT, { ...deps('super_admin', client), revalidate });
+    expect(await run()).toMatchObject({ ok: true });
+    expect(rpcCalls.length + updateCalls.length).toBe(1);
+    expect(revalidate).toHaveBeenCalledOnce();
+  });
+
+  test.each(['payment', 'reconcile'] as const)('%s retains applied-unrecorded when both audit and cache fail', async (action) => {
+    await signInAs('super_admin');
+    const { client } = createClient();
+    const options = {
+      ...deps('super_admin', client),
+      sinks: [{ write() {}, async flush() { throw new Error('audit unavailable'); } }],
+      revalidate: () => { throw new Error('cache unavailable'); },
+    };
+    const result = action === 'payment'
+      ? await expireStalePaymentOrder(ORDER, options)
+      : await reconcilePlanLimits(ACCOUNT, options);
+    expect(result).toMatchObject({ ok: false, committed: true, code: 'audit_write_failed' });
+  });
+
+  test('uncertain committed update never promises that nothing changed', async () => {
+    await signInAs('super_admin');
+    let committed = false;
+    const query = {
+      update: () => { committed = true; return query; },
+      eq: () => query, in: () => query, lte: () => query,
+      select: async () => ({ data: null, error: { message: 'connection lost after commit' } }),
+    };
+    const result = await expireStalePaymentOrder(ORDER, deps('super_admin', { from: () => query }));
+    const { outcomeFor, outcomeNote } = await import('./adminOutcomes');
+    expect(committed).toBe(true);
+    expect(outcomeNote({ [outcomeFor(result)]: 'expire' })).not.toContain('nothing was changed');
+  });
+});

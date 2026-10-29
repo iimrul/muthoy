@@ -88,7 +88,7 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
       { userId: response.actor_user_id, shopId },
     );
     if (!ownsTransition()) throw new Error('The active user changed.');
-    await pullChanges(shopId, null);
+    await pullChanges(shopId, null, () => !ownsTransition());
     if (!ownsTransition()) throw new Error('The active user changed.');
     // The shop is linked at exactly this point, not one step earlier: the
     // server confirmed this owner may act in it, the claims were refreshed, and

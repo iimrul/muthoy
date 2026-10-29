@@ -48,7 +48,7 @@ import {
 } from '@muthoy/utils';
 import { ADMIN_REPORT_IDS, type AdminReportExportQuery } from '@muthoy/validation';
 import { CSV_CONTENT_TYPE, contentDisposition, toCsv, type CsvDocument } from './adminCsv';
-import { dhakaDayLabel, dhakaMonthLabel, dhakaTodayLabel } from './adminDashboard';
+import { dhakaDayLabel, dhakaMonthLabel } from './adminDashboard';
 import { dhakaDayAfterIso, dhakaDayStartIso } from './adminFilters';
 import {
   collectedPaymentsByMonth,
@@ -74,7 +74,7 @@ export type AdminReportId = (typeof ADMIN_REPORT_IDS)[number];
  *
  * Deliberately far above this product's scale: it exists so a runaway export
  * fails with a sentence instead of exhausting the server, not to limit a real
- * report. lib/queries.ts's pager has its own cap (200 pages × 1000 rows); this
+ * report. lib/queries.ts's pager has its own cap (200,000 rows); this
  * one is the report layer's own statement, so a change to the pager cannot
  * silently raise it.
  */
@@ -742,7 +742,6 @@ function toTextRows(
 function suppressRows(
   rows: readonly AggregateRow[],
   netIndexes: readonly number[],
-  publishedMoneyDays: readonly string[],
 ): {
   rows: readonly (readonly ReportCell[])[];
   suppressedBuckets: number;
@@ -778,7 +777,7 @@ function suppressRows(
     // use -- and only against the day whose money is published elsewhere,
     // which is today's net on the Dashboard. See `daysReleasable`.
     || (row.subPeriodDays !== undefined
-      && !daysReleasable(row.subPeriodDays, publishedMoneyDays));
+      && !daysReleasable(row.subPeriodDays));
   const out: (readonly ReportCell[])[] = [];
   let suppressedBuckets = 0;
 
@@ -1115,19 +1114,7 @@ export function buildReportTable(
   reportId: string,
   data: ReportData,
   query: AdminReportExportQuery,
-  options: {
-    /**
-     * The days whose money is published elsewhere in this panel.
-     *
-     * Exactly one is, in the shipped panel: today's net on the Dashboard. A
-     * month containing it is releasable only if the REST of that month also
-     * clears the floor, because month minus a published day is derivable.
-     * Injected so the rule is testable at a fixed date.
-     */
-     publishedMoneyDays?: readonly string[];
-  } = {},
 ): ReportTable {
-  const publishedMoneyDays = options.publishedMoneyDays ?? [dhakaTodayLabel()];
   const entry = requireReportDefinition(reportId);
   assertCompleteRead(data.tallies);
 
@@ -1159,7 +1146,7 @@ export function buildReportTable(
   const { cells, suppressedBuckets } =
     entry.kind === 'aggregate'
       ? (() => {
-          const gated = suppressRows(built, netIndexes, publishedMoneyDays);
+          const gated = suppressRows(built, netIndexes);
           return { cells: gated.rows, suppressedBuckets: gated.suppressedBuckets };
         })()
       : {

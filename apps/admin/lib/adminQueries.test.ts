@@ -6,7 +6,7 @@
 //
 //  1. a drill-down parameter is validated BEFORE a query is built, so a
 //     malformed id never becomes a filter on a service-role read;
-//  2. a page is bounded — the pager keeps asking until a short page arrives,
+//  2. a page is bounded — the pager keeps asking until an empty page arrives,
 //     and a failing read raises AdminDataError instead of a half list;
 //  3. no client-supplied ordering or column list reaches PostgREST: the
 //     select/order/filter calls are fixed in the source.
@@ -24,6 +24,7 @@ const supabase = vi.hoisted(() => ({
   rowsByTable: new Map<string, Record<string, unknown>[]>(),
   errorTable: null as string | null,
   countByTable: new Map<string, number>(),
+  responseCap: Number.POSITIVE_INFINITY,
 }));
 
 vi.mock('./supabaseAdmin', () => ({
@@ -61,7 +62,7 @@ vi.mock('./supabaseAdmin', () => ({
           return Promise.resolve(
             supabase.errorTable === table
               ? { data: null, error: { message: table + ' read failed' } }
-              : { data: rows.slice(from, to + 1), error: null },
+              : { data: rows.slice(from, Math.min(to + 1, from + supabase.responseCap)), error: null },
           );
         },
         maybeSingle() {
@@ -102,6 +103,7 @@ beforeEach(() => {
   supabase.rowsByTable = new Map();
   supabase.errorTable = null;
   supabase.countByTable = new Map();
+  supabase.responseCap = Number.POSITIVE_INFINITY;
   seed('shops', [{
     id: SHOP, name: 'Alpha Pharmacy', phone: '01700000011', created_at: '2026-09-01T06:00:00.000Z',
     plan: 'pro', commercial_status: 'active', commercial_reason: null, archived_at: null,
@@ -156,6 +158,33 @@ describe('drill-down parameters are validated before any query', () => {
 });
 
 describe('the reads themselves', () => {
+  test('a smaller response cap preserves every account, order and provider event', async () => {
+    const secondAccount = '86666666-6666-4666-8666-666666666667';
+    const secondShop = '81111111-1111-4111-8111-111111111112';
+    seed('billing_accounts', [
+      ...(supabase.rowsByTable.get('billing_accounts') ?? []),
+      { id: secondAccount, primary_shop_id: secondShop, principal_owner_user_id: 'owner-2', created_at: '2026-10-01T00:00:00Z' },
+    ]);
+    seed('shops', [
+      ...(supabase.rowsByTable.get('shops') ?? []),
+      { id: secondShop, name: 'Second pharmacy', billing_account_id: secondAccount, created_at: '2026-10-01T00:00:00Z' },
+    ]);
+    seed('payment_orders', ['order-a', 'order-b'].map((id) => ({
+      id, billing_account_id: ACCOUNT, amount_paisa: 100, status: 'created',
+      tier: 'pro', billing_cycle: 'monthly', created_at: '2026-10-01T00:00:00Z',
+    })));
+    seed('payment_provider_events', ['event-a', 'event-b'].map((id) => ({
+      id, payment_order_id: 'order-a', processing_status: 'received', received_at: '2026-10-01T00:00:00Z',
+    })));
+    supabase.responseCap = 1;
+
+    expect(await listAccountSummaries()).toHaveLength(2);
+    expect((await getAccountDetail(secondAccount))?.account.primaryShopName).toBe('Second pharmacy');
+    const orders = await listPaymentOrderSummaries();
+    expect(orders).toHaveLength(2);
+    expect(orders.find((order) => order.id === 'order-a')?.eventCount).toBe(2);
+  });
+
   test('listAccountSummaries joins the four reads into one summary', async () => {
     const summaries = await listAccountSummaries();
 

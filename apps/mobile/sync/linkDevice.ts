@@ -1,5 +1,8 @@
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import type { OwnerOnboardingPayload } from '../db/auth';
+import { assertSessionLive } from '../db/errors';
+import { captureSession } from '../state/sessionGuard';
+import { withAuthMutation } from './authMutation';
 import {
   describeSessionClaims,
   ownerSessionClaimProblems,
@@ -14,6 +17,7 @@ import {
 import { requireSupabaseConfiguration, supabase } from './supabaseClient';
 
 interface LinkDeviceOptions {
+  isStillActive?: () => boolean;
   /**
    * The shop, roles and Owner to create server-side. Sent by every new OTP
    * registration, because link-device is the only point where the server can
@@ -118,6 +122,8 @@ export async function linkDeviceToShop(
   ownerUserId?: string,
   options: LinkDeviceOptions = {},
 ): Promise<SessionClaims> {
+  const isStillActive = options.isStillActive ?? captureSession().isStillActive;
+  assertSessionLive(isStillActive);
   requireSupabaseConfiguration();
   if (!ownerUserId) {
     throw new Error('Owner identity is required to link this device.');
@@ -133,6 +139,7 @@ export async function linkDeviceToShop(
       ...(options.onboarding ? { onboarding: options.onboarding } : {}),
     },
   });
+  assertSessionLive(isStillActive);
   if (error) {
     throw await toLinkDeviceServerError(error);
   }
@@ -148,8 +155,13 @@ export async function linkDeviceToShop(
     linkResponse as BoundInstallationResponse,
     { required: true, expectedActorUserId: ownerUserId },
   );
+  assertSessionLive(isStillActive);
 
-  const { data, error: refreshError } = await supabase.auth.refreshSession();
+  const { data, error: refreshError } = await withAuthMutation(() => {
+    assertSessionLive(isStillActive);
+    return supabase.auth.refreshSession();
+  });
+  assertSessionLive(isStillActive);
   if (refreshError) {
     throw refreshError;
   }

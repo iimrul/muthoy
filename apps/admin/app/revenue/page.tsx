@@ -13,7 +13,6 @@ import {
   type RevenueOverview,
 } from '../../lib/adminPlatformQueries';
 import { daysReleasable, suppressTotalAcrossBuckets } from '../../lib/adminSuppression';
-import { dhakaTodayLabel } from '../../lib/adminDashboard';
 import { exportTaka } from '../../lib/adminReports';
 import { formatCount } from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
@@ -209,7 +208,7 @@ export default async function RevenuePage() {
       // month is how the composition rule already withholds a total whose
       // part is withheld -- so the day rule reaches the all-time figure
       // without a second mechanism.
-      contributingShopIds: daysReleasable(month.days, [dhakaTodayLabel()])
+      contributingShopIds: daysReleasable(month.days)
         ? month.shopIds
         : [],
     })),

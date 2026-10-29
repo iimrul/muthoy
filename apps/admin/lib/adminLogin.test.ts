@@ -9,8 +9,9 @@
 // directly: both branches run EXACTLY ONE KDF, and the unknown-username and
 // wrong-password responses are compared byte for byte, headers included.
 
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { recentAdminAudit } from './adminAudit';
+import type { AdminIdentityClient } from './adminIdentityStore';
 import { ADMIN_SESSION_COOKIE, newSessionPayload, signAdminSession, verifyAdminSession } from './adminSession';
 import {
   createLoginThrottles,
@@ -179,6 +180,22 @@ describe('failure is not an oracle', () => {
     expect(calls).toHaveLength(1);
   });
 
+  test('an overlong password cannot authenticate by its matching 256-character prefix', async () => {
+    const prefix = 'x'.repeat(256);
+    const env = { ...ENV, ADMIN_ACCOUNTS: JSON.stringify([{ username: 'founder', salt: SALT, hash: HASH }]) };
+    const derive = vi.fn((password: string) => password === prefix ? HASH : 'f'.repeat(64));
+    const response = await handleAdminSessionRequest(loginRequest({ username: 'founder', password: prefix + 'wrong' }), deps({ env, derive }));
+    expect(response.headers.get('location')).toBe(LOGIN_FAILURE_LOCATION);
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect(derive).toHaveBeenCalledExactlyOnceWith(prefix, SALT);
+  });
+
+  test('a valid maximum-length password still authenticates', async () => {
+    const password = 'x'.repeat(256);
+    const response = await handleAdminSessionRequest(loginRequest({ username: 'founder', password }), deps({ derive: () => HASH }));
+    expect(response.headers.get('location')).toBe('/');
+  });
+
   test('the audit DOES distinguish them, server-side only', async () => {
     await failureResponse({ username: 'nobody', password: PASSWORD });
     await failureResponse({ username: 'founder', password: 'wrong password here' });
@@ -272,6 +289,60 @@ describe('throttling', () => {
 
     expect(refused.status).toBe(429);
     expect(calls).toHaveLength(SOURCE_BUDGET);
+  });
+
+  test('an oversized body is refused BEFORE it is parsed', async () => {
+    // MY ROUND 2 OF THE DUAL PROTOCOL. Round 1A moved the source budget below
+    // the logout branch, which was right -- an exhausted budget must not trap
+    // an operator in a session they cannot end -- but the logout signal lives
+    // in the body, so `readFields` became reachable by any unauthenticated
+    // request. The budget is still ahead of the KDF, which was the expensive
+    // half; this ceiling covers the half that moved.
+    const headers = new Headers({
+      'content-type': 'application/x-www-form-urlencoded',
+      'x-forwarded-for': '203.0.113.9',
+      origin: ORIGIN,
+      'content-length': '4097',
+    });
+    const response = await handleAdminSessionRequest(
+      new Request(ORIGIN + '/api/admin/session', {
+        method: 'POST',
+        headers,
+        body: 'username=founder&password=' + 'x'.repeat(4_100),
+      }),
+      deps(),
+    );
+
+    expect(response.status).toBe(413);
+    // No KDF, and the budget is untouched: a refusal this cheap must not also
+    // be a way to spend somebody else's attempts.
+    expect(calls).toHaveLength(0);
+    expect(
+      await handleAdminSessionRequest(
+        loginRequest({ username: 'founder', password: PASSWORD }, { source: '203.0.113.9' }),
+        deps(),
+      ),
+    ).toMatchObject({ status: 303 });
+  });
+
+  test('a body at the ceiling is still read', async () => {
+    // Non-vacuity: the ceiling refuses what is over it and nothing else. A
+    // real form is a few hundred bytes, so this sits far above any of them.
+    const body = 'username=founder&password=' + encodeURIComponent(PASSWORD);
+    const headers = new Headers({
+      'content-type': 'application/x-www-form-urlencoded',
+      'x-forwarded-for': '203.0.113.10',
+      origin: ORIGIN,
+      'content-length': String(body.length),
+    });
+
+    const response = await handleAdminSessionRequest(
+      new Request(ORIGIN + '/api/admin/session', { method: 'POST', headers, body }),
+      deps(),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('set-cookie')).toContain(ADMIN_SESSION_COOKIE + '=');
   });
 
   test('rotating usernames consumes the SAME budget — that is the point of it', async () => {
@@ -400,7 +471,7 @@ describe('logout, configuration and the real KDF', () => {
 
   test("an AUTHENTICATED logout records the cookie subject, not the body one", async () => {
     const token = await signAdminSession(
-      newSessionPayload({ sub: 'founder', role: 'billing', epoch: 0, now: Date.now() }),
+      newSessionPayload({ sub: 'founder', role: 'billing', epoch: 0, now: NOW }),
       SECRET,
     );
     const request = new Request(ORIGIN + '/api/admin/session', {
@@ -415,7 +486,14 @@ describe('logout, configuration and the real KDF', () => {
       body: new URLSearchParams({ intent: 'logout', username: 'someone-else' }).toString(),
     });
 
-    const response = await handleAdminSessionRequest(request, deps());
+    const query = {
+      update: () => query,
+      eq: () => query,
+      or: () => query,
+      select: async () => ({ data: [{ username: 'founder' }], error: null }),
+    };
+    const client = { from: () => query } as unknown as AdminIdentityClient;
+    const response = await handleAdminSessionRequest(request, deps({ identityStore: { client } }));
 
     expect(response.headers.get('set-cookie')).toContain('Max-Age=0');
     expect(recentAdminAudit.entries()).toMatchObject([{

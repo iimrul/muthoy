@@ -145,6 +145,16 @@ export function dayReleasable(day: DaySides, k: number = SUPPRESSION_K): boolean
  *
  * So: a month is releasable only if every day's REFUND side clears the floor.
  *
+ * ONE INPUT, BECAUSE THERE IS ONE RULE. This function used to take a
+ * `publishedDays` list as well, and after round 15 narrowed the rule to the
+ * refund side that argument stopped being read. It was still being threaded in
+ * from `buildReportTable`'s options through `suppressRows` and passed by both
+ * pages, so every reader of those call sites -- including me, twice -- would
+ * believe a published-day set still gated something here. A dead parameter on
+ * a money path is a defect waiting for someone to trust it, and two tests
+ * were already passing `[]` against `['2026-10-02']` in cases whose outcome
+ * can no longer differ. It is gone.
+ *
  * THE COST, WHICH IS LARGE AND IS THE POINT. At beta scale -- ten pharmacies --
  * almost no day has five distinct refunding pharmacies, so almost every
  * monthly net figure is withheld. That is not the rule failing; it is
@@ -156,7 +166,6 @@ export function dayReleasable(day: DaySides, k: number = SUPPRESSION_K): boolean
  */
 export function daysReleasable(
   days: readonly DaySides[],
-  _publishedDays: readonly string[] = [],
   k: number = SUPPRESSION_K,
 ): boolean {
   // The REFUND side of every day. The sale side is public per pharmacy on the

@@ -55,11 +55,12 @@ export interface OutcomeMessages {
 }
 
 const GENERIC_FAILURE =
-  'That action did not complete, and nothing was changed. The server log has the details.';
+  'That action could not be confirmed. Check its current state before retrying. '
+  + 'The server log has the details.';
 
 const APPLIED_UNRECORDED =
   'The change WAS applied, but it could not be written to the audit log. '
-  + 'Do not retry it — a second attempt would repeat the change. '
+  + 'Do not retry this submission. '
   + 'The server log holds the record.';
 
 function firstString(value: string | string[] | undefined): string | null {

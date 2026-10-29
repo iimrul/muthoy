@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { randomUUID } from 'node:crypto';
 import {
   ADMIN_SUPPORT_CATEGORY_VALUES,
   ADMIN_SUPPORT_PRIORITY_VALUES,
@@ -416,6 +417,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
 
           {canWrite ? (
             <form action={addSupportNoteAction} className="mt-4">
+              <input type="hidden" name="requestId" value={randomUUID()} />
               <input type="hidden" name="caseId" value={detail.case.id} />
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-midGray">Add a note</span>
@@ -450,6 +452,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
             Every case is about one pharmacy. Paste its id from the pharmacy list.
           </p>
           <form action={openSupportCaseAction} className="mt-3 flex flex-wrap items-end gap-3">
+            <input type="hidden" name="requestId" value={randomUUID()} />
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-midGray">Pharmacy id</span>
               <input

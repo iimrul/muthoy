@@ -86,7 +86,7 @@ interface ClientCall {
 
 /** The same PostgREST-shaped fake as the identity store's, narrowed the same way. */
 function createClient(
-  options: { rows?: Record<string, unknown>[]; selectError?: string; writeError?: string } = {},
+  options: { rows?: Record<string, unknown>[]; selectError?: string; writeError?: string; responseCap?: number } = {},
 ) {
   const calls: ClientCall[] = [];
   const rows = options.rows ?? [];
@@ -113,7 +113,12 @@ function createClient(
           const chain: Record<string, unknown> = {
             range: (...args: unknown[]) => {
               call.filters.push({ method: 'range', args });
-              return Promise.resolve(result());
+              const response = result();
+              const [from, to] = args as [number, number];
+              return Promise.resolve({
+                ...response,
+                data: response.data?.slice(from, Math.min(to + 1, from + (options.responseCap ?? Infinity))) ?? null,
+              });
             },
             limit: (...args: unknown[]) => {
               call.filters.push({ method: 'limit', args });
@@ -256,6 +261,37 @@ describe('the flag state is three-valued', () => {
 });
 
 describe('reading the settings', () => {
+  test('a capped response cannot turn a stored disabled flag back on', async () => {
+    const { client } = createClient({
+      responseCap: 1,
+      rows: [
+        settingRow({ key: 'flag.analytics_enabled', value: true }),
+        settingRow({ key: 'flag.maps_enabled', value: false }),
+        settingRow({ key: 'flag.reports_pdf_enabled', value: false }),
+      ],
+    });
+    expect((await readSettings({ client })).size).toBe(3);
+    expect(await featureState('flag.maps_enabled', { client })).toBe('disabled');
+    expect(await featureState('flag.reports_pdf_enabled', { client })).toBe('disabled');
+  });
+
+  test('saving a flag omitted from the first capped page updates its existing row', async () => {
+    const { client, calls } = createClient({
+      responseCap: 1,
+      rows: [
+        settingRow({ key: 'flag.analytics_enabled', value: true }),
+        settingRow({ key: 'flag.maps_enabled', value: false }),
+      ],
+    });
+    expect(await writeSetting(
+      { key: 'flag.maps_enabled', value: true, updatedBy: 'founder' }, { client },
+    )).toBe('updated');
+    expect(calls.filter((call) => call.op === 'insert')).toEqual([]);
+    expect(calls.find((call) => call.op === 'update')?.filters).toEqual([
+      { method: 'eq', args: ['key', 'flag.maps_enabled'] },
+    ]);
+  });
+
   test('a key outside the six is dropped, not surfaced as configuration', async () => {
     const { client } = createClient({
       rows: [settingRow(), settingRow({ key: 'flag.something_else', value: true })],

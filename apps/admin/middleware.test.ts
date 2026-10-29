@@ -15,7 +15,6 @@ import {
   ADMIN_SESSION_COOKIE,
   newSessionPayload,
   signAdminSession,
-  touchedSessionPayload,
   verifyAdminSession,
 } from './lib/adminSession';
 import { middleware } from './middleware';
@@ -39,15 +38,16 @@ function configure(overrides: Partial<Record<(typeof ENV_KEYS)[number], string |
 
 async function cookieFor(
   sub: string,
-  options: { epoch?: number; now?: number; lastSeen?: number } = {},
+  options: { epoch?: number; now?: number } = {},
 ): Promise<string> {
   const now = options.now ?? Date.now();
   const payload = newSessionPayload({ sub, role: 'super_admin', epoch: options.epoch ?? 0, now });
-  return signAdminSession(
-    options.lastSeen === undefined ? payload : touchedSessionPayload(payload, options.lastSeen),
-    SECRET,
-  );
+  return signAdminSession(payload, SECRET);
 }
+
+// There is deliberately NO `lastSeen` option. It used to back-date lastSeen
+// through `touchedSessionPayload`, and that is what made the idle test below
+// vacuous for this whole batch -- see the comment on it.
 
 function request(path: string, cookie?: string): NextRequest {
   const headers = new Headers();
@@ -156,8 +156,36 @@ describe('an unauthenticated request', () => {
   });
 
   test('a cookie idle for more than 30 minutes is refused', async () => {
-    const cookie = await cookieFor('founder', { lastSeen: Date.now() - 31 * 60 * 1_000 });
+    // THIS TEST WAS VACUOUS, and a Codex round 1A fix is what revealed it.
+    //
+    // It used to build the cookie by back-dating `lastSeen` 31 minutes through
+    // `touchedSessionPayload`, leaving lastSeen BEFORE iat. `adminSession.ts`
+    // refuses that pair as `malformed` several lines above the idle check, so
+    // the 303 this test asserted came from the nonsense rule and the idle rule
+    // was never once exercised through the middleware. Round 1A made
+    // `touchedSessionPayload` monotonic -- right, because a lagging verifier
+    // must not drag lastSeen below iat -- which turned the construction into a
+    // perfectly valid cookie, and the test went red and said so.
+    //
+    // A real idle session is one issued 31 minutes ago and never touched since,
+    // so iat and lastSeen are both old and only the idle rule can refuse it.
+    const cookie = await cookieFor('founder', { now: Date.now() - 31 * 60 * 1_000 });
     expect((await middleware(request('/pharmacies', cookie))).status).toBe(303);
+  });
+
+  test('the idle refusal is the IDLE rule, not the nonsense rule standing in for it', async () => {
+    // The guard on the test above: these two rules are now pinned apart, so
+    // neither can pass for the other again.
+    const now = Date.now();
+    const idle = await cookieFor('founder', { now: now - 31 * 60 * 1_000 });
+    expect(await verifyAdminSession(idle, { secret: SECRET, epoch: 0, now }))
+      .toEqual({ ok: false, reason: 'idle' });
+
+    const payload = newSessionPayload({ sub: 'founder', role: 'super_admin', epoch: 0, now });
+    const backdated = await signAdminSession({ ...payload, lastSeen: now - 31 * 60 * 1_000 }, SECRET);
+    expect(await verifyAdminSession(backdated, { secret: SECRET, epoch: 0, now }))
+      .toEqual({ ok: false, reason: 'malformed' });
+    expect((await middleware(request('/pharmacies', backdated))).status).toBe(303);
   });
 
   test('a cookie from a revoked epoch is refused', async () => {

@@ -10,6 +10,7 @@ const {
   HYDRATION_TABLE_ORDER,
   applyRemoteRow,
   applyRemoteRows,
+  applyConflictRemoteRow,
   countFailedSyncRows,
   listPendingSyncRows,
   markSyncRowPermanentFailure,
@@ -183,5 +184,92 @@ describe("sync helper behavior on real SQLite", () => {
       { tableName: "batches", row: { id: "10000000-0000-4000-8000-000000000008", shop_id: SHOP_ID, medicine_id: "missing", batch_no: "B1", stock: 1, purchase_price: 100, sale_price: 120, created_at: NOW, updated_at: NOW, is_deleted: false } },
     ])).toThrow();
     expect(db.select().from(medicines).where(eq(medicines.id, medicineId)).get()).toBeUndefined();
+  });
+});
+
+describe("remote tenant binding on real SQLite", () => {
+  const TENANT_NOW = "2026-10-29T00:00:00.000Z";
+  const TENANT_LATER = "2026-10-29T00:01:00.000Z";
+  const TENANT_SHOP_A = "tenant-review-shop-A";
+  const TENANT_SHOP_B = "tenant-review-shop-B";
+  const TENANT_CUSTOMER_B = "tenant-review-private-B";
+
+  // Reuse this file's migrated database; these rows enqueue no work and use
+  // separate keys, so the original outbox/registration fixture stays intact.
+  beforeAll(() => {
+    for (const shopId of [TENANT_SHOP_A, TENANT_SHOP_B]) {
+      db.insert(shops).values({
+        id: shopId, ownerId: `owner-${shopId}`, name: shopId,
+        phone: "01700000000", createdAt: TENANT_NOW, updatedAt: TENANT_NOW,
+      }).run();
+      db.insert(roles).values({
+        id: `role-${shopId}`, shopId, name: "owner",
+        createdAt: TENANT_NOW, updatedAt: TENANT_NOW,
+      }).run();
+    }
+    db.insert(customers).values({
+      id: TENANT_CUSTOMER_B, shopId: TENANT_SHOP_B, name: "Private B",
+      createdAt: TENANT_NOW, updatedAt: TENANT_NOW,
+    }).run();
+  });
+
+  function tenantCustomer(shopId: string, overrides: Record<string, unknown> = {}) {
+    return {
+      id: TENANT_CUSTOMER_B, shop_id: shopId, name: "Private B",
+      created_at: TENANT_NOW, updated_at: TENANT_LATER, ...overrides,
+    };
+  }
+
+  it("refuses to reassign an existing UUID, including stale and force-applied rows", () => {
+    for (const updated_at of [TENANT_NOW, TENANT_LATER]) {
+      expect(() => applyRemoteRow("customers", tenantCustomer(TENANT_SHOP_A, { updated_at }))).toThrow(/shop/);
+      expect(() => applyRemoteRows([{
+        tableName: "customers", row: tenantCustomer(TENANT_SHOP_A, { updated_at }),
+      }])).toThrow(/shop/);
+    }
+    expect(() => db.transaction((tx) => applyConflictRemoteRow(tx, "customers", tenantCustomer(TENANT_SHOP_A)))).toThrow(/shop/);
+    expect(sqlite.prepare("SELECT shop_id, name FROM customers WHERE id = ?").get(TENANT_CUSTOMER_B))
+      .toEqual({ shop_id: TENANT_SHOP_B, name: "Private B" });
+  });
+
+  it("rejects fresh foreign rows and rolls back an entire mixed-shop batch", () => {
+    expect(() => applyRemoteRows([
+      { tableName: "customers", row: tenantCustomer(TENANT_SHOP_A, { id: "tenant-review-fresh-A" }) },
+      { tableName: "customers", row: tenantCustomer(TENANT_SHOP_B, { id: "tenant-review-fresh-B" }) },
+    ], { expectedShopId: TENANT_SHOP_A })).toThrow(/shop/);
+    expect(sqlite.prepare("SELECT id FROM customers WHERE id IN (?, ?)")
+      .all("tenant-review-fresh-A", "tenant-review-fresh-B")).toEqual([]);
+  });
+
+  it("resolves permissions through roles and rejects moving an existing permission", () => {
+    const permission = {
+      id: "tenant-review-permission-B", role_id: `role-${TENANT_SHOP_B}`, key: "reports",
+      allowed: true, created_at: TENANT_NOW, updated_at: TENANT_NOW,
+    };
+    expect(() => applyRemoteRows([{ tableName: "permissions", row: permission }], { expectedShopId: TENANT_SHOP_A })).toThrow(/shop/);
+    expect(applyRemoteRows([{ tableName: "permissions", row: permission }], { expectedShopId: TENANT_SHOP_B })).toEqual(["applied"]);
+    expect(() => applyRemoteRows([{
+      tableName: "permissions", row: { ...permission, role_id: `role-${TENANT_SHOP_A}`, updated_at: TENANT_LATER },
+    }], { expectedShopId: TENANT_SHOP_A })).toThrow(/shop/);
+  });
+
+  it("binds a conflict snapshot to both its tenant and recorded row ID", () => {
+    for (const expected of [
+      { shopId: TENANT_SHOP_A, rowId: TENANT_CUSTOMER_B },
+      { shopId: TENANT_SHOP_B, rowId: "tenant-review-another-row" },
+    ]) {
+      expect(() => db.transaction((tx) => applyConflictRemoteRow(tx, "customers", tenantCustomer(TENANT_SHOP_B), expected)))
+        .toThrow(/shop|identity/);
+    }
+  });
+
+  it("continues applying same-shop rows and accepts roles before permissions in one page", () => {
+    expect(applyRemoteRows([
+      { tableName: "permissions", row: { id: "tenant-review-permission-new-A", role_id: "tenant-review-new-role-A", key: "reports", allowed: true, created_at: TENANT_NOW, updated_at: TENANT_NOW } },
+      { tableName: "roles", row: { id: "tenant-review-new-role-A", shop_id: TENANT_SHOP_A, name: "staff", created_at: TENANT_NOW, updated_at: TENANT_NOW } },
+      { tableName: "customers", row: tenantCustomer(TENANT_SHOP_A, { id: "tenant-review-valid-A" }) },
+    ], { expectedShopId: TENANT_SHOP_A })).toEqual(["applied", "applied", "applied"]);
+    expect(sqlite.prepare("SELECT shop_id FROM customers WHERE id = ?").get("tenant-review-valid-A"))
+      .toEqual({ shop_id: TENANT_SHOP_A });
   });
 });
