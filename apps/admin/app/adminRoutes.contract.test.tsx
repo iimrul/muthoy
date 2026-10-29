@@ -1130,6 +1130,34 @@ describe('§8.9 the audit page filters, and the per-shop view is gated', () => {
     expect(html).toContain('INV-0001');
   });
 
+  test('the per-shop read EXCLUDES refund actions, in the page AND the count', async () => {
+    // ROUND 1B FINDING 2, at the layer the defect lives in.
+    //
+    // `apps/mobile/db/refunds.ts` writes `action: 'sale_refunded'` naming the
+    // refunded sale. This panel publishes each pharmacy's GROSS by design, and
+    // a refund is a full refund of one sale, so that row turns a published
+    // gross into a refund figure -- the figure every refund-adjusted aggregate
+    // here is withheld to protect. The reviewer reproduced it without reading
+    // `meta` at all.
+    //
+    // Both halves are asserted because the COUNT is most of the disclosure on
+    // its own: a total that still included these rows would publish how many
+    // refunds the pharmacy made.
+    await signInAs('founder', 'super_admin');
+
+    await render('./audit/page', { shop: SHOP_ID });
+
+    const auditReads = clientBox.calls.filter((call) => call.table === 'audit_logs');
+    expect(auditReads.length).toBeGreaterThanOrEqual(2);
+    for (const read of auditReads) {
+      expect(read.filters).toEqual(
+        expect.arrayContaining([
+          { method: 'not', args: ['action', 'in', '(sale_refunded)'] },
+        ]),
+      );
+    }
+  });
+
   test('a role without shop_audit.read reads no pharmacy log at all', async () => {
     // `billing` holds audit.read but NOT shop_audit.read — §4.2 scopes the
     // per-shop view to super_admin and support.

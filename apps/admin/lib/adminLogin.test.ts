@@ -18,6 +18,7 @@ import {
   derivePasswordHash,
   handleAdminSessionRequest,
   LOGIN_FAILURE_LOCATION,
+  MAX_SESSION_BODY_BYTES,
   MAX_USERNAME_FAILURES,
   PBKDF2_DIGEST,
   PBKDF2_ITERATIONS,
@@ -325,10 +326,14 @@ describe('throttling', () => {
     ).toMatchObject({ status: 303 });
   });
 
-  test('a body at the ceiling is still read', async () => {
-    // Non-vacuity: the ceiling refuses what is over it and nothing else. A
-    // real form is a few hundred bytes, so this sits far above any of them.
-    const body = 'username=founder&password=' + encodeURIComponent(PASSWORD);
+  test('a body AT the ceiling exactly is still read', async () => {
+    // ROUND 1B found this test weak: it submitted 60 bytes and so proved only
+    // that a small body is accepted, not that the boundary sits where the
+    // constant says. The body is now EXACTLY MAX_SESSION_BODY_BYTES, padded
+    // with an ignored field, so one byte either way moves the outcome.
+    const prefix = 'username=founder&password=' + encodeURIComponent(PASSWORD) + '&pad=';
+    const body = prefix + 'x'.repeat(MAX_SESSION_BODY_BYTES - prefix.length);
+    expect(body).toHaveLength(MAX_SESSION_BODY_BYTES);
     const headers = new Headers({
       'content-type': 'application/x-www-form-urlencoded',
       'x-forwarded-for': '203.0.113.10',
@@ -343,6 +348,20 @@ describe('throttling', () => {
 
     expect(response.status).toBe(303);
     expect(response.headers.get('set-cookie')).toContain(ADMIN_SESSION_COOKIE + '=');
+
+    // One byte over, and the same request is refused. The pair is the boundary.
+    const overBy = new Headers(headers);
+    overBy.set('content-length', String(MAX_SESSION_BODY_BYTES + 1));
+    expect(
+      await handleAdminSessionRequest(
+        new Request(ORIGIN + '/api/admin/session', {
+          method: 'POST',
+          headers: overBy,
+          body: body + 'x',
+        }),
+        deps(),
+      ),
+    ).toMatchObject({ status: 413 });
   });
 
   test('rotating usernames consumes the SAME budget — that is the point of it', async () => {

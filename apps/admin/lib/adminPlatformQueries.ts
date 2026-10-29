@@ -1771,6 +1771,27 @@ export async function subscriptionsOverview(
 
 const SHOP_AUDIT_COLUMNS = 'id,shop_id,actor_id,action,target,created_at';
 
+/**
+ * ROUND 1B FINDING 2 — THE AUDIT LOG IS A MONEY PUBLISHER.
+ *
+ * `apps/mobile/db/refunds.ts:586` writes `action: 'sale_refunded'` with the
+ * refunded sale as its `target`. This panel publishes each pharmacy's GROSS
+ * sales by design (accepted 8.2), and a refund here is a FULL refund of one
+ * sale. So an operator who sees "sale_refunded -> X" on a shop whose gross is
+ * published knows the refund amount -- the exact figure every net aggregate in
+ * this panel is suppressed to protect. The reviewer reproduced it without
+ * reading `meta` at all.
+ *
+ * Fifteen rounds of money suppression never looked here, because this read was
+ * classified as an AUDIT surface and audit surfaces were reviewed for
+ * authorization and redaction, never for arithmetic.
+ *
+ * The predicate is applied to the COUNT as well as the page. A count that
+ * still included these rows would publish how many refunds a pharmacy made,
+ * which is most of the disclosure on its own.
+ */
+const REFUND_REVEALING_ACTIONS = ['sale_refunded'] as const;
+
 export interface ShopAuditRow {
   id: string;
   shopId: string;
@@ -1811,12 +1832,17 @@ export async function shopAuditPage(
   const supabase = getSupabaseAdmin();
   const range = rangeSpec(query);
 
+  // `not('action', 'in', '(...)')` on BOTH, so the rows never arrive and the
+  // total counts only what is shown. One literal list, built once, because a
+  // predicate that drifted between the two queries would make the pager lie.
+  const withheldActions = '(' + REFUND_REVEALING_ACTIONS.join(',') + ')';
   const [countResult, pageResult] = await Promise.all([
     asCountQuery(
       supabase.from('audit_logs').select('id', { count: 'exact', head: true }),
-    ).eq('shop_id', shopId),
+    ).eq('shop_id', shopId).not('action', 'in', withheldActions),
     asPageQuery(supabase.from('audit_logs').select(SHOP_AUDIT_COLUMNS))
       .eq('shop_id', shopId)
+      .not('action', 'in', withheldActions)
       .order('created_at', { ascending: false })
       .order('id', { ascending: true })
       .range(range.from, range.to),

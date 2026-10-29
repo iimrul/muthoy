@@ -92,7 +92,15 @@ export function parseAdminAccounts(raw: string | undefined): Map<string, AdminAc
 
     const username = candidate.username;
     if (!isAdminUsername(username)) {
-      throw new AdminConfigError('ADMIN_ACCOUNTS has an invalid username');
+      // ROUND 1B: a legacy username fails HERE, before `parseAdminRoles` can
+      // produce the actionable sentence, so this refusal has to carry the same
+      // detail or the founder sees the useless half of the pair. Sanitised for
+      // the browser by `getErrorMessage`, same as that one.
+      throw new AdminConfigError(
+        'ADMIN_ACCOUNTS has an invalid username: '
+        + JSON.stringify(username)
+        + '. An admin username needs 1-64 characters and no whitespace.',
+      );
     }
     const lowercase = username.toLowerCase();
     if (seenLowercase.has(lowercase)) {

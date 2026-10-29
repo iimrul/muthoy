@@ -234,6 +234,13 @@ export interface ListFilterBuilder {
   /** Round 13 finding 4: the strict bound a half-open instant range needs. */
   lt(column: string, value: unknown): this;
   or(expression: string): this;
+  /**
+   * Negation, for a value a read must EXCLUDE. Round 1B finding 2 needs it to
+   * keep refund-revealing audit actions out of both the page and its count; a
+   * filter applied in JavaScript instead would still have fetched the rows and
+   * still have counted them.
+   */
+  not(column: string, operator: string, value: unknown): this;
 }
 
 // The full builder EXTENDS the filters-only one rather than being Pick()ed

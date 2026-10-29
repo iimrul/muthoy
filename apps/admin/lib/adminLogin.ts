@@ -94,7 +94,7 @@ const MAX_FIELD_LENGTH = 256;
  * of this panel's forms are native HTML POSTs, which always declare one, so
  * refusing an undeclared length would cost more than it buys.
  */
-const MAX_SESSION_BODY_BYTES = 4_096;
+export const MAX_SESSION_BODY_BYTES = 4_096;
 const MAX_SOURCE_BUCKETS = 10_000;
 
 interface UsernameThrottle {

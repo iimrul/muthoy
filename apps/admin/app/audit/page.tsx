@@ -391,6 +391,17 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
           </button>
         </form>
 
+        {/*
+          * ROUND 1B FINDING 2. Stated as policy rather than as a count: a
+          * number here would itself disclose how many refunds the pharmacy
+          * made, which is the figure the suppression exists to protect.
+          */}
+        <p className="mt-4 text-sm text-slate-600">
+          Refund entries are not shown. This panel publishes each pharmacy&apos;s gross
+          sales, so naming a refunded sale here would disclose the refund amount that
+          this panel&apos;s refund-adjusted totals are withheld to protect.
+        </p>
+
         {shopAudit.state === 'absent' ? (
           <EmptyState message="No pharmacy is selected. Enter a pharmacy id, or reach this view from that pharmacy's page." />
         ) : shopAudit.state === 'forbidden' ? (
