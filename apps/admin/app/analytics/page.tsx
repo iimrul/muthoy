@@ -9,7 +9,8 @@ import { parseListQuery } from '../../lib/adminFilters';
 import { requireMetric } from '../../lib/adminMetrics';
 import { analyticsOverview, type AnalyticsOverview } from '../../lib/adminPlatformQueries';
 import { featureState } from '../../lib/adminSettings';
-import { SUPPRESSION_K, suppressBelowK } from '../../lib/adminSuppression';
+import { daysReleasable, SUPPRESSION_K, suppressBelowK } from '../../lib/adminSuppression';
+import { dhakaTodayLabel } from '../../lib/adminDashboard';
 import { toDisplayMessage } from '../../lib/errors';
 
 // Batch 3 §8.5 — Analytics.
@@ -220,10 +221,14 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
       value: bucket.totalPaisa,
       contributingShopIds: bucket.shopIds,
     });
+    // ROUND 14 FINDING 3: the DAY rule too. Round 13 put downward composition
+    // in the report builder only, so this page published 420.00 for a month
+    // the report withheld -- and the Dashboard's 500.00 day minus that 420.00
+    // was still the withheld 80.00. One predicate, every output.
     return {
       label: bucket.month,
       amount: bucket.totalPaisa,
-      suppressed: gated.suppressed,
+      suppressed: gated.suppressed || !daysReleasable(bucket.days, [dhakaTodayLabel()]),
     };
   });
   const plans = toPoints(

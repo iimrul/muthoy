@@ -12,7 +12,8 @@ import {
   type AnalyticsOverview,
   type RevenueOverview,
 } from '../../lib/adminPlatformQueries';
-import { suppressTotalAcrossBuckets } from '../../lib/adminSuppression';
+import { daysReleasable, suppressTotalAcrossBuckets } from '../../lib/adminSuppression';
+import { dhakaTodayLabel } from '../../lib/adminDashboard';
 import { exportTaka } from '../../lib/adminReports';
 import { formatCount } from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
@@ -203,7 +204,14 @@ export default async function RevenuePage() {
     pharmacyNetSales,
     result.pharmacy.pharmacySalesByMonth.map((month) => ({
       value: month.totalPaisa,
-      contributingShopIds: month.shopIds,
+      // ROUND 14 FINDING 3: a month whose days are not releasable makes the
+      // TOTAL unreleasable too. Declaring an empty contributor set for such a
+      // month is how the composition rule already withholds a total whose
+      // part is withheld -- so the day rule reaches the all-time figure
+      // without a second mechanism.
+      contributingShopIds: daysReleasable(month.days, [dhakaTodayLabel()])
+        ? month.shopIds
+        : [],
     })),
   );
 

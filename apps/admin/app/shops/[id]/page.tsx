@@ -88,6 +88,8 @@ interface ShopBundle {
   /** The actual notes on those cases, newest first (Gate 5 finding 16). */
   notes: readonly ShopSupportNote[];
   casesFollowed: number;
+  /** Round 14 finding 12: older notes exist inside a case this view followed. */
+  olderNotesWithheld: boolean;
   location: ShopLocationRow | null;
 }
 
@@ -117,10 +119,10 @@ async function loadShop(id: string, mayReadLocation: boolean): Promise<BundleRes
     // The notes come AFTER the cases, because a note is read per case id and
     // the case ids are what scope it to this shop. There is no path that reads
     // a note without a case that belongs here.
-    const { notes, casesFollowed } = await listShopSupportNotes(cases);
+    const { notes, casesFollowed, olderNotesWithheld } = await listShopSupportNotes(cases);
     return {
       ok: true,
-      bundle: { detail, cases, notes, casesFollowed, location },
+      bundle: { detail, cases, notes, casesFollowed, olderNotesWithheld, location },
       nowMs: now.getTime(),
     };
   } catch (error: unknown) {
@@ -149,7 +151,7 @@ export default async function ShopDetailPage({ params }: ShopPageProps) {
   if (!result.ok) return <ErrorNotice message={result.message} />;
   if (result.bundle === null) notFound();
 
-  const { detail, cases, notes, casesFollowed, location } = result.bundle;
+  const { detail, cases, notes, casesFollowed, olderNotesWithheld, location } = result.bundle;
   const { shop } = detail;
 
   const openCases = cases.filter((entry) => entry.isOpen).length;
@@ -262,6 +264,15 @@ export default async function ShopDetailPage({ params }: ShopPageProps) {
                   <p className="mt-2 text-xs text-midGray">
                     Notes are shown for the {casesFollowed} most recently updated cases of{' '}
                     {cases.length}. The rest are on the Support page.
+                  </p>
+                ) : null}
+                {/* ROUND 14 FINDING 12: a different omission from the one
+                    above. That notice covers CASES this view did not follow;
+                    this one covers NOTES inside a case it did. */}
+                {olderNotesWithheld ? (
+                  <p role="status" className="mt-2 text-xs text-midGray">
+                    A case here has more notes than this view reads, so its oldest notes are not
+                    shown. The full history is on the Support page.
                   </p>
                 ) : null}
               </>

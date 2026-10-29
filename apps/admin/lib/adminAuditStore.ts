@@ -366,7 +366,15 @@ export async function readAdminAuditLogForExport(
     if (collected.length > AUDIT_EXPORT_MAX) {
       throw new AdminAuditExportTooLargeError(collected.length);
     }
-    if (rows.length < AUDIT_EXPORT_PAGE) return collected;
+    // ROUND 14 FINDING 6: a SHORT page does not mean exhaustion.
+    //
+    // A server-side cap below `AUDIT_EXPORT_PAGE` makes every page look short,
+    // so this returned after the first one: 501 stored events with a cap of
+    // 500 exported 500 and dropped the older `admins.disabled` denial, with no
+    // second request and no refusal. Keyset paging did not fix that, because
+    // the TERMINATION CONDITION was the bug. Only an EMPTY page proves there
+    // is nothing older than the cursor.
+    if (rows.length === 0) return collected;
 
     const last = rows[rows.length - 1];
     const at = typeof last?.at === 'string' ? last.at : null;

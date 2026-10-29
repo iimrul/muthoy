@@ -32,6 +32,7 @@ import {
   type PageMeta,
 } from './adminFilters';
 import { alignToWindow, dhakaDayLabel, trendDays, type DayBucket } from './adminDashboard';
+import type { DaySides } from './adminSuppression';
 import type { ShopLocationRow } from './adminGeo';
 import {
   collectedPaymentsByMonth,
@@ -64,7 +65,6 @@ import {
 } from './adminSupport';
 import {
   listSupportCases as readSupportCases,
-  listSupportNotes,
   listSupportNotesPage,
   readSupportCase,
 } from './adminSupportStore';
@@ -263,10 +263,14 @@ export async function listShopDistricts(): Promise<readonly string[]> {
       last = district;
     }
 
-    // Fewer rows than asked for means the table is exhausted. A page that
-    // yielded no usable district would also loop forever on the same cursor,
-    // so it stops here too.
-    if (rows.length < 1_000 || last === null) return [...districts].sort();
+    // ROUND 14 FINDING 11: a SHORT page does not mean exhaustion.
+    //
+    // My first version returned as soon as a page came back with fewer rows
+    // than it asked for, which is exactly what a server-side cap looks like:
+    // with a cap of five, five Dhaka shops ended the loop and Sylhet was never
+    // seen. The only thing that proves exhaustion is a page with NO rows at
+    // all, so the cursor advances until that happens.
+    if (rows.length === 0 || last === null) return [...districts].sort();
     after = last;
   }
 
@@ -499,6 +503,29 @@ export interface RevenueOverview {
 export async function revenueOverview(now: Date = new Date()): Promise<RevenueOverview> {
   const supabase = getSupabaseAdmin();
 
+  // ROUND 14 FINDING 5 — THE SUBSCRIPTION MONEY IS COUNTED TOO.
+  //
+  // Round 12 put the PHARMACY reads inside the completeness gate and round 13
+  // put the Dashboard inside it. These three reads stayed outside: six
+  // verified 100.00 orders with a transport returning five published collected
+  // payments of 500.00 and refused nothing. `readAllPages` cannot tell a
+  // finished page from a capped one, so the count has to come separately.
+  const [subscriptionCount, orderCount, eventCount] = await Promise.all([
+    supabase.from('billing_subscriptions').select('id', { count: 'exact', head: true }),
+    supabase.from('payment_orders').select('id', { count: 'exact', head: true }),
+    supabase.from('payment_provider_events').select('id', { count: 'exact', head: true }),
+  ]);
+  for (const [label, counted] of [
+    ['billing_subscriptions', subscriptionCount],
+    ['payment_orders', orderCount],
+    ['payment_provider_events', eventCount],
+  ] as const) {
+    if (counted.error) {
+      console.error('[admin] ' + label + ' count failed:', counted.error.message);
+      throw new AdminDataError(label + ' count query failed');
+    }
+  }
+
   const [subscriptions, orders, events, offerings] = await Promise.all([
     readAllPages<Record<string, unknown>>('billing_subscriptions', (from, to) =>
       asPageQuery(supabase.from('billing_subscriptions').select(REPORT_SUBSCRIPTION_COLUMNS))
@@ -516,6 +543,23 @@ export async function revenueOverview(now: Date = new Date()): Promise<RevenueOv
         .range(from, to),
     ).then((rows) => rows.map(toProviderEventRow)),
     listPlanOfferings(),
+  ]);
+
+  // THROWS on a short read. Revenue is Muthoy's own money: a figure built from
+  // part of the orders table is a wrong figure, and showing it is worse than
+  // showing an error.
+  assertCompleteRead([
+    {
+      label: 'billing_subscriptions',
+      counted: subscriptionCount.count ?? 0,
+      loaded: subscriptions.length,
+    },
+    { label: 'payment_orders', counted: orderCount.count ?? 0, loaded: orders.length },
+    {
+      label: 'payment_provider_events',
+      counted: eventCount.count ?? 0,
+      loaded: events.length,
+    },
   ]);
 
   const nowMs = now.getTime();
@@ -575,6 +619,14 @@ export interface AnalyticsOverview {
      * contributor to the count of sales.
      */
     saleShopIds: readonly string[];
+    /**
+     * The days inside this month, split by the side that produced each.
+     *
+     * ROUND 14 FINDINGS 3 and 4: `daysReleasable` asks the same question of
+     * these that the Dashboard asks of a single day, so a month cannot
+     * publish what a day withholds.
+     */
+    days: readonly DaySides[];
   }[];
   /** Per plan tier: the shops on it. */
   shopsByPlan: readonly { plan: string; shopIds: readonly string[] }[];
@@ -753,14 +805,49 @@ export async function analyticsOverview(
       saleCount: number;
       shopIds: string[];
       saleShopIds: string[];
+      /**
+       * ROUND 14 FINDINGS 3 and 4: the DAYS inside the month, split by side.
+       *
+       * The month is publishable only if every day's non-empty side clears the
+       * floor, because the Dashboard publishes days and gates them per side.
+       * The union was not enough: five sellers and one refunder on the same day
+       * is a day the Dashboard withholds and this released.
+       */
+      days: Map<string, { saleShopIds: string[]; refundShopIds: string[] }>;
     }
   >();
+  type MonthAccumulator = NonNullable<ReturnType<typeof months.get>>;
+  const monthFor = (month: string): MonthAccumulator =>
+    months.get(month)
+    ?? {
+      totalPaisa: null,
+      saleCount: 0,
+      shopIds: [],
+      saleShopIds: [],
+      days: new Map<string, { saleShopIds: string[]; refundShopIds: string[] }>(),
+    };
+  const dayFor = (
+    held: { days: Map<string, { saleShopIds: string[]; refundShopIds: string[] }> },
+    day: string,
+  ) => {
+    const existing = held.days.get(day) ?? { saleShopIds: [], refundShopIds: [] };
+    held.days.set(day, existing);
+    return existing;
+  };
+
   for (const row of [...sales.sales, ...sales.refunds]) {
     const month = row.businessDate.slice(0, 7);
-    const held = months.get(month)
-      ?? { totalPaisa: null, saleCount: 0, shopIds: [], saleShopIds: [] };
+    const held = monthFor(month);
     held.shopIds.push(row.shopId);
     months.set(month, held);
+  }
+  for (const row of sales.sales) {
+    const held = months.get(row.businessDate.slice(0, 7));
+    if (held !== undefined) dayFor(held, row.businessDate).saleShopIds.push(row.shopId);
+  }
+  for (const row of sales.refunds) {
+    const held = months.get(row.businessDate.slice(0, 7));
+    if (held !== undefined) dayFor(held, row.businessDate).refundShopIds.push(row.shopId);
   }
   // The COUNT is sale rows only — a refund is not a sale, and adding it would
   // make "how many sales" grow when money went back out. Its CONTRIBUTORS are
@@ -818,6 +905,9 @@ export async function analyticsOverview(
         saleCount: held.saleCount,
         shopIds: held.shopIds,
         saleShopIds: held.saleShopIds,
+        days: [...held.days.entries()]
+          .map(([day, sides]) => ({ day, ...sides }))
+          .sort((left, right) => left.day.localeCompare(right.day)),
       }))
       .sort((left, right) => left.month.localeCompare(right.month)),
     shopsByPlan: [
@@ -1695,13 +1785,31 @@ const MAX_CASES_FOR_NOTES = 20;
 
 export async function listShopSupportNotes(
   cases: readonly { id: string; summary: string }[],
-): Promise<{ notes: readonly ShopSupportNote[]; casesFollowed: number }> {
+): Promise<{
+  notes: readonly ShopSupportNote[];
+  casesFollowed: number;
+  /**
+   * ROUND 14 FINDING 12: TRUE when any followed case had older notes beyond
+   * the page that was read.
+   *
+   * Round 13 wired `olderWithheld` into the Support DETAIL view and this
+   * loader still called the wrapper that drops it, so the shop drill-down
+   * showed 500 of 501 notes with no warning. Its existing notice covers
+   * omitted CASES, which is a different omission.
+   */
+  olderNotesWithheld: boolean;
+}> {
   const followed = cases.slice(0, MAX_CASES_FOR_NOTES);
-  if (followed.length === 0) return { notes: [], casesFollowed: 0 };
+  if (followed.length === 0) {
+    return { notes: [], casesFollowed: 0, olderNotesWithheld: false };
+  }
 
+  let olderNotesWithheld = false;
   const perCase = await Promise.all(
     followed.map(async (entry) => {
-      const rows = await listSupportNotes(entry.id);
+      const page = await listSupportNotesPage(entry.id);
+      if (page.olderWithheld) olderNotesWithheld = true;
+      const rows = page.notes;
       return rows.map((row) => ({
         id: row.id,
         caseId: row.caseId,
@@ -1717,7 +1825,7 @@ export async function listShopSupportNotes(
     .flat()
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 
-  return { notes, casesFollowed: followed.length };
+  return { notes, casesFollowed: followed.length, olderNotesWithheld };
 }
 
 // ──────────────────────── §8.7 the support detail's account context

@@ -12,7 +12,6 @@ import { subscriptionsOverview, type SubscriptionsOverview } from '../../lib/adm
 import {
   LIFECYCLE_OVERRIDE_UNAVAILABLE,
   nextBillingBasisLabel,
-  SUBSCRIPTION_STATUS_FILTERS,
   upcomingExpirations,
   type SubscriptionDetailRow,
 } from '../../lib/adminSubscriptionViews';
@@ -22,6 +21,7 @@ import {
   formatDhakaDate,
   formatDhakaDateTime,
   statusLabel,
+  SUBSCRIPTION_STATUSES,
   tierLabel,
 } from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
@@ -55,8 +55,26 @@ export const dynamic = 'force-dynamic';
 /** §8.3's "upcoming expirations" horizon, the same seven days §8.1 alerts on. */
 const UPCOMING_DAYS = 7;
 
-/** The audit actions that are a change to a subscription or its payments. */
-const SUBSCRIPTION_AUDIT_PREFIXES = ['subscriptions.', 'payments.', 'accounts.'] as const;
+/**
+ * The audit actions that are a change to a subscription or its payments.
+ *
+ * ROUND 14 FINDING 8. These were the PLURAL namespaces only, and the writers
+ * emit singular ones too -- `subscription.extend`,
+ * `subscription.reconcile_limits`, `payment.expire_stale_order` -- so the real
+ * actions were invisible here and the page said nothing had been recorded.
+ *
+ * Both forms are listed rather than one being renamed, because an action name
+ * already written to a durable log cannot be renamed retroactively: a stored
+ * `subscription.extend` row has to stay findable.
+ */
+const SUBSCRIPTION_AUDIT_PREFIXES = [
+  'subscriptions.',
+  'subscription.',
+  'payments.',
+  'payment.',
+  'accounts.',
+  'account.',
+] as const;
 
 const COLUMNS: readonly DataColumn<SubscriptionDetailRow>[] = [
   { heading: 'Account', cell: (row) => row.accountLabel },
@@ -113,7 +131,11 @@ const AUDIT_COLUMNS: readonly DataColumn<AdminAuditEntry>[] = [
 
 const STATUS_OPTIONS = [
   { value: '', label: 'Any status' },
-  ...SUBSCRIPTION_STATUS_FILTERS.map((status) => ({ value: status, label: statusLabel(status) })),
+  // ROUND 14 FINDING 7: the five statuses `billing_subscriptions.status`
+  // allows, not the six entitlement ones. `trialing` is not among them -- a
+  // trial lives in the entitlement snapshot, which is the only record holding
+  // its end date -- so offering it here returned zero rows and zero total.
+  ...SUBSCRIPTION_STATUSES.map((status) => ({ value: status, label: statusLabel(status) })),
 ];
 
 type Result =

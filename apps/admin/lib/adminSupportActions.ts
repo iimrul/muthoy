@@ -121,7 +121,7 @@ export async function openSupportCase(
   const { shopId, category, priority, summary } = parsed.data;
 
   try {
-    await insertSupportCase(
+    const caseId = await insertSupportCase(
       { shopId, category, priority, summary, openedBy: session.username },
       storeDeps(deps),
     );
@@ -130,9 +130,13 @@ export async function openSupportCase(
         actor: session.username,
         role: session.role,
         action: 'support.case_open',
-        target: shopId,
+        // ROUND 14 FINDING 9: the CASE id, which is what the history reader
+        // matches on. `target: shopId` meant the opening event never appeared
+        // in the history of the case it opened.
+        target: caseId,
         outcome: 'success',
         reason: category + ' ' + priority,
+        caseId,
         shopId,
       },
       deps?.sinks,

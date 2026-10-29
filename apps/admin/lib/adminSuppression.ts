@@ -95,6 +95,75 @@ export function suppressSeriesBelowK<T>(
  * published bucket no longer depends on the requested window; see
  * `assertAnswerablePeriod` in adminReports.ts.
  */
+/** One day of a money bucket, split by the side that produced it. */
+export interface DaySides {
+  day: string;
+  saleShopIds: readonly string[];
+  refundShopIds: readonly string[];
+}
+
+/** Whether one SIDE of one day may be published on its own. */
+function sideReleasable(ids: readonly string[], k: number): boolean {
+  return ids.length === 0 || distinctCount(ids) >= k;
+}
+
+/** Whether a whole DAY may be published: every non-empty side clears the floor. */
+export function dayReleasable(day: DaySides, k: number = SUPPRESSION_K): boolean {
+  return sideReleasable(day.saleShopIds, k) && sideReleasable(day.refundShopIds, k);
+}
+
+/**
+ * Whether a MONTH may be published, given the days in it and the days whose
+ * money is published SOMEWHERE ELSE.
+ *
+ * ROUND 13 FINDING 2 established that composition has to hold downwards, and
+ * ROUND 14 FINDINGS 3 and 4 showed my first attempt was wrong twice over: it
+ * lived only in the report builder, and it checked the daily UNION while the
+ * Dashboard gates per side.
+ *
+ * My SECOND attempt -- "every day must be releasable" -- was sound and far too
+ * strict, which the reviewer also reproduced: six genuine one-pharmacy days
+ * hid a six-pharmacy monthly total that no query discloses. Refunds are rarer
+ * than sales, so almost every month contains a day with fewer than k
+ * refunders, and the panel would have withheld nearly every money figure it
+ * exists to show. Withholding everything is not privacy; it is a broken
+ * report that also happens to be private.
+ *
+ * So the rule is the composition rule on the partition that ACTUALLY EXISTS.
+ * Exactly one day's money is published anywhere in this panel: TODAY's net, on
+ * the Dashboard. For each such day D inside the month:
+ *
+ *   - if D is NOT releasable, the Dashboard withholds it, so there is nothing
+ *     to subtract and the month is unaffected;
+ *   - if D IS releasable, then month - D is derivable, so the REST of the
+ *     month must clear the floor per side as well.
+ *
+ * A day nobody publishes constrains nothing, which is why a historical month
+ * is unaffected. `publishedDays` is passed in rather than read from a clock
+ * here, so the rule is testable at a fixed date and so a future page that
+ * publishes another day's money has exactly one place to declare it.
+ */
+export function daysReleasable(
+  days: readonly DaySides[],
+  publishedDays: readonly string[] = [],
+  k: number = SUPPRESSION_K,
+): boolean {
+  for (const published of publishedDays) {
+    const day = days.find((candidate) => candidate.day === published);
+    if (day === undefined) continue;
+    // Withheld there, so not subtractable from here.
+    if (!dayReleasable(day, k)) continue;
+
+    const rest = days.filter((candidate) => candidate.day !== published);
+    const restSales = rest.flatMap((candidate) => [...candidate.saleShopIds]);
+    const restRefunds = rest.flatMap((candidate) => [...candidate.refundShopIds]);
+    // An empty rest is not a disclosure: month - D = nothing.
+    if (restSales.length === 0 && restRefunds.length === 0) continue;
+    if (!sideReleasable(restSales, k) || !sideReleasable(restRefunds, k)) return false;
+  }
+  return true;
+}
+
 export function suppressTotalAcrossBuckets<T>(
   total: T,
   buckets: readonly Aggregate<unknown>[],

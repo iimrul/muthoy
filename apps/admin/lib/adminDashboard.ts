@@ -280,6 +280,18 @@ export function dhakaDayLabel(isoTimestamp: string): string | null {
 }
 
 /**
+ * TODAY's Dhaka business date.
+ *
+ * ROUND 14's relaxation of the sub-period rule needs to know which day's money
+ * is published elsewhere, and exactly one is: today's net, on the Dashboard.
+ * Injectable so the rule is testable at a fixed date rather than against
+ * whatever day the suite happens to run on.
+ */
+export function dhakaTodayLabel(nowMs: number = Date.now()): string {
+  return dhakaDayLabel(new Date(nowMs).toISOString()) ?? '';
+}
+
+/**
  * The Dhaka calendar MONTH a UTC instant falls in, as `YYYY-MM`.
  *
  * ROUND 11 FINDING 8. Two places sliced the ISO string — `collectedPaymentsByMonth`

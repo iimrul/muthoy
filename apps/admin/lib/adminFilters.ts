@@ -369,7 +369,10 @@ export function applyShopListFilters<B extends ListFilterBuilder>(
   // `lte('created_at', '2026-10-25')` would exclude everything that happened
   // after midnight on the 25th, which is the whole of the 25th.
   if (query.from !== undefined) next = next.gte(dateColumn, dhakaDayStartIso(query.from));
-  if (query.to !== undefined) next = next.lte(dateColumn, dhakaDayEndIso(query.to));
+  // ROUND 14 FINDING 10: the last bound that was still inclusive. A pharmacy
+  // registered at `2026-10-31T23:59:59.999500+06:00` was outside the range and
+  // outside the pager's count, so the list and its total both omitted it.
+  if (query.to !== undefined) next = next.lt(dateColumn, dhakaDayAfterIso(query.to));
 
   return next;
 }

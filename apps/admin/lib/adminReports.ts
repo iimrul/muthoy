@@ -48,7 +48,7 @@ import {
 } from '@muthoy/utils';
 import { ADMIN_REPORT_IDS, type AdminReportExportQuery } from '@muthoy/validation';
 import { CSV_CONTENT_TYPE, contentDisposition, toCsv, type CsvDocument } from './adminCsv';
-import { dhakaDayLabel, dhakaMonthLabel } from './adminDashboard';
+import { dhakaDayLabel, dhakaMonthLabel, dhakaTodayLabel } from './adminDashboard';
 import { dhakaDayAfterIso, dhakaDayStartIso } from './adminFilters';
 import {
   collectedPaymentsByMonth,
@@ -60,8 +60,10 @@ import { PDF_CONTENT_TYPE, PDF_LATIN1_NOTICE, toPdf } from './adminPdf';
 import {
   SUPPRESSED_EXPORT,
   SUPPRESSION_K,
+  daysReleasable,
   suppressBelowK,
   type Aggregate,
+  type DaySides,
 } from './adminSuppression';
 import { formatCount, type PaymentOrderRow, type SubscriptionRow } from './adminViews';
 
@@ -229,6 +231,11 @@ export interface ReportDefinition {
 }
 
 function definition(entry: ReportDefinition): ReportDefinition {
+  // DEEP. Round 14 finding 2: `Object.freeze(entry)` left `entry.columns`
+  // writable, so `defineProperty(columns, '1', { value: <net label> })` gave a
+  // non-money report the canonical net-money heading before the first build --
+  // and every later table legitimately carried it.
+  Object.freeze(entry.columns);
   return Object.freeze(entry);
 }
 
@@ -460,12 +467,41 @@ export interface ReportTable {
  */
 const AUTHENTIC_TABLES = new WeakSet<object>();
 
-/** Freezes and registers a table. The only way one is created. */
+/**
+ * What each authentic table ACTUALLY holds.
+ *
+ * ROUND 14 FINDINGS 1 and 2. Round 13 registered the table object and then
+ * read its public fields, and `Object.freeze` is SHALLOW:
+ *
+ *   Object.defineProperty(table.rows[0], 'map', {
+ *     value: () => ['2026-10', '999.00'],
+ *   });
+ *
+ * froze nothing that mattered -- the inner row arrays were not frozen, and
+ * overriding `map` on one of them meant `toTextRows` never called
+ * `netCellText` at all. 999.00 went out through the CSV, the PDF and the
+ * screen with authenticity intact.
+ *
+ * So the registry stops being a yes/no and becomes the SOURCE. The cells and
+ * the captions this module computed are kept here, privately, and every
+ * output path reads them from this map rather than from the table it was
+ * handed. `table.rows` is a convenience for a caller that wants to count
+ * them; nothing trusts it. Mutating it, redefining a method on it, or
+ * replacing it entirely changes nothing that is exported.
+ */
+const MINTED = new WeakMap<object, { columns: readonly string[]; rows: readonly (readonly ReportCell[])[] }>();
+
+/** Freezes deeply, registers, and records what was built. */
 function mintTable(table: ReportTable): ReportTable {
-  Object.freeze(table.columns);
-  Object.freeze(table.rows);
+  // Deep, because round 14 finding 1 walked through the shallow version. The
+  // freeze is defence in depth now rather than the mechanism: the WeakMap
+  // above is what the serializer reads.
+  const columns = Object.freeze([...table.columns]);
+  const rows = Object.freeze(table.rows.map((row) => Object.freeze([...row])));
+  Object.freeze(table.tallies);
   Object.freeze(table);
   AUTHENTIC_TABLES.add(table);
+  MINTED.set(table, { columns, rows });
   return table;
 }
 
@@ -626,6 +662,16 @@ interface AggregateRow {
    * Revenue total, applied downwards instead of upwards.
    */
   subPeriodContributorIds?: readonly (readonly string[])[];
+  /**
+   * The sub-periods, SPLIT BY SIDE.
+   *
+   * ROUND 14 FINDING 4. `subPeriodContributorIds` carried the daily UNION, and
+   * the Dashboard gates per side — so a day with five sellers and ONE refunder
+   * is withheld there and was released here, and the month revealed exactly
+   * the day the Dashboard had refused. Same question, same answer, one
+   * predicate: `daysReleasable`.
+   */
+  subPeriodDays?: readonly DaySides[];
 }
 
 /**
@@ -696,6 +742,7 @@ function toTextRows(
 function suppressRows(
   rows: readonly AggregateRow[],
   netIndexes: readonly number[],
+  publishedMoneyDays: readonly string[],
 ): {
   rows: readonly (readonly ReportCell[])[];
   suppressedBuckets: number;
@@ -726,7 +773,12 @@ function suppressRows(
       (contributors) =>
         contributors.length > 0
         && suppressBelowK({ value: null, contributingShopIds: contributors }).suppressed,
-    );
+    )
+    // Round 14 finding 4: per side, through the shared predicate the pages
+    // use -- and only against the day whose money is published elsewhere,
+    // which is today's net on the Dashboard. See `daysReleasable`.
+    || (row.subPeriodDays !== undefined
+      && !daysReleasable(row.subPeriodDays, publishedMoneyDays));
   const out: (readonly ReportCell[])[] = [];
   let suppressedBuckets = 0;
 
@@ -1019,19 +1071,24 @@ function buildPharmacySalesByMonth(
         ...monthSales.map((row) => row.shopId),
         ...monthRefunds.map((row) => row.shopId),
       ],
-      // Round 13 finding 2: the DAYS inside this month, each with its own
-      // contributors. The Dashboard publishes a day; this publishes a month;
-      // the difference between them is a day's worth of pharmacies, and a day
-      // behind fewer than k of them must not be recoverable that way.
-      subPeriodContributorIds: [
+      // Round 13 finding 2 / ROUND 14 FINDING 4: the DAYS inside this month,
+      // split by SIDE. The Dashboard publishes a day and gates each side on
+      // its own contributors; a union here released a day it withheld.
+      subPeriodDays: [
         ...new Set([...monthSales, ...monthRefunds].map((row) => row.businessDate)),
-      ].map((day) => [
-        ...new Set(
-          [...monthSales, ...monthRefunds]
-            .filter((row) => row.businessDate === day)
-            .map((row) => row.shopId),
-        ),
-      ]),
+      ].map((day) => ({
+        day,
+        saleShopIds: [
+          ...new Set(
+            monthSales.filter((row) => row.businessDate === day).map((row) => row.shopId),
+          ),
+        ],
+        refundShopIds: [
+          ...new Set(
+            monthRefunds.filter((row) => row.businessDate === day).map((row) => row.shopId),
+          ),
+        ],
+      })),
     };
   });
 }
@@ -1058,7 +1115,19 @@ export function buildReportTable(
   reportId: string,
   data: ReportData,
   query: AdminReportExportQuery,
+  options: {
+    /**
+     * The days whose money is published elsewhere in this panel.
+     *
+     * Exactly one is, in the shipped panel: today's net on the Dashboard. A
+     * month containing it is releasable only if the REST of that month also
+     * clears the floor, because month minus a published day is derivable.
+     * Injected so the rule is testable at a fixed date.
+     */
+     publishedMoneyDays?: readonly string[];
+  } = {},
 ): ReportTable {
+  const publishedMoneyDays = options.publishedMoneyDays ?? [dhakaTodayLabel()];
   const entry = requireReportDefinition(reportId);
   assertCompleteRead(data.tallies);
 
@@ -1090,7 +1159,7 @@ export function buildReportTable(
   const { cells, suppressedBuckets } =
     entry.kind === 'aggregate'
       ? (() => {
-          const gated = suppressRows(built, netIndexes);
+          const gated = suppressRows(built, netIndexes, publishedMoneyDays);
           return { cells: gated.rows, suppressedBuckets: gated.suppressedBuckets };
         })()
       : {
@@ -1154,12 +1223,33 @@ export function reportTextRows(table: ReportTable): readonly (readonly string[])
   // net columns from `reportId` was not enough while `reportId` was itself a
   // field a caller could replace.
   assertAuthenticReportTable(table);
+  // Round 14 finding 1: the MINTED cells, not `table.rows`. A row array whose
+  // `map` was redefined is not consulted, because nothing here reads the
+  // public field.
+  const minted = MINTED.get(table);
+  if (minted === undefined) throw new ReportTableProvenanceError();
   const entry = requireReportDefinition(table.reportId);
-  return toTextRows(table.rows, netValueIndexes(entry));
+  return toTextRows(minted.rows, netValueIndexes(entry));
+}
+
+/**
+ * The COLUMN HEADINGS as minted, for a serializer.
+ *
+ * Round 14 finding 2 mutated a frozen definition's `columns` array with
+ * `defineProperty` before the first build, so a `plan_distribution` table
+ * acquired the canonical net-money heading and published `pro,5` under it.
+ * The definitions are deep-frozen now, and this reads the minted copy rather
+ * than the live array either way.
+ */
+export function reportTextColumns(table: ReportTable): readonly string[] {
+  assertAuthenticReportTable(table);
+  const minted = MINTED.get(table);
+  if (minted === undefined) throw new ReportTableProvenanceError();
+  return minted.columns;
 }
 
 export function reportToCsvDocument(table: ReportTable): CsvDocument {
-  return { headers: table.columns, rows: reportTextRows(table) };
+  return { headers: reportTextColumns(table), rows: reportTextRows(table) };
 }
 
 export function reportToCsv(table: ReportTable): string {
@@ -1170,7 +1260,7 @@ export function reportToPdf(table: ReportTable): string {
   return toPdf({
     title: table.title,
     subtitle: table.subtitle,
-    headers: table.columns,
+    headers: reportTextColumns(table),
     rows: reportTextRows(table),
   });
 }

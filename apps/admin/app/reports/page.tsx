@@ -12,6 +12,7 @@ import {
   buildReport,
   reportDefinition,
   reportMetric,
+  reportTextColumns,
   reportTextRows,
   type ReportTable,
 } from '../../lib/adminReports';
@@ -135,7 +136,12 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   // verifies every refund-net cell and is the only thing that turns one into
   // text, so this page, the CSV and the PDF all cross the same boundary.
   // Indexing `result.table.rows` for display is a type error now.
+  // ROUND 12 FINDING 4 / ROUND 14 FINDINGS 1-2: both the cells and the
+  // HEADINGS come from what the module minted, not from the table's public
+  // fields. A heading is what makes a figure a money figure to a reader, so it
+  // has to cross the same boundary the figure does.
   const textRows = result !== null && result.ok ? reportTextRows(result.table) : [];
+  const textColumns = result !== null && result.ok ? reportTextColumns(result.table) : [];
 
   return (
     <>
@@ -234,7 +240,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
               </caption>
               <thead>
                 <tr className="border-b border-black/10 text-left">
-                  {result.table.columns.map((column) => (
+                  {textColumns.map((column) => (
                     <th key={column} scope="col" className="py-1 font-medium">
                       {column}
                     </th>

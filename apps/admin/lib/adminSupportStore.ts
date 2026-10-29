@@ -220,22 +220,41 @@ export interface SupportCaseInsert {
 export async function insertSupportCase(
   input: SupportCaseInsert,
   deps?: AdminSupportStoreDeps,
-): Promise<void> {
+): Promise<string> {
   const nowIso = nowFor(deps).toISOString();
-  const { error } = await clientFor(deps).from('admin_support_cases').insert({
-    shop_id: input.shopId,
-    category: input.category,
-    priority: input.priority,
-    summary: input.summary,
-    opened_by: input.openedBy,
-    opened_at: nowIso,
-    updated_at: nowIso,
-  });
+  // ROUND 14 FINDING 9: INSERT ... RETURNING id.
+  //
+  // This returned void, so the opening audit entry had no case id to record --
+  // it filed `target: shopId` and no `meta.caseId`, and the case-history
+  // reader matches on the case id in both. Every successful opening event
+  // therefore failed to appear in the history of the case it opened, which is
+  // the one event a case's history most obviously needs.
+  const { data, error } = await clientFor(deps)
+    .from('admin_support_cases')
+    .insert({
+      shop_id: input.shopId,
+      category: input.category,
+      priority: input.priority,
+      summary: input.summary,
+      opened_by: input.openedBy,
+      opened_at: nowIso,
+      updated_at: nowIso,
+    })
+    .select('id')
+    .single();
 
   if (error) {
     console.error('[admin] admin_support_cases insert failed:', error.message);
     throw new AdminDataError('support case write failed');
   }
+  const caseId = (data as { id?: unknown } | null)?.id;
+  if (typeof caseId !== 'string' || caseId.length === 0) {
+    // The row committed but its id did not come back, so the audit entry could
+    // not name it. Raising is right: a case nobody can find in the history is
+    // worse than a refused open the operator can retry.
+    throw new AdminDataError('support case write returned no id');
+  }
+  return caseId;
 }
 
 export interface SupportCaseUpdate {

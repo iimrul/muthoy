@@ -39,7 +39,24 @@ export const LIFECYCLE_OVERRIDE_UNAVAILABLE =
   + 'a separately approved audited server API — that is gate E10. No control on this page '
   + 'writes to a subscription, an entitlement or a billing account.';
 
-/** §8.3's six statuses, in lifecycle order rather than alphabetical. */
+/**
+ * The ENTITLEMENT statuses, in lifecycle order rather than alphabetical.
+ *
+ * ROUND 14 FINDING 7. This list was offered as the filter on BOTH the maps
+ * page and the subscriptions page, and the two filter different columns:
+ *
+ *   - `/maps` filters `entitlement_snapshots.status`, which genuinely holds
+ *     `trialing` — a trial is an entitlement, and the snapshot is the only
+ *     record that carries its end date;
+ *   - `/subscriptions` filters `billing_subscriptions.status`, whose CHECK is
+ *     `('active','past_due','grace','canceled','expired')`. There is no
+ *     `trialing` row for it to find, so the option returned zero rows and
+ *     zero total — a filter that reads as "there are no trials".
+ *
+ * So this one keeps the six, for the entitlement-backed view, and the
+ * subscriptions page uses `SUBSCRIPTION_STATUSES` — the five its own column
+ * allows. The name says `FILTERS` rather than `STATUSES` for that reason.
+ */
 export const SUBSCRIPTION_STATUS_FILTERS = Object.freeze([
   'trialing',
   'active',
