@@ -176,9 +176,20 @@ export default async function DashboardPage() {
     contributors.length > 0
     && suppressBelowK({ value: null, contributingShopIds: contributors }).suppressed;
 
-  const netTodayWithheld =
-    sideWithheld(stats.saleContributorShopIds)
-    || sideWithheld(stats.refundContributorShopIds);
+  const saleSideWithheld = sideWithheld(stats.saleContributorShopIds);
+  const refundSideWithheld = sideWithheld(stats.refundContributorShopIds);
+  const netTodayWithheld = saleSideWithheld || refundSideWithheld;
+  /**
+   * WHICH SIDE actually failed, because round 1B finding 7 caught the caption
+   * telling the truth's opposite: ten pharmacies sold and two refunded, and the
+   * panel said "fewer than five pharmacies recorded a sale". The sale side had
+   * ten. Naming the wrong side is worse than naming no side, because an
+   * operator acts on it -- and the activity chart beside it was already
+   * publishing the ten.
+   */
+  const withheldReason = saleSideWithheld
+    ? 'Withheld: fewer than five pharmacies recorded a sale on this business date.'
+    : 'Withheld: fewer than five pharmacies recorded a refund on this business date.';
 
   const alerts = dashboardAlerts({ shops, subscriptions, entitlements, orders, events }, nowMs);
   const raisedAlerts = alerts.filter((alert) => alert.count > 0).length;
@@ -244,7 +255,7 @@ export default async function DashboardPage() {
           value={netTodayWithheld ? EMPTY_VALUE : formatCount(activeToday)}
           note={
             netTodayWithheld
-              ? 'Withheld: fewer than five pharmacies recorded a sale on this business date.'
+              ? withheldReason
               : 'Distinct pharmacies that recorded a sale on this business date.'
           }
           href="/analytics"
@@ -308,7 +319,7 @@ export default async function DashboardPage() {
           // to withhold.
           composition={
             netTodayWithheld
-              ? `All shops · ${stats.day.businessDate} (Asia/Dhaka) · withheld: fewer than ${SUPPRESSION_K} pharmacies contributed`
+              ? `All shops · ${stats.day.businessDate} (Asia/Dhaka) · withheld: fewer than ${SUPPRESSION_K} pharmacies recorded a ${saleSideWithheld ? 'sale' : 'refund'}`
               : `All shops · ${stats.day.businessDate} (Asia/Dhaka) · gross ${formatMoney(stats.grossSalesToday)} less refunds ${formatMoney(stats.refundsToday)}`
           }
         />

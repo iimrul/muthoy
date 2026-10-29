@@ -17,6 +17,7 @@
 
 import { describe, expect, test } from 'vitest';
 import { asPaisa } from '@muthoy/types';
+import { parseCsv } from '@muthoy/utils';
 import { ADMIN_REPORT_IDS, adminReportExportQuerySchema } from '@muthoy/validation';
 import { requireMetric } from './adminMetrics';
 import { SUPPRESSED_DISPLAY, SUPPRESSION_K } from './adminSuppression';
@@ -1033,6 +1034,43 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
   // the honest one. What the rule distinguishes now is pinned by
   // 'a money bucket at k ANSWERS when k pharmacies refunded' and
   // 'one refunding pharmacy anywhere in the month withholds it'.
+
+  test('a withheld CSV says so IN THE FILE, and still parses', () => {
+    // ROUND 1B FINDING 6. The PDF carried the title and subtitle; the CSV
+    // carried neither. A downloaded file therefore held a month and an empty
+    // amount with nothing to say the amount was WITHHELD rather than zero --
+    // and on its own, a blank reads as "nothing happened".
+    // A withheld month, built the same way as its neighbour below: one
+    // refunding pharmacy is under the floor, so the amount is withheld.
+    const base = october();
+    const withheld = buildReportTable(
+      'refund_net_pharmacy_sales',
+      data({
+        sales: base.sales,
+        refunds: [saleTotal(1, { businessDate: '2026-10-01', totalPaisa: asPaisa(2_000) })],
+        tallies: base.tallies,
+      }),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
+    );
+    expect(reportTextRows(withheld)).toEqual([['2026-10', '']]);
+
+    const csv = reportToCsv(withheld);
+
+    expect(csv).toContain('A blank amount is a WITHHELD figure, not an absence of activity.');
+    // And the report's own title and subtitle, which only the PDF carried.
+    expect(csv).toContain(withheld.title);
+    expect(csv).toContain(withheld.subtitle);
+
+    // And it is still a CSV this panel's own parser accepts. The notes are
+    // padded to the header width because `parseCsv` refuses a file whose rows
+    // disagree on column count -- a one-field preamble would have produced
+    // exports we could not read back.
+    const parsed = parseCsv(csv);
+    const widths = new Set(parsed.map((row) => row.length));
+    expect(widths.size).toBe(1);
+    // The data row survives the preamble, blank amount and all.
+    expect(parsed.at(-1)).toEqual(['2026-10', '']);
+  });
 
   test('a sales-only month has no refund to disclose, so it answers', () => {
     // ROUND 15 FINDINGS 1 and 2 replaced the published-day rule with the

@@ -798,6 +798,35 @@ describe('§8.1 the Dashboard renders its nine figures and all five alerts', () 
     seedPlatform();
   });
 
+  test('the withheld caption names the side that FAILED, not the other one', async () => {
+    // ROUND 1B FINDING 7. Five pharmacies sold and two refunded, so the SALE
+    // side clears the floor and the REFUND side does not -- and the panel said
+    // "fewer than five pharmacies recorded a sale". That is the opposite of
+    // what happened, next to an activity chart already publishing the five.
+    // Naming the wrong side is worse than naming no side: an operator acts on
+    // it.
+    clientBox.rowsByTable.sales = Array.from({ length: 5 }, (_unused, index) => ({
+      id: 's' + index,
+      shop_id: '7b000000-0000-4000-8000-00000000002' + index,
+      business_date: '2026-09-10',
+      total: 10_000,
+      created_at: '2026-09-10T00:00:00.000Z',
+    }));
+    clientBox.rowsByTable.sale_refunds = Array.from({ length: 2 }, (_unused, index) => ({
+      id: 'r' + index,
+      shop_id: '7b000000-0000-4000-8000-00000000002' + index,
+      business_date: '2026-09-10',
+      total_amount: 100,
+      created_at: '2026-09-10T00:00:00.000Z',
+    }));
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./page');
+
+    expect(html).toContain('recorded a refund');
+    expect(html).not.toContain('fewer than five pharmacies recorded a sale');
+  });
+
   test('an authorized role reaches every source table it needs', async () => {
     await signInAs('founder', 'super_admin');
 

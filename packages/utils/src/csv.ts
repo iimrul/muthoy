@@ -3,6 +3,16 @@ export const MAX_INVENTORY_CSV_ROWS = 1000;
 
 export function parseCsv(text: string, maxRows = MAX_INVENTORY_CSV_ROWS): string[][] {
   if (new TextEncoder().encode(text).length > MAX_INVENTORY_CSV_BYTES) throw new Error('CSV exceeds 2 MiB');
+  // A LEADING BOM IS NOT PART OF THE FIRST FIELD.
+  //
+  // Found by round 1B finding 6's regression test, and it was a real defect
+  // rather than a test artefact: quoted mode is entered only when the field is
+  // still empty, so a BOM sitting in front of an opening quote left the field
+  // unquoted and an embedded comma then split it. This panel's own CSV writer
+  // emits a BOM, so the panel could not read back a file whose first field was
+  // quoted -- and Excel writes that shape too, which is what the inventory
+  // import is given.
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';

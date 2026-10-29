@@ -1236,7 +1236,19 @@ export function reportTextColumns(table: ReportTable): readonly string[] {
 }
 
 export function reportToCsvDocument(table: ReportTable): CsvDocument {
-  return { headers: reportTextColumns(table), rows: reportTextRows(table) };
+  return {
+    headers: reportTextColumns(table),
+    rows: reportTextRows(table),
+    // The same two sentences the screen and the PDF carry. The second one is
+    // the whole of round 1B finding 6: within one report a blank amount can
+    // only ever be a withheld figure, because a bucket that answers prints a
+    // number -- but a reader holding the file alone has no way to know that
+    // convention, and a blank reads as "nothing happened".
+    notes: [
+      table.title + ' — ' + table.subtitle,
+      'A blank amount is a WITHHELD figure, not an absence of activity.',
+    ],
+  };
 }
 
 export function reportToCsv(table: ReportTable): string {

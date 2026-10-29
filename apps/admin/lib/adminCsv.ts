@@ -71,6 +71,21 @@ export function csvRow(fields: readonly string[]): string {
 export interface CsvDocument {
   headers: readonly string[];
   rows: readonly (readonly string[])[];
+  /**
+   * Lines placed ABOVE the header row, each in the first column.
+   *
+   * ROUND 1B FINDING 6. The PDF carries the report's title and subtitle and
+   * the CSV carried neither, so a downloaded file held a month and an empty
+   * amount and nothing to say the amount was WITHHELD rather than zero. On
+   * screen the subtitle and a tooltip say so; detached from the page, the file
+   * said nothing at all.
+   *
+   * Padded to the header width rather than written as a short row, because
+   * `parseCsv` refuses a file whose rows disagree on column count -- a
+   * one-field preamble would have made this panel's own exports unreadable by
+   * this panel's own parser.
+   */
+  notes?: readonly string[];
 }
 
 /**
@@ -81,7 +96,11 @@ export interface CsvDocument {
  * write.
  */
 export function toCsv(document: CsvDocument): string {
-  const lines = [csvRow(document.headers), ...document.rows.map(csvRow)];
+  const width = document.headers.length;
+  const notes = (document.notes ?? []).map((note) =>
+    csvRow([note, ...Array.from({ length: Math.max(0, width - 1) }, () => '')]),
+  );
+  const lines = [...notes, csvRow(document.headers), ...document.rows.map(csvRow)];
   return UTF8_BOM + lines.join(CSV_LINE_ENDING) + CSV_LINE_ENDING;
 }
 
