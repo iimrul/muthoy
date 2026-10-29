@@ -7,6 +7,7 @@
 // granted.
 
 import { readdirSync, readFileSync } from 'node:fs';
+import ts from 'typescript';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { ADMIN_ROLE_NAME_VALUES } from '@muthoy/validation';
@@ -246,65 +247,148 @@ describe('parseAdminRoles fails closed', () => {
   });
 });
 
-describe('ROUND 11 FINDING 6: every declared permission has an enforcement point', () => {
+describe('ROUND 11 FINDING 6 / ROUND 12 FINDING 9: every permission has a SERVER gate', () => {
   // THE DEFECT THIS GENERALISES. `audit.export` was declared here, granted to
-  // super_admin alone, and documented in §4.4 -- and checked by nothing. There
-  // was no handler and no download, so the role matrix advertised a capability
-  // the panel did not have. A permission with no enforcement point is not an
-  // access control; it is a line in a document.
+  // super_admin alone, and documented in 4.4 -- and checked by nothing. A
+  // permission with no enforcement point is not an access control; it is a
+  // line in a document.
   //
-  // So rather than one test for one endpoint, this asserts the PROPERTY: a
-  // name in ADMIN_PERMISSIONS must be checked somewhere in the shipped code.
-  // It fails on the next permission added without a gate, which is the class
-  // of defect rather than the instance.
+  // ROUND 12 FINDING 9 -- MY FIRST VERSION OF THIS GUARD WAS TOO WEAK. It
+  // accepted `permissions.includes(...)` as enforcement, and it read comments.
+  // The reviewer deleted the real Settings write gate in memory and the guard
+  // still answered true, purely because the page renders a permission-
+  // dependent control. Hiding a button is not an access control: the URL can
+  // be typed and the action can be invoked.
+  //
+  // So the requirement is a SERVER gate -- `requireAdminPermission` -- and the
+  // scan reads code with comments blanked. A visibility check no longer
+  // satisfies anything on its own.
 
   const ROOTS = ['app', 'lib', 'components'] as const;
   const IGNORED = new Set(['node_modules', '.next']);
 
-  function sources(directory: string): string[] {
+  /** Source text with every comment blanked, same length. */
+  function codeOf(text: string): string {
+    const file = ts.createSourceFile(
+      'scanned.tsx',
+      text,
+      ts.ScriptTarget.ES2022,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    const ranges: ts.CommentRange[] = [];
+    const collectAt = (position: number): void => {
+      ranges.push(
+        ...(ts.getLeadingCommentRanges(text, position) ?? []),
+        ...(ts.getTrailingCommentRanges(text, position) ?? []),
+      );
+    };
+    const visit = (node: ts.Node): void => {
+      collectAt(node.pos);
+      node.forEachChild(visit);
+    };
+    visit(file);
+    collectAt(file.endOfFileToken.pos);
+
+    const LF = String.fromCharCode(10);
+    const CR = String.fromCharCode(13);
+    const SPACE = String.fromCharCode(32);
+    const out = text.split('');
+    for (const range of ranges) {
+      for (let index = range.pos; index < range.end && index < out.length; index += 1) {
+        if (out[index] !== LF && out[index] !== CR) out[index] = SPACE;
+      }
+    }
+    return out.join('');
+  }
+
+  function sources(directory: string): { path: string; code: string }[] {
     return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
       const absolute = join(directory, entry.name);
       if (entry.isDirectory()) return IGNORED.has(entry.name) ? [] : sources(absolute);
-      if (!/\.(ts|tsx)$/.test(entry.name)) return [];
+      if (!/[.](ts|tsx)$/.test(entry.name)) return [];
       // Shipped code only: a permission "enforced" inside a test is not
       // enforced at all, and counting test files would make this vacuous.
-      if (/\.test\.tsx?$/.test(entry.name)) return [];
-      return [readFileSync(absolute, 'utf8')];
+      if (/[.]test[.]tsx?$/.test(entry.name)) return [];
+      return [{ path: absolute, code: codeOf(readFileSync(absolute, 'utf8')) }];
     });
   }
 
-  const SHIPPED = ROOTS.flatMap((root) =>
-    sources(join(import.meta.dirname, '..', root)),
-  ).join(String.fromCharCode(10));
+  const SHIPPED = ROOTS.flatMap((root) => sources(join(import.meta.dirname, '..', root)));
+  const CODE = SHIPPED.map((file) => file.code).join(String.fromCharCode(10));
 
-  test('the scan found the shipped code at all, or every case below is vacuous', () => {
-    // Non-vacuity. An empty haystack would make every `includes` below false
-    // and fail loudly, but the anchor is asserted anyway so a future change to
-    // the walk cannot quietly narrow what it reads.
-    expect(SHIPPED.length).toBeGreaterThan(50_000);
-    expect(SHIPPED).toContain('requireAdminPermission');
+  /**
+   * The ONE permission enforced without `requireAdminPermission`, and why.
+   *
+   * `shop_audit.read` gates the per-shop audit view INSIDE the /audit page's
+   * loader: without it the loader returns `forbidden` and issues no query at
+   * all, so a caller cannot even learn whether a shop id exists. That is a
+   * server-side refusal before any read, which is what matters -- it is simply
+   * not spelled `requireAdminPermission`, because the page is already gated on
+   * `audit.read` and this is a narrower second check within it.
+   *
+   * The exemption is BACKED by the test below, so it fails if that loader
+   * stops refusing.
+   */
+  const SERVER_GATE_EXEMPT = new Set(['shop_audit.read']);
+
+  test('the scan found the shipped code, or every case below is vacuous', () => {
+    expect(CODE.length).toBeGreaterThan(50_000);
+    expect(CODE).toContain('requireAdminPermission');
+    // And the comment blanking actually happened: this phrase appears only
+    // inside comments in the shipped tree.
+    expect(CODE).not.toContain('GATE 5 FINDING');
   });
 
   for (const permission of ADMIN_PERMISSIONS) {
-    test(permission + ' is checked by shipped code, not only declared', () => {
-      // The two forms the codebase uses: a route or page gate, and a
-      // capability test for offering an action.
-      const gated = SHIPPED.includes("requireAdminPermission('" + permission + "')");
-      const offered = SHIPPED.includes("permissions.includes('" + permission + "')");
-
+    test(permission + ' is gated on the SERVER, not merely hidden in the UI', () => {
+      if (SERVER_GATE_EXEMPT.has(permission)) {
+        expect(CODE).toContain("permissions.includes('" + permission + "')");
+        return;
+      }
       expect(
-        gated || offered,
-        permission + ' is granted by the role matrix but enforced nowhere',
+        CODE.includes("requireAdminPermission('" + permission + "'"),
+        permission + ' has no requireAdminPermission gate in shipped code',
       ).toBe(true);
     });
   }
 
+  test('the shop_audit.read exemption is EARNED: it refuses before reading', () => {
+    const page = SHIPPED.find((file) => file.path.endsWith(join('app', 'audit', 'page.tsx')));
+    expect(page, 'the audit page is not in the scan').toBeDefined();
+    const code = page?.code ?? '';
+
+    const check = code.indexOf("permissions.includes('shop_audit.read')");
+    expect(check, 'the shop_audit.read check is gone').toBeGreaterThan(-1);
+
+    // The refusal is in the SAME statement as the check, so there is no path
+    // between them on which a read could happen first. Measured FORWARD from
+    // the check rather than against the file's first `forbidden`, which my
+    // first version did -- and that one sits 684 characters EARLIER, in the
+    // result type, so the assertion was comparing the wrong pair.
+    const statement = code.slice(check, check + 120);
+    expect(statement, 'the check no longer refuses on the spot').toContain("'forbidden'");
+    expect(statement.slice(0, statement.indexOf("'forbidden'"))).not.toContain('await');
+  });
+
+  test('MUTATION: a guard that accepted visibility checks would pass this', () => {
+    // Round 12 finding 9's reproduction. With the real gate removed, the old
+    // version of this guard still answered true for settings.write because the
+    // page offers a permission-dependent control. The strengthened rule looks
+    // for the SERVER gate, so the same mutant now fails it.
+    const mutant = CODE.split("requireAdminPermission('settings.write'").join(
+      "requireAdminPermission('settings.read'",
+    );
+
+    expect(mutant.includes("requireAdminPermission('settings.write'")).toBe(false);
+    // The visibility check survives the mutation, which is exactly why it
+    // cannot be what this guard accepts.
+    expect(mutant).toContain("permissions.includes('settings.write')");
+  });
+
   test('audit.export is enforced by a ROUTE, not only by hiding a link', () => {
-    // Hiding the link is not an access control: the URL can be typed. Finding
-    // 6's fix is the handler; the link is a convenience on top of it.
-    const route = readFileSync(
-      join(import.meta.dirname, '..', 'app/api/audit/export/route.ts'),
-      'utf8',
+    const route = codeOf(
+      readFileSync(join(import.meta.dirname, '..', 'app/api/audit/export/route.ts'), 'utf8'),
     );
 
     expect(route).toContain("requireAdminPermission('audit.export')");
@@ -323,15 +407,13 @@ describe('ROUND 11 FINDING 6: every declared permission has an enforcement point
   });
 
   test('a role may READ the audit without being able to EXPORT it', () => {
-    // The split `reports.export` makes, for the same reason: looking at a
-    // denial on screen is not carrying a file of them out of the building.
-    const readers = ADMIN_ROLE_NAMES.filter((role) => permissionsForRole(role).includes('audit.read'));
+    const readers = ADMIN_ROLE_NAMES.filter((role) =>
+      permissionsForRole(role).includes('audit.read'),
+    );
     const readOnly = readers.filter(
       (role) => !permissionsForRole(role).includes('audit.export'),
     );
 
-    // Non-vacuous in both directions: somebody reads it, and not everybody who
-    // reads it may export it.
     expect(readers.length).toBeGreaterThan(1);
     expect(readOnly.length).toBeGreaterThan(0);
   });

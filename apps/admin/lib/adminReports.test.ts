@@ -17,6 +17,7 @@
 
 import { describe, expect, test } from 'vitest';
 import { asPaisa } from '@muthoy/types';
+import { NetSalesProvenanceError } from '@muthoy/utils';
 import { ADMIN_REPORT_IDS, adminReportExportQuerySchema } from '@muthoy/validation';
 import { requireMetric } from './adminMetrics';
 import { SUPPRESSED_DISPLAY, SUPPRESSION_K } from './adminSuppression';
@@ -31,6 +32,7 @@ import {
   exportTaka,
   reportDefinition,
   reportDownload,
+  reportTextRows,
   reportFilename,
   reportMetric,
   reportToCsv,
@@ -241,11 +243,12 @@ describe('the completeness gate', () => {
   });
 });
 
+/** `count` shops, all on the same plan, so they land in one bucket. */
+function shopsOnOnePlan(count: number): ReportShopRow[] {
+  return Array.from({ length: count }, (_unused, index) => shop(index + 1, { plan: 'pro' }));
+}
+
 describe('k-anonymity at the boundary', () => {
-  /** `count` shops, all on the same plan, so they land in one bucket. */
-  function shopsOnOnePlan(count: number): ReportShopRow[] {
-    return Array.from({ length: count }, (_unused, index) => shop(index + 1, { plan: 'pro' }));
-  }
 
   test(`k-1 (${SUPPRESSION_K - 1}) contributors: the bucket exists and its value is EMPTY`, () => {
     const table = buildReportTable(
@@ -254,11 +257,11 @@ describe('k-anonymity at the boundary', () => {
       query({ reportId: 'plan_distribution', format: 'csv' }),
     );
 
-    expect(table.rows).toHaveLength(1);
+    expect(reportTextRows(table)).toHaveLength(1);
     // The key stays — the bucket's existence is not the disclosure.
-    expect(table.rows[0]?.[0]).toBe('pro');
+    expect(reportTextRows(table)[0]?.[0]).toBe('pro');
     // The value is empty, not zero: zero would be a lie about the data.
-    expect(table.rows[0]?.[1]).toBe('');
+    expect(reportTextRows(table)[0]?.[1]).toBe('');
     expect(table.suppressedBuckets).toBe(1);
   });
 
@@ -269,7 +272,7 @@ describe('k-anonymity at the boundary', () => {
       query({ reportId: 'plan_distribution', format: 'csv' }),
     );
 
-    expect(table.rows[0]?.[1]).toBe(String(SUPPRESSION_K));
+    expect(reportTextRows(table)[0]?.[1]).toBe(String(SUPPRESSION_K));
     expect(table.suppressedBuckets).toBe(0);
   });
 
@@ -284,8 +287,8 @@ describe('k-anonymity at the boundary', () => {
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
     );
 
-    expect(table.rows[0]?.[0]).toBe('2026-10');
-    expect(table.rows[0]?.[1]).toBe('');
+    expect(reportTextRows(table)[0]?.[0]).toBe('2026-10');
+    expect(reportTextRows(table)[0]?.[1]).toBe('');
   });
 
   test('a money bucket at k shows the refund-subtracted total', () => {
@@ -303,7 +306,7 @@ describe('k-anonymity at the boundary', () => {
     );
 
     // 5 x 1500.00 - 500.00 = 7000.00, through the shared subtraction.
-    expect(table.rows[0]?.[1]).toBe('7000.00');
+    expect(reportTextRows(table)[0]?.[1]).toBe('7000.00');
   });
 
   test('MANY ROWS from ONE shop is still one contributor', () => {
@@ -317,7 +320,7 @@ describe('k-anonymity at the boundary', () => {
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
     );
 
-    expect(table.rows[0]?.[1]).toBe('');
+    expect(reportTextRows(table)[0]?.[1]).toBe('');
     expect(table.suppressedBuckets).toBe(1);
   });
 
@@ -341,8 +344,8 @@ describe('k-anonymity at the boundary', () => {
       query({ reportId: 'pharmacy_registrations', format: 'csv' }),
     );
 
-    expect(table.rows).toHaveLength(1);
-    expect(table.rows[0]?.[1]).toBe('Pharmacy 1');
+    expect(reportTextRows(table)).toHaveLength(1);
+    expect(reportTextRows(table)[0]?.[1]).toBe('Pharmacy 1');
     expect(table.suppressedBuckets).toBe(0);
   });
 
@@ -373,7 +376,7 @@ describe('k-anonymity at the boundary', () => {
     // The active count is WITHHELD — one shop traded. The registration count
     // stands, because registration metadata is exempt by §8.10 and five
     // pharmacies registering discloses nothing about any of their trade.
-    expect(table.rows[0]).toEqual(['2026-10-01', '', String(SUPPRESSION_K)]);
+    expect(reportTextRows(table)[0]).toEqual(['2026-10-01', '', String(SUPPRESSION_K)]);
     expect(table.suppressedBuckets).toBe(1);
   });
 
@@ -395,7 +398,7 @@ describe('k-anonymity at the boundary', () => {
       query({ reportId: 'activity_summary', format: 'csv' }),
     );
 
-    expect(table.rows[0]).toEqual(['2026-10-01', String(SUPPRESSION_K), String(SUPPRESSION_K)]);
+    expect(reportTextRows(table)[0]).toEqual(['2026-10-01', String(SUPPRESSION_K), String(SUPPRESSION_K)]);
     expect(table.suppressedBuckets).toBe(0);
   });
 
@@ -427,7 +430,7 @@ describe('the filters', () => {
       }),
     );
 
-    expect(table.rows.map((row) => row[1])).toEqual(['Pharmacy 2']);
+    expect(reportTextRows(table).map((row) => row[1])).toEqual(['Pharmacy 2']);
   });
 
   test('a Dhaka-day range INCLUDES a registration late in its last day', () => {
@@ -443,7 +446,7 @@ describe('the filters', () => {
       }),
     );
 
-    expect(table.rows).toHaveLength(1);
+    expect(reportTextRows(table)).toHaveLength(1);
   });
 
   test('the status filter narrows the registrations', () => {
@@ -453,7 +456,7 @@ describe('the filters', () => {
       query({ reportId: 'pharmacy_registrations', format: 'csv', status: 'suspended' }),
     );
 
-    expect(table.rows.map((row) => row[1])).toEqual(['Pharmacy 2']);
+    expect(reportTextRows(table).map((row) => row[1])).toEqual(['Pharmacy 2']);
     expect(table.subtitle).toContain('status suspended');
   });
 
@@ -473,7 +476,7 @@ describe('the filters', () => {
       query({ reportId: 'subscriptions', format: 'csv' }),
     );
 
-    expect(table.rows).toEqual([['pro', 'monthly', 'active', String(SUPPRESSION_K)]]);
+    expect(reportTextRows(table)).toEqual([['pro', 'monthly', 'active', String(SUPPRESSION_K)]]);
   });
 
   test('an UNVERIFIED payment order is not counted as collected', () => {
@@ -490,7 +493,7 @@ describe('the filters', () => {
     );
 
     // Five verified orders at 500.00 each; the failed one contributes nothing.
-    expect(table.rows[0]).toEqual(['2026-10', '2500.00', String(SUPPRESSION_K)]);
+    expect(reportTextRows(table)[0]).toEqual(['2026-10', '2500.00', String(SUPPRESSION_K)]);
   });
 });
 
@@ -522,7 +525,7 @@ describe('no report row carries a sale, a customer or a medicine', () => {
     );
 
     // No shop id reaches the rows, even though five of them were counted.
-    expect(JSON.stringify(table.rows)).not.toContain('shop-');
+    expect(JSON.stringify(reportTextRows(table))).not.toContain('shop-');
   });
 });
 
@@ -658,7 +661,7 @@ describe('registrations are bucketed by the DHAKA day (Gate 5 finding 10)', () =
       query({ reportId: 'pharmacy_registrations', format: 'csv' }),
     );
 
-    expect(table.rows[0]?.[0]).toBe('2026-10-25');
+    expect(reportTextRows(table)[0]?.[0]).toBe('2026-10-25');
   });
 
   test('a registration after Dhaka midnight moves to the NEXT day', () => {
@@ -672,7 +675,7 @@ describe('registrations are bucketed by the DHAKA day (Gate 5 finding 10)', () =
     );
 
     // Both would have read 2026-10-25 under the UTC slice.
-    expect(table.rows.map((row) => row[0])).toEqual(['2026-10-26', '2026-10-26']);
+    expect(reportTextRows(table).map((row) => row[0])).toEqual(['2026-10-26', '2026-10-26']);
   });
 
   test('the activity report agrees with it, so the two views cannot drift', () => {
@@ -686,7 +689,7 @@ describe('registrations are bucketed by the DHAKA day (Gate 5 finding 10)', () =
       query({ reportId: 'activity_summary', format: 'csv' }),
     );
 
-    expect(table.rows[0]?.[0]).toBe('2026-10-26');
+    expect(reportTextRows(table)[0]?.[0]).toBe('2026-10-26');
   });
 
   test('an unreadable timestamp is EXCLUDED before bucketing, and that is stated', () => {
@@ -705,7 +708,7 @@ describe('registrations are bucketed by the DHAKA day (Gate 5 finding 10)', () =
       query({ reportId: 'pharmacy_registrations', format: 'csv' }),
     );
 
-    expect(table.rows).toEqual([]);
+    expect(reportTextRows(table)).toEqual([]);
   });
 });
 
@@ -815,13 +818,13 @@ describe('the status filter is applied or REFUSED, never claimed falsely (findin
     );
 
     // The activity rows exist, and the active count is the five sellers.
-    expect(table.rows.length).toBeGreaterThan(0);
-    const active = table.rows.map((row) => row[1]);
+    expect(reportTextRows(table).length).toBeGreaterThan(0);
+    const active = reportTextRows(table).map((row) => row[1]);
     expect(active).toContain(String(SUPPRESSION_K));
     // And NO registration is claimed in the period, because none happened in
     // it: widening the read must not smuggle August registrations into an
     // October report.
-    expect(table.rows.every((row) => row[2] === '0' || row[2] === SUPPRESSED_DISPLAY)).toBe(true);
+    expect(reportTextRows(table).every((row) => row[2] === '0' || row[2] === SUPPRESSED_DISPLAY)).toBe(true);
   });
 
   test('a status filter still restricts those established sellers', () => {
@@ -958,8 +961,11 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
 
     // Six contributors across the whole month, so October is released -- and
     // it is 580.00 in BOTH windows. There is no pair of answers to subtract.
-    expect(whole.rows).toEqual([['2026-10', '580.00']]);
-    expect(wider.rows.find((row) => row[0] === '2026-10')).toEqual(['2026-10', '580.00']);
+    expect(reportTextRows(whole)).toEqual([['2026-10', '580.00']]);
+    expect(reportTextRows(wider).find((row) => row[0] === '2026-10')).toEqual([
+      '2026-10',
+      '580.00',
+    ]);
   });
 
   test('an open-ended range is still allowed, and still whole-month', () => {
@@ -969,7 +975,7 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
     );
 
-    expect(open.rows).toEqual([['2026-10', '580.00']]);
+    expect(reportTextRows(open)).toEqual([['2026-10', '580.00']]);
   });
 
   test('February and a leap year are month ends too, not a 30/31 guess', () => {
@@ -1068,8 +1074,8 @@ describe('ROUND 11 FINDING 8: collected payments land in the DHAKA month', () =>
     // it under 2026-09, and an October report exported 2026-09,500.00,5.
     const table = monthly(verifiedAt('2026-09-30T20:00:00.000Z'));
 
-    expect(table.rows.map((row) => row[0])).toEqual(['2026-10']);
-    expect(table.rows[0]).toEqual(['2026-10', '500.00', '5']);
+    expect(reportTextRows(table).map((row) => row[0])).toEqual(['2026-10']);
+    expect(reportTextRows(table)[0]).toEqual(['2026-10', '500.00', '5']);
   });
 
   test('the contributors land in the same month as the money', () => {
@@ -1079,19 +1085,246 @@ describe('ROUND 11 FINDING 8: collected payments land in the DHAKA month', () =>
     const table = monthly(verifiedAt('2026-09-30T20:00:00.000Z'));
 
     expect(table.suppressedBuckets).toBe(0);
-    expect(table.rows[0]?.[1]).toBe('500.00');
+    expect(reportTextRows(table)[0]?.[1]).toBe('500.00');
   });
 
   test('a midday payment stays in its own month', () => {
     const table = monthly(verifiedAt('2026-10-15T06:00:00.000Z'));
 
-    expect(table.rows.map((row) => row[0])).toEqual(['2026-10']);
+    expect(reportTextRows(table).map((row) => row[0])).toEqual(['2026-10']);
   });
 
   test('the last Dhaka instant of a month is still that month', () => {
     // 2026-10-31T17:59:59Z is 2026-10-31T23:59:59 Dhaka: the final second.
     const table = monthly(verifiedAt('2026-10-31T17:59:59.000Z'));
 
-    expect(table.rows.map((row) => row[0])).toEqual(['2026-10']);
+    expect(reportTextRows(table).map((row) => row[0])).toEqual(['2026-10']);
+  });
+});
+
+describe('ROUND 12 FINDING 4: the export cell stays opaque until the serializer', () => {
+  // The reviewer substituted at the HANDLER, after `buildReportTable` had
+  // verified everything:
+  //
+  //   reportDownload({ ...table, rows: table.rows.map((row) =>
+  //     row.map((value, column) => (column === 1 ? '500.00' : value))) }, query)
+  //
+  // Five sales of 100.00 less 100.00 of refunds build 400.00 correctly; both
+  // serializers then returned 200 with 500.00 under the net column heading.
+  // Zero diagnostics, no forged cell. The verification was one step before the
+  // output, again.
+
+  const fiveSellers = () => {
+    const sales = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      saleTotal(index + 1, { businessDate: '2026-10-01', totalPaisa: asPaisa(10_000) }),
+    );
+    const refunds = [saleTotal(1, { businessDate: '2026-10-01', totalPaisa: asPaisa(10_000) })];
+    return data({
+      sales,
+      refunds,
+      tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }],
+    });
+  };
+
+  const monthly = () =>
+    buildReportTable(
+      'refund_net_pharmacy_sales',
+      fiveSellers(),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
+    );
+
+  test('the honest figure is still exactly right', () => {
+    // 5 x 100.00 less 100.00 = 400.00, through the shared subtraction.
+    expect(reportTextRows(monthly())).toEqual([['2026-10', '400.00']]);
+  });
+
+  test('REPRODUCTION: substituting a row at the handler is REFUSED', () => {
+    const table = monthly();
+    const mutated = {
+      ...table,
+      rows: table.rows.map((row) =>
+        row.map((value, column) => (column === 1 ? '500.00' : value)),
+      ),
+    };
+
+    // Every output path refuses it, because every output path IS this check.
+    expect(() => reportTextRows(mutated)).toThrow(NetSalesProvenanceError);
+    expect(() => reportToCsv(mutated)).toThrow(NetSalesProvenanceError);
+    expect(() => reportToPdf(mutated)).toThrow(NetSalesProvenanceError);
+    expect(() =>
+      reportDownload(mutated, query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' })),
+    ).toThrow(NetSalesProvenanceError);
+    expect(() =>
+      reportDownload(mutated, query({ reportId: 'refund_net_pharmacy_sales', format: 'pdf' })),
+    ).toThrow(NetSalesProvenanceError);
+  });
+
+  test('the net columns are DERIVED, so blanking them cannot disable the check', () => {
+    // The obvious next move: keep the substitution and claim the column is not
+    // a money column. `reportTextRows` re-derives that from the report's own
+    // definition, so there is no field on the table to blank.
+    const table = monthly();
+    const mutated = {
+      ...table,
+      rows: table.rows.map((row) =>
+        row.map((value, column) => (column === 1 ? '500.00' : value)),
+      ),
+      netColumns: [],
+      suppressedBuckets: 0,
+    } as unknown as ReturnType<typeof buildReportTable>;
+
+    expect(() => reportToCsv(mutated)).toThrow(NetSalesProvenanceError);
+  });
+
+  test('a report with no money column is unaffected', () => {
+    const table = buildReportTable(
+      'plan_distribution',
+      data({ shops: shopsOnOnePlan(SUPPRESSION_K) }),
+      query({ reportId: 'plan_distribution', format: 'csv' }),
+    );
+
+    expect(() => reportToCsv(table)).not.toThrow();
+    expect(reportTextRows(table)[0]?.[1]).toBe(String(SUPPRESSION_K));
+  });
+
+  test('a withheld net bucket serialises as an EMPTY cell, not a zero', () => {
+    const sales = Array.from({ length: SUPPRESSION_K - 1 }, (_unused, index) =>
+      saleTotal(index + 1, { businessDate: '2026-10-01' }),
+    );
+    const table = buildReportTable(
+      'refund_net_pharmacy_sales',
+      data({ sales, tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }] }),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
+    );
+
+    expect(reportTextRows(table)).toEqual([['2026-10', '']]);
+    expect(reportToCsv(table)).not.toContain('0.00');
+  });
+});
+
+describe('ROUND 12 FINDING 3: a status filter cannot reconstruct a withheld group', () => {
+  // Executed six-pharmacy fixture: five commercially active, one suspended,
+  // all trading that day.
+  //
+  //   activity_summary, no status -> 6
+  //   activity_summary, active    -> 5
+  //   activity_summary, suspended -> withheld      6 - 5 = the withheld 1
+  //
+  // I had recorded this as a documented limitation of k-anonymity. It is not a
+  // limitation; it is a defect you can execute, and the reviewer did.
+
+  const sixTraders = () => {
+    const shops = [
+      ...Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+        shop(index + 1, { commercialStatus: 'active' }),
+      ),
+      shop(99, { commercialStatus: 'suspended' }),
+    ];
+    const sales = shops.map((row) =>
+      saleTotal(0, { shopId: row.id, businessDate: '2026-10-01' }),
+    );
+    return data({
+      shops,
+      sales,
+      tallies: [{ label: 'shops', counted: shops.length, loaded: shops.length }],
+    });
+  };
+
+  const activity = (status?: string) =>
+    buildReportTable(
+      'activity_summary',
+      sixTraders(),
+      query({
+        reportId: 'activity_summary',
+        format: 'csv',
+        ...(status === undefined ? {} : { status }),
+      }),
+    );
+
+  test('the UNFILTERED day still publishes its six traders', () => {
+    // The complement of "no filter" is empty, so nothing is withheld: this is
+    // the figure an operator legitimately needs.
+    expect(reportTextRows(activity())[0]?.[1]).toBe(String(SUPPRESSION_K + 1));
+  });
+
+  test('REPRODUCTION: the ACTIVE-only view is withheld, its complement being one shop', () => {
+    const rows = reportTextRows(activity('active'));
+
+    expect(rows[0]?.[0]).toBe('2026-10-01');
+    expect(rows[0]?.[1], 'the active-only count was published').toBe('');
+  });
+
+  test('REPRODUCTION: the SUSPENDED-only view is withheld too', () => {
+    expect(reportTextRows(activity('suspended'))[0]?.[1]).toBe('');
+  });
+
+  test('so there is no pair of answers to subtract', () => {
+    const unfiltered = reportTextRows(activity())[0]?.[1] ?? '';
+    const active = reportTextRows(activity('active'))[0]?.[1] ?? '';
+    const suspended = reportTextRows(activity('suspended'))[0]?.[1] ?? '';
+
+    // Exactly one of the three is a number. Two numbers would be a
+    // subtraction, which is the whole attack.
+    const published = [unfiltered, active, suspended].filter((cell) => cell.length > 0);
+    expect(published).toEqual([String(SUPPRESSION_K + 1)]);
+  });
+
+  test('a filter whose complement also clears the floor still answers', () => {
+    // The feature survives: the rule withholds only when the EXCLUDED group is
+    // small enough to be identified.
+    const shops = [
+      ...Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+        shop(index + 1, { commercialStatus: 'active' }),
+      ),
+      ...Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+        shop(index + 50, { commercialStatus: 'suspended' }),
+      ),
+    ];
+    const sales = shops.map((row) =>
+      saleTotal(0, { shopId: row.id, businessDate: '2026-10-01' }),
+    );
+    const table = buildReportTable(
+      'activity_summary',
+      data({
+        shops,
+        sales,
+        tallies: [{ label: 'shops', counted: shops.length, loaded: shops.length }],
+      }),
+      query({ reportId: 'activity_summary', format: 'csv', status: 'active' }),
+    );
+
+    expect(reportTextRows(table)[0]?.[1]).toBe(String(SUPPRESSION_K));
+  });
+
+  test('plan distribution carries the same rule', () => {
+    const shops = [
+      ...Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+        shop(index + 1, { plan: 'free', commercialStatus: 'active' }),
+      ),
+      shop(99, { plan: 'free', commercialStatus: 'suspended' }),
+    ];
+    const withFilter = buildReportTable(
+      'plan_distribution',
+      data({ shops, tallies: [{ label: 'shops', counted: shops.length, loaded: shops.length }] }),
+      query({ reportId: 'plan_distribution', format: 'csv', status: 'active' }),
+    );
+    const withoutFilter = buildReportTable(
+      'plan_distribution',
+      data({ shops, tallies: [{ label: 'shops', counted: shops.length, loaded: shops.length }] }),
+      query({ reportId: 'plan_distribution', format: 'csv' }),
+    );
+
+    expect(reportTextRows(withFilter)[0]?.[1], 'the filtered plan count was published').toBe('');
+    expect(reportTextRows(withoutFilter)[0]?.[1]).toBe(String(SUPPRESSION_K + 1));
+  });
+
+  test('subscriptions needs no complement, because its buckets ARE the statuses', () => {
+    // Non-vacuity for the rule's scope: this report groups BY status, so a
+    // status filter selects whole buckets and changes no published value.
+    // Adding a complement here would withhold figures for no gain.
+    const entry = requireReportDefinition('subscriptions');
+
+    expect(entry.statusFilter).toBe('subscription');
+    expect(entry.columns).toContain('Status');
   });
 });

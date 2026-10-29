@@ -1369,21 +1369,23 @@ describe('the net anchors appear ONLY where they are pinned', () => {
   // which is also what catches an input-corruption bug like the comment
   // stripper that used to delete code after a string containing two slashes.
   //
-  // Six occurrences in four files. A legitimate edit updates this map, and
+  // Five occurrences in four files. A legitimate edit updates this map, and
   // that is the intended cost.
   const ANCHOR_OCCURRENCES: Readonly<Record<string, Readonly<Record<string, number>>>> = {
     netSalesToday: {
       // The type declaration, the assignment from the shared subtraction, and
-      // the Dashboard's TWO reads.
+      // the Dashboard's single read.
       //
-      // Two since round 11 finding 1: the page had no k-anonymity gate at all,
-      // so it published a one-pharmacy figure that Analytics withheld. The
-      // gate reads the amount to decide, and the card reads it to render.
-      // BOTH are reads -- the write-position layer below still sees zero
-      // writes, which is the invariant that matters.
+      // It went to TWO in round 11, when the suppression gate read the amount
+      // to decide, and back to ONE in round 12: finding 2 showed the gate had
+      // to be computed from the two CONTRIBUTOR SETS rather than from the
+      // amount, because five net contributors are not five sellers. So the
+      // card's prop is the only occurrence again. The count is not the
+      // invariant this layer carries -- the write-position check below is, and
+      // it still sees zero writes.
       'lib/platformStats.ts': 1,
       'lib/queries.ts': 1,
-      'app/page.tsx': 2,
+      'app/page.tsx': 1,
     },
     pharmacyNetSales: {
       // The binding, the suppression input, and the amount the net card
@@ -1645,10 +1647,11 @@ describe('the net anchors appear ONLY where they are pinned', () => {
     expect(real, 'the Dashboard read is not where this test expects it').toContain(READ);
     // The old formatting call is gone for good.
     expect(real).not.toContain('formatMoney(stats.netSalesToday)');
-    // The page as shipped: TWO occurrences since round 11 finding 1 added the
-    // suppression gate, and BOTH are reads. The count is not the invariant
-    // this test carries -- zero writes is.
-    expect(anchorOccurrences(real).netSalesToday).toBe(2);
+    // The page as shipped: ONE occurrence, and it is a read. (Two during
+    // round 11, when the gate read the amount; round 12 moved the gate onto
+    // the contributor sets.) The count is not the invariant this test carries
+    // -- zero writes is.
+    expect(anchorOccurrences(real).netSalesToday).toBe(1);
     expect(anchorWrites(real)).toEqual([]);
 
     const mutant = real.replace(
@@ -1658,7 +1661,7 @@ describe('the net anchors appear ONLY where they are pinned', () => {
     expect(mutant).not.toEqual(real);
 
     // The count is UNCHANGED -- which is why layer 2 could not see this...
-    expect(anchorOccurrences(mutant).netSalesToday).toBe(2);
+    expect(anchorOccurrences(mutant).netSalesToday).toBe(1);
     // ...and the write position is what catches it.
     expect(anchorWrites(mutant).length, 'the destructuring write was missed').toBe(1);
   });

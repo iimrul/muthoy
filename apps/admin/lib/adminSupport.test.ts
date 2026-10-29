@@ -50,7 +50,8 @@ const {
   supportQueueCounts,
   supportStatusLabel,
 } = await import('./adminSupport');
-const { listSupportCases, listSupportNotes, readSupportCase } = await import('./adminSupportStore');
+const { listSupportCases, listSupportNotes, listSupportNotesPage, readSupportCase } =
+  await import('./adminSupportStore');
 const { addSupportNote, openSupportCase, updateSupportCaseStatus } = await import(
   './adminSupportActions'
 );
@@ -414,6 +415,57 @@ describe('the store', () => {
     expect(calls[0]?.filters).toEqual(
       expect.arrayContaining([{ method: 'eq', args: ['case_id', CASE_ID] }]),
     );
+  });
+
+  // ROUND 12 FINDING 8. This read ordered ASCENDING and always took
+  // `range(0, 499)`, so once a case passed 500 notes it returned the OLDEST
+  // 500 and every later note was invisible -- permanently, and silently.
+  // Adding a note could not make it appear.
+
+  test('REPRODUCTION: the NEWEST note survives a case of 501', async () => {
+    const rows = Array.from({ length: 501 }, (_unused, index) =>
+      noteRow({ id: 'note-' + String(index).padStart(4, '0'), body: 'note ' + index }),
+    );
+    // Newest first, as the query now orders them.
+    const { client } = createClient({ rows: [...rows].reverse() });
+
+    const page = await listSupportNotesPage(CASE_ID, { client });
+
+    expect(page.notes).toHaveLength(500);
+    expect(page.olderWithheld, 'the truncation was not reported').toBe(true);
+    // The newest note is present, and the oldest is the one dropped.
+    expect(page.notes.at(-1)?.body).toBe('note 500');
+    expect(page.notes.some((note) => note.body === 'note 0')).toBe(false);
+  });
+
+  test('the read asks for the NEWEST page, and one row beyond it', async () => {
+    const { client, calls } = createClient({ rows: [noteRow()] });
+
+    await listSupportNotesPage(CASE_ID, { client });
+
+    expect(calls[0]?.filters).toEqual(
+      expect.arrayContaining([
+        { method: 'order', args: ['created_at', { ascending: false }] },
+        // 0..500 inclusive is 501 rows: the page plus the one that proves
+        // there is more, without a second round trip or a count.
+        { method: 'range', args: [0, 500] },
+      ]),
+    );
+  });
+
+  test('a short case reports no truncation, and reads oldest-first', async () => {
+    const rows = [
+      noteRow({ id: 'note-1', body: 'first' }),
+      noteRow({ id: 'note-2', body: 'second' }),
+    ];
+    const { client } = createClient({ rows: [...rows].reverse() });
+
+    const page = await listSupportNotesPage(CASE_ID, { client });
+
+    expect(page.olderWithheld).toBe(false);
+    // A case reads as a conversation, so the page comes back in insertion
+    // order even though the query asked for it newest-first.
+    expect(page.notes.map((note) => note.body)).toEqual(['first', 'second']);
   });
 });
 

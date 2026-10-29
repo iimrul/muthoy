@@ -42,6 +42,7 @@ import {
 import NetSalesCard from '../components/NetSalesCard';
 import { ADMIN_METRICS, NET_SALES_METRIC_IDS, requirePharmacySalesMetric } from './adminMetrics';
 import { suppressBelowK } from './adminSuppression';
+import { assertCompleteRead, ReportCompletenessError } from './adminReports';
 
 const NET_TODAY = requirePharmacySalesMetric('pharmacy_sales_net_today');
 
@@ -678,8 +679,10 @@ describe('§6i ROUND 11: provenance ends at the OUTPUT, not at the data structur
   test('FINDING 1: the Dashboard gates the figure, the composition and the count', () => {
     const page = source('app/page.tsx');
 
-    // The gate exists at all, on the contributors to the net figure.
-    expect(page).toContain('contributingShopIds: stats.netContributorShopIds');
+    // The gate exists at all. Round 12 finding 2 replaced the single union
+    // input with the two SIDES; the per-side assertions are in round 12's
+    // block below, and this one keeps the round-11 property: there IS a gate.
+    expect(page).toContain('suppressBelowK({');
     // All three outputs hang off ONE verdict. Hiding only the headline leaks
     // the amount, because gross less refunds IS the amount.
     expect(page).toContain('withheld={netTodayWithheld}');
@@ -708,5 +711,86 @@ describe('§6i ROUND 11: provenance ends at the OUTPUT, not at the data structur
     expect(queries).toContain('refundRows.map((row) => row.shop_id)');
     expect(queries).toContain("select('total, shop_id')");
     expect(queries).toContain("select('total_amount, shop_id')");
+  });
+});
+
+describe('§6i ROUND 12: the boundary is the bytes, and the floor is per side', () => {
+  test('FINDING 2: five NET contributors are not five sellers', () => {
+    // The reviewer's fixture: one pharmacy sells 100.00, four others refund
+    // 10.00 each. Five net contributors -- so a UNION cleared the floor and
+    // the page published "Pharmacies active today: 1", gross 100.00 and
+    // refunds 40.00. One identifiable pharmacy's takings.
+    const sellers = ['shop-1'];
+    const refunders = ['shop-2', 'shop-3', 'shop-4', 'shop-5'];
+    const union = [...new Set([...sellers, ...refunders])];
+
+    // The union passes, which is exactly why it was the wrong input.
+    expect(union).toHaveLength(5);
+    expect(suppressBelowK({ value: null, contributingShopIds: union }).suppressed).toBe(false);
+    // Each side, on its own, does not.
+    expect(suppressBelowK({ value: null, contributingShopIds: sellers }).suppressed).toBe(true);
+    expect(suppressBelowK({ value: null, contributingShopIds: refunders }).suppressed).toBe(true);
+  });
+
+  test('FINDING 2: the Dashboard gates on the SIDES, not the union', () => {
+    const page = codeOf('app/page.tsx');
+
+    // The union field is gone from the page and from the stats it reads.
+    expect(page).not.toContain('netContributorShopIds');
+    expect(page).toContain('stats.saleContributorShopIds');
+    expect(page).toContain('stats.refundContributorShopIds');
+    // One verdict, built from both sides, gates all four outputs.
+    expect(page).toContain('sideWithheld(stats.saleContributorShopIds)');
+    expect(page).toContain('sideWithheld(stats.refundContributorShopIds)');
+    expect(page).toContain('withheld={netTodayWithheld}');
+    expect(page).toMatch(/netTodayWithheld \? EMPTY_VALUE : formatCount\(activeToday\)/);
+  });
+
+  test('FINDING 2: the two sides are collected separately in the read', () => {
+    const queries = codeOf('lib/queries.ts');
+
+    expect(queries).toContain('saleContributorShopIds');
+    expect(queries).toContain('refundContributorShopIds');
+    // Not unioned anywhere in the read.
+    expect(queries).not.toContain('netContributorShopIds');
+  });
+
+  test('FINDING 1: the Analytics read goes through the SAME period rule', () => {
+    const queries = codeOf('lib/adminPlatformQueries.ts');
+
+    // Imported, not restated: one predicate, so the page and the export
+    // cannot disagree about which windows are answerable.
+    expect(queries).toContain('assertWholeMonthRange(range');
+    expect(queries).toContain('assertCompleteRead([');
+  });
+
+  test('FINDING 5: the completeness evidence is ENFORCED on the analytics path', () => {
+    // `platformReportData` returned tallies and `analyticsOverview` discarded
+    // them, so a capped read became a published total: six 100.00 sales with
+    // an exact count of 6 but five rows returned rendered 500.00, while the
+    // matching report refused with "read 5 of 6". Revenue consumes the same
+    // overview.
+    expect(() => assertCompleteRead([{ label: 'sales', counted: 6, loaded: 5 }])).toThrow(
+      ReportCompletenessError,
+    );
+    // And the refusal names both numbers, so an operator knows what was lost.
+    try {
+      assertCompleteRead([{ label: 'sales', counted: 6, loaded: 5 }]);
+      expect.unreachable('the gate did not throw');
+    } catch (error) {
+      expect((error as Error).message).toContain('6');
+      expect((error as Error).message).toContain('5');
+    }
+  });
+
+  test('FINDING 4: the net export cell cannot be read without verifying', () => {
+    // The whole point of the round-12 change: there is no way to get text out
+    // of a cell except the verifying unwrap.
+    const cell = netExportCell(netSalesPaisa(asPaisa(50_000), asPaisa(10_000)));
+
+    expect(netCellText(cell)).toBe('400.00');
+    expect(() => netCellText('400.00')).toThrow(NetSalesProvenanceError);
+    // And a cell does not stringify into something plausible by accident.
+    expect(String(cell)).not.toContain('400');
   });
 });

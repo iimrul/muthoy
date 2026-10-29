@@ -15,14 +15,24 @@
 //    repeats a non-idempotent write.
 
 import { beforeEach, describe, expect, test } from 'vitest';
-import { recentAdminAudit, type AdminAuditEntry, type AdminAuditSink } from './adminAudit';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
+  ALLOWED_META_KEYS,
+  recentAdminAudit,
+  type AdminAuditEntry,
+  type AdminAuditSink,
+} from './adminAudit';
+import {
+  AdminAuditExportTooLargeError,
   AdminAuditReadError,
   auditHistory,
+  AUDIT_EXPORT_MAX,
   AUDIT_READ_LIMIT,
   createPostgresAuditSink,
   fromAuditRow,
   readAdminAuditLog,
+  readAdminAuditLogForExport,
   recordAdminActionDurably,
   toAuditRow,
 } from './adminAuditStore';
@@ -668,5 +678,231 @@ describe('ROUND 11 FINDING 5: the durable audit log is READ, not only written', 
     expect(history.durable).toBe(false);
     expect(history.unavailable).toContain('could not be read');
     expect(history.unavailable).toContain('E4-H');
+  });
+});
+
+describe('ROUND 12 FINDINGS 6 and 10: the export reads completely, or refuses', () => {
+  /**
+   * A reader that PAGES, and records the filters each page carried.
+   *
+   * `rows` is the whole stored set; this serves it in pages the way PostgREST
+   * does, so "the predicate ran before pagination" is measurable rather than
+   * asserted.
+   */
+  function createPagingReader(rows: Record<string, unknown>[]) {
+    const seen: {
+      like: string | null;
+      eq: [string, string][];
+      range: [number, number] | null;
+      limit: number | null;
+    }[] = [];
+
+    const client = {
+      from() {
+        return {
+          select() {
+            const call = {
+              like: null as string | null,
+              eq: [] as [string, string][],
+              range: null as [number, number] | null,
+              limit: null as number | null,
+            };
+            seen.push(call);
+            const chain: Record<string, unknown> = {};
+            const settle = () => {
+              let matched = rows;
+              for (const [column, value] of call.eq) {
+                matched = matched.filter((row) => row[column] === value);
+              }
+              if (call.like !== null) {
+                const prefix = call.like.slice(0, -1);
+                matched = matched.filter((row) => String(row.action ?? '').startsWith(prefix));
+              }
+              // `readAdminAuditLog` bounds with `limit`; the export pages
+              // with `range`. A fake that honoured only one of them would
+              // measure the wrong thing -- an uncalled `range` must mean
+              // "everything", not "one row".
+              if (call.limit !== null) matched = matched.slice(0, call.limit);
+              if (call.range === null) return { data: matched, error: null };
+              const [from, to] = call.range;
+              return { data: matched.slice(from, to + 1), error: null };
+            };
+            chain.order = () => chain;
+            chain.limit = (count: number) => {
+              call.limit = count;
+              return chain;
+            };
+            chain.like = (_column: string, pattern: string) => {
+              call.like = pattern;
+              return chain;
+            };
+            chain.eq = (column: string, value: string) => {
+              call.eq.push([column, value]);
+              return chain;
+            };
+            chain.gte = () => chain;
+            chain.lte = () => chain;
+            chain.range = (from: number, to: number) => {
+              call.range = [from, to];
+              return chain;
+            };
+            chain.then = (resolve: (value: unknown) => unknown) =>
+              Promise.resolve(settle()).then(resolve);
+            return chain;
+          },
+        };
+      },
+    };
+
+    return { client: client as never, seen };
+  }
+
+  /** The reviewer's fixture: one older denial, then 500 logins. */
+  function fiveHundredAndOne(): Record<string, unknown>[] {
+    const denial = {
+      at: '2026-10-01T06:00:00.000Z',
+      actor: 'super',
+      actor_verified: true,
+      role: 'super_admin',
+      action: 'admins.disabled',
+      target: 'billing-1',
+      outcome: 'denied',
+      meta: {},
+    };
+    const logins = Array.from({ length: 500 }, (_unused, index) => ({
+      at: '2026-10-2' + String(index % 10) + 'T06:00:00.000Z',
+      actor: 'ops',
+      actor_verified: true,
+      role: 'support',
+      action: 'login',
+      target: 'login-' + index,
+      outcome: 'success',
+      meta: {},
+    }));
+    // Newest first, as the query orders them: the denial is the OLDEST row.
+    return [...logins, denial];
+  }
+
+  test('REPRODUCTION: the 501st event is no longer lost', async () => {
+    // The page-bounded read returned 500 and dropped the denial entirely.
+    const { client } = createPagingReader(fiveHundredAndOne());
+
+    const all = await readAdminAuditLogForExport({}, { client });
+
+    expect(all).toHaveLength(501);
+    expect(all.some((entry) => entry.action === 'admins.disabled')).toBe(true);
+  });
+
+  test('REPRODUCTION: a filtered export finds an event older than the bound', async () => {
+    // `?action=admins.` returned 200 with headers only, because the filter ran
+    // over a 500-row sample that did not include the denial.
+    const { client, seen } = createPagingReader(fiveHundredAndOne());
+
+    const matched = await readAdminAuditLogForExport({ action: 'admins.' }, { client });
+
+    expect(matched).toHaveLength(1);
+    expect(matched[0]?.action).toBe('admins.disabled');
+    // And the predicate went into the QUERY, before any pagination.
+    expect(seen[0]?.like).toBe('admins.%');
+  });
+
+  test('the other dimensions are server-side too', async () => {
+    const { client, seen } = createPagingReader(fiveHundredAndOne());
+
+    await readAdminAuditLogForExport({ actor: 'ops', outcome: 'success' }, { client });
+
+    expect(seen[0]?.eq).toEqual([
+      ['actor', 'ops'],
+      ['outcome', 'success'],
+    ]);
+  });
+
+  test('beyond the ceiling it REFUSES rather than truncating', async () => {
+    const many = Array.from({ length: AUDIT_EXPORT_MAX + 10 }, (_unused, index) => ({
+      at: '2026-10-25T06:00:00.000Z',
+      actor: 'ops',
+      actor_verified: true,
+      role: 'support',
+      action: 'login',
+      target: String(index),
+      outcome: 'success',
+      meta: {},
+    }));
+    const { client } = createPagingReader(many);
+
+    await expect(readAdminAuditLogForExport({}, { client })).rejects.toThrow(
+      AdminAuditExportTooLargeError,
+    );
+  });
+
+  test('FINDING 10: identical prefixes do not duplicate history', async () => {
+    // `['login', 'login']` passed the overlap check -- a string is not inside
+    // itself under startsWith -- and the merge returned 500 rows holding 250
+    // distinct events.
+    const rows = Array.from({ length: 4 }, (_unused, index) => ({
+      at: '2026-10-2' + index + 'T06:00:00.000Z',
+      actor: 'ops',
+      actor_verified: true,
+      role: 'support',
+      action: 'login',
+      target: String(index),
+      outcome: 'success',
+      meta: {},
+    }));
+    const { client } = createPagingReader(rows);
+
+    const entries = await readAdminAuditLog({ actionPrefixes: ['login', 'login'] }, { client });
+
+    expect(entries).toHaveLength(4);
+    expect(new Set(entries.map((entry) => entry.target)).size).toBe(4);
+  });
+
+  test('FINDING 6: a page read narrows on the server as well', async () => {
+    const { client, seen } = createPagingReader(fiveHundredAndOne());
+
+    await readAdminAuditLog(
+      { filter: { actor: 'super', action: 'admins.', outcome: 'denied' } },
+      { client },
+    );
+
+    expect(seen[0]?.eq).toEqual([
+      ['actor', 'super'],
+      ['outcome', 'denied'],
+    ]);
+    expect(seen[0]?.like).toBe('admins.%');
+  });
+});
+
+describe('ROUND 12 FINDING 7: the export records a meta key the redactor keeps', () => {
+  test('rowCount is allowed; rows and scanned are not', () => {
+    // Executed exports stored `meta: {}` in both the Postgres insert and the
+    // stderr record, because `rows` and `scanned` are not in the allowlist.
+    // The one action whose audit entry needs to say how much history left the
+    // building said nothing at all.
+    expect(ALLOWED_META_KEYS).toContain('rowCount');
+    expect(ALLOWED_META_KEYS).not.toContain('rows');
+    expect(ALLOWED_META_KEYS).not.toContain('scanned');
+  });
+
+  test('the route records rowCount, and the row survives redaction', () => {
+    const route = readFileSync(
+      join(import.meta.dirname, '..', 'app/api/audit/export/route.ts'),
+      'utf8',
+    );
+    expect(route).toContain('rowCount: matched.length');
+    expect(route).not.toContain('scanned: entries.length');
+
+    // And the redactor keeps it, rather than this being a claim about a list.
+    const row = toAuditRow({
+      at: '2026-10-25T06:00:00.000Z',
+      actor: 'super',
+      actorVerified: true,
+      role: 'super_admin',
+      action: 'audit.export',
+      target: null,
+      outcome: 'success',
+      meta: { rowCount: 42 },
+    });
+    expect(row.meta).toEqual({ rowCount: 42 });
   });
 });
