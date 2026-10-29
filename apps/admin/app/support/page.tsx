@@ -141,13 +141,19 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
   // redacted `caseId` meta key, which lib/adminAudit.ts allows only as a UUID.
   // ROUND 11 FINDING 5: the DURABLE log, so a case's transition history
   // survives a restart and is the same on every instance.
-  const history = await auditHistory({ actionPrefixes: ['support.'] });
-  const caseHistory =
+  // ROUND 12 FINDING 6: narrowed to THIS case in the query. It used to load
+  // 500 platform-wide support events and then pick the case out of them, so a
+  // case whose history was older than those 500 rows showed none.
+  const history =
     detail === null
-      ? []
-      : history.entries.filter(
-          (entry) => String(entry.meta.caseId ?? '') === detail.case.id,
-        );
+      ? { entries: [], durable: true, unavailable: null }
+      : await auditHistory({
+          actionPrefixes: ['support.'],
+          filter: { target: detail.case.id },
+        });
+  const caseHistory = history.entries.filter(
+    (entry) => String(entry.meta.caseId ?? '') === detail?.case.id,
+  );
   const counts = supportQueueCounts(cases);
 
   return (

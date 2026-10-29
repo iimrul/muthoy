@@ -12,6 +12,7 @@ import {
   buildReport,
   reportDefinition,
   reportMetric,
+  reportTextRows,
   type ReportTable,
 } from '../../lib/adminReports';
 import { featureState } from '../../lib/adminSettings';
@@ -126,6 +127,12 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   const definition = reportDefinition(reportId);
   const hasMoneyColumn = definition !== undefined && reportMetric(definition) !== null;
 
+  // ROUND 12 FINDING 4: the cells are opaque until HERE. `reportTextRows`
+  // verifies every refund-net cell and is the only thing that turns one into
+  // text, so this page, the CSV and the PDF all cross the same boundary.
+  // Indexing `result.table.rows` for display is a type error now.
+  const textRows = result !== null && result.ok ? reportTextRows(result.table) : [];
+
   return (
     <>
       <h1 className="text-xl font-semibold">Reports</h1>
@@ -210,7 +217,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
             <p className="mt-1 text-xs text-midGray">{PDF_LATIN1_NOTICE}</p>
           ) : null}
 
-          {result.table.rows.length === 0 ? (
+          {textRows.length === 0 ? (
             <EmptyState message="This report has no rows in the chosen range. That is the data, not a filter error." />
           ) : (
             <table className="mt-4 w-full text-sm">
@@ -227,7 +234,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                 </tr>
               </thead>
               <tbody>
-                {result.table.rows.map((row, rowIndex) => (
+                {textRows.map((row, rowIndex) => (
                   // The first cell is the bucket key, unique per row in an
                   // aggregate — but a registration report legitimately repeats
                   // a date, so the index is part of the key.

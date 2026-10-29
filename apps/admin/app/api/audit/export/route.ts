@@ -1,9 +1,12 @@
 import { CSV_CONTENT_TYPE, contentDisposition, toCsv } from '../../../../lib/adminCsv';
 import {
+  AdminAuditExportTooLargeError,
   AdminAuditReadError,
-  readAdminAuditLog,
+  AUDIT_EXPORT_MAX,
+  readAdminAuditLogForExport,
   recordAdminActionDurably,
 } from '../../../../lib/adminAuditStore';
+import { dhakaDayEndIso, dhakaDayStartIso } from '../../../../lib/adminFilters';
 import {
   auditDhakaDay,
   filterAuditEntries,
@@ -34,11 +37,19 @@ import { AdminForbiddenError, AdminUnauthenticatedError } from '../../../../lib/
 // is awaited rather than fired and forgotten: if it cannot be recorded, the
 // file is not sent.
 //
-// IT REFUSES RATHER THAN TRUNCATING. If the durable table cannot be read, this
-// returns 503 and no file. The /audit PAGE may fall back to the in-process ring
-// with a visible notice, because a partial view that says so is still useful; a
-// FILE cannot say it once detached from the screen, and a short CSV that looks
-// complete is evidence of the wrong thing.
+// IT REFUSES RATHER THAN TRUNCATING, and ROUND 12 FINDING 6 is why that
+// sentence needed to become true. It used to read the PAGE's bounded 500 and
+// filter that sample: with 501 stored events — one older `admins.disabled`
+// denial followed by 500 logins — the unfiltered export returned 200 with 500
+// events, and `?action=admins.` returned 200 with headers only. A successful
+// CSV omitted the event it was asked for and said nothing about it.
+//
+// So the filters run SERVER-SIDE, before pagination, and the read pages all
+// the way through. Beyond AUDIT_EXPORT_MAX it answers 413 and sends nothing.
+// If the durable table cannot be read at all it answers 503. The /audit PAGE
+// may fall back to the in-process ring behind a visible notice, because a
+// partial view that says so is still useful; a FILE cannot say it once
+// detached from the screen.
 
 export const dynamic = 'force-dynamic';
 
@@ -52,6 +63,10 @@ const MESSAGES = {
     + 'the hosted project) is what this endpoint needs.',
   unrecorded:
     'The export was not produced because it could not itself be recorded in the audit log.',
+  tooLarge:
+    'That range matches more than ' + AUDIT_EXPORT_MAX + ' audit entries, so no file was '
+    + 'produced. A truncated export that looked complete would be worse than none. Narrow '
+    + 'the dates, the actor or the action and try again.',
   failed: 'The audit export could not be produced. The server log has the details.',
 } as const;
 
@@ -90,22 +105,37 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const url = new URL(request.url);
-  // The same filters the page offers, applied through the same predicates, so
-  // the file matches the view the reader was looking at. An absent param is
-  // undefined, which the filter treats as "no constraint".
+  // The same filters the page offers. Four of them are pushed into the QUERY
+  // (round 12 finding 6) so the bound applies to the matches rather than the
+  // matches to the bound; the free-text search is applied in memory, over the
+  // complete matching set rather than over a truncated sample.
+  const from = url.searchParams.get('from') ?? undefined;
+  const to = url.searchParams.get('to') ?? undefined;
   const filter = {
     actor: url.searchParams.get('actor') ?? undefined,
     action: url.searchParams.get('action') ?? undefined,
     outcome: url.searchParams.get('outcome') ?? undefined,
-    from: url.searchParams.get('from') ?? undefined,
-    to: url.searchParams.get('to') ?? undefined,
+    from,
+    to,
     search: url.searchParams.get('search') ?? undefined,
   };
 
   let entries;
   try {
-    entries = await readAdminAuditLog();
+    entries = await readAdminAuditLogForExport({
+      actor: filter.actor,
+      action: filter.action,
+      outcome: filter.outcome,
+      // The Dhaka day bounds, not the raw strings: `at` is a timestamptz, and
+      // comparing it against a bare date would put six hours of every Dhaka
+      // day on the wrong side of the bound.
+      fromIso: from === undefined ? undefined : dhakaDayStartIso(from),
+      toIso: to === undefined ? undefined : dhakaDayEndIso(to),
+    });
   } catch (error) {
+    if (error instanceof AdminAuditExportTooLargeError) {
+      return problem(413, MESSAGES.tooLarge);
+    }
     if (error instanceof AdminAuditReadError) {
       return problem(503, MESSAGES.unavailable);
     }
@@ -143,7 +173,12 @@ export async function GET(request: Request): Promise<Response> {
       action: 'audit.export',
       target: null,
       outcome: 'success',
-      meta: { rows: matched.length, scanned: entries.length },
+      // ROUND 12 FINDING 7: `rowCount` is the key §8.9's redactor ALLOWS.
+      // `rows` and `scanned` are not in ALLOWED_META_KEYS, so both were
+      // dropped and every export stored `meta: {}` — the one action whose
+      // audit entry needs to say how much history left the building said
+      // nothing at all.
+      meta: { rowCount: matched.length },
     });
     if (recorded.durability === 'failed') {
       return problem(500, MESSAGES.unrecorded);

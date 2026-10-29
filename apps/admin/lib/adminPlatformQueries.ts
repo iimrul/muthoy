@@ -42,7 +42,14 @@ import {
   recordedCancellations,
   type MrrBreakdown,
 } from './adminMetrics';
-import type { ReportData, ReportSaleTotalRow, ReportShopRow, SourceTally } from './adminReports';
+import {
+  assertCompleteRead,
+  assertWholeMonthRange,
+  type ReportData,
+  type ReportSaleTotalRow,
+  type ReportShopRow,
+  type SourceTally,
+} from './adminReports';
 import {
   renewalHistory,
   subscriptionDetailRows,
@@ -565,6 +572,22 @@ function sumTotals(rows: readonly ReportSaleTotalRow[]): Paisa {
 export async function analyticsOverview(
   range: { from?: string; to?: string } = {},
 ): Promise<AnalyticsOverview> {
+  // ROUND 12 FINDING 1 — THE PERIOD RULE APPLIES HERE TOO.
+  //
+  // Round 11 closed period differencing in `buildReportTable`. This path
+  // builds the same monthly buckets from request-windowed rows and never went
+  // near that gate, so the attack worked unchanged through the real Analytics
+  // renderer:
+  //
+  //   ?from=2026-10-02&to=2026-10-02 -> withheld
+  //   ?from=2026-10-01&to=2026-10-01 -> 500.00
+  //   ?from=2026-10-01&to=2026-10-02 -> 580.00     580 - 500 = the withheld 80
+  //
+  // ONE rule, imported rather than restated: `assertWholeMonthRange` is the
+  // same predicate the report gate uses, so the page and the export cannot
+  // disagree about which windows are answerable.
+  assertWholeMonthRange(range, 'The pharmacy sales series');
+
   const base = { format: 'csv' as const, ...range };
   const supabase = getSupabaseAdmin();
   const [activity, sales, accountRows, subscriptionRows, orderRows] = await Promise.all([
@@ -592,6 +615,17 @@ export async function analyticsOverview(
         .range(from, to),
     ).then((rows) => rows.map(toPaymentOrderRow)),
   ]);
+
+  // ROUND 12 FINDING 5 — THE COMPLETENESS EVIDENCE IS ENFORCED, NOT JUST
+  // PRODUCED.
+  //
+  // `platformReportData` returns tallies and this function threw them away, so
+  // a capped response became a published total: a source holding six ৳100
+  // sales with an exact count of 6 but five rows returned rendered 500.00 on
+  // Analytics while the matching REPORT refused with "read 5 of 6". Revenue
+  // consumes this overview too, so both pages were outside the gate the
+  // export has had since §8.10.
+  assertCompleteRead([...activity.tallies, ...sales.tallies]);
 
   const accounts = accountRows.map((row) => ({
     id: text(row.id),

@@ -146,28 +146,39 @@ export default async function DashboardPage() {
   const today = overview.activeByDay[overview.activeByDay.length - 1];
   const activeToday = today === undefined ? 0 : distinctShopCount(today);
 
-  // ROUND 11 FINDING 1 — THE DASHBOARD'S OWN k FLOOR.
+  // ROUND 11 FINDING 1 / ROUND 12 FINDING 2 — THE DASHBOARD'S OWN k FLOOR,
+  // PER SIDE.
   //
-  // This page applied none. With a single contributing pharmacy it rendered
-  // ৳80.00 as the headline and, in the composition line, gross ৳100.00 and
-  // refunds ৳20.00 — while Analytics withheld that same bucket. Two pages
-  // disagreeing about whether a figure may be shown is a privacy failure.
+  // Round 11: this page applied no floor at all, and published ৳80.00 plus
+  // gross ৳100.00 and refunds ৳20.00 for a single contributing pharmacy while
+  // Analytics withheld that same bucket.
   //
-  // ONE verdict gates THREE things, because any one of them discloses the
-  // other two:
+  // Round 12: the floor I added was gated on the UNION of the two sides, which
+  // is the per-value mistake Gate 5 finding 4 already found once. One pharmacy
+  // selling ৳100 and four others refunding ৳10 each is five NET contributors
+  // and ONE seller, so the union cleared the floor and the page published
+  // "Pharmacies active today: 1", gross ৳100.00 and refunds ৳40.00.
+  //
+  // So EVERY NON-EMPTY SIDE must clear the floor on its own, and the four
+  // outputs stand or fall together:
   //
   //   - the net headline;
-  //   - the composition, which carries gross and refunds and therefore the
-  //     net figure by subtraction. Hiding only the headline leaks the amount;
-  //   - today's ACTIVE PHARMACY COUNT, because "1" beside a withheld figure
-  //     says that one identifiable pharmacy's takings are the withheld
-  //     number. This is Gate 5 finding 4 again: the floor belongs on the
-  //     contributors to the VALUE, and a count of them is a value.
-  const gatedNetToday = suppressBelowK({
-    value: stats.netSalesToday,
-    contributingShopIds: stats.netContributorShopIds,
-  });
-  const netTodayWithheld = gatedNetToday.suppressed;
+  //   - the composition, which carries gross and refunds. Any two of
+  //     {gross, refunds, net} give the third, so releasing the composition
+  //     while withholding the headline discloses the headline, and releasing
+  //     the headline beside a withheld side discloses that side;
+  //   - today's ACTIVE PHARMACY COUNT, which is the number of SELLERS. "1"
+  //     beside any of the above names the pharmacy.
+  //
+  // An EMPTY side is not withheld: "no pharmacy refunded today" is a fact
+  // about nobody, and there is no individual behind it to protect.
+  const sideWithheld = (contributors: readonly string[]) =>
+    contributors.length > 0
+    && suppressBelowK({ value: null, contributingShopIds: contributors }).suppressed;
+
+  const netTodayWithheld =
+    sideWithheld(stats.saleContributorShopIds)
+    || sideWithheld(stats.refundContributorShopIds);
 
   const alerts = dashboardAlerts({ shops, subscriptions, entitlements, orders, events }, nowMs);
   const raisedAlerts = alerts.filter((alert) => alert.count > 0).length;

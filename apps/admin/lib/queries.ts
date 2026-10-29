@@ -153,22 +153,21 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
   const grossSalesToday = sumSaleTotals(saleRows);
   const refundsToday = sumRefundTotals(refundRows);
 
-  // BOTH SIDES. A pharmacy that only refunded today still contributed to the
-  // net figure, so counting the sales side alone would clear the floor on a
-  // day whose refunds came from a shop the sales side could not see.
-  const netContributorShopIds = [
-    ...new Set([
-      ...saleRows.map((row) => row.shop_id),
-      ...refundRows.map((row) => row.shop_id),
-    ]),
-  ];
+  // SEPARATELY, not unioned. Round 12 finding 2: a union of the two sides
+  // cleared the floor for a day on which ONE pharmacy sold and four others
+  // refunded, and the page then published that one pharmacy's gross takings
+  // and an activity count of 1. Each side is gated against its own
+  // contributors in app/page.tsx.
+  const saleContributorShopIds = [...new Set(saleRows.map((row) => row.shop_id))];
+  const refundContributorShopIds = [...new Set(refundRows.map((row) => row.shop_id))];
 
   return {
     totalShops: count ?? 0,
     grossSalesToday,
     refundsToday,
     netSalesToday: netSalesPaisa(grossSalesToday, refundsToday),
-    netContributorShopIds,
+    saleContributorShopIds,
+    refundContributorShopIds,
     day,
   };
 }

@@ -147,11 +147,29 @@ export function fromAuditRow(row: Record<string, unknown>): AdminAuditEntry {
  * disjoint, asserted below, so merging cannot double-count a row.
  */
 export async function readAdminAuditLog(
-  options: { limit?: number; actionPrefixes?: readonly string[] } = {},
+  options: {
+    limit?: number;
+    actionPrefixes?: readonly string[];
+    /**
+     * Server-side narrowing, so the bound applies to the MATCHES.
+     *
+     * ROUND 12 FINDING 6, second half. A filtered page view used to search the
+     * most recent 500 entries overall and then filter them, so an actor or an
+     * action whose last activity was older than those 500 rows appeared to
+     * have none at all. Support was the worst case: it loaded 500
+     * platform-wide support events and then picked out one case.
+     */
+    filter?: AuditServerFilter;
+  } = {},
   deps: { client?: AdminAuditClient } = {},
 ): Promise<readonly AdminAuditEntry[]> {
   const limit = Math.min(options.limit ?? AUDIT_READ_LIMIT, AUDIT_READ_LIMIT);
-  const prefixes = options.actionPrefixes ?? [];
+  // ROUND 12 FINDING 10: DEDUPED FIRST. `['login', 'login']` passed the
+  // overlap check below -- a prefix is not "inside" itself under
+  // `startsWith` when the strings are equal -- and the merge then returned
+  // 500 rows holding 250 distinct events, displacing real history with
+  // duplicates. The shipped prefix lists are distinct, so this was latent.
+  const prefixes = [...new Set(options.actionPrefixes ?? [])];
   for (const prefix of prefixes) {
     for (const other of prefixes) {
       if (prefix !== other && prefix.startsWith(other)) {
@@ -167,25 +185,144 @@ export async function readAdminAuditLog(
   const collected: AdminAuditEntry[] = [];
 
   for (const prefix of queries) {
-    const base = client
-      .from('admin_audit_log')
-      .select(AUDIT_COLUMNS)
-      .order('at', { ascending: false })
-      .limit(limit);
-    const { data, error } = await (prefix === null ? base : base.like('action', prefix + '%'));
+    const base = applyServerFilter(
+      client
+        .from('admin_audit_log')
+        .select(AUDIT_COLUMNS)
+        .order('at', { ascending: false })
+        .limit(limit) as unknown as Record<string, unknown>,
+      options.filter ?? {},
+    ) as unknown as {
+      like: (column: string, pattern: string) => unknown;
+    };
+    const { data, error } = (await (prefix === null
+      ? (base as unknown)
+      : base.like('action', prefix + '%'))) as {
+      data: unknown;
+      error: { message: string } | null;
+    };
     if (error) {
       // The driver message goes to the server log, never to a page.
       console.error('[admin] admin_audit_log read failed:', error.message);
       throw new AdminAuditReadError('admin audit read failed');
     }
-    for (const row of data ?? []) {
-      collected.push(fromAuditRow(row as unknown as Record<string, unknown>));
+    for (const row of ((data ?? []) as unknown as Record<string, unknown>[])) {
+      collected.push(fromAuditRow(row));
     }
   }
 
   return collected
     .sort((left, right) => right.at.localeCompare(left.at))
     .slice(0, limit);
+}
+
+/**
+ * The hard ceiling on one EXPORT.
+ *
+ * Above this the endpoint refuses rather than truncating. A file is read away
+ * from the screen that produced it, so it cannot carry "this is the most
+ * recent 500" the way a page can.
+ */
+export const AUDIT_EXPORT_MAX = 50_000;
+
+/** One page of the export pager. */
+const AUDIT_EXPORT_PAGE = 1_000;
+
+/** The server-side dimensions an audit read can narrow on. */
+export interface AuditServerFilter {
+  actor?: string;
+  /** Matched as a PREFIX, so `admins.` selects the whole namespace. */
+  action?: string;
+  outcome?: string;
+  /** Exact match. Support uses it for one case's history. */
+  target?: string;
+  /** Inclusive ISO-8601 instant bounds. */
+  fromIso?: string;
+  toIso?: string;
+}
+
+function applyServerFilter<T extends Record<string, unknown>>(
+  query: T,
+  filter: AuditServerFilter,
+): T {
+  let narrowed = query;
+  const call = (method: string, ...args: unknown[]): void => {
+    const fn = (narrowed as Record<string, unknown>)[method];
+    if (typeof fn === 'function') {
+      narrowed = (fn as (...a: unknown[]) => T).apply(narrowed, args);
+    }
+  };
+  if (filter.actor !== undefined && filter.actor.length > 0) call('eq', 'actor', filter.actor);
+  if (filter.outcome !== undefined && filter.outcome.length > 0) {
+    call('eq', 'outcome', filter.outcome);
+  }
+  if (filter.action !== undefined && filter.action.length > 0) {
+    call('like', 'action', filter.action + '%');
+  }
+  if (filter.target !== undefined && filter.target.length > 0) {
+    call('eq', 'target', filter.target);
+  }
+  if (filter.fromIso !== undefined) call('gte', 'at', filter.fromIso);
+  if (filter.toIso !== undefined) call('lte', 'at', filter.toIso);
+  return narrowed;
+}
+
+/** Thrown when an export would have to truncate to succeed. */
+export class AdminAuditExportTooLargeError extends Error {
+  constructor(readonly scanned: number) {
+    super('the audit export exceeds ' + AUDIT_EXPORT_MAX + ' matching entries');
+    this.name = 'AdminAuditExportTooLargeError';
+  }
+}
+
+/**
+ * EVERY entry matching the filter, newest first — or a refusal.
+ *
+ * ROUND 12 FINDING 6. The export used `readAdminAuditLog`, which is bounded at
+ * 500, and then filtered that bounded sample in memory. With 501 stored events
+ * — one older `admins.disabled` denial followed by 500 logins — the unfiltered
+ * export returned 200 with 500 events and `?action=admins.` returned 200 with
+ * headers only. A successful CSV omitted the very event it was asked for, and
+ * said nothing about it. My "refuses rather than truncating" claim was false.
+ *
+ * So the predicates run SERVER-SIDE, before pagination, and this pages all the
+ * way through. Above `AUDIT_EXPORT_MAX` it throws, because a file that is
+ * silently short is evidence of the wrong thing.
+ */
+export async function readAdminAuditLogForExport(
+  filter: AuditServerFilter = {},
+  deps: { client?: AdminAuditClient } = {},
+): Promise<readonly AdminAuditEntry[]> {
+  const client = deps.client ?? getSupabaseAdmin();
+  const collected: AdminAuditEntry[] = [];
+
+  for (let offset = 0; offset <= AUDIT_EXPORT_MAX; offset += AUDIT_EXPORT_PAGE) {
+    const base = client
+      .from('admin_audit_log')
+      .select(AUDIT_COLUMNS)
+      .order('at', { ascending: false })
+      .range(offset, offset + AUDIT_EXPORT_PAGE - 1);
+    const { data, error } = (await applyServerFilter(
+      base as unknown as Record<string, unknown>,
+      filter,
+    )) as { data: unknown; error: { message: string } | null };
+    if (error) {
+      console.error('[admin] admin_audit_log export read failed:', error.message);
+      throw new AdminAuditReadError('admin audit read failed');
+    }
+    const rows = (data ?? []) as unknown as Record<string, unknown>[];
+    for (const row of rows) collected.push(fromAuditRow(row));
+    // The ceiling is checked BEFORE the "that was the last page" return, not
+    // after it. My first version checked afterwards, so a final partial page
+    // could carry the total past the ceiling and still resolve -- 50 010 rows
+    // came back from a set that should have been refused.
+    if (collected.length > AUDIT_EXPORT_MAX) {
+      throw new AdminAuditExportTooLargeError(collected.length);
+    }
+    if (rows.length < AUDIT_EXPORT_PAGE) return collected;
+  }
+
+  throw new AdminAuditExportTooLargeError(collected.length);
 }
 
 /**
@@ -216,7 +353,11 @@ const AUDIT_UNAVAILABLE =
  * and never silent about which.
  */
 export async function auditHistory(
-  options: { limit?: number; actionPrefixes?: readonly string[] } = {},
+  options: {
+    limit?: number;
+    actionPrefixes?: readonly string[];
+    filter?: AuditServerFilter;
+  } = {},
   deps: { client?: AdminAuditClient } = {},
 ): Promise<AuditHistory> {
   try {

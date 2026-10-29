@@ -146,28 +146,57 @@ export async function readSupportCase(
   return parseSupportCaseRow(rows[0] as Record<string, unknown>);
 }
 
-/** One case's notes, in insertion order. */
-export async function listSupportNotes(
+/**
+ * One case's notes, in insertion order, with the NEWEST ones kept.
+ *
+ * ROUND 12 FINDING 8. This ordered ASCENDING and always read `range(0, 499)`,
+ * so once a case had more than `MAX_NOTES_PER_CASE` notes it returned the
+ * OLDEST 500 and every note added after that was invisible — permanently, and
+ * silently. An operator reading a long case saw a frozen history and had no
+ * way to tell: adding a note could not make it appear.
+ *
+ * So the read takes the newest page and the caller is told when there is more.
+ * The rows come back oldest-first within that page, because a case reads as a
+ * conversation.
+ */
+export async function listSupportNotesPage(
   caseId: string,
   deps?: AdminSupportStoreDeps,
-): Promise<SupportNoteRow[]> {
+): Promise<{ notes: SupportNoteRow[]; olderWithheld: boolean }> {
   if (caseId.length === 0) {
     throw new AdminDataError('a support note lookup needs a case id');
   }
 
+  // One row beyond the page, which is how "there is more" is known without a
+  // second round trip or a count.
   const { data, error } = await clientFor(deps)
     .from('admin_support_notes')
     .select(SUPPORT_NOTE_COLUMNS)
     .eq('case_id', caseId)
-    .order('created_at', { ascending: true })
-    .order('id', { ascending: true })
-    .range(0, MAX_NOTES_PER_CASE - 1);
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(0, MAX_NOTES_PER_CASE);
 
   if (error) {
     console.error('[admin] admin_support_notes list failed:', error.message);
     throw new AdminDataError('support note list failed');
   }
-  return (data ?? []).map((row) => parseSupportNoteRow(row as Record<string, unknown>));
+
+  const rows = data ?? [];
+  const olderWithheld = rows.length > MAX_NOTES_PER_CASE;
+  const page = (olderWithheld ? rows.slice(0, MAX_NOTES_PER_CASE) : rows).map((row) =>
+    parseSupportNoteRow(row as Record<string, unknown>),
+  );
+  // Back into insertion order for reading.
+  return { notes: page.reverse(), olderWithheld };
+}
+
+/** One case's notes, in insertion order. The newest page of them. */
+export async function listSupportNotes(
+  caseId: string,
+  deps?: AdminSupportStoreDeps,
+): Promise<SupportNoteRow[]> {
+  return (await listSupportNotesPage(caseId, deps)).notes;
 }
 
 // ─────────────────────────────────────────────────────────────────── writing

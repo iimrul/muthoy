@@ -60,23 +60,29 @@ export interface PlatformStats {
    */
   netSalesToday: NetSales;
   /**
-   * The DISTINCT pharmacies behind today's net figure — sales side and refund
-   * side together.
+   * The DISTINCT pharmacies that SOLD today, and separately those that
+   * REFUNDED today.
    *
-   * ROUND 11 FINDING 1. The Dashboard had no contributor set at all, so it
-   * applied no k floor: with one contributing pharmacy it rendered ৳80.00 and,
-   * in the composition line, gross ৳100.00 and refunds ৳20.00 — while
-   * Analytics withheld that very bucket. Two pages disagreeing about whether a
-   * figure may be shown is a privacy failure, not an inconsistency.
+   * ROUND 11 FINDING 1 added a contributor set, because the Dashboard had none
+   * and published a one-pharmacy figure that Analytics withheld. ROUND 12
+   * FINDING 2 then showed I had made it a UNION, which is the per-value
+   * mistake Gate 5 finding 4 already found once:
    *
-   * Collected from the SAME two reads that produce the figure, rather than
-   * from the analytics overview's activity buckets. The figure and its gate
-   * have to come from one windowing of one pair of tables, which is the half
-   * of W4-04 that is easy to get wrong.
+   *   one pharmacy sells ৳100; four others refund ৳10 each
+   *   -> five NET contributors, so the union cleared the floor
+   *   -> published "Pharmacies active today: 1", gross ৳100.00 and
+   *      refunds ৳40.00. One identifiable pharmacy's takings.
+   *
+   * Five contributors to the net figure are not five contributors to gross, to
+   * refunds, or to today's activity. Each side therefore carries its own set,
+   * and `app/page.tsx` releases nothing unless every NON-EMPTY side clears the
+   * floor on its own — because gross less refunds is the net figure, and any
+   * two of the three give the third.
    *
    * These ids are never rendered. They exist to be counted.
    */
-  netContributorShopIds: readonly string[];
+  saleContributorShopIds: readonly string[];
+  refundContributorShopIds: readonly string[];
   day: DhakaDayRange;
 }
 

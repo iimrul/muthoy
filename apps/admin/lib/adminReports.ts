@@ -233,7 +233,7 @@ function definition(entry: ReportDefinition): ReportDefinition {
 }
 
 /** The last Dhaka day of the month a `YYYY-MM-DD` day falls in. */
-function monthEnd(day: string): string {
+export function monthEnd(day: string): string {
   const year = Number(day.slice(0, 4));
   const month = Number(day.slice(5, 7));
   // Day 0 of the NEXT month is the last day of this one, which also gets
@@ -271,16 +271,34 @@ function assertAnswerablePeriod(
   }
 
   if (entry.period !== 'month') return;
+  assertWholeMonthRange(query, 'The ' + entry.title + ' report');
+}
 
-  const starts = query.from === undefined || query.from.endsWith('-01');
-  const ends = query.to === undefined || query.to === monthEnd(query.to);
+/**
+ * Refuses a range that is not whole months.
+ *
+ * ROUND 12 FINDING 1: exported, because Analytics builds the same monthly
+ * buckets from request-windowed rows and had no such gate — so the
+ * differencing attack round 11 closed in the export still worked through the
+ * page. One predicate, two callers, no chance of them disagreeing about which
+ * windows are answerable.
+ *
+ * An open end is allowed: the attack needs a window the caller chose INSIDE a
+ * month, and `from` on the first with no `to` still covers whole months.
+ */
+export function assertWholeMonthRange(
+  range: { from?: string; to?: string },
+  subject: string,
+): void {
+  const starts = range.from === undefined || range.from.endsWith('-01');
+  const ends = range.to === undefined || range.to === monthEnd(range.to);
   if (starts && ends) return;
 
   throw new AdminReportFilterError(
-    'The ' + entry.title + ' report is grouped by month, so it answers for whole months '
-    + 'only. A part-month range would make each month’s figure depend on the window, '
-    + 'and two overlapping windows would then differ by a withheld month. Use the first day '
-    + 'of a month as the start and the last day of a month as the end.',
+    subject + ' is grouped by month, so it answers for whole months only. A part-month '
+    + 'range would make each month’s figure depend on the window, and two overlapping '
+    + 'windows would then differ by a withheld month. Use the first day of a month as the '
+    + 'start and the last day of a month as the end.',
   );
 }
 
@@ -394,7 +412,25 @@ export interface ReportTable {
   title: string;
   subtitle: string;
   columns: readonly string[];
-  rows: readonly (readonly string[])[];
+  /**
+   * The rows, still carrying OPAQUE cells in any refund-net column.
+   *
+   * ROUND 12 FINDING 4. This was `readonly string[][]`, verified inside
+   * `buildReportTable` and then handed out as plain text -- so the
+   * verification happened one step before the output, again. The reviewer
+   * substituted at the HANDLER:
+   *
+   *   reportDownload({ ...table, rows: table.rows.map((row) =>
+   *     row.map((value, column) => (column === 1 ? '500.00' : value))) }, query)
+   *
+   * and both serializers returned 200 with 500.00 under the canonical net
+   * caption, zero diagnostics, no forged cell.
+   *
+   * So the cells stay opaque all the way into the serializer, and
+   * `reportTextRows` is the only thing that turns them into text. Read them
+   * through that function, never by indexing this array for display.
+   */
+  rows: readonly (readonly ReportCell[])[];
   /** How many buckets were withheld for k-anonymity. Reported, never hidden. */
   suppressedBuckets: number;
   /** The tallies the gate passed on, so a caller can record the evidence. */
@@ -470,7 +506,7 @@ function groupContributors<T>(
  * report declares as refund-net money are resolved through `netCellText`,
  * which verifies. A plain string standing in one of those columns throws.
  */
-type ReportCell = string | NetExportCell;
+export type ReportCell = string | NetExportCell;
 
 interface AggregateRow {
   key: string;
@@ -486,6 +522,33 @@ interface AggregateRow {
    * beside a sales aggregate without either weakening the other.
    */
   valueContributorIds?: readonly (readonly string[] | undefined)[];
+  /**
+   * The contributors a STATUS FILTER excluded from this bucket.
+   *
+   * ROUND 12 FINDING 3. A filtered aggregate and the unfiltered one differ by
+   * exactly the excluded group, so publishing both publishes that group:
+   *
+   *   activity_summary, no status -> 6
+   *   activity_summary, active    -> 5
+   *   activity_summary, suspended -> withheld      6 - 5 = the withheld 1
+   *
+   * I had recorded this as a documented limitation of k-anonymity. The
+   * reviewer rejected that, correctly: these are shipped filters on a shipped
+   * report, and a limitation you can execute is a defect.
+   *
+   * The rule is the composition rule again — a part may be published only if
+   * every other part could be. So a filtered figure is released only when the
+   * complement ALSO clears the floor, and the unfiltered view (whose
+   * complement is empty) keeps answering. In the fixture above: 6 is
+   * published, and the active-5 and suspended-1 views are both withheld, so
+   * there is no pair to subtract.
+   *
+   * `undefined` or empty means nothing was excluded, which is the unfiltered
+   * case and the common one.
+   */
+  complementContributorIds?: readonly string[];
+  /** Per-value complements, index-aligned with `values`. */
+  valueComplementIds?: readonly (readonly string[] | undefined)[];
 }
 
 /**
@@ -570,6 +633,13 @@ function suppressRows(
   // passed anywhere. `SUPPRESSED_EXPORT` is still what a non-net column gets.
   const suppressedCell = (index: number): ReportCell =>
     netIndexes.includes(index) ? withheldNetCell() : SUPPRESSED_EXPORT;
+
+  // Round 12 finding 3: a non-empty complement below the floor withholds the
+  // value, however large the filtered side is.
+  const complementBlocks = (complement: readonly string[] | undefined): boolean =>
+    complement !== undefined
+    && complement.length > 0
+    && suppressBelowK({ value: null, contributingShopIds: complement }).suppressed;
   const out: (readonly ReportCell[])[] = [];
   let suppressedBuckets = 0;
 
@@ -593,11 +663,17 @@ function suppressRows(
     if (row.valueContributorIds !== undefined) {
       const perValue = row.values.map((value, index) => {
         const contributors = row.valueContributorIds?.[index];
-        if (contributors === undefined) return { cell: value, suppressed: false };
+        const blocked = complementBlocks(row.valueComplementIds?.[index]);
+        if (contributors === undefined) {
+          // An exempt value is still withheld when the FILTER would expose the
+          // excluded group through it.
+          return { cell: blocked ? suppressedCell(index) : value, suppressed: blocked };
+        }
         const gated = suppressBelowK({ value, contributingShopIds: contributors });
+        const suppressed = gated.suppressed || blocked;
         return {
-          cell: gated.suppressed ? suppressedCell(index) : value,
-          suppressed: gated.suppressed,
+          cell: suppressed ? suppressedCell(index) : value,
+          suppressed,
         };
       });
       if (perValue.some((entry) => entry.suppressed)) suppressedBuckets += 1;
@@ -610,7 +686,7 @@ function suppressRows(
       contributingShopIds: row.contributorIds,
     };
     const gated = suppressBelowK(aggregate);
-    if (gated.suppressed) {
+    if (gated.suppressed || complementBlocks(row.complementContributorIds)) {
       suppressedBuckets += 1;
       out.push([row.key, ...row.values.map((_value, index) => suppressedCell(index))]);
       continue;
@@ -717,14 +793,28 @@ function buildPlanDistribution(data: ReportData, query: AdminReportExportQuery):
     (shop) => shop.plan,
     (shop) => shop.id,
   );
+  // ROUND 12 FINDING 3: the same buckets WITHOUT the status filter, so each
+  // row can declare what the filter left out. Unfiltered minus filtered is
+  // exactly the excluded group, and publishing both publishes that group.
+  const unfiltered = groupContributors(
+    data.shops,
+    (shop) => shop.plan,
+    (shop) => shop.id,
+  );
 
   return [...buckets.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([plan, contributorIds]) => ({
-      key: plan,
-      values: [formatCount(new Set(contributorIds).size)],
-      contributorIds,
-    }));
+    .map(([plan, contributorIds]) => {
+      const kept = new Set(contributorIds);
+      return {
+        key: plan,
+        values: [formatCount(kept.size)],
+        contributorIds,
+        complementContributorIds: (unfiltered.get(plan) ?? []).filter(
+          (shopId) => !kept.has(shopId),
+        ),
+      };
+    });
 }
 
 function buildActivitySummary(data: ReportData, query: AdminReportExportQuery): AggregateRow[] {
@@ -745,6 +835,15 @@ function buildActivitySummary(data: ReportData, query: AdminReportExportQuery): 
     (row) => row.businessDate,
     (row) => row.shopId,
   );
+  // ROUND 12 FINDING 3: the sales half WITHOUT the status restriction, so the
+  // active count can declare the pharmacies the filter excluded. This is the
+  // report the reviewer differenced: 6 unfiltered, 5 active, 1 suspended
+  // withheld.
+  const salesByDayUnfiltered = groupContributors(
+    data.sales.filter((row) => withinRange(row.businessDate, query)),
+    (row) => row.businessDate,
+    (row) => row.shopId,
+  );
   const registrationsByDay = groupContributors(
     data.shops
       .filter((shop) => withinInstantRange(shop.createdAt, query))
@@ -758,10 +857,19 @@ function buildActivitySummary(data: ReportData, query: AdminReportExportQuery): 
   return days.map((day) => {
     const active = salesByDay.get(day) ?? [];
     const registered = registrationsByDay.get(day) ?? [];
+    const activeKept = new Set(active);
+    const activeComplement = (salesByDayUnfiltered.get(day) ?? []).filter(
+      (shopId) => !activeKept.has(shopId),
+    );
     return {
       key: day,
-      values: [formatCount(new Set(active).size), formatCount(new Set(registered).size)],
+      values: [formatCount(activeKept.size), formatCount(new Set(registered).size)],
       contributorIds: [...active, ...registered],
+      // Round 12 finding 3. The REGISTRATION count carries no complement: it
+      // is registration metadata, which §8.10 permits unsuppressed, and it is
+      // filtered on the shop's own status rather than restricted by a set the
+      // reader could difference against a sales figure.
+      valueComplementIds: [activeComplement, undefined],
       // EACH VALUE BY ITS OWN CONTRIBUTORS (Gate 5 finding 4).
       //
       // The active count is a sales-derived aggregate and is gated by the
@@ -880,7 +988,10 @@ export function buildReportTable(
           cells: built.map((row) => [row.key, ...row.values]),
           suppressedBuckets: 0,
         };
-  const rows = toTextRows(cells, netIndexes);
+  // NOT flattened here. Round 12 finding 4: the text is produced by
+  // `reportTextRows`, at the serializer, so there is no window between a
+  // verified row and the bytes in which a caller can substitute one.
+  const rows = cells;
 
   const parts = [rangeCaption(query), rows.length + ' rows'];
   if (query.status !== undefined && query.status.length > 0) {
@@ -915,8 +1026,27 @@ export async function buildReport(
 
 // ───────────────────────────────────────────────────────────────── the exports
 
+/**
+ * The rows as TEXT, verifying every refund-net cell on the way.
+ *
+ * ROUND 12 FINDING 4 — THIS IS THE OUTPUT BOUNDARY. Every path that turns a
+ * report into something a human reads goes through here: the CSV, the PDF and
+ * the on-screen table. A plain string standing in a net column throws.
+ *
+ * WHICH COLUMNS ARE NET IS DERIVED FROM THE REPORT'S OWN DEFINITION, not read
+ * off the table. Trusting a field on the table would mean
+ * `{ ...table, netColumns: [] }` disables the check, which is the same shape
+ * of bypass as the one this closes. The only thing taken on trust is
+ * `reportId`, and a caller who changes that gets a different report's title
+ * and columns -- so the net caption it is trying to publish under is gone.
+ */
+export function reportTextRows(table: ReportTable): readonly (readonly string[])[] {
+  const entry = requireReportDefinition(table.reportId);
+  return toTextRows(table.rows, netValueIndexes(entry));
+}
+
 export function reportToCsvDocument(table: ReportTable): CsvDocument {
-  return { headers: table.columns, rows: table.rows };
+  return { headers: table.columns, rows: reportTextRows(table) };
 }
 
 export function reportToCsv(table: ReportTable): string {
@@ -928,7 +1058,7 @@ export function reportToPdf(table: ReportTable): string {
     title: table.title,
     subtitle: table.subtitle,
     headers: table.columns,
-    rows: table.rows,
+    rows: reportTextRows(table),
   });
 }
 

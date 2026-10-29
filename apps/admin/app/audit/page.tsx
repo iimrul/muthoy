@@ -12,7 +12,13 @@ import {
   sliceAuditEntries,
 } from '../../lib/adminAuditViews';
 import { requireAdminPermission } from '../../lib/adminAuthz';
-import { pageMeta, parseListQuery, rangeSpec } from '../../lib/adminFilters';
+import {
+  dhakaDayEndIso,
+  dhakaDayStartIso,
+  pageMeta,
+  parseListQuery,
+  rangeSpec,
+} from '../../lib/adminFilters';
 import { shopAuditPage, type ShopAuditPage } from '../../lib/adminPlatformQueries';
 import { formatCount, formatDhakaDateTime, isUuid } from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
@@ -178,12 +184,26 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
   // clearly-stated fallback. This page used to read the ring and nothing else,
   // so the history it showed was whatever this process had done since it
   // started -- a different answer on every instance, and none after a restart.
-  const history = await auditHistory();
-  const entries = history.entries;
   const actorFilter = firstParam(raw, 'district');
   const outcomeFilter = firstParam(raw, 'status');
-  // Its OWN schema field, because action names carry dots (finding 6).
+  // Its OWN schema field, because action names carry dots (Gate 5 finding 6).
   const actionFilter = query.action ?? '';
+
+  // ROUND 12 FINDING 6: the filters go into the QUERY, so the 500-row bound
+  // applies to the MATCHES. Filtering a bounded sample made an actor whose
+  // last activity was older than the most recent 500 entries look as though
+  // it had none. The free-text search stays in memory and is stated as
+  // searching the loaded page.
+  const history = await auditHistory({
+    filter: {
+      actor: actorFilter,
+      action: actionFilter,
+      outcome: outcomeFilter,
+      fromIso: query.from === undefined ? undefined : dhakaDayStartIso(query.from),
+      toIso: query.to === undefined ? undefined : dhakaDayEndIso(query.to),
+    },
+  });
+  const entries = history.entries;
 
   const matched = filterAuditEntries(entries, {
     actor: actorFilter,
