@@ -39,24 +39,29 @@
 // under the caption, which is the outcome this whole exercise exists to stop.
 
 import { formatMoney, isNetSales, netSalesAmount, type NetSales } from '@muthoy/utils';
-import type { Metric } from '../lib/adminMetrics';
-
-/**
- * A manifest entry whose family is the pharmacy-takings one.
- *
- * The narrowing is the point: `Metric` alone would let this card render a
- * subscription figure under a pharmacy caption, which is the mislabelling
- * §5.2 was written to prevent.
- */
-export type PharmacySalesMetric = Metric & { family: 'pharmacy_sales' };
-
-export function isPharmacySalesMetric(metric: Metric): metric is PharmacySalesMetric {
-  return metric.family === 'pharmacy_sales';
-}
+import { requirePharmacySalesMetric, type NetSalesMetricId } from '../lib/adminMetrics';
 
 interface NetSalesCardProps {
-  /** The §5.2 entry whose label this card renders. Never a caption prop. */
-  metric: PharmacySalesMetric;
+  /**
+   * WHICH §5.2 entry to render — an ID, not the entry itself.
+   *
+   * GATE 5 ROUND 10. This used to take the `Metric` OBJECT, which made it an
+   * indirect caption prop: a spread was enough to keep the family and replace
+   * the words, and the reviewer rendered an authentic net figure under the
+   * subscription caption with
+   *
+   *   metric={{ ...requirePharmacySalesMetric('pharmacy_sales_net_today'),
+   *             label: 'Monthly recurring run rate' }}
+   *
+   * which compiled cleanly and passed the amount check. Assigning a different
+   * family's entry over a props object did the same.
+   *
+   * So the card now takes one of two literal IDs and RESOLVES the canonical
+   * entry itself. A caller cannot supply a label, cannot edit one, and cannot
+   * name a metric outside the pharmacy-takings family — the union rejects it
+   * at compile time and the resolver re-checks the family at runtime.
+   */
+  metricId: NetSalesMetricId;
   /**
    * The amount, as produced by `netSalesPaisa` or `sumNetSales`.
    *
@@ -82,10 +87,10 @@ interface NetSalesCardProps {
  * too. An operator seeing this is seeing a real defect: some code path put a
  * value into a net field that the refund-net calculation did not produce.
  */
-function ProvenanceFailure({ metric }: { metric: PharmacySalesMetric }) {
+function ProvenanceFailure({ label }: { label: string }) {
   return (
     <section className="rounded-xl border border-red-300 bg-red-50 p-5">
-      <h2 className="text-sm font-medium text-richBlack">{metric.label}</h2>
+      <h2 className="text-sm font-medium text-richBlack">{label}</h2>
       <p role="alert" className="mt-2 text-sm text-richBlack">
         This figure is unavailable: the value reaching this card was not produced by the
         refund-net calculation, so it is not shown. This is a defect, not an empty state —
@@ -96,15 +101,20 @@ function ProvenanceFailure({ metric }: { metric: PharmacySalesMetric }) {
 }
 
 export default function NetSalesCard({
-  metric,
+  metricId,
   amount,
   composition,
   withheld = false,
 }: NetSalesCardProps) {
+  // Resolved HERE, from the manifest, so the caption cannot be supplied or
+  // edited by a caller. `requirePharmacySalesMetric` throws if the id is not
+  // in the manifest or is not in the pharmacy-takings family.
+  const metric = requirePharmacySalesMetric(metricId);
+
   // The runtime half. Reproduction A reaches exactly here: the field was
   // overwritten with a gross number, the types never saw it, and this is what
   // refuses it.
-  if (!isNetSales(amount)) return <ProvenanceFailure metric={metric} />;
+  if (!isNetSales(amount)) return <ProvenanceFailure label={metric.label} />;
 
   // CLAUDE.md rule 6: money in the DM Mono variable. Decided here from the
   // metric's own unit, not from a caller's flag.

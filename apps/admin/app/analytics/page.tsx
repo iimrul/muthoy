@@ -1,4 +1,4 @@
-import { netSalesAmount } from '@muthoy/utils';
+import { netChartPoints } from '@muthoy/utils';
 import { ADMIN_MAX_RANGE_DAYS } from '@muthoy/validation';
 import ChartPanel from '../../components/charts/ChartPanel';
 import { EMPTY_VALUE, formatCount } from '../../lib/adminViews';
@@ -197,20 +197,34 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     contributingShopIds: conversion.accountIds,
   });
 
-  // §6i: `netSalesAmount` rather than `Number(...)`.
+  // §6i ROUND 10: the net series goes through `netChartPoints`, the sink
+  // that owns the conversion, NOT through the generic numeric `toPoints`.
   //
-  // The month total is an opaque `NetSales` now, so `Number(bucket.totalPaisa)`
-  // would be NaN — and `Number()` accepting anything is precisely how round 9
-  // laundered a collected figure into a net tile. The chart genuinely needs a
-  // plottable number, so the unwrap is explicit here and VERIFIES provenance
-  // on the way out, which is what the opaque type is for: every exit is
-  // visible and checked rather than implicit.
-  const sales = toPoints(
-    pharmacySalesByMonth,
-    (bucket) => bucket.month,
-    (bucket) => Number(netSalesAmount(bucket.totalPaisa)) / 100,
-    (bucket) => bucket.shopIds,
-  );
+  // `toPoints` takes a `(bucket) => number` selector, and that selector is a
+  // place a caller can put anything. The reviewer put an identity-shaped call
+  // there -- `((_: number) => 230)(Number(netSalesAmount(...)) / 100)` -- and
+  // the series published 230.00 under this page's pharmacy-net caption with
+  // zero type errors.
+  //
+  // The sink takes the OPAQUE amounts instead and divides by 100 itself, so
+  // there is no numeric selector to substitute. Suppression is applied FIRST,
+  // on the shops behind each month, and passed in as a flag -- a withheld
+  // bucket comes back null rather than 0, exactly as before.
+  const salesBuckets = pharmacySalesByMonth.map((bucket) => {
+    const gated = suppressBelowK({
+      value: bucket.totalPaisa,
+      contributingShopIds: bucket.shopIds,
+    });
+    return {
+      label: bucket.month,
+      amount: bucket.totalPaisa,
+      suppressed: gated.suppressed,
+    };
+  });
+  const sales = {
+    points: netChartPoints(salesBuckets),
+    withheld: salesBuckets.filter((bucket) => bucket.suppressed).length,
+  };
   const plans = toPoints(
     shopsByPlan,
     (bucket) => bucket.plan,

@@ -6,3 +6,4 @@ export * from './moneyInput';
 export * from './csv';
 export * from './bengali';
 export * from './netSales';
+export * from './netSalesSinks';

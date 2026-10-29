@@ -5,7 +5,7 @@ import ErrorNotice from '../../components/ErrorNotice';
 import NetSalesCard from '../../components/NetSalesCard';
 import { EmptyState, MetricTile } from '../../components/PageParts';
 import { requireAdminPermission } from '../../lib/adminAuthz';
-import { requireMetric, requirePharmacySalesMetric } from '../../lib/adminMetrics';
+import { requireMetric } from '../../lib/adminMetrics';
 import {
   analyticsOverview,
   revenueOverview,
@@ -373,7 +373,7 @@ export default async function RevenuePage() {
               rather than a substitute value, so k-anonymity withholds the
               figure without anything else taking its place. */}
           <NetSalesCard
-            metric={requirePharmacySalesMetric('pharmacy_sales_net')}
+            metricId="pharmacy_sales_net"
             amount={pharmacyNetSales}
             withheld={pharmacySales.suppressed}
             composition={

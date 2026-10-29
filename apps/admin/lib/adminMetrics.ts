@@ -525,6 +525,24 @@ export function requireMetric(id: string): Metric {
 }
 
 /**
+ * The two ids a net figure may be rendered under.
+ *
+ * GATE 5 ROUND 10: `NetSalesCard` takes one of these rather than a `Metric`
+ * object, because an object prop is an indirect caption prop -- a spread kept
+ * the family and replaced the label, putting an authentic net figure under a
+ * subscription caption. A literal union cannot carry a label at all.
+ *
+ * Asserted against the manifest in adminMetrics.test.ts, so this list cannot
+ * drift from the `pharmacy_sales` family it claims to describe.
+ */
+export const NET_SALES_METRIC_IDS = Object.freeze([
+  'pharmacy_sales_net',
+  'pharmacy_sales_net_today',
+] as const);
+
+export type NetSalesMetricId = (typeof NET_SALES_METRIC_IDS)[number];
+
+/**
  * A manifest entry narrowed to the PHARMACY-TAKINGS family.
  *
  * §6i: `NetSalesCard` accepts only this type, so the net renderer cannot be

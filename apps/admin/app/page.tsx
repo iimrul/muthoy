@@ -18,7 +18,6 @@ import {
   isActiveSubscriptionNow,
   monthlyRecurringRevenue,
   requireMetric,
-  requirePharmacySalesMetric,
 } from '../lib/adminMetrics';
 import { dashboardOverview, type DashboardOverview } from '../lib/adminPlatformQueries';
 import { suppressSeriesBelowK } from '../lib/adminSuppression';
@@ -255,7 +254,7 @@ export default async function DashboardPage() {
             property name built as `'net' + 'SalesToday'`. Neither is
             expressible here: there is no caption prop and no value string. */}
         <NetSalesCard
-          metric={requirePharmacySalesMetric('pharmacy_sales_net_today')}
+          metricId="pharmacy_sales_net_today"
           amount={stats.netSalesToday}
           composition={`All shops · ${stats.day.businessDate} (Asia/Dhaka) · gross ${formatMoney(stats.grossSalesToday)} less refunds ${formatMoney(stats.refundsToday)}`}
         />

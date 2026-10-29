@@ -39,7 +39,7 @@
 // exactly like a real absence.
 
 import { addPaisa, asPaisa, type Paisa } from '@muthoy/types';
-import { netSalesAmount, netSalesPaisa } from '@muthoy/utils';
+import { netExportTaka, netSalesPaisa } from '@muthoy/utils';
 import { ADMIN_REPORT_IDS, type AdminReportExportQuery } from '@muthoy/validation';
 import { CSV_CONTENT_TYPE, contentDisposition, toCsv, type CsvDocument } from './adminCsv';
 import { dhakaDayLabel } from './adminDashboard';
@@ -610,11 +610,19 @@ function buildPharmacySalesByMonth(
     const total = netSalesPaisa(sumPaisaOf(monthSales), sumPaisaOf(monthRefunds));
     return {
       key: month,
-      // §6i: `netSalesAmount` VERIFIES provenance before unwrapping, so an
-      // export cannot print a figure the refund-net calculation did not
-      // produce. The unwrap is explicit and greppable rather than implicit,
-      // which is the point of the opaque type leaving the module at all.
-      values: [exportTaka(netSalesAmount(total))],
+      // §6i ROUND 10: `netExportTaka` takes the OPAQUE amount and owns the
+      // conversion.
+      //
+      // This used to unwrap the amount and hand the number to the generic
+      // taka formatter, and that shape left a gap between the unwrap and the
+      // formatter wide enough to put any `Paisa` through. The reviewer did
+      // exactly that -- an identity-shaped call returning a GROSS monthly sum
+      // -- and the CSV exported 500.00 instead of 400.00 under the heading
+      // "Pharmacy sales, net of refunds (BDT)", with zero type errors.
+      //
+      // The sink cannot be handed a number at all, so there is nothing for an
+      // identity-shaped call to substitute.
+      values: [netExportTaka(total)],
       contributorIds: [
         ...monthSales.map((row) => row.shopId),
         ...monthRefunds.map((row) => row.shopId),
