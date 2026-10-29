@@ -6,7 +6,7 @@ import {
   readAdminAuditLogForExport,
   recordAdminActionDurably,
 } from '../../../../lib/adminAuditStore';
-import { dhakaDayEndIso, dhakaDayStartIso } from '../../../../lib/adminFilters';
+import { dhakaDayAfterIso, dhakaDayStartIso } from '../../../../lib/adminFilters';
 import {
   auditDhakaDay,
   filterAuditEntries,
@@ -130,7 +130,9 @@ export async function GET(request: Request): Promise<Response> {
       // comparing it against a bare date would put six hours of every Dhaka
       // day on the wrong side of the bound.
       fromIso: from === undefined ? undefined : dhakaDayStartIso(from),
-      toIso: to === undefined ? undefined : dhakaDayEndIso(to),
+      // Round 13 finding 4: exclusive, so an audit event recorded inside the
+      // last millisecond of the day is not silently outside the export.
+      toExclusiveIso: to === undefined ? undefined : dhakaDayAfterIso(to),
     });
   } catch (error) {
     if (error instanceof AdminAuditExportTooLargeError) {

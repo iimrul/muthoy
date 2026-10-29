@@ -245,3 +245,41 @@ export async function requireAdminPermission(
   }
   return session;
 }
+
+/**
+ * A session holding AT LEAST ONE of these permissions.
+ *
+ * ROUND 13 FINDING 7. `/audit` demanded `audit.read` before anything else, and
+ * `support` does not hold it — it holds `shop_audit.read`, the narrower
+ * permission for ONE pharmacy's log. So the role that the §4.2 matrix grants
+ * the per-shop view could never reach it: a real signed Support session asking
+ * for `/audit?shop=<uuid>` got "your admin role does not have access to this
+ * page" and issued zero reads. The permission existed, was granted, was
+ * enforced — and was unreachable.
+ *
+ * This admits the session and lets the PAGE gate each section on its own
+ * permission, which is what the matrix actually describes. It is not a
+ * widening: a caller holding neither is still refused, and the denial is still
+ * audited with the permissions that were required.
+ */
+export async function requireAnyAdminPermission(
+  permissions: readonly AdminPermission[],
+  env: AdminEnvironment = process.env,
+  deps: AdminAuthzDeps = {},
+): Promise<AdminSessionContext> {
+  const session = await currentAdminSession(env, deps);
+  if (permissions.some((permission) => session.permissions.includes(permission))) {
+    return session;
+  }
+
+  await audit(deps, {
+    actor: session.username,
+    actorVerified: true,
+    role: session.role,
+    action: 'authz.denied',
+    outcome: 'denied',
+    // The whole set, so the record says what would have been sufficient.
+    meta: { permission: permissions.join(' or ') },
+  });
+  throw new AdminForbiddenError(permissions.join(' or '), session.role);
+}

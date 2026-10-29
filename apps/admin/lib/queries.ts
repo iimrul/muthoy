@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { AdminDataError } from './errors';
+import { assertCompleteRead } from './adminReports';
 import { netSalesPaisa } from '@muthoy/utils';
 import {
   dhakaDayRange,
@@ -149,6 +150,45 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
       .order('id', { ascending: true })
       .range(from, to),
   );
+
+  // ROUND 13 FINDING 3 — THE DASHBOARD IS INSIDE THE COMPLETENESS GATE TOO.
+  //
+  // `readAllPages` stops when a page comes back shorter than `PAGE_SIZE`,
+  // which is correct for a finished read and indistinguishable from a CAPPED
+  // one. With six pharmacies selling 100.00 each and a transport returning
+  // five rows, the Dashboard published 500.00 and refused nothing, while the
+  // matching report correctly rejected `counted: 6, loaded: 5`. Round 12 put
+  // Analytics and Revenue inside the gate and left this page outside it.
+  //
+  // So both reads are counted independently and compared with what loaded.
+  // `head: true` asks for the count and no rows, so this is two cheap queries
+  // rather than a second pass over the data.
+  const [saleCount, refundCount] = await Promise.all([
+    supabase
+      .from('sales')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_deleted', false)
+      .eq('business_date', day.businessDate),
+    supabase
+      .from('sale_refunds')
+      .select('id', { count: 'exact', head: true })
+      .eq('is_deleted', false)
+      .eq('business_date', day.businessDate),
+  ]);
+  if (saleCount.error) {
+    console.error('[admin] sales count query failed:', saleCount.error.message);
+    throw new AdminDataError('sales count query failed');
+  }
+  if (refundCount.error) {
+    console.error('[admin] sale_refunds count query failed:', refundCount.error.message);
+    throw new AdminDataError('sale_refunds count query failed');
+  }
+  // THROWS on a short read. A dashboard figure built from part of a day is a
+  // wrong figure, and showing it is worse than showing an error.
+  assertCompleteRead([
+    { label: 'sales', counted: saleCount.count ?? 0, loaded: saleRows.length },
+    { label: 'sale_refunds', counted: refundCount.count ?? 0, loaded: refundRows.length },
+  ]);
 
   const grossSalesToday = sumSaleTotals(saleRows);
   const refundsToday = sumRefundTotals(refundRows);

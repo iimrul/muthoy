@@ -8,7 +8,11 @@ import {
   listShopsPage,
   type ShopListPage,
 } from '../../lib/adminPlatformQueries';
-import { formatDhakaDate, formatDhakaDateTime } from '../../lib/adminViews';
+import {
+  COMMERCIAL_STATUSES,
+  formatDhakaDate,
+  formatDhakaDateTime,
+} from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
 
 // Batch 3 §8.2 — Pharmacy Management.
@@ -37,10 +41,12 @@ const PLAN_OPTIONS = [
   { value: 'ultra', label: 'ultra' },
 ];
 
+// Round 13 finding 8: built from the schema's own allowed values. The hand
+// written list offered `suspended`, which no row can hold, and omitted
+// `read_only`, which is the status that restricts a pharmacy.
 const STATUS_OPTIONS = [
   { value: '', label: 'Any status' },
-  { value: 'active', label: 'active' },
-  { value: 'suspended', label: 'suspended' },
+  ...COMMERCIAL_STATUSES.map((status) => ({ value: status, label: status })),
 ];
 
 const SORT_OPTIONS = [

@@ -49,7 +49,7 @@ import {
 import { ADMIN_REPORT_IDS, type AdminReportExportQuery } from '@muthoy/validation';
 import { CSV_CONTENT_TYPE, contentDisposition, toCsv, type CsvDocument } from './adminCsv';
 import { dhakaDayLabel, dhakaMonthLabel } from './adminDashboard';
-import { dhakaDayEndIso, dhakaDayStartIso } from './adminFilters';
+import { dhakaDayAfterIso, dhakaDayStartIso } from './adminFilters';
 import {
   collectedPaymentsByMonth,
   NET_SALES_METRIC_IDS,
@@ -437,6 +437,59 @@ export interface ReportTable {
   tallies: readonly SourceTally[];
 }
 
+/**
+ * The register of tables this module actually built.
+ *
+ * ROUND 13 FINDING 1. Round 12 made the serializer derive the net columns from
+ * `table.reportId` instead of trusting a field on the table. The reviewer then
+ * changed `reportId` INSTEAD:
+ *
+ *   reportDownload({ ...table, reportId: 'plan_distribution',
+ *     rows: table.rows.map((row) => [row[0], '500.00']) }, query)
+ *
+ * -> HTTP 200, the canonical net caption, 500.00, zero diagnostics. Because
+ * `title` and `columns` are independent fields, the net HEADING came along for
+ * the ride while the identity that drove verification did not. Appending a
+ * plain-string column under the net heading worked for the same reason.
+ *
+ * The lesson, fifth time around: a value built by this module must not be
+ * reassemblable by a caller. Identity, captions and rows are bound together by
+ * the OBJECT rather than by any field, so `{ ...table, ... }` is not a report
+ * table at all. A WeakSet and not a brand property, because a symbol-keyed
+ * marker is copied by a spread -- which is the whole reason §6i uses one.
+ */
+const AUTHENTIC_TABLES = new WeakSet<object>();
+
+/** Freezes and registers a table. The only way one is created. */
+function mintTable(table: ReportTable): ReportTable {
+  Object.freeze(table.columns);
+  Object.freeze(table.rows);
+  Object.freeze(table);
+  AUTHENTIC_TABLES.add(table);
+  return table;
+}
+
+/** Thrown when something that is not a built report table reaches an output. */
+export class ReportTableProvenanceError extends Error {
+  constructor() {
+    super(
+      'this report table was not produced by buildReportTable, so its caption, its identity '
+      + 'and its rows cannot be trusted to describe each other',
+    );
+    this.name = 'ReportTableProvenanceError';
+  }
+}
+
+/**
+ * The gate every output path crosses first.
+ *
+ * Exported so the route and the page can state the refusal in their own words
+ * rather than letting a 500 happen somewhere lower down.
+ */
+export function assertAuthenticReportTable(table: ReportTable): void {
+  if (!AUTHENTIC_TABLES.has(table)) throw new ReportTableProvenanceError();
+}
+
 function withinRange(day: string, query: AdminReportExportQuery): boolean {
   if (query.from !== undefined && day < query.from) return false;
   if (query.to !== undefined && day > query.to) return false;
@@ -447,7 +500,10 @@ function withinInstantRange(timestamp: string, query: AdminReportExportQuery): b
   const at = Date.parse(timestamp);
   if (!Number.isFinite(at)) return false;
   if (query.from !== undefined && at < Date.parse(dhakaDayStartIso(query.from))) return false;
-  if (query.to !== undefined && at > Date.parse(dhakaDayEndIso(query.to))) return false;
+  // Round 13 finding 4: HALF-OPEN. `Date.parse` keeps milliseconds, so an
+  // inclusive `.999` bound here agreed with the old query bound -- and both
+  // dropped the same rows. A strict compare against the next midnight cannot.
+  if (query.to !== undefined && at >= Date.parse(dhakaDayAfterIso(query.to))) return false;
   return true;
 }
 
@@ -549,6 +605,27 @@ interface AggregateRow {
   complementContributorIds?: readonly string[];
   /** Per-value complements, index-aligned with `values`. */
   valueComplementIds?: readonly (readonly string[] | undefined)[];
+  /**
+   * The contributor sets of the SUB-PERIODS this bucket aggregates.
+   *
+   * ROUND 13 FINDING 2. Whole-month windows stopped two monthly answers from
+   * differing, but they did nothing about a monthly answer differenced against
+   * a DAILY one published elsewhere:
+   *
+   *   Oct 29: five pharmacies sell 100.00 each -> the Dashboard releases
+   *           500.00 for that day, refunds 0.00
+   *   Oct 1:  one other pharmacy refunds 80.00, and nothing else happens
+   *   the full-October export releases 420.00, because the month's union is
+   *   six pharmacies
+   *
+   *   500.00 - 420.00 = 80.00, which is the lone refunding pharmacy's amount.
+   *
+   * The composition rule has to hold ACROSS GRANULARITIES, not just within
+   * one: a month is releasable only if every day inside it is releasable on
+   * its own. That is the same rule `suppressTotalAcrossBuckets` applies to the
+   * Revenue total, applied downwards instead of upwards.
+   */
+  subPeriodContributorIds?: readonly (readonly string[])[];
 }
 
 /**
@@ -640,6 +717,16 @@ function suppressRows(
     complement !== undefined
     && complement.length > 0
     && suppressBelowK({ value: null, contributingShopIds: complement }).suppressed;
+
+  // Round 13 finding 2: a bucket whose SUB-PERIODS are not each releasable is
+  // not releasable either, because a sub-period published elsewhere can be
+  // subtracted from it.
+  const subPeriodBlocks = (row: AggregateRow): boolean =>
+    (row.subPeriodContributorIds ?? []).some(
+      (contributors) =>
+        contributors.length > 0
+        && suppressBelowK({ value: null, contributingShopIds: contributors }).suppressed,
+    );
   const out: (readonly ReportCell[])[] = [];
   let suppressedBuckets = 0;
 
@@ -676,7 +763,12 @@ function suppressRows(
           suppressed,
         };
       });
-      if (perValue.some((entry) => entry.suppressed)) suppressedBuckets += 1;
+      const subBlocked = subPeriodBlocks(row);
+      if (subBlocked || perValue.some((entry) => entry.suppressed)) suppressedBuckets += 1;
+      if (subBlocked) {
+        out.push([row.key, ...row.values.map((_value, index) => suppressedCell(index))]);
+        continue;
+      }
       out.push([row.key, ...perValue.map((entry) => entry.cell)]);
       continue;
     }
@@ -686,7 +778,11 @@ function suppressRows(
       contributingShopIds: row.contributorIds,
     };
     const gated = suppressBelowK(aggregate);
-    if (gated.suppressed || complementBlocks(row.complementContributorIds)) {
+    if (
+      gated.suppressed
+      || complementBlocks(row.complementContributorIds)
+      || subPeriodBlocks(row)
+    ) {
       suppressedBuckets += 1;
       out.push([row.key, ...row.values.map((_value, index) => suppressedCell(index))]);
       continue;
@@ -923,6 +1019,19 @@ function buildPharmacySalesByMonth(
         ...monthSales.map((row) => row.shopId),
         ...monthRefunds.map((row) => row.shopId),
       ],
+      // Round 13 finding 2: the DAYS inside this month, each with its own
+      // contributors. The Dashboard publishes a day; this publishes a month;
+      // the difference between them is a day's worth of pharmacies, and a day
+      // behind fewer than k of them must not be recoverable that way.
+      subPeriodContributorIds: [
+        ...new Set([...monthSales, ...monthRefunds].map((row) => row.businessDate)),
+      ].map((day) => [
+        ...new Set(
+          [...monthSales, ...monthRefunds]
+            .filter((row) => row.businessDate === day)
+            .map((row) => row.shopId),
+        ),
+      ]),
     };
   });
 }
@@ -1005,7 +1114,7 @@ export function buildReportTable(
     );
   }
 
-  return {
+  return mintTable({
     reportId: entry.id,
     title: entry.title,
     subtitle: parts.join(' · '),
@@ -1013,7 +1122,7 @@ export function buildReportTable(
     rows,
     suppressedBuckets,
     tallies: data.tallies,
-  };
+  });
 }
 
 /** Reads the data through the injected source, then builds the table. */
@@ -1041,6 +1150,10 @@ export async function buildReport(
  * and columns -- so the net caption it is trying to publish under is gone.
  */
 export function reportTextRows(table: ReportTable): readonly (readonly string[])[] {
+  // Round 13 finding 1: the whole table, as built, or nothing. Deriving the
+  // net columns from `reportId` was not enough while `reportId` was itself a
+  // field a caller could replace.
+  assertAuthenticReportTable(table);
   const entry = requireReportDefinition(table.reportId);
   return toTextRows(table.rows, netValueIndexes(entry));
 }

@@ -16,7 +16,11 @@ import {
   type ReportTable,
 } from '../../lib/adminReports';
 import { featureState } from '../../lib/adminSettings';
-import { EMPTY_VALUE } from '../../lib/adminViews';
+import {
+  COMMERCIAL_STATUSES,
+  EMPTY_VALUE,
+  SUBSCRIPTION_STATUSES,
+} from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
 
 // Batch 3 §8.10 — Reports.
@@ -153,10 +157,14 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
             name: 'status',
             label: 'Status',
             value: firstParam(params.status),
+            // Round 13 finding 8: the real values, and BOTH families, because
+            // a report's `statusFilter` says which column its status means.
             options: [
               { value: '', label: 'Any status' },
-              { value: 'active', label: 'active' },
-              { value: 'suspended', label: 'suspended' },
+              ...(definition?.statusFilter === 'subscription'
+                ? SUBSCRIPTION_STATUSES
+                : COMMERCIAL_STATUSES
+              ).map((status) => ({ value: status, label: status })),
             ],
           },
         ]}

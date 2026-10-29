@@ -78,6 +78,17 @@ export const AUDIT_READ_LIMIT = 500;
 /** Exactly the columns §3.4 grants select on, as ONE literal. */
 const AUDIT_COLUMNS = 'at, actor, actor_verified, role, action, target, outcome, meta';
 
+/**
+ * The same columns plus `id`, for keyset paging.
+ *
+ * `id` is never rendered — it is the tiebreaker that makes `(at, id)` a total
+ * order, so a page can continue from the last row seen instead of from a
+ * count. One literal, because a concatenated column list makes PostgREST infer
+ * `GenericStringError[]`.
+ */
+const AUDIT_CURSOR_COLUMNS =
+  'id, at, actor, actor_verified, role, action, target, outcome, meta';
+
 const OUTCOMES = new Set(['success', 'failure', 'denied']);
 
 /**
@@ -236,9 +247,18 @@ export interface AuditServerFilter {
   outcome?: string;
   /** Exact match. Support uses it for one case's history. */
   target?: string;
-  /** Inclusive ISO-8601 instant bounds. */
+  /** Inclusive lower bound. */
   fromIso?: string;
-  toIso?: string;
+  /**
+   * EXCLUSIVE upper bound.
+   *
+   * Round 13 finding 4: `admin_audit_log.at` is a microsecond-precision
+   * `timestamptz`, and an inclusive `23:59:59.999` bound drops an event
+   * recorded inside the last millisecond of a Dhaka day -- from the page AND
+   * from the export, which is the one place a missing security event matters
+   * most.
+   */
+  toExclusiveIso?: string;
 }
 
 function applyServerFilter<T extends Record<string, unknown>>(
@@ -263,7 +283,7 @@ function applyServerFilter<T extends Record<string, unknown>>(
     call('eq', 'target', filter.target);
   }
   if (filter.fromIso !== undefined) call('gte', 'at', filter.fromIso);
-  if (filter.toIso !== undefined) call('lte', 'at', filter.toIso);
+  if (filter.toExclusiveIso !== undefined) call('lt', 'at', filter.toExclusiveIso);
   return narrowed;
 }
 
@@ -295,17 +315,44 @@ export async function readAdminAuditLogForExport(
 ): Promise<readonly AdminAuditEntry[]> {
   const client = deps.client ?? getSupabaseAdmin();
   const collected: AdminAuditEntry[] = [];
+  // ROUND 13 FINDING 5 — KEYSET PAGING, NOT OFFSET.
+  //
+  // `range(offset, offset + page - 1)` is an OFFSET window, and an audit log
+  // is append-heavy: an event inserted between page one and page two shifts
+  // every later row down by one, so the reader sees one old event TWICE. The
+  // reviewer executed it against PostgreSQL with both canonical indexes --
+  // 5 001 seeded events, one appended mid-read -- and got 5 002 entries
+  // containing 5 001 distinct events. A duplicated line in an evidence file is
+  // not a cosmetic fault: it misrepresents what happened.
+  //
+  // So each page continues from the LAST ROW SEEN rather than from a count.
+  // `(at, id)` is a total order, so a row either sorts before the cursor or it
+  // does not, whatever is inserted meanwhile. A concurrent insert is simply
+  // newer than the cursor and is not seen by this pass, which is the correct
+  // answer for a snapshot.
+  let cursor: { at: string; id: string } | null = null;
 
-  for (let offset = 0; offset <= AUDIT_EXPORT_MAX; offset += AUDIT_EXPORT_PAGE) {
-    const base = client
+  for (let page = 0; page * AUDIT_EXPORT_PAGE <= AUDIT_EXPORT_MAX; page += 1) {
+    let base = client
       .from('admin_audit_log')
-      .select(AUDIT_COLUMNS)
+      .select(AUDIT_CURSOR_COLUMNS)
       .order('at', { ascending: false })
-      .range(offset, offset + AUDIT_EXPORT_PAGE - 1);
-    const { data, error } = (await applyServerFilter(
-      base as unknown as Record<string, unknown>,
-      filter,
-    )) as { data: unknown; error: { message: string } | null };
+      .order('id', { ascending: false })
+      .limit(AUDIT_EXPORT_PAGE) as unknown as Record<string, unknown>;
+    if (cursor !== null) {
+      // Strictly older than the cursor, by the same two keys the order uses.
+      const or = (base as { or?: (expression: string) => unknown }).or;
+      if (typeof or === 'function') {
+        base = or.call(
+          base,
+          'at.lt."' + cursor.at + '",and(at.eq."' + cursor.at + '",id.lt."' + cursor.id + '")',
+        ) as Record<string, unknown>;
+      }
+    }
+    const { data, error } = (await applyServerFilter(base, filter)) as {
+      data: unknown;
+      error: { message: string } | null;
+    };
     if (error) {
       console.error('[admin] admin_audit_log export read failed:', error.message);
       throw new AdminAuditReadError('admin audit read failed');
@@ -320,6 +367,16 @@ export async function readAdminAuditLogForExport(
       throw new AdminAuditExportTooLargeError(collected.length);
     }
     if (rows.length < AUDIT_EXPORT_PAGE) return collected;
+
+    const last = rows[rows.length - 1];
+    const at = typeof last?.at === 'string' ? last.at : null;
+    const id = last?.id === undefined || last?.id === null ? null : String(last.id);
+    if (at === null || id === null) {
+      // Without a cursor the next page would have to be an offset, and an
+      // offset is what this change exists to remove.
+      throw new AdminAuditReadError('an audit page returned no cursor to continue from');
+    }
+    cursor = { at, id };
   }
 
   throw new AdminAuditExportTooLargeError(collected.length);

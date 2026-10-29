@@ -14,6 +14,36 @@
 import { ZERO_PAISA, addPaisa, asPaisa, type Paisa } from '@muthoy/types';
 
 const EMPTY_VALUE = '—';
+
+/**
+ * The commercial statuses a shop row may hold, from the schema's own CHECK.
+ *
+ * ROUND 13 FINDING 8. The pharmacies and reports filters offered `suspended`,
+ * which `commercial_status` has NEVER allowed —
+ * `check (commercial_status in ('active','read_only'))` — so choosing it
+ * queried a value no row can hold and returned nothing, while `read_only`, the
+ * status that actually restricts a pharmacy, was not offered at all. A filter
+ * that cannot select the restricted rows is worse than no filter: it reads as
+ * "there are none".
+ *
+ * Declared ONCE here and consumed by both pages, so the two cannot drift from
+ * each other or from the column again.
+ */
+export const COMMERCIAL_STATUSES = Object.freeze(['active', 'read_only'] as const);
+
+/**
+ * The subscription statuses `billing_subscriptions.status` allows.
+ *
+ * Same CHECK-constraint source: `('active','past_due','grace','canceled','expired')`.
+ * The reports page offered two of them and invented a third.
+ */
+export const SUBSCRIPTION_STATUSES = Object.freeze([
+  'active',
+  'past_due',
+  'grace',
+  'canceled',
+  'expired',
+] as const);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**

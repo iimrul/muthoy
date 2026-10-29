@@ -231,6 +231,8 @@ export interface ListFilterBuilder {
   eq(column: string, value: unknown): this;
   gte(column: string, value: unknown): this;
   lte(column: string, value: unknown): this;
+  /** Round 13 finding 4: the strict bound a half-open instant range needs. */
+  lt(column: string, value: unknown): this;
   or(expression: string): this;
 }
 
@@ -259,14 +261,42 @@ export function dhakaDayStartIso(day: string): string {
 }
 
 /**
- * The LAST instant of a Dhaka calendar day, inclusive.
+ * The LAST instant of a Dhaka calendar day, inclusive to the millisecond.
  *
- * `23:59:59.999` rather than the next midnight, so the bound can be `lte` and
- * the two ends of the range read the same way. The millisecond gap is below
- * the resolution of anything this product records.
+ * ROUND 13 FINDING 4 — DO NOT USE THIS AS A QUERY BOUND. The comment here used
+ * to say the millisecond gap was "below the resolution of anything this
+ * product records". That was false: PostgreSQL `timestamptz` keeps
+ * MICROSECONDS, so a payment verified at `2026-10-31T23:59:59.999500+06:00`
+ * falls in the gap. The reviewer executed it against the real chain — six
+ * verified payments, the sixth in that window — and the October report
+ * exported `2026-10,500.00,5` while the correct answer was 600.00 from six.
+ * Worse, the completeness gate and the k floor both accepted the short subset,
+ * because the count query omitted the same row.
+ *
+ * Kept only for display and for comparisons against values this code itself
+ * produced at millisecond precision. Every query uses `dhakaDayAfterIso` with
+ * a strict `lt`.
  */
 export function dhakaDayEndIso(day: string): string {
   return day + 'T23:59:59.999' + DHAKA_OFFSET;
+}
+
+/**
+ * The first instant AFTER a Dhaka calendar day — an exclusive upper bound.
+ *
+ * Half-open `[start, after)` is the only form that cannot drop a row to
+ * precision: it does not matter how many digits the column keeps, because the
+ * bound is the next day's midnight rather than a guess at the last
+ * representable instant before it.
+ */
+export function dhakaDayAfterIso(day: string): string {
+  const parsed = Date.parse(day + 'T00:00:00' + DHAKA_OFFSET);
+  if (!Number.isFinite(parsed)) return day + 'T00:00:00' + DHAKA_OFFSET;
+  const next = new Date(parsed + 24 * 60 * 60_000);
+  // Rendered in the Dhaka offset, so the literal reads as the next local
+  // midnight rather than as an instant six hours away from one.
+  const shifted = new Date(next.getTime() + 6 * 60 * 60_000);
+  return shifted.toISOString().slice(0, 10) + 'T00:00:00' + DHAKA_OFFSET;
 }
 
 /**

@@ -270,18 +270,30 @@ export interface SupportCaseDetail {
   notes: readonly SupportNoteView[];
   /** Append-only by PRIVILEGE: the table grants insert and nothing else. */
   notesAreAppendOnly: true;
+  /**
+   * TRUE when older notes exist beyond the page that was read.
+   *
+   * ROUND 13 FINDING 6. The store reported this and the loader dropped it, so
+   * a 501-note case rendered "Notes (500) · append-only" with the oldest note
+   * silently absent. An operator reading a case history has to be able to tell
+   * a complete one from a partial one.
+   */
+  olderNotesWithheld: boolean;
 }
 
 export function supportCaseDetail(input: {
   row: SupportCaseRow;
   shopName: string | null;
   notes: readonly SupportNoteRow[];
+  /** Defaults to false, so an existing caller cannot silently claim complete. */
+  olderNotesWithheld?: boolean;
   nowMs: number;
 }): SupportCaseDetail {
   return {
     case: summarizeSupportCase({ row: input.row, shopName: input.shopName, nowMs: input.nowMs }),
     notes: orderNotes(input.notes),
     notesAreAppendOnly: true,
+    olderNotesWithheld: input.olderNotesWithheld ?? false,
   };
 }
 

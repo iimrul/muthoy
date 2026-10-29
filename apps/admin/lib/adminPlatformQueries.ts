@@ -24,6 +24,7 @@ import type { AdminListQuery, AdminReportExportQuery } from '@muthoy/validation'
 import {
   applyShopListFilters,
   applyShopListQuery,
+  dhakaDayAfterIso,
   pageMeta,
   rangeSpec,
   type ListFilterBuilder,
@@ -64,6 +65,7 @@ import {
 import {
   listSupportCases as readSupportCases,
   listSupportNotes,
+  listSupportNotesPage,
   readSupportCase,
 } from './adminSupportStore';
 import type {
@@ -213,27 +215,66 @@ export async function listShopsPage(query: AdminListQuery): Promise<ShopListPage
   };
 }
 
-/** The distinct districts present, for the filter control. Bounded. */
+/** No real deployment has this many districts; the loop is bounded anyway. */
+const MAX_DISTRICTS = 500;
+
+/**
+ * The distinct districts present, for the filter control.
+ *
+ * ROUND 13 FINDING 9. This read the first 5 000 rows ordered by district and
+ * deduplicated AFTERWARDS, so the cap was spent on rows rather than on
+ * districts: 5 000 Dhaka shops followed by one Sylhet shop returned
+ * `['Dhaka']`, and Sylhet simply vanished from the filter. A smaller server
+ * page cap makes it worse, and the loss is silent — the control looks
+ * complete.
+ *
+ * So it pages BY DISTRICT instead of by row. Each page is ordered ascending,
+ * and the next page asks for districts strictly greater than the last one
+ * seen, which skips the remaining rows of a district already recorded. Every
+ * round trip therefore advances past at least one district, so the number of
+ * queries is bounded by the number of districts rather than by the number of
+ * shops.
+ */
 export async function listShopDistricts(): Promise<readonly string[]> {
-  const { data, error } = await getSupabaseAdmin()
-    .from('shops')
-    .select('district')
-    .eq('is_deleted', false)
-    .not('district', 'is', null)
-    .order('district', { ascending: true })
-    .range(0, 4_999);
-
-  if (error) {
-    console.error('[admin] district list query failed:', error.message);
-    throw new AdminDataError('district list query failed');
-  }
-
   const districts = new Set<string>();
-  for (const row of data ?? []) {
-    const district = nullableText((row as Record<string, unknown>).district);
-    if (district !== null && district.trim().length > 0) districts.add(district.trim());
+  let after: string | null = null;
+
+  for (let page = 0; page < MAX_DISTRICTS; page += 1) {
+    const base = getSupabaseAdmin()
+      .from('shops')
+      .select('district')
+      .eq('is_deleted', false)
+      .not('district', 'is', null)
+      .order('district', { ascending: true })
+      .limit(1_000);
+    const { data, error } = await (after === null ? base : base.gt('district', after));
+
+    if (error) {
+      console.error('[admin] district list query failed:', error.message);
+      throw new AdminDataError('district list query failed');
+    }
+
+    const rows = data ?? [];
+    let last: string | null = null;
+    for (const row of rows) {
+      const district = nullableText((row as Record<string, unknown>).district);
+      if (district === null || district.trim().length === 0) continue;
+      districts.add(district.trim());
+      last = district;
+    }
+
+    // Fewer rows than asked for means the table is exhausted. A page that
+    // yielded no usable district would also loop forever on the same cursor,
+    // so it stops here too.
+    if (rows.length < 1_000 || last === null) return [...districts].sort();
+    after = last;
   }
-  return [...districts].sort();
+
+  // Unreachable in any real deployment, and a silent truncation is exactly
+  // what this function exists to stop — so it says so rather than returning a
+  // short list that looks complete.
+  console.error('[admin] district list exceeded ' + MAX_DISTRICTS + ' pages');
+  throw new AdminDataError('district list is larger than this page can read');
 }
 
 // ────────────────────────────────────────────────────────── §8.6 the map read
@@ -368,10 +409,21 @@ export async function getSupportCaseDetail(
   const row = await readSupportCase(caseId);
   if (row === null) return null;
 
-  const [notes, names] = await Promise.all([listSupportNotes(caseId), shopNamesFor([row.shopId])]);
+  // ROUND 13 FINDING 6: the TRUNCATION FLAG travels with the notes.
+  //
+  // Round 12 made the store return `olderWithheld` and this loader called the
+  // convenience wrapper that drops it, so the flag had no production consumer
+  // at all: a 501-note case rendered "Notes (500) · append-only" with the
+  // oldest note silently missing and nothing saying so.
+  const [page, names] = await Promise.all([
+    listSupportNotesPage(caseId),
+    shopNamesFor([row.shopId]),
+  ]);
+  const notes = page.notes;
 
   return supportCaseDetail({
     row,
+    olderNotesWithheld: page.olderWithheld,
     shopName: names.get(row.shopId) ?? null,
     notes,
     nowMs: now.getTime(),
@@ -882,7 +934,17 @@ function toSaleTotalRow(column: string) {
 /** A date range, already in the form its column compares against. */
 interface Bounds {
   from?: string;
+  /** Inclusive upper bound, for a DAY column whose value IS the whole day. */
   to?: string;
+  /**
+   * EXCLUSIVE upper bound, for an instant column.
+   *
+   * Round 13 finding 4: an inclusive `.999` literal cannot bound a
+   * microsecond-precision `timestamptz` without dropping rows inside the last
+   * millisecond of the day -- and the count query dropped them too, so the
+   * completeness gate accepted the short subset as complete.
+   */
+  toExclusive?: string;
 }
 
 /**
@@ -895,7 +957,11 @@ interface Bounds {
 function instantBounds(query: AdminReportExportQuery): Bounds {
   return {
     ...(query.from === undefined ? {} : { from: query.from + 'T00:00:00+06:00' }),
-    ...(query.to === undefined ? {} : { to: query.to + 'T23:59:59.999+06:00' }),
+    // Round 13 finding 4: the EXCLUSIVE next-midnight bound. The inclusive
+    // `.999` literal dropped a payment verified at `...59.999500+06:00`, and
+    // the count query dropped it too -- so the completeness gate and the k
+    // floor both accepted a short subset as complete.
+    ...(query.to === undefined ? {} : { toExclusive: dhakaDayAfterIso(query.to) }),
   };
 }
 
@@ -920,6 +986,7 @@ function withRange<B extends ListFilterBuilder>(builder: B, column: string, boun
   let next = builder;
   if (bounds.from !== undefined) next = next.gte(column, bounds.from);
   if (bounds.to !== undefined) next = next.lte(column, bounds.to);
+  if (bounds.toExclusive !== undefined) next = next.lt(column, bounds.toExclusive);
   return next;
 }
 

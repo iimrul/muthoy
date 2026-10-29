@@ -390,6 +390,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
 
           <h3 className="mt-6 text-sm font-semibold">
             Notes ({detail.notes.length}) · append-only
+            {detail.olderNotesWithheld ? ' · older notes not shown' : ''}
           </h3>
           <p className="mt-1 text-xs text-midGray">
             A note cannot be edited or deleted. That is enforced by the table&rsquo;s privileges — it

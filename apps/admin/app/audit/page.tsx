@@ -11,9 +11,9 @@ import {
   formatAuditMeta,
   sliceAuditEntries,
 } from '../../lib/adminAuditViews';
-import { requireAdminPermission } from '../../lib/adminAuthz';
+import { requireAnyAdminPermission } from '../../lib/adminAuthz';
 import {
-  dhakaDayEndIso,
+  dhakaDayAfterIso,
   dhakaDayStartIso,
   pageMeta,
   parseListQuery,
@@ -148,14 +148,24 @@ interface AuditPageProps {
 }
 
 export default async function AuditPage({ searchParams }: AuditPageProps) {
+  // ROUND 13 FINDING 7: EITHER permission admits the session, and each
+  // SECTION is then gated on its own.
+  //
+  // This required `audit.read` before anything else, and `support` does not
+  // hold it -- it holds `shop_audit.read`, for ONE pharmacy's log. So the role
+  // the §4.2 matrix grants the per-shop view could never reach it: a real
+  // Support session asking for `/audit?shop=<uuid>` was refused outright and
+  // issued zero reads. Not a widening: a caller holding neither is still
+  // refused, and the platform table below still requires `audit.read`.
   let permissions: readonly string[];
   try {
-    const session = await requireAdminPermission('audit.read');
+    const session = await requireAnyAdminPermission(['audit.read', 'shop_audit.read']);
     permissions = session.permissions;
   } catch (error: unknown) {
     console.error('[admin] audit denied:', error);
     return <ErrorNotice message={toDisplayMessage(error)} />;
   }
+  const mayReadPlatformAudit = permissions.includes('audit.read');
 
   const raw = await searchParams;
   // The shared schema bounds `page`, `pageSize`, `search`, `action` and the
@@ -194,13 +204,20 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
   // last activity was older than the most recent 500 entries look as though
   // it had none. The free-text search stays in memory and is stated as
   // searching the loaded page.
-  const history = await auditHistory({
+  // NOT READ AT ALL without `audit.read`. Round 13 finding 7 opened this page
+  // to `shop_audit.read` as well, and reading the platform log and then hiding
+  // it would hand every row to a role that may not have them -- the refusal
+  // has to come before the query, not before the render.
+  const history = !mayReadPlatformAudit
+    ? { entries: [], durable: true, unavailable: null }
+    : await auditHistory({
     filter: {
       actor: actorFilter,
       action: actionFilter,
       outcome: outcomeFilter,
       fromIso: query.from === undefined ? undefined : dhakaDayStartIso(query.from),
-      toIso: query.to === undefined ? undefined : dhakaDayEndIso(query.to),
+      toExclusiveIso:
+        query.to === undefined ? undefined : dhakaDayAfterIso(query.to),
     },
   });
   const entries = history.entries;
@@ -252,7 +269,12 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
         </p>
       ) : null}
 
-      {history.unavailable === null ? (
+      {!mayReadPlatformAudit ? (
+        <p role="status" className="mt-2 text-sm text-midGray">
+          Your admin role holds the per-pharmacy audit view below, not the platform-wide admin
+          audit. Nothing platform-wide was read for this page.
+        </p>
+      ) : history.unavailable === null ? (
         <p className="mt-2 text-xs text-midGray">
           Read from the durable <code>admin_audit_log</code> table, newest first, up to{' '}
           {AUDIT_READ_LIMIT} entries. The structured stderr line remains the record of account.
@@ -265,6 +287,8 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
         </p>
       )}
 
+      {mayReadPlatformAudit ? (
+      <>
       <FilterForm
         search={{
           value: query.search ?? '',
@@ -333,6 +357,8 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
           <Pager meta={meta} params={carriedParams(raw)} noun="entries" />
         </>
       )}
+      </>
+      ) : null}
 
       <section aria-labelledby="shop-audit" className="mt-10">
         <h2 id="shop-audit" className="text-base font-semibold">
