@@ -292,7 +292,12 @@ describe('k-anonymity at the boundary', () => {
     expect(reportTextRows(table)[0]?.[1]).toBe('');
   });
 
-  test('a money bucket at k shows the refund-subtracted total', () => {
+  test('a money bucket at k WITHHOLDS when one pharmacy refunded', () => {
+    // ROUND 15 FINDINGS 1 and 2 changed this answer, and the reason is the
+    // whole of those findings: the shop drill-down publishes each pharmacy's
+    // GROSS SALES TODAY, so five visible gross figures minus this net figure
+    // isolate the single refund inside it. Per-shop refunds are visible
+    // nowhere else, which is exactly why the net must not disclose them.
     const sales = Array.from({ length: SUPPRESSION_K }, (_unused, index) => saleTotal(index + 1));
     const refunds = [saleTotal(1, { totalPaisa: asPaisa(50_000) })];
 
@@ -306,7 +311,29 @@ describe('k-anonymity at the boundary', () => {
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
     );
 
-    // 5 x 1500.00 - 500.00 = 7000.00, through the shared subtraction.
+    expect(reportTextRows(table)[0]?.[1], 'the single refund was disclosed').toBe('');
+  });
+
+  test('a money bucket at k ANSWERS when k pharmacies refunded', () => {
+    // Non-vacuity for the rule above: it withholds a disclosure, not every
+    // figure. Five refunding pharmacies make no single refund isolable, and
+    // 5 x 1500.00 - 5 x 100.00 = 7000.00 publishes through the shared
+    // subtraction.
+    const sales = Array.from({ length: SUPPRESSION_K }, (_unused, index) => saleTotal(index + 1));
+    const refunds = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      saleTotal(index + 1, { totalPaisa: asPaisa(10_000) }),
+    );
+
+    const table = buildReportTable(
+      'refund_net_pharmacy_sales',
+      data({
+        sales,
+        refunds,
+        tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }],
+      }),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
+    );
+
     expect(reportTextRows(table)[0]?.[1]).toBe('7000.00');
   });
 
@@ -1013,19 +1040,36 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     expect(reportTextRows(open)).toEqual([['2026-10', '580.00']]);
   });
 
-  test('the REST of the month is what has to clear the floor', () => {
-    // October 1 is published and IS releasable (five sellers), so
-    // month - October 1 is derivable -- and that remainder is October 2's one
-    // pharmacy. The month is therefore withheld, which is the composition rule
-    // on the partition that actually exists.
+  test('a sales-only month has no refund to disclose, so it answers', () => {
+    // ROUND 15 FINDINGS 1 and 2 replaced the published-day rule with the
+    // refund-side one. This fixture has no refunds at all, so there is nothing
+    // a net figure could disclose that the per-shop gross figures do not
+    // already show -- and withholding it would hide a legitimate total for no
+    // privacy gain.
     const open = buildReportTable(
       'refund_net_pharmacy_sales',
       october(),
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
-      { publishedMoneyDays: ['2026-10-01'] },
     );
 
-    expect(reportTextRows(open)).toEqual([['2026-10', '']]);
+    expect(reportTextRows(open)).toEqual([['2026-10', '580.00']]);
+  });
+
+  test('one refunding pharmacy anywhere in the month withholds it', () => {
+    const base = october();
+    const withRefund = data({
+      sales: base.sales,
+      refunds: [saleTotal(1, { businessDate: '2026-10-01', totalPaisa: asPaisa(2_000) })],
+      tallies: base.tallies,
+    });
+
+    const table = buildReportTable(
+      'refund_net_pharmacy_sales',
+      withRefund,
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
+    );
+
+    expect(reportTextRows(table)).toEqual([['2026-10', '']]);
   });
 
   test('a month whose EVERY DAY clears the floor still publishes', () => {
@@ -1210,9 +1254,13 @@ describe('ROUND 12 FINDING 4: the export cell stays opaque until the serializer'
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
     );
 
-  test('the honest figure is still exactly right', () => {
-    // 5 x 100.00 less 100.00 = 400.00, through the shared subtraction.
-    expect(reportTextRows(monthly())).toEqual([['2026-10', '400.00']]);
+  test('the honest figure is WITHHELD, because one pharmacy refunded', () => {
+    // 5 x 100.00 less 100.00 = 400.00 is computed correctly and not published.
+    // Round 15 findings 1 and 2: five visible per-shop gross figures minus
+    // 400.00 isolate that one refund. The substitution tests below are
+    // unaffected -- they ask whether a FORGED cell can reach the output, and a
+    // withheld cell is still a cell this module minted.
+    expect(reportTextRows(monthly())).toEqual([['2026-10', '']]);
   });
 
   test('REPRODUCTION: substituting a row at the handler is REFUSED', () => {

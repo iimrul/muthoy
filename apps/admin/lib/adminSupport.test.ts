@@ -127,13 +127,33 @@ function createClient(
   const client = {
     from(table: string) {
       return {
-        select(columns: string) {
+        select(columns: string, selectOptions?: { count?: string; head?: boolean }) {
           const call: ClientCall = {
             op: 'select',
             table,
             filters: [{ method: 'select', args: [columns] }],
           };
           calls.push(call);
+          // ROUND 15 FINDING 7: a HEAD COUNT query answers with the count and
+          // no rows, the way PostgREST does. Without it the store's overflow
+          // check read `count` as 0 and reported no omission -- the fake, not
+          // the store, was the thing that could not see 501 notes.
+          if (selectOptions?.head === true) {
+            const counted = options.selectError === undefined
+              ? { data: null, error: null, count: rows.length }
+              : { data: null, error: { message: options.selectError }, count: null };
+            const headChain: Record<string, unknown> = {
+              then: (resolve: (value: unknown) => unknown) =>
+                Promise.resolve(counted).then(resolve),
+            };
+            for (const method of ['eq', 'order', 'range', 'limit']) {
+              headChain[method] = (...args: unknown[]) => {
+                call.filters.push({ method, args });
+                return headChain;
+              };
+            }
+            return headChain;
+          }
           const chain: Record<string, unknown> = {
             range: (...args: unknown[]) => {
               call.filters.push({ method: 'range', args });
@@ -441,7 +461,9 @@ describe('the store', () => {
     const rows = Array.from({ length: 501 }, (_unused, index) =>
       noteRow({ id: 'note-' + String(index).padStart(4, '0'), body: 'note ' + index }),
     );
-    // Newest first, as the query now orders them.
+    // Newest first, as the query now orders them. The fake serves the whole
+    // set and the store slices it, so `count` is 501 and the page is 500 --
+    // which is exactly the shape round 15 finding 7 made detectable.
     const { client } = createClient({ rows: [...rows].reverse() });
 
     const page = await listSupportNotesPage(CASE_ID, { client });
@@ -453,17 +475,22 @@ describe('the store', () => {
     expect(page.notes.some((note) => note.body === 'note 0')).toBe(false);
   });
 
-  test('the read asks for the NEWEST page, and one row beyond it', async () => {
+  test('the read COUNTS the case, then asks for the newest page', async () => {
     const { client, calls } = createClient({ rows: [noteRow()] });
 
     await listSupportNotesPage(CASE_ID, { client });
 
-    expect(calls[0]?.filters).toEqual(
+    // ROUND 15 FINDING 7: a COUNT and then a page, rather than a page of
+    // MAX+1 rows. Asking for one row beyond the page assumed the server would
+    // return it; with a response cap equal to the page size, 501 stored notes
+    // came back as 500 and reported no omission at all.
+    const page = calls.find((call) =>
+      call.filters.some((filter) => filter.method === 'range'),
+    );
+    expect(page?.filters).toEqual(
       expect.arrayContaining([
         { method: 'order', args: ['created_at', { ascending: false }] },
-        // 0..500 inclusive is 501 rows: the page plus the one that proves
-        // there is more, without a second round trip or a count.
-        { method: 'range', args: [0, 500] },
+        { method: 'range', args: [0, 499] },
       ]),
     );
   });

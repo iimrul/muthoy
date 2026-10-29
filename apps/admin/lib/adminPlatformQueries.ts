@@ -258,9 +258,14 @@ export async function listShopDistricts(): Promise<readonly string[]> {
     let last: string | null = null;
     for (const row of rows) {
       const district = nullableText((row as Record<string, unknown>).district);
+      // ROUND 15 FINDING 6: the CURSOR advances on every row, including a
+      // blank one. `continue`-ing before the assignment left `last === null`
+      // for a page of blank districts, which this loop then read as
+      // exhaustion -- so a legal `['', 'Dhaka', 'Sylhet']` set returned `[]`
+      // after one request. A blank is not a district, but it IS a position.
+      if (district !== null) last = district;
       if (district === null || district.trim().length === 0) continue;
       districts.add(district.trim());
-      last = district;
     }
 
     // ROUND 14 FINDING 11: a SHORT page does not mean exhaustion.
@@ -449,8 +454,25 @@ const OFFERING_COLUMNS = 'tier,billing_cycle,amount_paisa,is_active';
  */
 const CANCELLATION_WINDOW_DAYS = 90;
 
-/** The price list MRR is derived from. Small and operator-maintained. */
+/**
+ * The price list MRR is derived from. Small and operator-maintained.
+ *
+ * ROUND 15 FINDING 4. This read was uncounted, and a MISSING offering does not
+ * surface as an error -- it falls through to `ZERO_BILLED`, so a capped
+ * response that omitted the Ultra annual row rendered that subscription's
+ * billed amount as 0.00 while the stored price was 4 790.00. A zero price is
+ * indistinguishable from a free plan on screen, which makes this the worst
+ * failure mode available: silent, plausible, and wrong about money.
+ */
 export async function listPlanOfferings(): Promise<readonly OfferingRow[]> {
+  const counted = await getSupabaseAdmin()
+    .from('plan_offerings')
+    .select('tier', { count: 'exact', head: true });
+  if (counted.error) {
+    console.error('[admin] plan_offerings count failed:', counted.error.message);
+    throw new AdminDataError('plan offering read failed');
+  }
+
   const { data, error } = await getSupabaseAdmin()
     .from('plan_offerings')
     .select(OFFERING_COLUMNS)
@@ -461,6 +483,13 @@ export async function listPlanOfferings(): Promise<readonly OfferingRow[]> {
     console.error('[admin] plan_offerings read failed:', error.message);
     throw new AdminDataError('plan offering read failed');
   }
+
+  // Round 15 finding 4: a SHORT read is refused rather than returned. A gap in
+  // the price list becomes a 0.00 billed amount further downstream, which
+  // reads as a free plan rather than as an error.
+  assertCompleteRead([
+    { label: 'plan_offerings', counted: counted.count ?? 0, loaded: (data ?? []).length },
+  ]);
 
   return (data ?? []).map((raw) => {
     const row = raw as Record<string, unknown>;
@@ -1409,6 +1438,68 @@ export async function dashboardOverview(now: Date = new Date()): Promise<Dashboa
           .range(from, to),
       ),
     ]);
+
+  // ROUND 15 FINDING 3 — THE DASHBOARD OVERVIEW IS INSIDE THE GATE TOO.
+  //
+  // Round 13 counted the Dashboard's SALES and REFUNDS and round 14 counted
+  // Revenue's three reads. This overview -- where the MRR tile and the
+  // subscription counts come from -- was still outside: six active monthly
+  // subscriptions at 100.00 with a response cap of five rendered 500.00 MRR
+  // and refused nothing, while `revenueOverview` refused the same fixture
+  // correctly. Two pages disagreeing about the same money is the shape of
+  // defect this gate exists to prevent.
+  const [shopCount, subscriptionCount, entitlementCount, orderCount, eventCount, saleCount] =
+    await Promise.all([
+      supabase
+        .from('shops')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_deleted', false),
+      supabase.from('billing_subscriptions').select('id', { count: 'exact', head: true }),
+      supabase
+        .from('entitlement_snapshots')
+        .select('billing_account_id', { count: 'exact', head: true }),
+      supabase.from('payment_orders').select('id', { count: 'exact', head: true }),
+      supabase.from('payment_provider_events').select('id', { count: 'exact', head: true }),
+      supabase
+        .from('sales')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_deleted', false)
+        .gte('business_date', windowStart)
+        .lte('business_date', day.businessDate),
+    ]);
+  for (const [label, counted] of [
+    ['shops', shopCount],
+    ['billing_subscriptions', subscriptionCount],
+    ['entitlement_snapshots', entitlementCount],
+    ['payment_orders', orderCount],
+    ['payment_provider_events', eventCount],
+    ['sales', saleCount],
+  ] as const) {
+    if (counted.error) {
+      console.error('[admin] ' + label + ' count failed:', counted.error.message);
+      throw new AdminDataError(label + ' count query failed');
+    }
+  }
+  assertCompleteRead([
+    { label: 'shops', counted: shopCount.count ?? 0, loaded: shopRows.length },
+    {
+      label: 'billing_subscriptions',
+      counted: subscriptionCount.count ?? 0,
+      loaded: subscriptionRows.length,
+    },
+    {
+      label: 'entitlement_snapshots',
+      counted: entitlementCount.count ?? 0,
+      loaded: entitlementRows.length,
+    },
+    { label: 'payment_orders', counted: orderCount.count ?? 0, loaded: orderRows.length },
+    {
+      label: 'payment_provider_events',
+      counted: eventCount.count ?? 0,
+      loaded: eventRows.length,
+    },
+    { label: 'sales', counted: saleCount.count ?? 0, loaded: saleRows.length },
+  ]);
 
   const shops = shopRows.map(toDashboardShopRow);
 

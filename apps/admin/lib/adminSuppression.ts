@@ -113,55 +113,56 @@ export function dayReleasable(day: DaySides, k: number = SUPPRESSION_K): boolean
 }
 
 /**
- * Whether a MONTH may be published, given the days in it and the days whose
- * money is published SOMEWHERE ELSE.
+ * Whether a MONTH may be published, given the days inside it.
  *
- * ROUND 13 FINDING 2 established that composition has to hold downwards, and
- * ROUND 14 FINDINGS 3 and 4 showed my first attempt was wrong twice over: it
- * lived only in the report builder, and it checked the daily UNION while the
- * Dashboard gates per side.
+ * THE RULE, AND THE THREE WRONG VERSIONS BEFORE IT.
  *
- * My SECOND attempt -- "every day must be releasable" -- was sound and far too
- * strict, which the reviewer also reproduced: six genuine one-pharmacy days
- * hid a six-pharmacy monthly total that no query discloses. Refunds are rarer
- * than sales, so almost every month contains a day with fewer than k
- * refunders, and the panel would have withheld nearly every money figure it
- * exists to show. Withholding everything is not privacy; it is a broken
- * report that also happens to be private.
+ * Round 13 established that composition has to hold downwards: a month
+ * differenced against a day published elsewhere discloses the difference.
  *
- * So the rule is the composition rule on the partition that ACTUALLY EXISTS.
- * Exactly one day's money is published anywhere in this panel: TODAY's net, on
- * the Dashboard. For each such day D inside the month:
+ * Round 14 showed that version was wrong twice -- it lived only in the report
+ * builder, and it compared the daily UNION while the Dashboard gates per side.
  *
- *   - if D is NOT releasable, the Dashboard withholds it, so there is nothing
- *     to subtract and the month is unaffected;
- *   - if D IS releasable, then month - D is derivable, so the REST of the
- *     month must clear the floor per side as well.
+ * Round 14's own fix, "every day must be releasable", was then reproduced as
+ * over-withholding, so round 15 narrowed it to "only days the Dashboard
+ * publishes". ROUND 15 FINDINGS 1 and 2 killed that narrowing:
  *
- * A day nobody publishes constrains nothing, which is why a historical month
- * is unaffected. `publishedDays` is passed in rather than read from a clock
- * here, so the rule is testable at a fixed date and so a future page that
- * publishes another day's money has exactly one place to declare it.
+ *   - FINDING 1. `publishedMoneyDays` was incomplete. The shop drill-down
+ *     publishes each pharmacy's GROSS SALES TODAY (accepted 8.2 scope, and
+ *     `shops.read` is held by all four roles). Five drill-downs give
+ *     5 x 100.00 = 500.00 of gross; the monthly net reads 420.00; the
+ *     difference is one pharmacy's 80.00 refund. The Dashboard withholding its
+ *     own net changed nothing, because the gross came from somewhere else.
+ *   - FINDING 2. A day published YESTERDAY is still remembered. Midnight does
+ *     not erase a disclosure, so keying the rule to "today" was never sound.
+ *
+ * WHAT IS ACTUALLY EXPOSED, stated precisely, because it decides the rule.
+ * Per-shop GROSS is visible by design. Per-shop REFUNDS are not visible
+ * anywhere. Net = gross - refunds, so publishing a net figure alongside
+ * visible gross figures discloses REFUNDS. The sale side needs no extra
+ * protection -- it is already public per pharmacy -- and the refund side needs
+ * it on EVERY day, not just today, because a reader can keep notes.
+ *
+ * So: a month is releasable only if every day's REFUND side clears the floor.
+ *
+ * THE COST, WHICH IS LARGE AND IS THE POINT. At beta scale -- ten pharmacies --
+ * almost no day has five distinct refunding pharmacies, so almost every
+ * monthly net figure is withheld. That is not the rule failing; it is
+ * k-anonymity giving the correct answer for a population in which five
+ * contributors genuinely do not exist. The honest options are (a) withhold, as
+ * here, (b) stop publishing per-shop gross, which is accepted 8.2
+ * functionality, or (c) accept the disclosure. (a) is the only one of the
+ * three this code can choose on its own.
  */
 export function daysReleasable(
   days: readonly DaySides[],
-  publishedDays: readonly string[] = [],
+  _publishedDays: readonly string[] = [],
   k: number = SUPPRESSION_K,
 ): boolean {
-  for (const published of publishedDays) {
-    const day = days.find((candidate) => candidate.day === published);
-    if (day === undefined) continue;
-    // Withheld there, so not subtractable from here.
-    if (!dayReleasable(day, k)) continue;
-
-    const rest = days.filter((candidate) => candidate.day !== published);
-    const restSales = rest.flatMap((candidate) => [...candidate.saleShopIds]);
-    const restRefunds = rest.flatMap((candidate) => [...candidate.refundShopIds]);
-    // An empty rest is not a disclosure: month - D = nothing.
-    if (restSales.length === 0 && restRefunds.length === 0) continue;
-    if (!sideReleasable(restSales, k) || !sideReleasable(restRefunds, k)) return false;
-  }
-  return true;
+  // The REFUND side of every day. The sale side is public per pharmacy on the
+  // drill-down, so gating it here protects nothing while hiding a great deal;
+  // the refund side is the only part a net figure can disclose.
+  return days.every((day) => sideReleasable(day.refundShopIds, k));
 }
 
 export function suppressTotalAcrossBuckets<T>(

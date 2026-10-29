@@ -167,15 +167,29 @@ export async function listSupportNotesPage(
     throw new AdminDataError('a support note lookup needs a case id');
   }
 
-  // One row beyond the page, which is how "there is more" is known without a
-  // second round trip or a count.
+  // ROUND 15 FINDING 7: the COUNT decides, not an extra row.
+  //
+  // Asking for `range(0, MAX)` and treating MAX+1 rows as "there is more"
+  // assumed the server would return that many. With a response cap equal to
+  // the page size, 501 stored notes came back as 500 with
+  // `olderWithheld: false` -- the omission this flag exists to disclose,
+  // undisclosed. An exact count cannot be capped away.
+  const counted = await clientFor(deps)
+    .from('admin_support_notes')
+    .select('id', { count: 'exact', head: true })
+    .eq('case_id', caseId);
+  if (counted.error) {
+    console.error('[admin] admin_support_notes count failed:', counted.error.message);
+    throw new AdminDataError('support note list failed');
+  }
+
   const { data, error } = await clientFor(deps)
     .from('admin_support_notes')
     .select(SUPPORT_NOTE_COLUMNS)
     .eq('case_id', caseId)
     .order('created_at', { ascending: false })
     .order('id', { ascending: false })
-    .range(0, MAX_NOTES_PER_CASE);
+    .range(0, MAX_NOTES_PER_CASE - 1);
 
   if (error) {
     console.error('[admin] admin_support_notes list failed:', error.message);
@@ -183,10 +197,14 @@ export async function listSupportNotesPage(
   }
 
   const rows = data ?? [];
-  const olderWithheld = rows.length > MAX_NOTES_PER_CASE;
-  const page = (olderWithheld ? rows.slice(0, MAX_NOTES_PER_CASE) : rows).map((row) =>
-    parseSupportNoteRow(row as Record<string, unknown>),
-  );
+  const page = rows
+    .slice(0, MAX_NOTES_PER_CASE)
+    .map((row) => parseSupportNoteRow(row as Record<string, unknown>));
+  // Compared against what the READER WILL SEE, not against the raw response.
+  // `rows.length` was the wrong side of the comparison: a transport that
+  // returned all 501 rows made `501 > 501` false while the page showed 500,
+  // so the one case that needed the notice did not get it.
+  const olderWithheld = (counted.count ?? 0) > page.length;
   // Back into insertion order for reading.
   return { notes: page.reverse(), olderWithheld };
 }

@@ -332,7 +332,16 @@ export async function readAdminAuditLogForExport(
   // answer for a snapshot.
   let cursor: { at: string; id: string } | null = null;
 
-  for (let page = 0; page * AUDIT_EXPORT_PAGE <= AUDIT_EXPORT_MAX; page += 1) {
+  // ROUND 15 FINDING 5: bounded by ROWS COLLECTED, not by request count.
+  //
+  // `page * AUDIT_EXPORT_PAGE <= AUDIT_EXPORT_MAX` assumed every response
+  // carries a full 1 000 rows. With a server cap of 500 it allowed 51
+  // requests and then threw "exceeds 50 000" having scanned 25 500 -- a
+  // legitimate export, refused, with a message stating a number it had not
+  // reached. The real ceiling is the row check inside the loop; this bound
+  // only has to be finite, so it is generous and measured in requests.
+  const MAX_REQUESTS = 10_000;
+  for (let page = 0; page < MAX_REQUESTS; page += 1) {
     let base = client
       .from('admin_audit_log')
       .select(AUDIT_CURSOR_COLUMNS)

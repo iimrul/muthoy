@@ -17,6 +17,7 @@ import 'server-only';
 // whole page into an error.
 
 import { AdminDataError } from './errors';
+import { assertCompleteRead } from './adminReports';
 import { readAllPages } from './queries';
 import { dhakaDayRange } from './platformStats';
 import { getSupabaseAdmin } from './supabaseAdmin';
@@ -392,6 +393,26 @@ export async function getShopDetail(
       .order('id', { ascending: true })
       .range(from, to),
   );
+
+  // ROUND 15 FINDING 3, second half. This read was uncounted too: six sales of
+  // 100.00 for one shop with a response cap of five rendered gross 500.00 and
+  // a count of 5 on the drill-down, against a real 600.00 and 6. The figure is
+  // labelled GROSS and belongs to one named pharmacy, so a short read here is
+  // a wrong number about an identified shop.
+  const saleCount = await supabase
+    .from('sales')
+    .select('id', { count: 'exact', head: true })
+    .eq('shop_id', id)
+    .eq('is_deleted', false)
+    .gte('created_at', day.startInclusive)
+    .lt('created_at', day.endExclusive);
+  if (saleCount.error) {
+    console.error('[admin] shop sales count failed:', saleCount.error.message);
+    throw new AdminDataError('shop sales count failed');
+  }
+  assertCompleteRead([
+    { label: 'shop sales', counted: saleCount.count ?? 0, loaded: saleRows.length },
+  ]);
 
   const memberships = (await readMemberships()).filter((membership) => membership.shopId === id);
   const entitlement = shop.billingAccountId === null
