@@ -938,7 +938,13 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     }
   });
 
-  test('a WHOLE month is WITHHELD when a day inside it is withheld', () => {
+  test('a whole month ANSWERS when the published day is itself withheld', () => {
+    // ROUND 14's relaxation: a month is constrained only against a day whose
+    // money is published SOMEWHERE ELSE, which in the shipped panel is today's
+    // net on the Dashboard. The fixture's second day stands in for that, so
+    // the rule is exercised at a fixed date rather than against whatever day
+    // the suite happens to run on.
+    const published = { publishedMoneyDays: ['2026-10-02'] };
     const whole = buildReportTable(
       'refund_net_pharmacy_sales',
       october(),
@@ -948,6 +954,7 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
         from: '2026-10-01',
         to: '2026-10-31',
       }),
+      published,
     );
     const wider = buildReportTable(
       'refund_net_pharmacy_sales',
@@ -958,18 +965,23 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
         from: '2026-09-01',
         to: '2026-10-31',
       }),
+      published,
     );
 
-    // ROUND 13 FINDING 2 CHANGED THIS ANSWER, and the change is the point.
+    // ROUND 13 FINDING 2 made this withhold; ROUND 14's relaxation makes it
+    // answer again, and the reasoning is the point.
     //
-    // Six contributors across the month clears the floor on the month's own
-    // union, which is what this test used to assert. But October 2 has ONE
-    // contributor, and the Dashboard publishes a DAY -- so a visible month
-    // minus a visible day recovers that one pharmacy's figure. A month is
-    // releasable only if every day inside it is, and this fixture's second
-    // day is not.
-    expect(reportTextRows(whole)).toEqual([['2026-10', '']]);
-    expect(reportTextRows(wider).find((row) => row[0] === '2026-10')).toEqual(['2026-10', '']);
+    // October 2 has ONE contributor, so the Dashboard WITHHOLDS that day.
+    // There is therefore no published figure to subtract from the month, and
+    // withholding the month too would hide a legitimate six-pharmacy total for
+    // no privacy gain -- the over-withholding the reviewer reproduced. The
+    // case where the published day IS releasable, and the remainder is not, is
+    // the test below.
+    expect(reportTextRows(whole)).toEqual([['2026-10', '580.00']]);
+    expect(reportTextRows(wider).find((row) => row[0] === '2026-10')).toEqual([
+      '2026-10',
+      '580.00',
+    ]);
   });
 
   test('an open-ended range is still allowed, and still whole-month', () => {
@@ -977,10 +989,42 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       'refund_net_pharmacy_sales',
       october(),
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
+      { publishedMoneyDays: ['2026-10-02'] },
     );
 
-    // Accepted rather than refused -- the range IS whole months. The figure is
-    // withheld for round 13 finding 2's reason, not for the period's.
+    // Accepted rather than refused -- the range IS whole months -- and
+    // answered, because the published day is one the Dashboard withholds.
+    expect(reportTextRows(open)).toEqual([['2026-10', '580.00']]);
+  });
+
+  test('a month is NOT withheld against a day nothing publishes', () => {
+    // ROUND 14's relaxation, pinned from the other side. The same fixture with
+    // no published day IS releasable: 580.00 cannot be differenced against a
+    // figure that appears nowhere, and withholding it would hide a legitimate
+    // total for no privacy gain. This is the over-withholding the reviewer
+    // reproduced, and the reason the rule takes a published set at all.
+    const open = buildReportTable(
+      'refund_net_pharmacy_sales',
+      october(),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
+      { publishedMoneyDays: [] },
+    );
+
+    expect(reportTextRows(open)).toEqual([['2026-10', '580.00']]);
+  });
+
+  test('the REST of the month is what has to clear the floor', () => {
+    // October 1 is published and IS releasable (five sellers), so
+    // month - October 1 is derivable -- and that remainder is October 2's one
+    // pharmacy. The month is therefore withheld, which is the composition rule
+    // on the partition that actually exists.
+    const open = buildReportTable(
+      'refund_net_pharmacy_sales',
+      october(),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
+      { publishedMoneyDays: ['2026-10-01'] },
+    );
+
     expect(reportTextRows(open)).toEqual([['2026-10', '']]);
   });
 

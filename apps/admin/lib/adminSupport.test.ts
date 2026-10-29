@@ -154,7 +154,22 @@ function createClient(
         },
         insert(values: Record<string, unknown>) {
           calls.push({ op: 'insert', table, values, filters: [] });
-          return Promise.resolve(writeResult());
+          // ROUND 14 FINDING 9: INSERT ... RETURNING id. The opening audit
+          // entry needs the created case id, because the history reader
+          // matches on it -- so the insert is awaited for a row now, not just
+          // for an error.
+          const result = writeResult();
+          const awaited = Promise.resolve(result);
+          return Object.assign(awaited, {
+            select: () => ({
+              single: () =>
+                Promise.resolve(
+                  result.error === null
+                    ? { data: { id: CASE_ID }, error: null }
+                    : { data: null, error: result.error },
+                ),
+            }),
+          });
         },
         update(values: Record<string, unknown>) {
           const call: ClientCall = { op: 'update', table, values, filters: [] };

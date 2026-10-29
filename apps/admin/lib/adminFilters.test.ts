@@ -17,6 +17,7 @@ import {
   SEARCH_COLUMNS,
   applyShopListQuery,
   containsPattern,
+  dhakaDayAfterIso,
   dhakaDayEndIso,
   dhakaDayStartIso,
   escapeLikePattern,
@@ -248,6 +249,15 @@ describe('the Dhaka day bounds', () => {
   test('the end is the LAST instant of the same day, so `to` is inclusive', () => {
     // `lte(created_at, '2026-10-25')` would exclude the whole of the 25th.
     expect(dhakaDayEndIso('2026-10-25')).toBe('2026-10-25T23:59:59.999+06:00');
+    // ROUND 14 FINDING 10: the bound a QUERY uses is the next midnight,
+    // exclusive. The inclusive form above is kept for display only, because
+    // `timestamptz` keeps microseconds and `.999` drops the last millisecond
+    // of the day -- from the rows AND from the pager's count.
+    expect(dhakaDayAfterIso('2026-10-25')).toBe('2026-10-26T00:00:00+06:00');
+    expect(dhakaDayAfterIso('2026-10-31')).toBe('2026-11-01T00:00:00+06:00');
+    // A leap day and a year end both roll forward correctly.
+    expect(dhakaDayAfterIso('2028-02-28')).toBe('2028-02-29T00:00:00+06:00');
+    expect(dhakaDayAfterIso('2026-12-31')).toBe('2027-01-01T00:00:00+06:00');
   });
 
   test('a one-day range contains a shop registered at Dhaka midday', () => {
@@ -303,12 +313,16 @@ describe('the filters reach the query', () => {
       parsed({ from: '2026-10-01', to: '2026-10-25' }),
     );
 
+    // ROUND 14 FINDING 10: inclusive at the start, EXCLUSIVE at the end. The
+    // `lte('...23:59:59.999')` form left a pharmacy registered inside the last
+    // millisecond of the day out of both the list and the pager's count.
     expect(builder.calls).toEqual(
       expect.arrayContaining([
         { method: 'gte', args: ['created_at', '2026-10-01T00:00:00+06:00'] },
-        { method: 'lte', args: ['created_at', '2026-10-25T23:59:59.999+06:00'] },
+        { method: 'lt', args: ['created_at', '2026-10-26T00:00:00+06:00'] },
       ]),
     );
+    expect(builder.calls.some((call) => call.method === 'lte')).toBe(false);
   });
 
   test('the date column is overridable, for a list whose dates are not registrations', () => {

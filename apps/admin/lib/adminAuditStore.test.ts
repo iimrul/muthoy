@@ -780,6 +780,7 @@ describe('ROUND 12 FINDINGS 6 and 10: the export reads completely, or refuses', 
   /** The reviewer's fixture: one older denial, then 500 logins. */
   function fiveHundredAndOne(): Record<string, unknown>[] {
     const denial = {
+      id: 'denial-0000',
       at: '2026-10-01T06:00:00.000Z',
       actor: 'super',
       actor_verified: true,
@@ -790,6 +791,9 @@ describe('ROUND 12 FINDINGS 6 and 10: the export reads completely, or refuses', 
       meta: {},
     };
     const logins = Array.from({ length: 500 }, (_unused, index) => ({
+      // `id` for the keyset cursor (round 13 finding 5). Descending ids match
+      // the descending `(at, id)` order the reader asks for.
+      id: 'login-' + String(999 - index).padStart(4, '0'),
       at: '2026-10-2' + String(index % 10) + 'T06:00:00.000Z',
       actor: 'ops',
       actor_verified: true,

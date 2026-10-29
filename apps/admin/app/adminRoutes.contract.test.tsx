@@ -110,9 +110,17 @@ vi.mock('../lib/supabaseAdmin', () => ({
       // cannot be made from the table name alone.
       const filters: { method: string; args: unknown[] }[] = [];
       clientBox.calls.push({ table, columns, filters });
+      // ROUND 14 FINDING 11: a CURSOR query answers with the rows beyond the
+      // cursor, and this fixture holds one page of rows -- so beyond it there
+      // are none. Without this the district pager, which now continues until
+      // an EMPTY page proves exhaustion, would see the same rows forever and
+      // hit its ceiling.
+      const advanced = () => filters.some((entry) => entry.method === 'gt');
       const chain: Record<string, unknown> = {
         then: (resolve: (value: unknown) => unknown) =>
-          Promise.resolve(result(table)).then(resolve),
+          Promise.resolve(
+            advanced() ? { data: [], error: null, count: 0 } : result(table),
+          ).then(resolve),
         maybeSingle: () => Promise.resolve(singleResult(table)),
         single: () => Promise.resolve(singleResult(table)),
       };
@@ -121,7 +129,7 @@ vi.mock('../lib/supabaseAdmin', () => ({
       // per prefix. Without it the chain returned undefined and every one of
       // those pages threw -- which the "renders without throwing" tests caught.
       for (const method of [
-        'eq', 'gte', 'lte', 'lt', 'or', 'order', 'not', 'in', 'limit', 'range', 'like',
+        'eq', 'gte', 'lte', 'lt', 'gt', 'or', 'order', 'not', 'in', 'limit', 'range', 'like',
       ]) {
         chain[method] = (...args: unknown[]) => {
           filters.push({ method, args });
