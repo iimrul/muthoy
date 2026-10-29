@@ -362,7 +362,9 @@ describe('the GROSS boundary', () => {
       // §6i: the pharmacy figure goes through the NARROWED accessor, which
       // only returns a `pharmacy_sales` metric, and through the net card
       // rather than MetricTile.
-      expect(code).toContain("requirePharmacySalesMetric('pharmacy_sales_net')");
+      // Round 10: the card takes an ID, not a metric object, because an
+      // object prop was an indirect caption prop.
+      expect(code).toContain('metricId="pharmacy_sales_net"');
       expect(code).toContain('<NetSalesCard');
       expect(familyOf('mrr')).toBe('subscription');
       expect(familyOf('pharmacy_sales_net')).toBe('pharmacy_sales');
@@ -374,9 +376,12 @@ describe('the GROSS boundary', () => {
       // so the detectable symptom is a MetricTile whose metric did NOT come
       // from requireMetric.
       const real = revenuePage();
+      // The mutation a caller could still attempt: name a DIFFERENT metric.
+      // The union rejects it at compile time and the resolver rejects it at
+      // runtime; here it shows up as a tile whose id is not a resolved one.
       const mutated = real.replace(
-        "metric={requirePharmacySalesMetric('pharmacy_sales_net')}",
-        'metric={{ id: "x", label: "Total revenue", family: "pharmacy_sales", unit: "paisa", definitionRef: "MRR" }}',
+        'metricId="pharmacy_sales_net"',
+        'metricId={"mrr" as never}',
       );
 
       expect(mutated, 'the mutation did not apply').not.toBe(real);
@@ -390,7 +395,9 @@ describe('the GROSS boundary', () => {
         + [...code.matchAll(/<NetSalesCard\b/g)].length;
       const countResolved = (code: string) =>
         [...code.matchAll(/metric=\{requireMetric\('[a-z_]+'\)\}/g)].length
-        + [...code.matchAll(/metric=\{requirePharmacySalesMetric\('[a-z_]+'\)\}/g)].length;
+        // A net card resolves its own entry from one of the two literal ids,
+        // so a bare `metricId="pharmacy_sales_net..."` IS the resolved form.
+        + [...code.matchAll(/metricId="pharmacy_sales_net[a-z_]*"/g)].length;
 
       // The real page: every tile resolves. The mutant: one does not.
       expect(countResolved(real)).toBe(countTiles(real));
@@ -847,14 +854,29 @@ describe('the GROSS boundary', () => {
 
     // It verifies provenance before showing anything.
     expect(code).toContain('isNetSales(amount)');
-    // It owns the caption: the label comes from the metric, and there is no
-    // caption prop a caller could pass instead.
-    expect(code).toContain('{metric.label}');
-    expect(code).not.toMatch(/\blabel\s*[:?]\s*string/);
+    // It owns the caption: the label is resolved from the manifest INSIDE
+    // the component, and the public props cannot carry one.
+    //
+    // The claim is about `NetSalesCardProps` specifically, not about the whole
+    // file. An earlier version of this assertion scanned the entire source and
+    // fired on the internal failure state's own `label: string` -- a prop of a
+    // private component that no caller can reach. A guard that cannot tell a
+    // public prop from a private one is not checking what it claims to.
+    const props = code.slice(
+      code.indexOf('interface NetSalesCardProps'),
+      code.indexOf('function ProvenanceFailure'),
+    );
+    expect(props.length, 'the props interface was not found').toBeGreaterThan(50);
+    expect(props).toContain('metricId: NetSalesMetricId');
+    expect(props).not.toMatch(/\blabel\s*[:?]/);
+    expect(props).not.toMatch(/\bvalue\s*[:?]/);
+    expect(props).not.toMatch(/\bmetric\s*[:?]\s*Metric/);
+
+    // And it resolves the entry itself rather than trusting one passed in.
+    expect(code).toContain('requirePharmacySalesMetric(metricId)');
     // It owns the formatting: the amount is unwrapped and formatted HERE,
     // after verification, so no caller can hand it a formatted string.
     expect(code).toContain('formatMoney(netSalesAmount(amount))');
-    expect(code).not.toMatch(/\bvalue\s*[:?]\s*string/);
   });
 
   test('NO other file formats a net amount', () => {
@@ -1207,7 +1229,7 @@ describe('the GROSS boundary', () => {
     // card renders that metric's label, so the words are checked where they
     // are defined rather than where they are displayed.
     const dashboard = SOURCES.find((file) => file.path === 'app/page.tsx');
-    expect(dashboard?.code).toContain("requirePharmacySalesMetric('pharmacy_sales_net_today')");
+    expect(dashboard?.code).toContain('metricId="pharmacy_sales_net_today"');
     // The page no longer captions the figure itself.
     expect(dashboard?.code).not.toContain('Total sales today');
 

@@ -28,6 +28,8 @@ import { describe, expect, test } from 'vitest';
 import { asPaisa } from '@muthoy/types';
 import {
   isNetSales,
+  netChartPoints,
+  netExportTaka,
   netSalesAmount,
   netSalesPaisa,
   NetSalesProvenanceError,
@@ -35,11 +37,10 @@ import {
   type NetSales,
 } from '@muthoy/utils';
 import NetSalesCard from '../components/NetSalesCard';
-import { requirePharmacySalesMetric } from './adminMetrics';
+import { ADMIN_METRICS, NET_SALES_METRIC_IDS, requirePharmacySalesMetric } from './adminMetrics';
 import { suppressBelowK } from './adminSuppression';
 
 const NET_TODAY = requirePharmacySalesMetric('pharmacy_sales_net_today');
-const NET_ALL_TIME = requirePharmacySalesMetric('pharmacy_sales_net');
 
 describe('§6i the trusted producer', () => {
   test('the arithmetic is unchanged: gross minus refunds, in paisa', () => {
@@ -157,7 +158,7 @@ describe('§6i the renderer: ROUND 9 reproduction A, at runtime', () => {
 
   test('an authentic amount renders the figure under the manifest caption', () => {
     const net = netSalesPaisa(asPaisa(10_000), asPaisa(2_000));
-    const html = renderToStaticMarkup(<NetSalesCard metric={NET_TODAY} amount={net} />);
+    const html = renderToStaticMarkup(<NetSalesCard metricId="pharmacy_sales_net_today" amount={net} />);
 
     expect(html).toContain(NET_TODAY.label);
     expect(html).toContain('৳80.00');
@@ -177,7 +178,7 @@ describe('§6i the renderer: ROUND 9 reproduction A, at runtime', () => {
     Object.assign(stats, { ['net' + 'SalesToday']: stats.grossSalesToday });
 
     const html = renderToStaticMarkup(
-      <NetSalesCard metric={NET_TODAY} amount={stats.netSalesToday} />,
+      <NetSalesCard metricId="pharmacy_sales_net_today" amount={stats.netSalesToday} />,
     );
 
     // The gross figure does NOT appear.
@@ -208,7 +209,7 @@ describe('§6i the renderer: ROUND 9 reproduction A, at runtime', () => {
     expect(unprotected(stats.netSalesToday)).toBe('৳100.00');
     // And the real card refuses the very same value.
     const html = renderToStaticMarkup(
-      <NetSalesCard metric={NET_TODAY} amount={stats.netSalesToday} />,
+      <NetSalesCard metricId="pharmacy_sales_net_today" amount={stats.netSalesToday} />,
     );
     expect(html).not.toContain('৳100.00');
   });
@@ -216,7 +217,7 @@ describe('§6i the renderer: ROUND 9 reproduction A, at runtime', () => {
   test('a withheld figure shows the em dash, and is still not a substitution', () => {
     const net = netSalesPaisa(asPaisa(10_000), asPaisa(2_000));
     const html = renderToStaticMarkup(
-      <NetSalesCard metric={NET_ALL_TIME} amount={net} withheld />,
+      <NetSalesCard metricId="pharmacy_sales_net" amount={net} withheld />,
     );
 
     expect(html).toContain('—');
@@ -250,13 +251,59 @@ describe('§6i compile-negative: the substitutions do not TYPECHECK', () => {
   // "this is a type error" without compiling would prove nothing — and the
   // brief is explicit that a case which never compiled does not count.
 
-  /** Compiles one fixture against the real packages, and returns its errors. */
-  function diagnosticsFor(source: string): readonly string[] {
+  // ONE program for every case, built once.
+  //
+  // The first version created a separate `ts.createProgram` per case, and a
+  // single program costs about 5.5s -- it loads lib.d.ts and the real
+  // @muthoy/types and @muthoy/utils sources, which is the point: a fixture
+  // that stubbed the type would not be testing the shipped one. Seven programs
+  // meant roughly 38s and a 5s-default timeout failure in the first test.
+  //
+  // So all the fixtures are written as separate files in one temp directory
+  // and checked by ONE program, with diagnostics mapped back per file. The
+  // generous per-test timeout below is a declaration of that real cost, not a
+  // way to pass: the assertions are unchanged and the compiler still runs.
+  const PRELUDE = [
+    "import { asPaisa } from '@muthoy/types';",
+    "import { netSalesPaisa, sumNetSales, type NetSales } from '@muthoy/utils';",
+    'const authentic: NetSales = netSalesPaisa(asPaisa(10000), asPaisa(2000));',
+    'const collectedTotalPaisa = asPaisa(23000);',
+    'const grossSalesToday = asPaisa(10000);',
+    'declare function takesNet(amount: NetSales): void;',
+    'void authentic; void collectedTotalPaisa; void grossSalesToday;',
+    '',
+  ].join(String.fromCharCode(10));
+
+  /** Each case is the PRELUDE plus one line under test. */
+  const CASES = {
+    prelude: 'takesNet(authentic);',
+    launderedCollected: 'takesNet(((_amount: number) => Number(collectedTotalPaisa))(0));',
+    formattedString: 'takesNet(((_: string) => "x")("y"));',
+    grossAsNet: 'takesNet(grossSalesToday);',
+    collectedAsNet: 'takesNet(collectedTotalPaisa);',
+    grossIntoSum: 'sumNetSales([authentic, grossSalesToday]);',
+    doubleAssertion: 'takesNet(grossSalesToday as unknown as NetSales);',
+  } as const;
+
+  type CaseName = keyof typeof CASES;
+  type CaseDiagnostics = { [K in CaseName]: readonly string[] };
+
+  let COMPILED: CaseDiagnostics | null = null;
+
+  /** Diagnostics per case, from a single compiler run. */
+  function compiled(): CaseDiagnostics {
+    if (COMPILED !== null) return COMPILED;
+
     const dir = mkdtempSync(join(tmpdir(), 'netsales-'));
-    const file = join(dir, 'fixture.ts');
-    writeFileSync(file, source, 'utf8');
+    const byFile = new Map<string, CaseName>();
     try {
-      const program = ts.createProgram([file], {
+      for (const [name, line] of Object.entries(CASES) as [CaseName, string][]) {
+        const file = join(dir, name + '.ts');
+        writeFileSync(file, PRELUDE + line + String.fromCharCode(10), 'utf8');
+        byFile.set(file.split(String.fromCharCode(92)).join('/'), name);
+      }
+
+      const program = ts.createProgram([...byFile.keys()], {
         strict: true,
         noEmit: true,
         target: ts.ScriptTarget.ES2022,
@@ -268,77 +315,64 @@ describe('§6i compile-negative: the substitutions do not TYPECHECK', () => {
           '@muthoy/types': [join(import.meta.dirname, '../../../packages/types/src/index.ts')],
         },
       });
-      const normalised = file.split('\\').join('/');
-      return ts
-        .getPreEmitDiagnostics(program)
-        .filter((entry) => entry.file?.fileName === normalised)
-        .map((entry) => ts.flattenDiagnosticMessageText(entry.messageText, ' '));
+
+      const result = Object.fromEntries(
+        Object.keys(CASES).map((name) => [name, [] as string[]]),
+      ) as Record<CaseName, string[]>;
+      for (const entry of ts.getPreEmitDiagnostics(program)) {
+        const name = byFile.get(entry.file?.fileName ?? '');
+        if (name === undefined) continue;
+        result[name].push(ts.flattenDiagnosticMessageText(entry.messageText, ' '));
+      }
+      COMPILED = result;
+      return result;
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   }
 
-  const PRELUDE = [
-    "import { asPaisa } from '@muthoy/types';",
-    "import { netSalesPaisa, sumNetSales, type NetSales } from '@muthoy/utils';",
-    'const authentic: NetSales = netSalesPaisa(asPaisa(10000), asPaisa(2000));',
-    'const collectedTotalPaisa = asPaisa(23000);',
-    'const grossSalesToday = asPaisa(10000);',
-    'declare function takesNet(amount: NetSales): void;',
-    '',
-  ].join('\n');
+  /** The real compiler's cost, declared once. */
+  const COMPILER_TIMEOUT = 60_000;
 
   test('the PRELUDE itself compiles clean, or every case below is vacuous', () => {
     // The non-vacuity gate the brief asks for: if the fixture could not
     // resolve `@muthoy/utils`, every "this is rejected" case would pass for
     // the wrong reason.
-    const diagnostics = diagnosticsFor(PRELUDE + 'takesNet(authentic);\n');
-    expect(diagnostics, 'the fixture harness itself is broken').toEqual([]);
-  });
+    expect(compiled().prelude, 'the fixture harness itself is broken').toEqual([]);
+  }, COMPILER_TIMEOUT);
 
   test('REPRODUCTION B: a laundered collected total cannot be supplied as net', () => {
-    const diagnostics = diagnosticsFor(
-      PRELUDE + 'takesNet(((_amount: number) => Number(collectedTotalPaisa))(0));\n',
-    );
+    const diagnostics = compiled().launderedCollected;
     expect(diagnostics.length, 'the laundered collected total was accepted').toBeGreaterThan(0);
     expect(diagnostics.join(' ')).toContain('NetSales');
-  });
+  }, COMPILER_TIMEOUT);
 
   test('REPRODUCTION C: a formatted string cannot be supplied as net', () => {
-    const diagnostics = diagnosticsFor(
-      PRELUDE + 'takesNet(((_: string) => "x")("y"));\n',
-    );
-    expect(diagnostics.length, 'a formatted string was accepted').toBeGreaterThan(0);
-  });
+    expect(compiled().formattedString.length, 'a formatted string was accepted')
+      .toBeGreaterThan(0);
+  }, COMPILER_TIMEOUT);
 
   test('a GROSS paisa amount cannot be supplied as net', () => {
-    const diagnostics = diagnosticsFor(PRELUDE + 'takesNet(grossSalesToday);\n');
-    expect(diagnostics.length, 'gross was accepted as net').toBeGreaterThan(0);
-  });
+    expect(compiled().grossAsNet.length, 'gross was accepted as net').toBeGreaterThan(0);
+  }, COMPILER_TIMEOUT);
 
   test('a COLLECTED paisa amount cannot be supplied as net', () => {
-    const diagnostics = diagnosticsFor(PRELUDE + 'takesNet(collectedTotalPaisa);\n');
-    expect(diagnostics.length, 'collected was accepted as net').toBeGreaterThan(0);
-  });
+    expect(compiled().collectedAsNet.length, 'collected was accepted as net')
+      .toBeGreaterThan(0);
+  }, COMPILER_TIMEOUT);
 
   test('a gross amount cannot be summed into a net total', () => {
-    const diagnostics = diagnosticsFor(
-      PRELUDE + 'sumNetSales([authentic, grossSalesToday]);\n',
-    );
-    expect(diagnostics.length, 'gross joined a net aggregate').toBeGreaterThan(0);
-  });
+    expect(compiled().grossIntoSum.length, 'gross joined a net aggregate').toBeGreaterThan(0);
+  }, COMPILER_TIMEOUT);
 
   test('a DOUBLE ASSERTION still compiles — which is why the runtime check exists', () => {
     // Stated rather than hidden. `x as unknown as NetSales` defeats any type,
     // in any language with assertions, so the type is not the whole defence.
     // The runtime register is, and the suite above proves such a value is
     // refused at the renderer.
-    const diagnostics = diagnosticsFor(
-      PRELUDE + 'takesNet(grossSalesToday as unknown as NetSales);\n',
-    );
-    expect(diagnostics).toEqual([]);
+    expect(compiled().doubleAssertion).toEqual([]);
     expect(isNetSales(asPaisa(10_000) as unknown as NetSales)).toBe(false);
-  });
+  }, COMPILER_TIMEOUT);
 });
 
 describe('§6i the shipped pages use the trusted path', () => {
@@ -378,8 +412,132 @@ describe('§6i the shipped pages use the trusted path', () => {
     }
   });
 
-  test('the Analytics chart unwraps EXPLICITLY, and verifies while doing it', () => {
+  test('the Analytics chart goes through the SINK, not a numeric selector', () => {
     const page = source('app/analytics/page.tsx');
-    expect(page).toContain('netSalesAmount(bucket.totalPaisa)');
+    // §6i round 10: `netChartPoints` owns the conversion. The generic
+    // `toPoints` took a `(bucket) => number` selector, and that selector was
+    // where the reviewer put `((_: number) => 230)(...)`.
+    expect(page).toContain('netChartPoints(');
+    expect(page).not.toContain('netSalesAmount(bucket.totalPaisa)');
+  });
+
+  test('the CSV export goes through the SINK too', () => {
+    const report = source('lib/adminReports.ts');
+    expect(report).toContain('netExportTaka(total)');
+    // The gap between the unwrap and the formatter is gone.
+    expect(report).not.toContain('exportTaka(netSalesAmount(');
+  });
+});
+
+describe('§6i ROUND 10: the chart and export sinks, and the caption', () => {
+  // Round 9 closed the CARD sink and left two others with the original
+  // defect's shape: unwrap -> arbitrary number -> caption owned elsewhere.
+  // Each of these is the reviewer's own reproduction, executed.
+
+  test('the chart sink cannot be handed a number', () => {
+    const months = [
+      { label: '2026-09', amount: netSalesPaisa(asPaisa(10_000), asPaisa(2_000)) },
+      { label: '2026-10', amount: netSalesPaisa(asPaisa(30_000), asPaisa(7_000)) },
+    ];
+
+    expect(netChartPoints(months)).toEqual([
+      { label: '2026-09', value: 80 },
+      { label: '2026-10', value: 230 },
+    ]);
+  });
+
+  test('a suppressed bucket is NULL, never zero', () => {
+    const points = netChartPoints([
+      {
+        label: '2026-09',
+        amount: netSalesPaisa(asPaisa(10_000), asPaisa(2_000)),
+        suppressed: true,
+      },
+    ]);
+
+    expect(points).toEqual([{ label: '2026-09', value: null }]);
+  });
+
+  test('REPRODUCTION: the laundered chart value is refused', () => {
+    // `((_: number) => 230)(...)` cannot reach the sink, because the sink
+    // takes no number. The runtime half catches the equivalent attempt --
+    // handing it a value that never came from the producer.
+    const launderedAsNet = asPaisa(23_000) as unknown as NetSales;
+
+    expect(() => netChartPoints([{ label: '2026-09', amount: launderedAsNet }]))
+      .toThrow(NetSalesProvenanceError);
+  });
+
+  test('REPRODUCTION: the laundered CSV cell is refused', () => {
+    const authentic = netSalesPaisa(asPaisa(10_000), asPaisa(2_000));
+    expect(netExportTaka(authentic)).toBe('80.00');
+
+    // The reviewer's substitution put `sumPaisaOf(monthSales)` -- a GROSS sum
+    // -- between the unwrap and the formatter, exporting 500.00 where 400.00
+    // belonged. A gross sum is not a `NetSales`, and an unauthenticated one
+    // throws rather than printing.
+    const grossSum = asPaisa(50_000) as unknown as NetSales;
+    expect(() => netExportTaka(grossSum)).toThrow(NetSalesProvenanceError);
+  });
+
+  test('the export cell is a PLAIN decimal, so a spreadsheet reads a number', () => {
+    const authentic = netSalesPaisa(asPaisa(1_234_567), asPaisa(0));
+    const cell = netExportTaka(authentic);
+
+    expect(cell).toBe('12345.67');
+    // No symbol, no separator: both would make the cell text.
+    expect(cell).not.toContain('৳');
+    expect(cell).not.toContain(',');
+  });
+
+  test('a negative net exports and plots as negative, not clamped', () => {
+    const negative = netSalesPaisa(asPaisa(1_000), asPaisa(3_500));
+
+    expect(netExportTaka(negative)).toBe('-25.00');
+    expect(netChartPoints([{ label: 'm', amount: negative }])).toEqual([
+      { label: 'm', value: -25 },
+    ]);
+  });
+
+  test('REPRODUCTION: a spread cannot relabel the card', () => {
+    // The reviewer kept the family and replaced the words:
+    //   metric={{ ...requirePharmacySalesMetric('...'), label: 'Monthly recurring run rate' }}
+    // and an authentic net figure rendered under the subscription caption.
+    //
+    // The card takes an ID now and resolves the entry itself, so there is no
+    // object to spread. What it renders is the MANIFEST's label, whatever the
+    // caller does.
+    const net = netSalesPaisa(asPaisa(10_000), asPaisa(2_000));
+    const html = renderToStaticMarkup(
+      <NetSalesCard metricId="pharmacy_sales_net_today" amount={net} />,
+    );
+
+    expect(html).toContain(NET_TODAY.label);
+    // A caption from another family cannot appear here.
+    expect(html).not.toContain('Monthly recurring run rate');
+  });
+
+  test('an id outside the pharmacy family is refused at RUNTIME too', () => {
+    // The union stops it at compile time; this is the second half, for a value
+    // that arrived as a string at runtime.
+    expect(() =>
+      renderToStaticMarkup(
+        <NetSalesCard
+          metricId={'collected_subscription_payments' as never}
+          amount={netSalesPaisa(asPaisa(1), asPaisa(0))}
+        />,
+      ),
+    ).toThrow(/not pharmacy_sales/);
+  });
+
+  test('the two net ids are exactly the pharmacy_sales family', () => {
+    // Non-vacuity for the union: if the manifest gained a third pharmacy
+    // metric, this list would have to grow with it rather than silently
+    // excluding it.
+    const family = ADMIN_METRICS.filter((entry) => entry.family === 'pharmacy_sales')
+      .map((entry) => entry.id)
+      .sort();
+
+    expect([...NET_SALES_METRIC_IDS].sort()).toEqual(family);
   });
 });
