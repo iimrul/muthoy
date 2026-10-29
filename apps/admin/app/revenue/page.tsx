@@ -1,11 +1,11 @@
 import Link from 'next/link';
-import { asPaisa } from '@muthoy/types';
-import { formatMoney } from '@muthoy/utils';
+import { formatMoney, sumNetSales } from '@muthoy/utils';
 import ChartPanel from '../../components/charts/ChartPanel';
 import ErrorNotice from '../../components/ErrorNotice';
+import NetSalesCard from '../../components/NetSalesCard';
 import { EmptyState, MetricTile } from '../../components/PageParts';
 import { requireAdminPermission } from '../../lib/adminAuthz';
-import { requireMetric } from '../../lib/adminMetrics';
+import { requireMetric, requirePharmacySalesMetric } from '../../lib/adminMetrics';
 import {
   analyticsOverview,
   revenueOverview,
@@ -14,7 +14,7 @@ import {
 } from '../../lib/adminPlatformQueries';
 import { suppressBelowK } from '../../lib/adminSuppression';
 import { exportTaka } from '../../lib/adminReports';
-import { EMPTY_VALUE, formatCount } from '../../lib/adminViews';
+import { formatCount } from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
 
 // Batch 3 §8.4 — Revenue & Billing.
@@ -173,12 +173,21 @@ export default async function RevenuePage() {
   // from the shops behind it, and a total built from fewer than five shops is
   // those shops' takings wearing a platform label.
   const pharmacyShopIds = result.pharmacy.pharmacySalesByMonth.flatMap((month) => month.shopIds);
-  const pharmacyNetSalesPaisa = result.pharmacy.pharmacySalesByMonth.reduce(
-    (total, month) => total + Number(month.totalPaisa),
-    0,
+  // §6i: aggregated by `sumNetSales`, which verifies every part, rather than
+  // by a `reduce` that coerced each month's total with `Number(...)`.
+  //
+  // That coercion was the hole Gate 5 round 9 walked through: it accepts
+  // anything, so
+  // `((_amount: number) => Number(collectedTotalPaisa))(pharmacyNetSalesPaisa)`
+  // substituted collected payments into this tile with no compile error and no
+  // source-guard finding. `sumNetSales` cannot be fed a collected total — its
+  // parameter is `NetSales` and each element is checked — and the result stays
+  // opaque all the way into the renderer.
+  const pharmacyNetSales = sumNetSales(
+    result.pharmacy.pharmacySalesByMonth.map((month) => month.totalPaisa),
   );
   const pharmacySales = suppressBelowK({
-    value: pharmacyNetSalesPaisa,
+    value: pharmacyNetSales,
     contributingShopIds: pharmacyShopIds,
   });
 
@@ -355,20 +364,24 @@ export default async function RevenuePage() {
           both sides windowed on the same business date.
         </p>
         <div className="mt-4 max-w-sm">
-          <MetricTile
-            metric={requireMetric('pharmacy_sales_net')}
-            value={
-              pharmacySales.suppressed
-                ? EMPTY_VALUE
-                : formatMoney(asPaisa(Math.trunc(pharmacySales.value)))
-            }
-            note={
+          {/* §6i: NetSalesCard, not MetricTile.
+              `MetricTile` takes an already-formatted string, so the caller
+              owned the value under this caption — and round 9 used exactly
+              that to render ৳230.00 of collected payments here. This card
+              takes the opaque amount instead and formats it itself, after
+              verifying provenance. The suppressed case passes `withheld`
+              rather than a substitute value, so k-anonymity withholds the
+              figure without anything else taking its place. */}
+          <NetSalesCard
+            metric={requirePharmacySalesMetric('pharmacy_sales_net')}
+            amount={pharmacyNetSales}
+            withheld={pharmacySales.suppressed}
+            composition={
               pharmacySales.suppressed
                 ? 'Withheld: fewer than five pharmacies contributed, so the total would be those pharmacies’ own takings.'
                 : formatCount(pharmacySales.contributorCount)
                   + ' contributing pharmacies, all time. Their money, not Muthoy’s.'
             }
-            href="/analytics"
           />
         </div>
       </section>

@@ -19,7 +19,7 @@ import 'server-only';
 // so no table can reach a report without producing its own evidence.
 
 import { addPaisa, asPaisa, type Paisa } from '@muthoy/types';
-import { netSalesPaisa } from '@muthoy/utils';
+import { netSalesPaisa, sumNetSales, type NetSales } from '@muthoy/utils';
 import type { AdminListQuery, AdminReportExportQuery } from '@muthoy/validation';
 import {
   applyShopListFilters,
@@ -490,7 +490,15 @@ export interface AnalyticsOverview {
   /** Per month: the refund-net total and the shops behind it. */
   pharmacySalesByMonth: readonly {
     month: string;
-    totalPaisa: Paisa;
+    /**
+     * The month's refund-NET total, as an opaque `NetSales` (§6i).
+     *
+     * Not a `Paisa`: a plain number here is what let Gate 5 round 9 launder a
+     * collected-payments figure into the pharmacy-net tile through an
+     * identity-shaped call. Read it with `netSalesAmount`, or aggregate it
+     * with `sumNetSales`, both of which verify provenance first.
+     */
+    totalPaisa: NetSales;
     /** §8.5's sales VOLUME: how many sale rows, beside the refund-net total. */
     saleCount: number;
     /**
@@ -648,14 +656,23 @@ export async function analyticsOverview(
       .sort((left, right) => left.month.localeCompare(right.month));
   };
 
+  // §6i: `totalPaisa` is an opaque `NetSales`, so it starts as null and is
+  // set only by the shared subtraction in the final pass below. There is no
+  // authentic zero to initialise it with here, and inventing one would be the
+  // sort of public minting the redesign forbids.
   const months = new Map<
     string,
-    { totalPaisa: Paisa; saleCount: number; shopIds: string[]; saleShopIds: string[] }
+    {
+      totalPaisa: NetSales | null;
+      saleCount: number;
+      shopIds: string[];
+      saleShopIds: string[];
+    }
   >();
   for (const row of [...sales.sales, ...sales.refunds]) {
     const month = row.businessDate.slice(0, 7);
     const held = months.get(month)
-      ?? { totalPaisa: asPaisa(0), saleCount: 0, shopIds: [], saleShopIds: [] };
+      ?? { totalPaisa: null, saleCount: 0, shopIds: [], saleShopIds: [] };
     held.shopIds.push(row.shopId);
     months.set(month, held);
   }
@@ -708,7 +725,10 @@ export async function analyticsOverview(
     pharmacySalesByMonth: [...months.entries()]
       .map(([month, held]) => ({
         month,
-        totalPaisa: held.totalPaisa,
+        // The pass above sets every month, so this is never null in
+        // practice; `sumNetSales([])` is an AUTHENTIC zero rather than a cast,
+        // which keeps the impossible branch honest instead of silent.
+        totalPaisa: held.totalPaisa ?? sumNetSales([]),
         saleCount: held.saleCount,
         shopIds: held.shopIds,
         saleShopIds: held.saleShopIds,

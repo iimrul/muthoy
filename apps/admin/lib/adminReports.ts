@@ -39,7 +39,7 @@
 // exactly like a real absence.
 
 import { addPaisa, asPaisa, type Paisa } from '@muthoy/types';
-import { netSalesPaisa } from '@muthoy/utils';
+import { netSalesAmount, netSalesPaisa } from '@muthoy/utils';
 import { ADMIN_REPORT_IDS, type AdminReportExportQuery } from '@muthoy/validation';
 import { CSV_CONTENT_TYPE, contentDisposition, toCsv, type CsvDocument } from './adminCsv';
 import { dhakaDayLabel } from './adminDashboard';
@@ -610,7 +610,11 @@ function buildPharmacySalesByMonth(
     const total = netSalesPaisa(sumPaisaOf(monthSales), sumPaisaOf(monthRefunds));
     return {
       key: month,
-      values: [exportTaka(total)],
+      // §6i: `netSalesAmount` VERIFIES provenance before unwrapping, so an
+      // export cannot print a figure the refund-net calculation did not
+      // produce. The unwrap is explicit and greppable rather than implicit,
+      // which is the point of the opaque type leaving the module at all.
+      values: [exportTaka(netSalesAmount(total))],
       contributorIds: [
         ...monthSales.map((row) => row.shopId),
         ...monthRefunds.map((row) => row.shopId),

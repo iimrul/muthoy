@@ -4,6 +4,7 @@
 // service-role key, and all of it is unit-tested.
 
 import { ZERO_PAISA, addPaisa, asPaisa, type Paisa } from '@muthoy/types';
+import { type NetSales } from '@muthoy/utils';
 
 // Bangladesh is a fixed UTC+06:00 offset with no DST (its only trial ended in
 // 2009), so the platform's "today" is a fixed-offset calendar day. The admin
@@ -48,8 +49,16 @@ export interface PlatformStats {
   totalShops: number;
   grossSalesToday: Paisa;
   refundsToday: Paisa;
-  /** grossSalesToday − refundsToday, via the shared @muthoy/utils definition. */
-  netSalesToday: Paisa;
+  /**
+   * grossSalesToday − refundsToday, via the shared @muthoy/utils definition.
+   *
+   * §6i: an OPAQUE `NetSales`, not a `Paisa`. A plain number here is what let
+   * Gate 5 round 9 render gross under the net caption -- both by assigning
+   * over the field (`Object.assign` with a name built as `'net' + 'SalesToday'`)
+   * and by laundering the value through an identity-shaped call. The renderer
+   * verifies provenance before it formats, so neither substitution survives.
+   */
+  netSalesToday: NetSales;
   day: DhakaDayRange;
 }
 

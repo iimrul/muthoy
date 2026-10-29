@@ -3,7 +3,7 @@ import { formatMoney, formatNumber } from '@muthoy/utils';
 import ChartPanel from '../components/charts/ChartPanel';
 import ErrorNotice from '../components/ErrorNotice';
 import { EmptyState, MetricTile } from '../components/PageParts';
-import StatCard from '../components/StatCard';
+import NetSalesCard from '../components/NetSalesCard';
 import { requireAdminPermission } from '../lib/adminAuthz';
 import {
   dashboardAlerts,
@@ -18,6 +18,7 @@ import {
   isActiveSubscriptionNow,
   monthlyRecurringRevenue,
   requireMetric,
+  requirePharmacySalesMetric,
 } from '../lib/adminMetrics';
 import { dashboardOverview, type DashboardOverview } from '../lib/adminPlatformQueries';
 import { suppressSeriesBelowK } from '../lib/adminSuppression';
@@ -245,11 +246,18 @@ export default async function DashboardPage() {
             href="/revenue"
           />
         )}
-        <StatCard
-          label="Total sales today, net of refunds"
-          value={formatMoney(stats.netSalesToday)}
-          hint={`All shops · ${stats.day.businessDate} (Asia/Dhaka) · gross ${formatMoney(stats.grossSalesToday)} less refunds ${formatMoney(stats.refundsToday)}`}
-          isMoney
+        {/* §6i: the net figure goes through NetSalesCard, which owns both the
+            caption and the formatting and verifies the amount's provenance.
+            This used to be a StatCard taking a free-form label and a
+            caller-formatted string, which is how Gate 5 round 9 rendered gross
+            under this very caption — once by laundering the value through an
+            identity-shaped call, and once by assigning over the field with a
+            property name built as `'net' + 'SalesToday'`. Neither is
+            expressible here: there is no caption prop and no value string. */}
+        <NetSalesCard
+          metric={requirePharmacySalesMetric('pharmacy_sales_net_today')}
+          amount={stats.netSalesToday}
+          composition={`All shops · ${stats.day.businessDate} (Asia/Dhaka) · gross ${formatMoney(stats.grossSalesToday)} less refunds ${formatMoney(stats.refundsToday)}`}
         />
       </div>
 

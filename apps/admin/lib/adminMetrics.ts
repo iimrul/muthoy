@@ -523,3 +523,23 @@ export function requireMetric(id: string): Metric {
   }
   return found;
 }
+
+/**
+ * A manifest entry narrowed to the PHARMACY-TAKINGS family.
+ *
+ * §6i: `NetSalesCard` accepts only this type, so the net renderer cannot be
+ * pointed at a subscription or count metric and a pharmacy figure cannot be
+ * captioned as Muthoy's own money. It throws on the wrong family for the same
+ * reason `requireMetric` throws on an unknown id -- the alternative is a real
+ * number under a caption from the wrong family, which is the mislabelling
+ * §5.2 exists to prevent.
+ */
+export function requirePharmacySalesMetric(id: string): Metric & { family: 'pharmacy_sales' } {
+  const found = requireMetric(id);
+  if (found.family !== 'pharmacy_sales') {
+    throw new Error(
+      'Metric ' + id + ' is in the ' + found.family + ' family, not pharmacy_sales',
+    );
+  }
+  return found as Metric & { family: 'pharmacy_sales' };
+}

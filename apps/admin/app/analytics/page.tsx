@@ -1,3 +1,4 @@
+import { netSalesAmount } from '@muthoy/utils';
 import { ADMIN_MAX_RANGE_DAYS } from '@muthoy/validation';
 import ChartPanel from '../../components/charts/ChartPanel';
 import { EMPTY_VALUE, formatCount } from '../../lib/adminViews';
@@ -196,10 +197,18 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     contributingShopIds: conversion.accountIds,
   });
 
+  // §6i: `netSalesAmount` rather than `Number(...)`.
+  //
+  // The month total is an opaque `NetSales` now, so `Number(bucket.totalPaisa)`
+  // would be NaN — and `Number()` accepting anything is precisely how round 9
+  // laundered a collected figure into a net tile. The chart genuinely needs a
+  // plottable number, so the unwrap is explicit here and VERIFIES provenance
+  // on the way out, which is what the opaque type is for: every exit is
+  // visible and checked rather than implicit.
   const sales = toPoints(
     pharmacySalesByMonth,
     (bucket) => bucket.month,
-    (bucket) => Number(bucket.totalPaisa) / 100,
+    (bucket) => Number(netSalesAmount(bucket.totalPaisa)) / 100,
     (bucket) => bucket.shopIds,
   );
   const plans = toPoints(
