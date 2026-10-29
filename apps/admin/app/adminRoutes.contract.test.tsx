@@ -813,10 +813,18 @@ describe('§8.1 the Dashboard renders its nine figures and all five alerts', () 
       'Accounts that have ever paid',
       'Currently paid entitlements',
       'Monthly recurring run rate',
-      'Total sales today, net of refunds',
+      // §6i: this caption now comes from the MANIFEST rather than from a
+      // hand-written string on the page. It reads "Pharmacy sales today, net
+      // of refunds" because that is `pharmacy_sales_net_today`'s label, and
+      // the net card has no caption prop a caller could pass instead -- which
+      // is what closes round 9's reproduction C structurally.
+      'Pharmacy sales today, net of refunds',
     ]) {
       expect(html, label + ' is missing').toContain(label);
     }
+    // And the OLD hand-written caption is gone, so the page cannot be
+    // captioning the figure itself any more.
+    expect(html).not.toContain('Total sales today, net of refunds');
   });
 
   test('all five alert classes are listed, and the summary counts them', async () => {

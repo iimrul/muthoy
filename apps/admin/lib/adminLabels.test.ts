@@ -16,7 +16,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, test } from 'vitest';
-import { ADMIN_METRICS } from './adminMetrics';
+import { ADMIN_METRICS, requireMetric } from './adminMetrics';
 
 const ADMIN_ROOT = join(import.meta.dirname, '..');
 const SCANNED = ['app', 'components', 'lib'];
@@ -34,8 +34,8 @@ interface SourceFile {
  *
  * GATE 5 FIFTH-DELTA FINDING. The regex deleted everything after `//` on a
  * line, so a string literal CONTAINING those two characters truncated the
- * line and hid the code after it: `{ pharmacyNetSalesPaisa, note: "//" };
- * totals.pharmacyNetSalesPaisa = 42;` vanished before any check ran. A guard
+ * line and hid the code after it: `{ pharmacyNetSales, note: "//" };
+ * totals.pharmacyNetSales = 42;` vanished before any check ran. A guard
  * whose INPUT can be corrupted is not a guard, and this repository has
  * learned the same lesson once before, in the H-9 source scanner.
  *
@@ -126,7 +126,7 @@ const SOURCES = SCANNED.flatMap((directory) => collect(join(ADMIN_ROOT, director
 // The net-money anchors, at module scope so the provenance guard and the
 // occurrence pins below cannot drift apart into two different lists.
 const MODULE_NET_FIELD = 'netSalesToday';
-const MODULE_NET_ANCHORS = [MODULE_NET_FIELD, 'pharmacyNetSalesPaisa'] as const;
+const MODULE_NET_ANCHORS = [MODULE_NET_FIELD, 'pharmacyNetSales'] as const;
 
 describe('the GROSS boundary', () => {
   test('finds the admin source tree', () => {
@@ -359,7 +359,11 @@ describe('the GROSS boundary', () => {
       const code = revenuePage();
 
       expect(code).toContain("requireMetric('mrr')");
-      expect(code).toContain("requireMetric('pharmacy_sales_net')");
+      // §6i: the pharmacy figure goes through the NARROWED accessor, which
+      // only returns a `pharmacy_sales` metric, and through the net card
+      // rather than MetricTile.
+      expect(code).toContain("requirePharmacySalesMetric('pharmacy_sales_net')");
+      expect(code).toContain('<NetSalesCard');
       expect(familyOf('mrr')).toBe('subscription');
       expect(familyOf('pharmacy_sales_net')).toBe('pharmacy_sales');
     });
@@ -371,15 +375,22 @@ describe('the GROSS boundary', () => {
       // from requireMetric.
       const real = revenuePage();
       const mutated = real.replace(
-        "metric={requireMetric('pharmacy_sales_net')}",
+        "metric={requirePharmacySalesMetric('pharmacy_sales_net')}",
         'metric={{ id: "x", label: "Total revenue", family: "pharmacy_sales", unit: "paisa", definitionRef: "MRR" }}',
       );
 
       expect(mutated, 'the mutation did not apply').not.toBe(real);
 
-      const countTiles = (code: string) => [...code.matchAll(/<MetricTile\b/g)].length;
+      // §6i: the pharmacy tile is a `NetSalesCard`, so both tile kinds are
+      // counted and both accessor forms count as resolved. The net card's
+      // accessor is the NARROWED one, which is itself part of the guard: it
+      // refuses a metric from the wrong family.
+      const countTiles = (code: string) =>
+        [...code.matchAll(/<MetricTile\b/g)].length
+        + [...code.matchAll(/<NetSalesCard\b/g)].length;
       const countResolved = (code: string) =>
-        [...code.matchAll(/metric=\{requireMetric\('[a-z_]+'\)\}/g)].length;
+        [...code.matchAll(/metric=\{requireMetric\('[a-z_]+'\)\}/g)].length
+        + [...code.matchAll(/metric=\{requirePharmacySalesMetric\('[a-z_]+'\)\}/g)].length;
 
       // The real page: every tile resolves. The mutant: one does not.
       expect(countResolved(real)).toBe(countTiles(real));
@@ -400,7 +411,7 @@ describe('the GROSS boundary', () => {
      * from the other family's figures. That is the real rule §5.2 states: a
      * subscription metric may not be fed a pharmacy-sales value, or the reverse.
      */
-    const PHARMACY_VALUES = ['pharmacySales', 'pharmacyNetSalesPaisa'] as const;
+    const PHARMACY_VALUES = ['pharmacySales', 'pharmacyNetSales'] as const;
     const SUBSCRIPTION_VALUES = ['collectedTotalPaisa', 'runRate.totalPaisa'] as const;
 
     function familyViolations(code: string): string[] {
@@ -586,7 +597,7 @@ describe('the GROSS boundary', () => {
    *
    *   - `netSalesToday`'s required token was its own name, so
    *     `const netSalesToday = 42` satisfied it trivially;
-   *   - a fabricated `pharmacyNetSalesPaisa = 42` passed in any file that
+   *   - a fabricated `pharmacyNetSales = 42` passed in any file that
    *     mentioned `pharmacySalesByMonth` anywhere else, for any reason.
    *
    * Co-occurrence is not derivation. The check is now per BINDING: every
@@ -626,10 +637,17 @@ describe('the GROSS boundary', () => {
   const PINNED_DERIVATIONS: Readonly<Record<string, readonly string[]>> = {
     // lib/queries.ts: the shared subtraction, called directly.
     netSalesToday: ['netSalesPaisa(grossSalesToday,refundsToday)'],
-    // app/revenue/page.tsx: summed from the tallied monthly totals, each of
-    // which lib/adminPlatformQueries.ts produced through netSalesPaisa.
-    pharmacyNetSalesPaisa: [
-      'result.pharmacy.pharmacySalesByMonth.reduce((total,month)=>total+Number(month.totalPaisa),0,)',
+    // app/revenue/page.tsx: summed by `sumNetSales`, which VERIFIES each
+    // monthly part, from totals lib/adminPlatformQueries.ts produced through
+    // netSalesPaisa.
+    //
+    // §6i changed this pin. It used to be a `reduce` over
+    // `Number(month.totalPaisa)`, and that `Number(...)` -- which accepts
+    // anything -- is the hole round 9 laundered a collected-payments figure
+    // through. The aggregation is now typed and checked, so the pin records a
+    // call that cannot take a non-net argument in the first place.
+    pharmacyNetSales: [
+      'sumNetSales(result.pharmacy.pharmacySalesByMonth.map((month)=>month.totalPaisa),)',
     ],
   };
 
@@ -648,8 +666,8 @@ describe('the GROSS boundary', () => {
   /**
    * A property or binding name, including the QUOTED and COMPUTED forms.
    *
-   * FIFTH-DELTA FINDING: `{ "pharmacyNetSalesPaisa": 42 }` and
-   * `{ ["pharmacyNetSalesPaisa"]: 42 }` are not Identifier names, so an
+   * FIFTH-DELTA FINDING: `{ "pharmacyNetSales": 42 }` and
+   * `{ ["pharmacyNetSales"]: 42 }` are not Identifier names, so an
    * identifier-only check saw no property at all.
    */
   function nameOf(node: ts.PropertyName | ts.BindingName): string | null {
@@ -797,14 +815,62 @@ describe('the GROSS boundary', () => {
     return fabricatedBindings(code).length === 0;
   }
 
+  /**
+   * §6i's trusted renderer, which is the ONE file that may use the word
+   * without binding an anchor.
+   *
+   * It does not hold a net FIGURE at all -- it receives an opaque amount and
+   * verifies it. Requiring it to carry a pinned derivation would be requiring
+   * the provenance boundary to re-derive the value it exists to check, which
+   * is backwards. The exemption is BACKED, not asserted: the two tests below
+   * require this file to verify provenance, to own its caption, and to own its
+   * formatting, so an exemption that stopped being earned would fail.
+   */
+  const NET_RENDERER = 'components/NetSalesCard.tsx';
+
   test('link 1: `net` appears only alongside a net-typed, PROVENANCED field', () => {
     const offenders = scannable()
+      .filter((file) => file.path !== NET_RENDERER)
       .filter((file) => mentionsWord(withoutIdentifiers(file.code), 'net'))
       .filter((file) => !anchoredWithProvenance(file.code));
 
     expect(
       offenders.map((file) => file.path),
       `a figure called net must be one of: ${NET_ANCHORS.join(', ')}, and must be derived`,
+    ).toEqual([]);
+  });
+
+  test('the renderer exemption is EARNED: it verifies, captions and formats', () => {
+    const renderer = SOURCES.find((file) => file.path === NET_RENDERER);
+    expect(renderer, 'the net renderer is missing').toBeDefined();
+    const code = renderer?.code ?? '';
+
+    // It verifies provenance before showing anything.
+    expect(code).toContain('isNetSales(amount)');
+    // It owns the caption: the label comes from the metric, and there is no
+    // caption prop a caller could pass instead.
+    expect(code).toContain('{metric.label}');
+    expect(code).not.toMatch(/\blabel\s*[:?]\s*string/);
+    // It owns the formatting: the amount is unwrapped and formatted HERE,
+    // after verification, so no caller can hand it a formatted string.
+    expect(code).toContain('formatMoney(netSalesAmount(amount))');
+    expect(code).not.toMatch(/\bvalue\s*[:?]\s*string/);
+  });
+
+  test('NO other file formats a net amount', () => {
+    // The structural half of §6i, checkable by source: `netSalesAmount` is the
+    // only way to get a number out of an authentic net value, so a file that
+    // both unwraps and formats is a second renderer. Exactly one may exist.
+    const unwrapAndFormat = SOURCES.filter(
+      (file) =>
+        file.code.includes('netSalesAmount(')
+        && file.code.includes('formatMoney(')
+        && file.path !== NET_RENDERER,
+    );
+
+    expect(
+      unwrapAndFormat.map((file) => file.path),
+      'another file unwraps a net amount and formats it',
     ).toEqual([]);
   });
 
@@ -818,7 +884,7 @@ describe('the GROSS boundary', () => {
     const mutants: readonly { label: string; code: string }[] = [
       {
         label: 'finding 12: the name alone',
-        code: 'const pharmacyNetSalesPaisa = 42; const label = "Net takings";',
+        code: 'const pharmacyNetSales = 42; const label = "Net takings";',
       },
       {
         label: 'delta: an anchor whose required token was its own name',
@@ -827,7 +893,7 @@ describe('the GROSS boundary', () => {
       {
         label: 'delta: a fabricated anchor beside an UNRELATED mention',
         code: [
-          'const pharmacyNetSalesPaisa = 42;',
+          'const pharmacyNetSales = 42;',
           '// pharmacySalesByMonth is mentioned here for an unrelated reason',
           'const label = "Net takings";',
         ].join('\n'),
@@ -836,7 +902,7 @@ describe('the GROSS boundary', () => {
         // SECOND-DELTA FINDING 3, the reviewer's exact counterexample: an
         // uppercase identifier read as a type annotation.
         label: 'second delta: a fabricated value behind an UPPERCASE name',
-        code: 'const GROSS_TOTAL = 42;\nconst pharmacyNetSalesPaisa = GROSS_TOTAL;',
+        code: 'const GROSS_TOTAL = 42;\nconst pharmacyNetSales = GROSS_TOTAL;',
       },
       {
         // The same trick, with the real page's derivation token present
@@ -844,7 +910,7 @@ describe('the GROSS boundary', () => {
         label: 'second delta: the same, with the derivation token nearby',
         code: [
           'const TOTALS = 42;',
-          'const pharmacyNetSalesPaisa = TOTALS;',
+          'const pharmacyNetSales = TOTALS;',
           'const unrelated = result.pharmacy.pharmacySalesByMonth.length;',
         ].join('\n'),
       },
@@ -853,7 +919,7 @@ describe('the GROSS boundary', () => {
         // sits after the colon, so a regex looking for `anchor` followed by
         // `:` or `=` found no binding at all.
         label: 'third delta: a destructuring rename',
-        code: 'const { totalPaisa: pharmacyNetSalesPaisa } = { totalPaisa: 42 };',
+        code: 'const { totalPaisa: pharmacyNetSales } = { totalPaisa: 42 };',
       },
       {
         // THIRD-DELTA FINDING, bypass 2: a SUBSTRING collision. The
@@ -862,13 +928,13 @@ describe('the GROSS boundary', () => {
         label: 'third delta: an identifier that merely contains the token',
         code: [
           'const pharmacySalesByMonthGross = 42;',
-          'const pharmacyNetSalesPaisa = pharmacySalesByMonthGross;',
+          'const pharmacyNetSales = pharmacySalesByMonthGross;',
         ].join('\n'),
       },
       {
         // The shorthand form of the rename, for completeness.
         label: 'third delta: a destructuring shorthand off a literal',
-        code: 'const { pharmacyNetSalesPaisa } = { pharmacyNetSalesPaisa: 42 };',
+        code: 'const { pharmacyNetSales } = { pharmacyNetSales: 42 };',
       },
       {
         // FOURTH-DELTA FINDING, bypass 1: the derivation token supplied by a
@@ -877,7 +943,7 @@ describe('the GROSS boundary', () => {
         // text simply is not the pinned expression.
         label: 'fourth delta: a typeof inside a type assertion',
         code:
-          'const pharmacyNetSalesPaisa = 42 as '
+          'const pharmacyNetSales = 42 as '
           + "(typeof result.pharmacy.pharmacySalesByMonth)[number]['totalPaisa'];",
       },
       {
@@ -885,47 +951,47 @@ describe('the GROSS boundary', () => {
         // than a bare identifier.
         label: 'fourth delta: an assignment through a member',
         code: [
-          'const totals = { pharmacyNetSalesPaisa };',
-          'totals.pharmacyNetSalesPaisa = 42;',
+          'const totals = { pharmacyNetSales };',
+          'totals.pharmacyNetSales = 42;',
         ].join(NEWLINE),
       },
       {
         // FIFTH-DELTA FINDINGS 2-6, now modelled by the classifier as well as
         // caught by the occurrence pins below.
         label: 'fifth delta: a quoted property name',
-        code: 'const pharmacyNetSalesPaisa = { "pharmacyNetSalesPaisa": 42 }.pharmacyNetSalesPaisa;',
+        code: 'const pharmacyNetSales = { "pharmacyNetSales": 42 }.pharmacyNetSales;',
       },
       {
         label: 'fifth delta: a class field',
-        code: 'class C { pharmacyNetSalesPaisa = 42; }',
+        code: 'class C { pharmacyNetSales = 42; }',
       },
       {
         label: 'fifth delta: an enum member',
-        code: 'enum E { pharmacyNetSalesPaisa = 42 }',
+        code: 'enum E { pharmacyNetSales = 42 }',
       },
       {
         label: 'fifth delta: a parenthesised member target',
-        code: '(totals.pharmacyNetSalesPaisa) = 42;',
+        code: '(totals.pharmacyNetSales) = 42;',
       },
       {
         label: 'fifth delta: a non-null asserted member target',
-        code: 'totals!.pharmacyNetSalesPaisa = 42;',
+        code: 'totals!.pharmacyNetSales = 42;',
       },
       {
         label: 'fifth delta: a postfix update',
-        code: 'totals.pharmacyNetSalesPaisa++;',
+        code: 'totals.pharmacyNetSales++;',
       },
       {
         label: 'fifth delta: a prefix update',
-        code: '--totals.pharmacyNetSalesPaisa;',
+        code: '--totals.pharmacyNetSales;',
       },
       {
         // The element-access form of the same write, and a compound
         // operator -- both now modelled rather than left for a sixth round.
         label: 'fourth delta: element access and a compound operator',
         code: [
-          "totals['pharmacyNetSalesPaisa'] = 42;",
-          'totals.pharmacyNetSalesPaisa += 42;',
+          "totals['pharmacyNetSales'] = 42;",
+          'totals.pharmacyNetSales += 42;',
         ].join(NEWLINE),
       },
     ];
@@ -945,7 +1011,7 @@ describe('the GROSS boundary', () => {
     // strengthening rather than a restatement.
     const DERIVATION_TOKEN: Readonly<Record<string, string>> = {
       netSalesToday: 'netSalesPaisa',
-      pharmacyNetSalesPaisa: 'pharmacySalesByMonth',
+      pharmacyNetSales: 'pharmacySalesByMonth',
     };
     const coOccurrence = (code: string) =>
       NET_ANCHORS.some(
@@ -963,7 +1029,7 @@ describe('the GROSS boundary', () => {
           new RegExp('(?:^|[^A-Za-z0-9_.])' + anchor + '\s*([:=])\s*([^;\n]*)', 'g'),
         ),
       ]);
-    const rename = 'const { totalPaisa: pharmacyNetSalesPaisa } = { totalPaisa: 42 };';
+    const rename = 'const { totalPaisa: pharmacyNetSales } = { totalPaisa: 42 };';
     expect(regexBindings(rename), 'the regex found no binding to check').toEqual([]);
     // The parser finds it, and rejects it.
     expect(anchorBindings(rename)).toHaveLength(1);
@@ -971,7 +1037,7 @@ describe('the GROSS boundary', () => {
 
     // The substring collision, likewise: `includes` cannot separate these two
     // identifiers, and a whole-identifier comparison can.
-    const collision = 'const pharmacyNetSalesPaisa = pharmacySalesByMonthGross;';
+    const collision = 'const pharmacyNetSales = pharmacySalesByMonthGross;';
     expect('pharmacySalesByMonthGross'.includes('pharmacySalesByMonth')).toBe(true);
     expect(anchorBindings(collision)[0]?.normalized).toBe('pharmacySalesByMonthGross');
     expect(fabricatedBindings(collision)).toHaveLength(1);
@@ -1022,17 +1088,17 @@ describe('the GROSS boundary', () => {
     // The page as shipped: a clean binding.
     expect(fabricatedBindings(real)).toEqual([]);
 
-    const derivation = /const pharmacyNetSalesPaisa = result\.pharmacy\.pharmacySalesByMonth[\s\S]*?\n  \);/;
+    const derivation = /const pharmacyNetSales = sumNetSales\([\s\S]*?\n  \);/;
     expect(derivation.test(real), 'the derivation is not where this test expects it').toBe(true);
 
     for (const [label, fabrication] of [
       [
         'a destructuring rename',
-        'const { totalPaisa: pharmacyNetSalesPaisa } = { totalPaisa: 42 };',
+        'const { totalPaisa: pharmacyNetSales } = { totalPaisa: 42 };',
       ],
       [
         'an identifier containing the token',
-        'const pharmacySalesByMonthGross = 42;\n  const pharmacyNetSalesPaisa = pharmacySalesByMonthGross;',
+        'const pharmacySalesByMonthGross = 42;\n  const pharmacyNetSales = pharmacySalesByMonthGross;',
       ],
     ] as const) {
       const mutant = real.replace(derivation, fabrication);
@@ -1052,7 +1118,7 @@ describe('the GROSS boundary', () => {
     // subtraction behind the word is the shared one, reached through the
     // reports' own tallied reads rather than recomputed here.
     const page = SOURCES.find((file) => file.path === 'app/revenue/page.tsx');
-    expect(page?.code).toContain('pharmacyNetSalesPaisa');
+    expect(page?.code).toContain('pharmacyNetSales');
     expect(page?.code).toContain('pharmacySalesByMonth');
     // SECOND-DELTA FINDING 3: containing both names was all this asked, so a
     // page whose anchor was fabricated satisfied link 2b as well. The binding
@@ -1089,7 +1155,10 @@ describe('the GROSS boundary', () => {
     // right and is not: \s* backtracks to zero width, the lookahead then sees
     // " Paisa" which does not START with Paisa, and the declaration matches as
     // though it were an assignment. Two explicit shapes instead.
-    const declaresType = (code: string) => code.includes(`${NET_FIELD}: Paisa`);
+    // §6i: the declared type is now the opaque `NetSales`, not `Paisa`. That
+    // is the whole point of the redesign -- a plain number in this field is
+    // what let round 9 assign gross over it -- so the predicate follows.
+    const declaresType = (code: string) => code.includes(`${NET_FIELD}: NetSales`);
     const assignsValue = (code: string) => code.includes(`${NET_FIELD}: netSalesPaisa(`);
 
     expect(SOURCES.filter((file) => declaresType(file.code)).map((file) => file.path))
@@ -1131,10 +1200,22 @@ describe('the GROSS boundary', () => {
     expect(shopPage?.code).not.toContain('netSalesPaisa');
   });
 
-  test('the dashboard still labels its figure as sales, unchanged', () => {
+  test('the dashboard still labels its figure as SALES, from the manifest', () => {
+    // §6i moved this caption out of the page. It used to be the hand-written
+    // string 'Total sales today, net of refunds', which is exactly what let
+    // round 9 put gross underneath it. The page now names a metric and the
+    // card renders that metric's label, so the words are checked where they
+    // are defined rather than where they are displayed.
     const dashboard = SOURCES.find((file) => file.path === 'app/page.tsx');
+    expect(dashboard?.code).toContain("requirePharmacySalesMetric('pharmacy_sales_net_today')");
+    // The page no longer captions the figure itself.
+    expect(dashboard?.code).not.toContain('Total sales today');
 
-    expect(dashboard?.code).toContain('Total sales today');
+    // And the manifest label still says SALES, not revenue -- the invariant
+    // this test has always been about.
+    const label = requireMetric('pharmacy_sales_net_today').label;
+    expect(label.toLowerCase()).toContain('sales');
+    expect(label.toLowerCase()).not.toContain('revenue');
   });
 
   test('the shop drill-down says GROSS out loud', () => {
@@ -1150,11 +1231,22 @@ describe('CLAUDE.md rule 6: money renders in DM Mono', () => {
 
     expect(callSites.length).toBeGreaterThan(0);
     for (const file of callSites) {
-      // Either the element carries the class directly, or the figure is
-      // declared money through the shared components' isMoney flag — the
-      // object form the column tables use, or the bare JSX prop app/page.tsx
-      // uses. The next test is what proves that flag really applies font-mono.
-      const carriesFont = file.code.includes('font-mono') || /\bisMoney\b/.test(file.code);
+      // Three accepted mechanisms, strongest first:
+      //
+      //   - the element carries the class directly;
+      //   - the figure goes through a shared component that decides from the
+      //     METRIC'S OWN UNIT — `MetricTile` and §6i's `NetSalesCard` both do,
+      //     which is better than a flag because a caller cannot get it wrong;
+      //   - the figure is declared money through the older `isMoney` flag.
+      //
+      // The next test proves those components really apply font-mono, so this
+      // one is not taking their names on trust.
+      const throughUnitAwareComponent =
+        file.code.includes('<MetricTile') || file.code.includes('<NetSalesCard');
+      const carriesFont =
+        file.code.includes('font-mono')
+        || throughUnitAwareComponent
+        || /\bisMoney\b/.test(file.code);
       expect(carriesFont, file.path + ' formats money without font-mono').toBe(true);
     }
   });
@@ -1165,6 +1257,14 @@ describe('CLAUDE.md rule 6: money renders in DM Mono', () => {
       expect(file?.code).toContain('font-mono');
       expect(file?.code).toMatch(/isMoney/);
     }
+
+    // §6i's net renderer, held to the same rule by a different mechanism: it
+    // decides from `metric.unit` rather than from a caller's flag, so there is
+    // no `isMoney` to find and the unit check is what must be present.
+    const netCard = SOURCES.find((candidate) => candidate.path === 'components/NetSalesCard.tsx');
+    expect(netCard?.code, 'the net card is missing').toBeDefined();
+    expect(netCard?.code).toContain('font-mono');
+    expect(netCard?.code).toContain("metric.unit === 'paisa'");
   });
 
   test('no admin file hardcodes a font family name', () => {
@@ -1202,9 +1302,11 @@ describe('the net anchors appear ONLY where they are pinned', () => {
       'lib/queries.ts': 1,
       'app/page.tsx': 1,
     },
-    pharmacyNetSalesPaisa: {
-      // The binding and the one read that feeds the suppressed tile.
-      'app/revenue/page.tsx': 2,
+    pharmacyNetSales: {
+      // The binding, the suppression input, and the amount the net card
+      // renders. Three now rather than two: §6i added the card, which takes
+      // the OPAQUE amount instead of a string the page formatted itself.
+      'app/revenue/page.tsx': 3,
     },
   };
 
@@ -1253,6 +1355,22 @@ describe('the net anchors appear ONLY where they are pinned', () => {
     let parent: ts.Node | undefined = node.parent;
 
     while (parent !== undefined) {
+      // A KEY is a read, not a write.
+      //
+      // GATE 5 ROUND 9 FALSE POSITIVE: `cache[formatMoney(stats.netSalesToday)]
+      // = 'cached'` writes `cache`, not the anchor -- the anchor only supplies
+      // the key. The climb below reaches the assignment through its left side
+      // either way, so the key positions have to be recognised FIRST. Without
+      // this, the guard was simultaneously too weak (round 9's three
+      // substitutions) and too strict (legitimate caching), which is the
+      // clearest possible sign that it was the wrong instrument for the job.
+      if (ts.isElementAccessExpression(parent) && parent.argumentExpression === child) {
+        return 'read';
+      }
+      if (ts.isComputedPropertyName(parent) && parent.expression === child) {
+        return 'read';
+      }
+
       // A write, however the target is spelled.
       if (
         ts.isBinaryExpression(parent)
@@ -1363,27 +1481,29 @@ describe('the net anchors appear ONLY where they are pinned', () => {
     // model its syntax, and every one of them is visible here.
     const page = SOURCES.find((file) => file.path === 'app/revenue/page.tsx');
     const real = page?.contents ?? '';
-    const baseline = anchorOccurrences(real).pharmacyNetSalesPaisa ?? 0;
-    expect(baseline).toBe(2);
+    const baseline = anchorOccurrences(real).pharmacyNetSales ?? 0;
+    // Three since §6i: the binding, the suppression input, and the amount the
+    // net card renders.
+    expect(baseline).toBe(3);
 
     const writes: readonly [string, string][] = [
-      ['a quoted property name', 'const o = { "pharmacyNetSalesPaisa": 42 };'],
-      ['a computed property name', 'const o = { ["pharmacyNetSalesPaisa"]: 42 };'],
-      ['a class field', 'class C { pharmacyNetSalesPaisa = 42; }'],
-      ['an enum member', 'enum E { pharmacyNetSalesPaisa = 42 }'],
-      ['a parenthesised target', '(totals.pharmacyNetSalesPaisa) = 42;'],
-      ['a non-null asserted target', 'totals!.pharmacyNetSalesPaisa = 42;'],
-      ['an array destructuring target', '[totals.pharmacyNetSalesPaisa] = [42];'],
-      ['an object destructuring target', '({ x: totals.pharmacyNetSalesPaisa } = { x: 42 });'],
-      ['a for-of loop target', 'for (totals.pharmacyNetSalesPaisa of [42]) {}'],
-      ['a postfix update', 'totals.pharmacyNetSalesPaisa++;'],
-      ['a prefix update', '--totals.pharmacyNetSalesPaisa;'],
+      ['a quoted property name', 'const o = { "pharmacyNetSales": 42 };'],
+      ['a computed property name', 'const o = { ["pharmacyNetSales"]: 42 };'],
+      ['a class field', 'class C { pharmacyNetSales = 42; }'],
+      ['an enum member', 'enum E { pharmacyNetSales = 42 }'],
+      ['a parenthesised target', '(totals.pharmacyNetSales) = 42;'],
+      ['a non-null asserted target', 'totals!.pharmacyNetSales = 42;'],
+      ['an array destructuring target', '[totals.pharmacyNetSales] = [42];'],
+      ['an object destructuring target', '({ x: totals.pharmacyNetSales } = { x: 42 });'],
+      ['a for-of loop target', 'for (totals.pharmacyNetSales of [42]) {}'],
+      ['a postfix update', 'totals.pharmacyNetSales++;'],
+      ['a prefix update', '--totals.pharmacyNetSales;'],
     ];
 
     const missed: string[] = [];
     for (const [label, write] of writes) {
       const mutant = real + String.fromCharCode(10) + write;
-      const after = anchorOccurrences(mutant).pharmacyNetSalesPaisa ?? 0;
+      const after = anchorOccurrences(mutant).pharmacyNetSales ?? 0;
       if (after <= baseline) missed.push(label);
     }
 
@@ -1401,19 +1521,19 @@ describe('the net anchors appear ONLY where they are pinned', () => {
     // disappear. On its own line it survived -- which is exactly the kind of
     // near-miss that makes a corrupted input hard to notice.
     const hidden =
-      'const totals = { pharmacyNetSalesPaisa, note: "'
+      'const totals = { pharmacyNetSales, note: "'
       + SLASHES
-      + '" }; totals.pharmacyNetSalesPaisa = 42;';
+      + '" }; totals.pharmacyNetSales = 42;';
 
     // The parser-driven stripper leaves the string and the write intact.
-    expect(stripComments(hidden)).toContain('totals.pharmacyNetSalesPaisa = 42;');
+    expect(stripComments(hidden)).toContain('totals.pharmacyNetSales = 42;');
     // And the occurrence count sees BOTH mentions: the shorthand property
     // (one identifier node) and the member write. The old stripper left only
     // the first, which is exactly how the write hid.
-    expect(anchorOccurrences(stripComments(hidden)).pharmacyNetSalesPaisa).toBe(2);
-    expect(anchorOccurrences(regexStrippedFor(hidden)).pharmacyNetSalesPaisa).toBe(1);
+    expect(anchorOccurrences(stripComments(hidden)).pharmacyNetSales).toBe(2);
+    expect(anchorOccurrences(regexStrippedFor(hidden)).pharmacyNetSales).toBe(1);
 
-    expect(regexStrippedFor(hidden)).not.toContain('totals.pharmacyNetSalesPaisa = 42;');
+    expect(regexStrippedFor(hidden)).not.toContain('totals.pharmacyNetSales = 42;');
   });
 
   test('NO anchor is ever written outside its pinned binding', () => {
@@ -1434,15 +1554,21 @@ describe('the net anchors appear ONLY where they are pinned', () => {
     expect(page, 'the Dashboard is not in SOURCES').toBeDefined();
     const real = page?.contents ?? '';
 
-    const READ = 'formatMoney(stats.netSalesToday)';
+    // §6i: the Dashboard hands the OPAQUE amount to the net card instead of
+    // formatting it. That is what closes reproduction C structurally -- there
+    // is no formatted string for a caller to swap -- so the read this test
+    // mutates is the prop, not a `formatMoney` call.
+    const READ = 'amount={stats.netSalesToday}';
     expect(real, 'the Dashboard read is not where this test expects it').toContain(READ);
+    // The old formatting call is gone for good.
+    expect(real).not.toContain('formatMoney(stats.netSalesToday)');
     // The page as shipped: one occurrence, and it is a read.
     expect(anchorOccurrences(real).netSalesToday).toBe(1);
     expect(anchorWrites(real)).toEqual([]);
 
     const mutant = real.replace(
       READ,
-      'formatMoney(({ x: stats.netSalesToday } = { x: stats.grossSalesToday }).x)',
+      'amount={({ x: stats.netSalesToday } = { x: stats.grossSalesToday }).x}',
     );
     expect(mutant).not.toEqual(real);
 
@@ -1494,7 +1620,7 @@ describe('the net anchors appear ONLY where they are pinned', () => {
     // The other half: prose about a figure must not count as using it, or the
     // pins would change every time someone wrote a comment.
     const commented =
-      '/* pharmacyNetSalesPaisa is described here */'
+      '/* pharmacyNetSales is described here */'
       + String.fromCharCode(10)
       + 'const unrelated = 1;';
 

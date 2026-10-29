@@ -552,6 +552,12 @@ export default defineConfig({
       // apps/admin/ — pnpm resolves react-dom from that workspace, and a
       // root-level file fails with ERR_MODULE_NOT_FOUND.
       "apps/admin/app/adminRoutes.contract.test.tsx",
+      // Batch 3 §6i. The financial-provenance evidence suite: the three round-9
+      // substitutions against the real rendering path, the compile-negative
+      // cases through the real TypeScript compiler, and the forgery /
+      // laundering boundaries. `.tsx` because it renders the net card with
+      // react-dom/server, so the glob above does not reach it.
+      "apps/admin/lib/netSalesProvenance.test.tsx",
       // W4-06. The REAL Next middleware, driven with NextRequest: the exact-match
       // public-path set (and every near miss), the fail-closed 503, the
       // redirect-vs-401 split, idle refresh, and denial after a role is removed.
