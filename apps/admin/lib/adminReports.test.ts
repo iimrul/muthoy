@@ -609,16 +609,19 @@ describe('the exports', () => {
 describe('buildReport reads through its injected source', () => {
   test('the query reaches the source unchanged', async () => {
     const seen: unknown[] = [];
+    // A DAY-grained report: round 11 finding 7 refuses a date range on a
+    // snapshot report such as plan_distribution, because its rows carry no
+    // date and the caption would have claimed one anyway.
     const table = await buildReport(
-      query({ reportId: 'plan_distribution', format: 'csv', from: '2026-10-01' }),
+      query({ reportId: 'activity_summary', format: 'csv', from: '2026-10-01' }),
       async (received) => {
         seen.push(received);
         return data({ shops: [shop(1)] });
       },
     );
 
-    expect(seen).toEqual([{ reportId: 'plan_distribution', format: 'csv', from: '2026-10-01' }]);
-    expect(table.reportId).toBe('plan_distribution');
+    expect(seen).toEqual([{ reportId: 'activity_summary', format: 'csv', from: '2026-10-01' }]);
+    expect(table.reportId).toBe('activity_summary');
   });
 
   test('a source whose read was incomplete propagates the refusal', async () => {
@@ -865,5 +868,230 @@ describe('the status filter is applied or REFUSED, never claimed falsely (findin
     expect(unfiltered.rows.length).toBeGreaterThan(0);
     expect(filtered.rows.length).toBe(0);
     expect(filtered.rows).not.toEqual(unfiltered.rows);
+  });
+});
+
+describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld month', () => {
+  // The reviewer's reproduction, executed. Five pharmacies take money on
+  // October 1 and ONE takes money on October 2:
+  //
+  //   October 2 alone -> withheld (one contributor)
+  //   October 1 alone -> 500.00
+  //   October 1 to 2  -> 580.00,  and 580 - 500 = the withheld 80.00
+  //
+  // Both requests were individually legitimate, so per-request suppression
+  // could never have stopped it. What stops it is that a month-grained report
+  // answers only for WHOLE months, so the row for October carries the same
+  // figure in every window that contains it.
+
+  const october = () => {
+    const first = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      saleTotal(index + 1, { businessDate: '2026-10-01', totalPaisa: asPaisa(10_000) }),
+    );
+    const second = [saleTotal(99, { businessDate: '2026-10-02', totalPaisa: asPaisa(8_000) })];
+    const sales = [...first, ...second];
+    return data({
+      sales,
+      tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }],
+    });
+  };
+
+  test('a part-month window is REFUSED rather than answered', () => {
+    for (const range of [
+      { from: '2026-10-01', to: '2026-10-01' },
+      { from: '2026-10-01', to: '2026-10-02' },
+      { from: '2026-10-02', to: '2026-10-02' },
+      { from: '2026-10-15', to: '2026-10-31' },
+    ]) {
+      expect(
+        () =>
+          buildReportTable(
+            'refund_net_pharmacy_sales',
+            october(),
+            query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', ...range }),
+          ),
+        JSON.stringify(range) + ' was answered',
+      ).toThrow(AdminReportFilterError);
+    }
+  });
+
+  test('the refusal says WHY, so the operator can correct the range', () => {
+    try {
+      buildReportTable(
+        'refund_net_pharmacy_sales',
+        october(),
+        query({
+          reportId: 'refund_net_pharmacy_sales',
+          format: 'csv',
+          from: '2026-10-01',
+          to: '2026-10-02',
+        }),
+      );
+      expect.unreachable('the part-month range was answered');
+    } catch (error) {
+      expect((error as Error).message).toContain('whole months');
+      expect((error as Error).message).toContain('withheld month');
+    }
+  });
+
+  test('a WHOLE month answers, and answers the same in a wider window', () => {
+    const whole = buildReportTable(
+      'refund_net_pharmacy_sales',
+      october(),
+      query({
+        reportId: 'refund_net_pharmacy_sales',
+        format: 'csv',
+        from: '2026-10-01',
+        to: '2026-10-31',
+      }),
+    );
+    const wider = buildReportTable(
+      'refund_net_pharmacy_sales',
+      october(),
+      query({
+        reportId: 'refund_net_pharmacy_sales',
+        format: 'csv',
+        from: '2026-09-01',
+        to: '2026-10-31',
+      }),
+    );
+
+    // Six contributors across the whole month, so October is released -- and
+    // it is 580.00 in BOTH windows. There is no pair of answers to subtract.
+    expect(whole.rows).toEqual([['2026-10', '580.00']]);
+    expect(wider.rows.find((row) => row[0] === '2026-10')).toEqual(['2026-10', '580.00']);
+  });
+
+  test('an open-ended range is still allowed, and still whole-month', () => {
+    const open = buildReportTable(
+      'refund_net_pharmacy_sales',
+      october(),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
+    );
+
+    expect(open.rows).toEqual([['2026-10', '580.00']]);
+  });
+
+  test('February and a leap year are month ends too, not a 30/31 guess', () => {
+    const empty = () =>
+      data({ sales: [], tallies: [{ label: 'sales', counted: 0, loaded: 0 }] });
+    const run = (from: string, to: string) =>
+      buildReportTable(
+        'refund_net_pharmacy_sales',
+        empty(),
+        query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from, to }),
+      );
+
+    // 2026 is not a leap year, so the 28th IS February's end and the 27th is
+    // a part month. The month end is computed, not guessed at 30 or 31.
+    expect(() => run('2026-01-01', '2026-02-28')).not.toThrow();
+    expect(() => run('2026-01-01', '2026-02-27')).toThrow(AdminReportFilterError);
+    // 2028 IS a leap year, so the 29th is that month's end -- and the 28th is
+    // then a part month, which is the opposite answer for the same day number.
+    expect(() => run('2028-02-01', '2028-02-29')).not.toThrow();
+    expect(() => run('2028-02-01', '2028-02-28')).toThrow(AdminReportFilterError);
+  });
+
+  test('an impossible calendar date is refused by the SCHEMA, before this gate', () => {
+    // My first version of the test above asserted that 2026-02-29 reached this
+    // gate. It does not: the shared query schema rejects a date that does not
+    // exist, which is the better layer for it. Recorded so the division of
+    // labour is visible rather than rediscovered.
+    expect(() =>
+      query({
+        reportId: 'refund_net_pharmacy_sales',
+        format: 'csv',
+        from: '2026-02-01',
+        to: '2026-02-29',
+      }),
+    ).toThrow(/real calendar date/);
+  });
+});
+
+describe('ROUND 11 FINDING 7: a snapshot report does not claim a period', () => {
+  // The reviewer put five subscriptions that began in October 2026 under
+  // "2020-01-01 to 2020-01-02": the builders read CURRENT state and ignore
+  // dates, while the subtitle printed whatever was asked for. Current state
+  // under a historical caption reads as historical evidence.
+
+  for (const reportId of ['subscriptions', 'plan_distribution'] as const) {
+    test(reportId + ' refuses a date range instead of printing it', () => {
+      expect(() =>
+        buildReportTable(
+          reportId,
+          data(),
+          query({ reportId, format: 'csv', from: '2020-01-01', to: '2020-01-02' }),
+        ),
+      ).toThrow(AdminReportFilterError);
+    });
+
+    test(reportId + ' still answers with no dates at all', () => {
+      expect(() =>
+        buildReportTable(reportId, data(), query({ reportId, format: 'csv' })),
+      ).not.toThrow();
+    });
+  }
+
+  test('the refusal explains that the rows carry no date', () => {
+    try {
+      buildReportTable(
+        'subscriptions',
+        data(),
+        query({ reportId: 'subscriptions', format: 'csv', from: '2020-01-01' }),
+      );
+      expect.unreachable('the snapshot report accepted a period');
+    } catch (error) {
+      expect((error as Error).message).toContain('snapshot of current state');
+      expect((error as Error).message).toContain('no date');
+    }
+  });
+});
+
+describe('ROUND 11 FINDING 8: collected payments land in the DHAKA month', () => {
+  const verifiedAt = (instant: string) =>
+    Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      order(index + 1, { verifiedAt: instant, amountPaisa: asPaisa(10_000) }),
+    );
+
+  const monthly = (orders: readonly PaymentOrderRow[]) =>
+    buildReportTable(
+      'subscription_revenue_and_renewals',
+      data({
+        orders: [...orders],
+        tallies: [{ label: 'payment_orders', counted: orders.length, loaded: orders.length }],
+      }),
+      query({ reportId: 'subscription_revenue_and_renewals', format: 'csv' }),
+    );
+
+  test('a payment verified at 20:00 UTC on Sep 30 is OCTOBER money', () => {
+    // 2026-09-30T20:00:00Z is 2026-10-01T02:00 in Dhaka. The UTC slice filed
+    // it under 2026-09, and an October report exported 2026-09,500.00,5.
+    const table = monthly(verifiedAt('2026-09-30T20:00:00.000Z'));
+
+    expect(table.rows.map((row) => row[0])).toEqual(['2026-10']);
+    expect(table.rows[0]).toEqual(['2026-10', '500.00', '5']);
+  });
+
+  test('the contributors land in the same month as the money', () => {
+    // If the total used the Dhaka month while the contributor grouping used
+    // the UTC one, the floor would be applied to an empty set -- withholding a
+    // real figure, or releasing one it should not.
+    const table = monthly(verifiedAt('2026-09-30T20:00:00.000Z'));
+
+    expect(table.suppressedBuckets).toBe(0);
+    expect(table.rows[0]?.[1]).toBe('500.00');
+  });
+
+  test('a midday payment stays in its own month', () => {
+    const table = monthly(verifiedAt('2026-10-15T06:00:00.000Z'));
+
+    expect(table.rows.map((row) => row[0])).toEqual(['2026-10']);
+  });
+
+  test('the last Dhaka instant of a month is still that month', () => {
+    // 2026-10-31T17:59:59Z is 2026-10-31T23:59:59 Dhaka: the final second.
+    const table = monthly(verifiedAt('2026-10-31T17:59:59.000Z'));
+
+    expect(table.rows.map((row) => row[0])).toEqual(['2026-10']);
   });
 });

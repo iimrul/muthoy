@@ -16,7 +16,16 @@
 
 import { beforeEach, describe, expect, test } from 'vitest';
 import { recentAdminAudit, type AdminAuditEntry, type AdminAuditSink } from './adminAudit';
-import { createPostgresAuditSink, recordAdminActionDurably, toAuditRow } from './adminAuditStore';
+import {
+  AdminAuditReadError,
+  auditHistory,
+  AUDIT_READ_LIMIT,
+  createPostgresAuditSink,
+  fromAuditRow,
+  readAdminAuditLog,
+  recordAdminActionDurably,
+  toAuditRow,
+} from './adminAuditStore';
 import { resultForDurability, AUDIT_WRITE_FAILED_MESSAGE } from './adminAssignments';
 import { outcomeFor, outcomeNote, outcomeQuery, OUTCOME_SENTENCES } from './adminOutcomes';
 
@@ -469,5 +478,195 @@ describe('an audit failure cannot crash the thing it is auditing (Gate 5 finding
     // Nothing queued since, so the second flush reports nothing — a sink reused
     // across requests must not re-report a write it already failed on.
     await expect(sink.flush?.()).resolves.toBeUndefined();
+  });
+});
+
+// ───────────────────────────────── ROUND 11 FINDINGS 5 and 6: the READ side
+
+/**
+ * A fake `admin_audit_log` READER.
+ *
+ * Mirrors exactly the call chain `readAdminAuditLog` builds —
+ * `select().order().limit()` and optionally `.like()` — so a change to that
+ * chain fails here rather than passing against a permissive stub.
+ */
+function createReader(options: { rows?: Record<string, unknown>[]; error?: string } = {}) {
+  const calls: { columns: string; like: string | null; limit: number | null }[] = [];
+
+  const client = {
+    from(table: string) {
+      if (table !== 'admin_audit_log') throw new Error('unexpected table: ' + table);
+      return {
+        select(columns: string) {
+          const call = { columns, like: null as string | null, limit: null as number | null };
+          calls.push(call);
+          const result = options.error === undefined
+            ? { data: options.rows ?? [], error: null }
+            : { data: null, error: { message: options.error } };
+          const chain = {
+            order() {
+              return chain;
+            },
+            limit(count: number) {
+              call.limit = count;
+              return chain;
+            },
+            like(_column: string, pattern: string) {
+              call.like = pattern;
+              return Promise.resolve(result);
+            },
+            then(resolve: (value: typeof result) => unknown) {
+              return Promise.resolve(result).then(resolve);
+            },
+          };
+          return chain;
+        },
+      };
+    },
+  };
+
+  return { client: client as never, calls };
+}
+
+const STORED_ROW = {
+  at: '2026-10-25T06:00:00.000Z',
+  actor: 'super',
+  actor_verified: true,
+  role: 'super_admin',
+  action: 'admins.role_assigned',
+  target: 'billing-1',
+  outcome: 'success',
+  meta: { username: 'billing-1' },
+};
+
+describe('ROUND 11 FINDING 5: the durable audit log is READ, not only written', () => {
+  // The defect: §8.9's durable sink was written and never read. /audit,
+  // /admins, /support and /subscriptions all rendered the in-process ring, so
+  // the history shown was whatever THIS process had done since it started --
+  // different on another instance, empty after a restart. A durable write
+  // nobody reads is not an audit trail, and applying migration 35 could never
+  // have supplied the missing reader.
+
+  test('a stored row comes back as an entry, with its fields intact', async () => {
+    const { client, calls } = createReader({ rows: [STORED_ROW] });
+
+    const entries = await readAdminAuditLog({}, { client });
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toEqual({
+      at: '2026-10-25T06:00:00.000Z',
+      actor: 'super',
+      actorVerified: true,
+      role: 'super_admin',
+      action: 'admins.role_assigned',
+      target: 'billing-1',
+      outcome: 'success',
+      meta: { username: 'billing-1' },
+    });
+    // Exactly the columns §3.4 grants select on, as one literal.
+    expect(calls[0]?.columns).toBe(
+      'at, actor, actor_verified, role, action, target, outcome, meta',
+    );
+  });
+
+  test('the read is BOUNDED, so a page cannot ask for the whole table', async () => {
+    const { client, calls } = createReader({ rows: [] });
+
+    await readAdminAuditLog({}, { client });
+    expect(calls[0]?.limit).toBe(AUDIT_READ_LIMIT);
+
+    await readAdminAuditLog({ limit: 10_000 }, { client });
+    expect(calls[1]?.limit, 'a caller raised the bound').toBe(AUDIT_READ_LIMIT);
+  });
+
+  test('a FAILED read throws rather than answering "nothing happened"', async () => {
+    const { client } = createReader({ error: 'relation "admin_audit_log" does not exist' });
+
+    await expect(readAdminAuditLog({}, { client })).rejects.toThrow(AdminAuditReadError);
+  });
+
+  test('the driver message never reaches the caller', async () => {
+    const { client } = createReader({
+      error: 'connection to postgresql://admin:hunter2@db failed',
+    });
+
+    await expect(readAdminAuditLog({}, { client })).rejects.toThrow('admin audit read failed');
+    await readAdminAuditLog({}, { client }).catch((error: unknown) => {
+      expect((error as Error).message).not.toContain('hunter2');
+    });
+  });
+
+  test('action prefixes filter SERVER-SIDE, one query each', async () => {
+    // One query per prefix rather than a dotted `or` filter: embedding dotted
+    // patterns in PostgREST's or syntax is how Gate 5 finding 6 made the
+    // Action filter unusable.
+    const { client, calls } = createReader({ rows: [] });
+
+    await readAdminAuditLog({ actionPrefixes: ['admins.', 'session.'] }, { client });
+
+    expect(calls.map((call) => call.like)).toEqual(['admins.%', 'session.%']);
+  });
+
+  test('overlapping prefixes are REFUSED, so no row is counted twice', async () => {
+    const { client } = createReader({ rows: [] });
+
+    await expect(
+      readAdminAuditLog({ actionPrefixes: ['session.', 'session.revoked'] }, { client }),
+    ).rejects.toThrow(/disjoint/);
+  });
+
+  test('merged results come back newest first', async () => {
+    const older = { ...STORED_ROW, at: '2026-10-20T06:00:00.000Z', action: 'session.revoked' };
+    const { client } = createReader({ rows: [STORED_ROW, older] });
+
+    const entries = await readAdminAuditLog({}, { client });
+
+    expect(entries.map((entry) => entry.at)).toEqual([
+      '2026-10-25T06:00:00.000Z',
+      '2026-10-20T06:00:00.000Z',
+    ]);
+  });
+
+  test('an unknown outcome reads as FAILURE, never as success', () => {
+    expect(fromAuditRow({ ...STORED_ROW, outcome: 'ok' }).outcome).toBe('failure');
+  });
+
+  test('a null actor_verified reads as UNVERIFIED', () => {
+    // The column is the difference between an actor the server verified and a
+    // name a request claimed. Anything other than an explicit true is claimed.
+    expect(fromAuditRow({ ...STORED_ROW, actor_verified: null }).actorVerified).toBe(false);
+    expect(fromAuditRow({ ...STORED_ROW, actor_verified: 'true' }).actorVerified).toBe(false);
+  });
+
+  test('a non-scalar meta value is dropped, not stringified', () => {
+    const entry = fromAuditRow({
+      ...STORED_ROW,
+      meta: { username: 'billing-1', nested: { a: 1 }, list: [1, 2] },
+    });
+
+    expect(entry.meta).toEqual({ username: 'billing-1' });
+  });
+
+  test('auditHistory reports DURABLE when the table answers', async () => {
+    const { client } = createReader({ rows: [STORED_ROW] });
+
+    const history = await auditHistory({}, { client });
+
+    expect(history.durable).toBe(true);
+    expect(history.unavailable).toBeNull();
+    expect(history.entries).toHaveLength(1);
+  });
+
+  test('auditHistory SAYS SO when the table cannot be read', async () => {
+    // The fallback is the in-process ring, and it is never silent: a page that
+    // rendered these entries without the message would be presenting one
+    // process's actions as the platform's history, which is the defect.
+    const { client } = createReader({ error: 'relation does not exist' });
+
+    const history = await auditHistory({}, { client });
+
+    expect(history.durable).toBe(false);
+    expect(history.unavailable).toContain('could not be read');
+    expect(history.unavailable).toContain('E4-H');
   });
 });

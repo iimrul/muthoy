@@ -27,9 +27,12 @@ import ts from 'typescript';
 import { describe, expect, test } from 'vitest';
 import { asPaisa } from '@muthoy/types';
 import {
+  isNetExportCell,
   isNetSales,
+  withheldNetCell,
+  netCellText,
   netChartPoints,
-  netExportTaka,
+  netExportCell,
   netSalesAmount,
   netSalesPaisa,
   NetSalesProvenanceError,
@@ -41,6 +44,56 @@ import { ADMIN_METRICS, NET_SALES_METRIC_IDS, requirePharmacySalesMetric } from 
 import { suppressBelowK } from './adminSuppression';
 
 const NET_TODAY = requirePharmacySalesMetric('pharmacy_sales_net_today');
+
+/** One shipped file's source text. Module-scoped: round 11's block reads it too. */
+function source(relative: string): string {
+  return readFileSync(join(import.meta.dirname, '..', relative), 'utf8');
+}
+
+/**
+ * The same text with every COMMENT blanked, same length.
+ *
+ * Three of my own assertions have now fired on my own explanatory comments:
+ * each of these files documents the exploit it closes by quoting it, so
+ * `not.toContain('netExportTaka(')` matched the prose describing the laundered
+ * call rather than any code. Rewording the comment was the wrong fix -- the
+ * comment is the record of why the code looks like this -- so a "this call is
+ * gone" assertion reads CODE only.
+ *
+ * Ranges come from the parser's own trivia, not a hand-rolled scan, for the
+ * reason lib/adminLabels.test.ts records: a raw scanner desynchronises on
+ * `reduce<Paisa>(` under the JSX variant and then returns later comments as
+ * ordinary tokens.
+ */
+function codeOf(relative: string): string {
+  const text = source(relative);
+  const file = ts.createSourceFile('scanned.tsx', text, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX);
+
+  const ranges: ts.CommentRange[] = [];
+  const collectAt = (position: number): void => {
+    ranges.push(
+      ...(ts.getLeadingCommentRanges(text, position) ?? []),
+      ...(ts.getTrailingCommentRanges(text, position) ?? []),
+    );
+  };
+  const visit = (node: ts.Node): void => {
+    collectAt(node.pos);
+    node.forEachChild(visit);
+  };
+  visit(file);
+  collectAt(file.endOfFileToken.pos);
+
+  const LF = String.fromCharCode(10);
+  const CR = String.fromCharCode(13);
+  const SPACE = String.fromCharCode(32);
+  const out = text.split('');
+  for (const range of ranges) {
+    for (let index = range.pos; index < range.end && index < out.length; index += 1) {
+      if (out[index] !== LF && out[index] !== CR) out[index] = SPACE;
+    }
+  }
+  return out.join('');
+}
 
 describe('§6i the trusted producer', () => {
   test('the arithmetic is unchanged: gross minus refunds, in paisa', () => {
@@ -380,10 +433,6 @@ describe('§6i the shipped pages use the trusted path', () => {
   // the renderer, both exercised above. This only checks that the pages are
   // wired to them, which is the one thing a type cannot say about itself.
 
-  function source(relative: string): string {
-    return readFileSync(join(import.meta.dirname, '..', relative), 'utf8');
-  }
-
   test('the Dashboard hands the opaque amount to the net card', () => {
     const page = source('app/page.tsx');
     expect(page).toContain('<NetSalesCard');
@@ -412,20 +461,28 @@ describe('§6i the shipped pages use the trusted path', () => {
     }
   });
 
-  test('the Analytics chart goes through the SINK, not a numeric selector', () => {
+  test('the Analytics page hands over BUCKETS and holds no points', () => {
     const page = source('app/analytics/page.tsx');
-    // §6i round 10: `netChartPoints` owns the conversion. The generic
-    // `toPoints` took a `(bucket) => number` selector, and that selector was
-    // where the reviewer put `((_: number) => 230)(...)`.
-    expect(page).toContain('netChartPoints(');
-    expect(page).not.toContain('netSalesAmount(bucket.totalPaisa)');
+    // §6i round 11: the page passes opaque buckets to the net component. It
+    // does not call the sink, so it never holds an array of numbers to map
+    // over -- which is where round 11 put `value: 230`.
+    expect(page).toContain('<NetSalesTrend');
+    // CODE only: this page's comment quotes the laundered `.map` it closed.
+    const code = codeOf('app/analytics/page.tsx');
+    expect(code).not.toContain('netChartPoints(');
+    expect(code).not.toContain('netSalesAmount(bucket.totalPaisa)');
   });
 
-  test('the CSV export goes through the SINK too', () => {
+  test('the export row carries an OPAQUE cell, not a string', () => {
     const report = source('lib/adminReports.ts');
-    expect(report).toContain('netExportTaka(total)');
-    // The gap between the unwrap and the formatter is gone.
-    expect(report).not.toContain('exportTaka(netSalesAmount(');
+    expect(report).toContain('netExportCell(total)');
+    // CODE only: the comment beside that line quotes the substitution.
+    const code = codeOf('lib/adminReports.ts');
+    expect(code).not.toContain('netExportTaka(');
+    expect(code).not.toContain('exportTaka(netSalesAmount(');
+    // And the verification happens on the rows that become the bytes.
+    expect(report).toContain('toTextRows(');
+    expect(report).toContain('netCellText(cell)');
   });
 });
 
@@ -470,19 +527,19 @@ describe('§6i ROUND 10: the chart and export sinks, and the caption', () => {
 
   test('REPRODUCTION: the laundered CSV cell is refused', () => {
     const authentic = netSalesPaisa(asPaisa(10_000), asPaisa(2_000));
-    expect(netExportTaka(authentic)).toBe('80.00');
+    expect(netCellText(netExportCell(authentic))).toBe('80.00');
 
     // The reviewer's substitution put `sumPaisaOf(monthSales)` -- a GROSS sum
     // -- between the unwrap and the formatter, exporting 500.00 where 400.00
     // belonged. A gross sum is not a `NetSales`, and an unauthenticated one
     // throws rather than printing.
     const grossSum = asPaisa(50_000) as unknown as NetSales;
-    expect(() => netExportTaka(grossSum)).toThrow(NetSalesProvenanceError);
+    expect(() => netExportCell(grossSum)).toThrow(NetSalesProvenanceError);
   });
 
   test('the export cell is a PLAIN decimal, so a spreadsheet reads a number', () => {
     const authentic = netSalesPaisa(asPaisa(1_234_567), asPaisa(0));
-    const cell = netExportTaka(authentic);
+    const cell = netCellText(netExportCell(authentic));
 
     expect(cell).toBe('12345.67');
     // No symbol, no separator: both would make the cell text.
@@ -493,7 +550,7 @@ describe('§6i ROUND 10: the chart and export sinks, and the caption', () => {
   test('a negative net exports and plots as negative, not clamped', () => {
     const negative = netSalesPaisa(asPaisa(1_000), asPaisa(3_500));
 
-    expect(netExportTaka(negative)).toBe('-25.00');
+    expect(netCellText(netExportCell(negative))).toBe('-25.00');
     expect(netChartPoints([{ label: 'm', amount: negative }])).toEqual([
       { label: 'm', value: -25 },
     ]);
@@ -539,5 +596,117 @@ describe('§6i ROUND 10: the chart and export sinks, and the caption', () => {
       .sort();
 
     expect([...NET_SALES_METRIC_IDS].sort()).toEqual(family);
+  });
+});
+
+describe('§6i ROUND 11: provenance ends at the OUTPUT, not at the data structure', () => {
+  // Round 10 gave the chart and the export dedicated sinks taking opaque
+  // amounts. Round 11 showed both sinks stopped one step short of the output,
+  // and each of these is the reviewer's own reproduction, executed.
+
+  test('REPRODUCTION 4: a plain string cannot stand in a net export column', () => {
+    // values: [((_: string) => exportTaka(sumPaisaOf(monthSales)))(netExportTaka(total))]
+    //
+    // exported 500.00 where 400.00 belonged, under "Pharmacy sales, net of
+    // refunds (BDT)", in the CSV and the PDF, with zero type errors. The cell
+    // is opaque now, so the laundered string is not a cell at all.
+    expect(isNetExportCell('500.00')).toBe(false);
+    expect(() => netCellText('500.00')).toThrow(NetSalesProvenanceError);
+    expect(() => netCellText('400.00')).toThrow(/refund-net column/);
+  });
+
+  test('an authentic cell reads back as its own plain decimal', () => {
+    const cell = netExportCell(netSalesPaisa(asPaisa(50_000), asPaisa(10_000)));
+
+    expect(isNetExportCell(cell)).toBe(true);
+    expect(netCellText(cell)).toBe('400.00');
+  });
+
+  test('a cell cannot be forged by spreading or cloning an authentic one', () => {
+    const cell = netExportCell(netSalesPaisa(asPaisa(10_000), asPaisa(2_000)));
+
+    expect(isNetExportCell({ ...cell })).toBe(false);
+    expect(isNetExportCell(Object.assign({}, cell))).toBe(false);
+    expect(isNetExportCell(structuredClone({ ...cell }))).toBe(false);
+    // And the authentic one is frozen, so its text cannot be edited in place.
+    expect(Object.isFrozen(cell)).toBe(true);
+  });
+
+  test('a WITHHELD cell is authentic, empty, and never a zero', () => {
+    // Suppression has to be able to blank a net column. If a bare '' were
+    // allowed through, the verifier would have to accept plain strings -- the
+    // hole it exists to close.
+    const cell = withheldNetCell();
+
+    expect(isNetExportCell(cell)).toBe(true);
+    expect(netCellText(cell)).toBe('');
+    expect(netCellText(cell)).not.toBe('0.00');
+  });
+
+  test('REPRODUCTION 3: the net series renderer takes no number, formatter or caption', () => {
+    const card = source('components/NetSalesTrend.tsx');
+    const props = card.slice(
+      card.indexOf('interface NetSalesTrendProps'),
+      card.indexOf('export default function NetSalesTrend'),
+    );
+
+    expect(props.length, 'the props interface was not found').toBeGreaterThan(50);
+    // The three things the page used to own, and the three substitutions they
+    // allowed: `.map` over points, a lying `format`, a swapped heading.
+    expect(props).not.toMatch(/\bpoints\s*[:?]/);
+    expect(props).not.toMatch(/\bformat\s*[:?]/);
+    expect(props).not.toMatch(/\bheading\s*[:?]/);
+    expect(props).not.toMatch(/\bvalue\s*[:?]/);
+    expect(props).toContain('metricId: NetSalesMetricId');
+    // And it resolves the caption itself.
+    expect(card).toContain('requirePharmacySalesMetric(metricId)');
+    expect(card).toContain('netChartPoints(buckets)');
+  });
+
+  test('the net series still plots the right taka, and withholds as null', () => {
+    const buckets = [
+      { label: '2026-09', amount: netSalesPaisa(asPaisa(10_000), asPaisa(2_000)), suppressed: false },
+      { label: '2026-10', amount: netSalesPaisa(asPaisa(30_000), asPaisa(7_000)), suppressed: true },
+    ];
+
+    expect(netChartPoints(buckets)).toEqual([
+      { label: '2026-09', value: 80 },
+      { label: '2026-10', value: null },
+    ]);
+  });
+
+  test('FINDING 1: the Dashboard gates the figure, the composition and the count', () => {
+    const page = source('app/page.tsx');
+
+    // The gate exists at all, on the contributors to the net figure.
+    expect(page).toContain('contributingShopIds: stats.netContributorShopIds');
+    // All three outputs hang off ONE verdict. Hiding only the headline leaks
+    // the amount, because gross less refunds IS the amount.
+    expect(page).toContain('withheld={netTodayWithheld}');
+    expect(page).toMatch(/netTodayWithheld[\s\S]{0,400}gross \$\{formatMoney/);
+    expect(page).toMatch(/netTodayWithheld \? EMPTY_VALUE : formatCount\(activeToday\)/);
+  });
+
+  test('FINDING 1: one contributing pharmacy withholds, five release', () => {
+    const net = netSalesPaisa(asPaisa(10_000), asPaisa(2_000));
+
+    expect(suppressBelowK({ value: net, contributingShopIds: ['shop-1'] }).suppressed).toBe(true);
+    expect(
+      suppressBelowK({
+        value: net,
+        contributingShopIds: ['s1', 's2', 's3', 's4', 's5'],
+      }).suppressed,
+    ).toBe(false);
+  });
+
+  test('FINDING 1: the contributor set counts the REFUND side too', () => {
+    const queries = source('lib/queries.ts');
+    // A day whose refunds came from a shop that did not sell still had that
+    // shop as a contributor. Counting the sales side alone would clear the
+    // floor on a set the count could not see.
+    expect(queries).toContain('saleRows.map((row) => row.shop_id)');
+    expect(queries).toContain('refundRows.map((row) => row.shop_id)');
+    expect(queries).toContain("select('total, shop_id')");
+    expect(queries).toContain("select('total_amount, shop_id')");
   });
 });

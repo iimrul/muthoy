@@ -835,9 +835,33 @@ describe('the GROSS boundary', () => {
    */
   const NET_RENDERER = 'components/NetSalesCard.tsx';
 
+  /**
+   * The files that may say the word without holding a net FIGURE.
+   *
+   * ROUND 11 generalised what was a single-file exemption, because the
+   * remediation added two more files of the same KIND: they stand at the
+   * provenance boundary and verify an opaque value rather than deriving one.
+   * Requiring them to carry a pinned derivation would require the boundary to
+   * re-derive the value it exists to check.
+   *
+   *   - NetSalesCard   — verifies, captions and formats a net amount;
+   *   - NetSalesTrend  — the same, for a series;
+   *   - adminReports   — resolves a declared refund-net export column through
+   *     `netCellText`, which verifies. Its mention of the word is the message
+   *     raised when a cell in that column was NOT produced by the sink.
+   *
+   * EVERY exemption is BACKED by a test below, so one that stopped being
+   * earned fails rather than quietly widening the scan's blind spot.
+   */
+  const NET_BOUNDARY_FILES: readonly string[] = [
+    NET_RENDERER,
+    'components/NetSalesTrend.tsx',
+    'lib/adminReports.ts',
+  ];
+
   test('link 1: `net` appears only alongside a net-typed, PROVENANCED field', () => {
     const offenders = scannable()
-      .filter((file) => file.path !== NET_RENDERER)
+      .filter((file) => !NET_BOUNDARY_FILES.includes(file.path))
       .filter((file) => mentionsWord(withoutIdentifiers(file.code), 'net'))
       .filter((file) => !anchoredWithProvenance(file.code));
 
@@ -845,6 +869,37 @@ describe('the GROSS boundary', () => {
       offenders.map((file) => file.path),
       `a figure called net must be one of: ${NET_ANCHORS.join(', ')}, and must be derived`,
     ).toEqual([]);
+  });
+
+  test('the TREND exemption is EARNED: opaque buckets in, caption resolved inside', () => {
+    const trend = scannable().find((file) => file.path === 'components/NetSalesTrend.tsx');
+    expect(trend, 'the net trend component is not in SOURCES').toBeDefined();
+    const code = trend?.code ?? '';
+
+    // It resolves the caption from the manifest rather than taking one...
+    expect(code).toContain('requirePharmacySalesMetric(metricId)');
+    // ...and converts through the sink, which verifies every bucket.
+    expect(code).toContain('netChartPoints(buckets)');
+    // It holds no net figure of its own, which is why it needs no derivation.
+    expect(fabricatedBindings(code)).toEqual([]);
+  });
+
+  test('the REPORT exemption is EARNED: the net column is verified, not stringified', () => {
+    const report = scannable().find((file) => file.path === 'lib/adminReports.ts');
+    expect(report, 'the report builder is not in SOURCES').toBeDefined();
+    const code = report?.code ?? '';
+
+    // Every cell in a declared refund-net column goes through the verifying
+    // unwrap, on the rows that become the exported bytes.
+    expect(code).toContain('netCellText(cell)');
+    expect(code).toContain('netValueIndexes(entry)');
+    // And it never turns a cell into text any other way. `String(cell)` or a
+    // template would produce "[object Object]" for an authentic cell and the
+    // caller's own text for a forged one -- the second is the dangerous half.
+    expect(code).not.toContain('String(cell)');
+    expect(code).not.toMatch(/\$\{cell\}/);
+    // It holds no net figure of its own either.
+    expect(fabricatedBindings(code)).toEqual([]);
   });
 
   test('the renderer exemption is EARNED: it verifies, captions and formats', () => {
@@ -1314,15 +1369,21 @@ describe('the net anchors appear ONLY where they are pinned', () => {
   // which is also what catches an input-corruption bug like the comment
   // stripper that used to delete code after a string containing two slashes.
   //
-  // Five occurrences in four files. A legitimate edit updates this map, and
+  // Six occurrences in four files. A legitimate edit updates this map, and
   // that is the intended cost.
   const ANCHOR_OCCURRENCES: Readonly<Record<string, Readonly<Record<string, number>>>> = {
     netSalesToday: {
       // The type declaration, the assignment from the shared subtraction, and
-      // the Dashboard's single read.
+      // the Dashboard's TWO reads.
+      //
+      // Two since round 11 finding 1: the page had no k-anonymity gate at all,
+      // so it published a one-pharmacy figure that Analytics withheld. The
+      // gate reads the amount to decide, and the card reads it to render.
+      // BOTH are reads -- the write-position layer below still sees zero
+      // writes, which is the invariant that matters.
       'lib/platformStats.ts': 1,
       'lib/queries.ts': 1,
-      'app/page.tsx': 1,
+      'app/page.tsx': 2,
     },
     pharmacyNetSales: {
       // The binding, the suppression input, and the amount the net card
@@ -1584,8 +1645,10 @@ describe('the net anchors appear ONLY where they are pinned', () => {
     expect(real, 'the Dashboard read is not where this test expects it').toContain(READ);
     // The old formatting call is gone for good.
     expect(real).not.toContain('formatMoney(stats.netSalesToday)');
-    // The page as shipped: one occurrence, and it is a read.
-    expect(anchorOccurrences(real).netSalesToday).toBe(1);
+    // The page as shipped: TWO occurrences since round 11 finding 1 added the
+    // suppression gate, and BOTH are reads. The count is not the invariant
+    // this test carries -- zero writes is.
+    expect(anchorOccurrences(real).netSalesToday).toBe(2);
     expect(anchorWrites(real)).toEqual([]);
 
     const mutant = real.replace(
@@ -1595,7 +1658,7 @@ describe('the net anchors appear ONLY where they are pinned', () => {
     expect(mutant).not.toEqual(real);
 
     // The count is UNCHANGED -- which is why layer 2 could not see this...
-    expect(anchorOccurrences(mutant).netSalesToday).toBe(1);
+    expect(anchorOccurrences(mutant).netSalesToday).toBe(2);
     // ...and the write position is what catches it.
     expect(anchorWrites(mutant).length, 'the destructuring write was missed').toBe(1);
   });

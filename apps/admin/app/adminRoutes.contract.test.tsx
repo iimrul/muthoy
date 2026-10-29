@@ -116,7 +116,13 @@ vi.mock('../lib/supabaseAdmin', () => ({
         maybeSingle: () => Promise.resolve(singleResult(table)),
         single: () => Promise.resolve(singleResult(table)),
       };
-      for (const method of ['eq', 'gte', 'lte', 'lt', 'or', 'order', 'not', 'in', 'limit', 'range']) {
+      // `like` is here for round 11 finding 5: the four history views read
+      // `admin_audit_log` with a server-side action-prefix filter, one query
+      // per prefix. Without it the chain returned undefined and every one of
+      // those pages threw -- which the "renders without throwing" tests caught.
+      for (const method of [
+        'eq', 'gte', 'lte', 'lt', 'or', 'order', 'not', 'in', 'limit', 'range', 'like',
+      ]) {
         chain[method] = (...args: unknown[]) => {
           filters.push({ method, args });
           return chain;
@@ -1054,7 +1060,7 @@ describe('§8.9 the audit page filters, and the per-shop view is gated', () => {
     clientBox.rowsByTable.audit_logs = [AUDIT_ROW];
   });
 
-  test('the filter controls are rendered, and the view states it is not the record', async () => {
+  test('the filter controls are rendered, and the view states its SOURCE', async () => {
     await signInAs('founder', 'super_admin');
 
     const html = await render('./audit/page');
@@ -1062,7 +1068,32 @@ describe('§8.9 the audit page filters, and the per-shop view is gated', () => {
     expect(html).toContain('Any actor');
     expect(html).toContain('Any action');
     expect(html).toContain('Any outcome');
+    // ROUND 11 FINDING 5. This used to assert "This view is not the record"
+    // unconditionally, which was honest when the page only ever read the
+    // in-process ring. It now reads `admin_audit_log` first, so with a healthy
+    // table the page says that instead -- and the warning must NOT appear,
+    // because it would be false.
+    expect(html).toContain('durable');
+    expect(html).toContain('admin_audit_log');
+    expect(html).not.toContain('This view is not the record');
+  });
+
+  test('when the durable log CANNOT be read, the page says so loudly', async () => {
+    await signInAs('founder', 'super_admin');
+    // Only the audit table fails: authorization stays healthy, so the failure
+    // lands where this test claims it does (Gate 5 finding 13's lesson).
+    clientBox.error = 'relation "admin_audit_log" does not exist';
+    clientBox.healthyTables = ['admin_role_assignments'];
+
+    const html = await render('./audit/page');
+
     expect(html).toContain('This view is not the record');
+    expect(html).toContain('since it started');
+    // And the gate that makes it complete is named, so the reader knows what
+    // is missing rather than only that something is.
+    expect(html).toContain('E4-H');
+    // The driver message never reaches the page.
+    expect(html).not.toContain('does not exist');
   });
 
   test('with no shop id, the per-shop view reads NOTHING', async () => {

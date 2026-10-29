@@ -6,6 +6,8 @@
 // lookup that resolved an inherited name would hand out a permission nobody
 // granted.
 
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { ADMIN_ROLE_NAME_VALUES } from '@muthoy/validation';
 import { AdminConfigError } from './errors';
@@ -241,5 +243,96 @@ describe('parseAdminRoles fails closed', () => {
     expect(resolveRole(roles, 'founder')).toBe('super_admin');
     expect(resolveRole(roles, 'ops')).toBeNull();
     expect(resolveRole(roles, 'constructor')).toBeNull();
+  });
+});
+
+describe('ROUND 11 FINDING 6: every declared permission has an enforcement point', () => {
+  // THE DEFECT THIS GENERALISES. `audit.export` was declared here, granted to
+  // super_admin alone, and documented in §4.4 -- and checked by nothing. There
+  // was no handler and no download, so the role matrix advertised a capability
+  // the panel did not have. A permission with no enforcement point is not an
+  // access control; it is a line in a document.
+  //
+  // So rather than one test for one endpoint, this asserts the PROPERTY: a
+  // name in ADMIN_PERMISSIONS must be checked somewhere in the shipped code.
+  // It fails on the next permission added without a gate, which is the class
+  // of defect rather than the instance.
+
+  const ROOTS = ['app', 'lib', 'components'] as const;
+  const IGNORED = new Set(['node_modules', '.next']);
+
+  function sources(directory: string): string[] {
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const absolute = join(directory, entry.name);
+      if (entry.isDirectory()) return IGNORED.has(entry.name) ? [] : sources(absolute);
+      if (!/\.(ts|tsx)$/.test(entry.name)) return [];
+      // Shipped code only: a permission "enforced" inside a test is not
+      // enforced at all, and counting test files would make this vacuous.
+      if (/\.test\.tsx?$/.test(entry.name)) return [];
+      return [readFileSync(absolute, 'utf8')];
+    });
+  }
+
+  const SHIPPED = ROOTS.flatMap((root) =>
+    sources(join(import.meta.dirname, '..', root)),
+  ).join(String.fromCharCode(10));
+
+  test('the scan found the shipped code at all, or every case below is vacuous', () => {
+    // Non-vacuity. An empty haystack would make every `includes` below false
+    // and fail loudly, but the anchor is asserted anyway so a future change to
+    // the walk cannot quietly narrow what it reads.
+    expect(SHIPPED.length).toBeGreaterThan(50_000);
+    expect(SHIPPED).toContain('requireAdminPermission');
+  });
+
+  for (const permission of ADMIN_PERMISSIONS) {
+    test(permission + ' is checked by shipped code, not only declared', () => {
+      // The two forms the codebase uses: a route or page gate, and a
+      // capability test for offering an action.
+      const gated = SHIPPED.includes("requireAdminPermission('" + permission + "')");
+      const offered = SHIPPED.includes("permissions.includes('" + permission + "')");
+
+      expect(
+        gated || offered,
+        permission + ' is granted by the role matrix but enforced nowhere',
+      ).toBe(true);
+    });
+  }
+
+  test('audit.export is enforced by a ROUTE, not only by hiding a link', () => {
+    // Hiding the link is not an access control: the URL can be typed. Finding
+    // 6's fix is the handler; the link is a convenience on top of it.
+    const route = readFileSync(
+      join(import.meta.dirname, '..', 'app/api/audit/export/route.ts'),
+      'utf8',
+    );
+
+    expect(route).toContain("requireAdminPermission('audit.export')");
+    // And the export is itself audited, awaited, before any bytes are sent.
+    expect(route).toContain("action: 'audit.export'");
+    expect(route).toContain('recordAdminActionDurably');
+    expect(route).toContain('MESSAGES.unrecorded');
+  });
+
+  test('audit.export is held by super_admin ALONE', () => {
+    const holders = ADMIN_ROLE_NAMES.filter((role) =>
+      permissionsForRole(role).includes('audit.export'),
+    );
+
+    expect(holders).toEqual(['super_admin']);
+  });
+
+  test('a role may READ the audit without being able to EXPORT it', () => {
+    // The split `reports.export` makes, for the same reason: looking at a
+    // denial on screen is not carrying a file of them out of the building.
+    const readers = ADMIN_ROLE_NAMES.filter((role) => permissionsForRole(role).includes('audit.read'));
+    const readOnly = readers.filter(
+      (role) => !permissionsForRole(role).includes('audit.export'),
+    );
+
+    // Non-vacuous in both directions: somebody reads it, and not everybody who
+    // reads it may export it.
+    expect(readers.length).toBeGreaterThan(1);
+    expect(readOnly.length).toBeGreaterThan(0);
   });
 });
