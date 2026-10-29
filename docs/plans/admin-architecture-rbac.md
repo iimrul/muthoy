@@ -1089,6 +1089,141 @@ attack classes comes back without a finding.
 
 ---
 
+## 6m. The DUAL-AGENT round, and the four decisions it leaves with the founder
+
+The founder replaced the review process on 2026-10-29: Codex reviews **and
+implements**, Claude independently reviews and corrects, Codex reviews the
+corrections, and neither agent may accept code it wrote without the other's
+subsequent review. What follows is the first full pass of that protocol.
+
+### What the coverage measurement found first
+
+Before any new review, the fourteen saved Codex transcripts were measured by
+extracting the command line of every `exec` block and collecting the repository
+paths in it (`docs/plans/muthoy-batch-3-independent-review-coverage-2026-10-29.md`).
+Three things came out of that:
+
+1. **Four route files had never been named in a single `exec` command** in any
+   round: `app/login/page.tsx`, `app/api/admin/session/route.ts`,
+   `app/accounts/page.tsx` with `accounts/[id]`, and `app/payments/page.tsx` --
+   plus `lib/adminOutcomes.ts`, the module the last two render.
+2. **No Codex round ever executed a test.** `spawn EPERM` appears in all
+   fourteen transcripts; a probe found the cause, which is that esbuild cannot
+   spawn its service binary inside that sandbox, in read-only and in
+   workspace-write alike. Every test figure in this batch is Claude's
+   measurement alone and has never been independently reproduced.
+3. The direction of attention had been Claude's, and it was narrow: fourteen of
+   fourteen rounds centred on money or privacy.
+
+### Round 1A: the auth boundary, and a test that never tested
+
+Codex returned 13 findings (2 HIGH, 9 MEDIUM, 2 LOW) and implemented all of
+them. The two HIGH were in the area the measurement had just named: logout
+cleared the browser cookie and left copied sessions usable, and mobile
+hydration and device linking continued after an owner handover.
+
+Claude then ran the tests Codex cannot run, and the first thing they did was
+fail -- which is the protocol working. `middleware.test.ts`'s
+"a cookie idle for more than 30 minutes is refused" had built its cookie by
+back-dating `lastSeen` through `touchedSessionPayload`, leaving `lastSeen`
+before `iat`; `adminSession.ts` refuses that pair as `malformed` eleven lines
+above the idle check. **The 303 it asserted came from the nonsense rule, and
+the idle rule was never once exercised through the middleware.** Codex's
+monotonic refresh turned that construction into a valid cookie and the test
+finally said so.
+
+Three further corrections from Claude: a 4 096-byte body ceiling, because
+moving the source budget below the logout branch left `readFields` reachable
+without spending budget; removal of `publishedMoneyDays`, which had been
+**dead on a money path** since round 15 and was still threaded through
+`buildReportTable` and still passed by both pages; and a config refusal that
+names the offending username, because it now fails the whole panel closed at
+boot on a value that previously logged in.
+
+### Round 1B: the four attack classes, and CLAIM NOT SUPPORTED
+
+The founder required that no claim of mathematical anonymity be made until
+cross-page, historical-release, repeated-query and differencing attacks had
+been independently examined. Codex examined all four and returned **CLAIM NOT
+SUPPORTED**, with seven disclosures and executable evidence
+(`scripts/review/admin-privacy-round1b.cjs`; its own write-up is
+`docs/plans/admin-privacy-round1b-review-2026-10-30.md`).
+
+Two were closed immediately, because they needed no decision:
+
+- **THE AUDIT LOG WAS A MONEY PUBLISHER.** `apps/mobile/db/refunds.ts` writes
+  `action: 'sale_refunded'` naming the refunded sale, and `shopAuditPage` shows
+  it per shop beside a published gross. Refunds are full refunds of one sale,
+  so the row IS the refund amount. Fifteen rounds of money suppression never
+  looked, because the read was classified as an AUDIT surface and audit
+  surfaces were reviewed for authorization and redaction, never for arithmetic.
+  Now excluded from the page AND the count, since a count would publish how
+  many refunds a pharmacy made.
+- **A DOWNLOADED CSV COULD NOT STATE ITS OWN WITHHOLDING**, and the caption for
+  a withheld activity count named the side that had NOT failed. Both fixed. The
+  CSV fix also exposed that `parseCsv` could not read this panel's own BOM-
+  prefixed exports, which is the shape Excel writes into the inventory import.
+
+### The four that remain, and the exact decision each needs
+
+**These are not deferred defects. They are decisions that change the meaning of
+an approved guarantee, and the authorization to make them is the founder's.**
+
+**1. k on contributor count is the wrong control while per-shop gross is
+public.** Ten shops with distinct known gross -- 1, 2, 4 ... 512 -- publish
+1 023; a published net of 682 gives refunds of 341; exactly one of the 1 024
+subsets sums to 341. k counts how many shops refunded and says nothing about
+which. **Raising k does not close this.** Three approved things collide:
+
+| | Approved requirement |
+|---|---|
+| §8.2 | per-shop gross is published (and Option A kept it) |
+| W4-04 | refund-net revenue is PUBLISHED |
+| §8.10 | k=5 confidentiality |
+
+Any two can hold. The decision is which one yields. The measured cost of
+withholding refund-derived aggregates outright is near zero today: at beta
+scale **0 of 5 monthly net outputs already answer**, while per-shop gross stays
+310/310.
+
+**2. Mutable releases.** The same whole-month query answered 457, then 450
+after one further refund; the difference is that refund. Refunds bucket by
+their own `businessDate` (`adminReports.ts:1049`), so a month is stable once it
+ends -- **except** that offline-first sync delivers late rows carrying their
+original dates, so a past month can still move until every device has synced.
+Closing it completely needs either the published figure STORED so it can be
+frozen -- new state, therefore a migration, therefore blocked by the H-9
+migration-chain seal -- or a freshness lag before a month may publish. The lag
+is a product decision about how current these reports are allowed to be.
+
+**3. A zero refund side.** `sideReleasable` treats an empty side as releasable,
+so the Dashboard can publish "refunds 0.00" beside ten sellers, which tells a
+reader that every one of them refunded nothing. Recorded here as a KNOWN EDGE
+rather than withheld: at beta scale withholding it would blank the Dashboard's
+money card on most days, and "no pharmacy had a refund today" is the most
+common state there is. This is consistent with §6l's withdrawal of any
+anonymity claim -- it is stated, not claimed away -- and if the founder wants it
+withheld, that is a one-line change.
+
+**4. Is k meant to cover Muthoy's OWN billing money?** `/payments` publishes a
+verified payment order that its own report withholds, and subscription prices
+are visible per account. The inconsistency is the defect either way. §8.10
+reads as pharmacy confidentiality, and a payment order is Muthoy's record of
+its own revenue, which would make the page right and the report
+over-withholding. But resolving it that way REMOVES suppression from a money
+report, and this document does not get to weaken a stated control to tidy an
+inconsistency.
+
+### What acceptance can and cannot mean here
+
+Dual acceptance in this environment means two independent **code** reviews plus
+Codex's read-only Node probes, which have reproduced real defects in every
+round including this one. It does **not** mean two parties measured the test
+suite, because Codex cannot execute one. Any final report must say that in
+those words.
+
+---
+
 ## 7. What would make these pages DONE
 
 | Gate | What it needs | Who |
