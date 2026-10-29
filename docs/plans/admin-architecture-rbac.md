@@ -806,6 +806,74 @@ Scope: `netSalesPaisa`'s home package, `lib/platformStats.ts`,
 
 ---
 
+## 6j. ROUND 10: the redesign was right, and I had applied it to ONE of three sinks
+
+Round 10 reviewed the §6i remediation as committed in `8efd8bf`, `6d1f432` and
+`84bfac5`. It did not accept it. It found three further ways to publish the
+wrong money under a pharmacy-net caption, reproduced through the real pages,
+and all three are the SAME defect one step to the side of where I had looked.
+
+| # | Sink | What the reviewer substituted | What the page published |
+|---|---|---|---|
+| 1 | the Analytics chart series | the generic `toPoints` selector, `(bucket) => number`, became `((_: number) => 230)(netSalesAmount(bucket.totalPaisa))` | a net month of ৳80.00 plotted as ৳230.00 |
+| 2 | the Reports CSV export | `sumPaisaOf(monthSales)` -- a GROSS sum -- placed between `netSalesAmount` and `exportTaka` | ৳400.00 exported as ৳500.00 |
+| 3 | `NetSalesCard`'s `metric` prop | the resolved manifest entry spread, with only `label` replaced | an authentic net figure captioned "Monthly recurring run rate" |
+
+The diagnosis, in one sentence: **provenance has to end at the OUTPUT, not at
+the unwrap.** `netSalesAmount` returns a plain `Paisa`, so every line after
+that call is outside the guarantee. §6i put the unwrap inside the card and
+stopped there -- the chart and the export still unwrapped into an open
+expression, and the card still took an OBJECT, which is an indirect caption
+prop. Findings 1 and 2 are the shape of the original reproduction C; finding 3
+is the shape of reproduction B. Neither was fixed, only moved.
+
+### What changed
+
+- `netChartPoints` and `netExportTaka` in `packages/utils/src/netSalesSinks.ts`
+  take the opaque amount and own the ÷100 and the decimal formatting
+  themselves. There is no numeric selector to substitute, and a suppressed
+  bucket is `null`, never zero. The net series no longer goes through
+  `toPoints`; the gross and collected series still do, correctly.
+- `NetSalesCard` takes `metricId: NetSalesMetricId` -- one of two literal ids --
+  and resolves the canonical entry itself with `requirePharmacySalesMetric`.
+  A caller cannot supply a label, cannot edit one, and cannot name a metric
+  outside the pharmacy-takings family: the union rejects it at compile time and
+  the resolver re-checks the family at runtime. `NET_SALES_METRIC_IDS` is
+  asserted equal to the manifest's `pharmacy_sales` family, so the union cannot
+  silently drift from the thing it claims to describe.
+- `netSalesAmount` stays, for the one deliberate boundary that needs it:
+  `apps/mobile/db/reports.ts` unwraps immediately into SQLite-backed local
+  arithmetic, which is outside the admin money path.
+
+### Two flaws in my own evidence, corrected rather than worked around
+
+1. The "the card has no caption prop" assertion scanned the WHOLE card file and
+   fired on the private `ProvenanceFailure`'s own `label: string` -- a prop no
+   caller can reach. A guard that cannot tell a public prop from a private one
+   is not checking what it claims to. It now reads `NetSalesCardProps` only,
+   and checks more: no label, no value, no metric object, and the entry
+   resolved internally.
+2. The compile-negative harness built one `ts.createProgram` per case. A single
+   program costs about 5.5s because it loads `lib.d.ts` and the real packages
+   -- which is the point, a stubbed fixture would not be testing the shipped
+   type -- so seven meant roughly 38s against Vitest's 5s default and the first
+   test timed out. One shared program over seven fixture files, diagnostics
+   mapped back per file: 1.33s. No assertion changed, and the per-test timeout
+   now declares the compiler's real cost instead of hiding it.
+
+### Evidence on `ac8c9bd`
+
+| Check | Result |
+|---|---|
+| `apps/admin` + `packages/utils` | 39 files, 1348 tests, 0 failed |
+| full repository suite | 289 files, 6567 tests, 0 failed, exit 0 |
+| `tsc --noEmit` (admin, utils) | 0 errors |
+| `eslint .` | 0 problems |
+| `turbo run lint typecheck` | 14/14 |
+| `next build` | exit 0 |
+
+---
+
 ## 7. What would make these pages DONE
 
 | Gate | What it needs | Who |

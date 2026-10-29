@@ -516,6 +516,48 @@ recording as a standing reason not to treat a green suite as a green tree.
 
 ---
 
+### Rounds 9 and 10: the sentence above was wrong, and the guard was replaced
+
+"The first time in six rounds that has been true" did not survive round 9. The
+full record is §6h–§6j of `admin-architecture-rbac.md`; the short version
+belongs here, because it is the most expensive lesson in Batch 3.
+
+**Round 9** put the wrong money under a pharmacy-net caption three more ways,
+through the real Dashboard and Revenue pages, confirmed by server-side render.
+Two of them no source scan can see: one launders the value across a call
+boundary, `((_: string) => formatMoney(stats.grossSalesToday))(...)`; the other
+replaces the field itself with a computed property name,
+`Object.assign(stats, { ['net' + 'SalesToday']: stats.grossSalesToday })`.
+Round 9 also showed layer 3 of my own guard ended in `return 'read'` -- it
+failed OPEN -- after I had told both the founder and the reviewer that all
+three layers failed closed. That claim was false and is corrected here.
+
+The conclusion the reviewer and I reached is that **nine rounds of guarding the
+SOURCE could not establish what a page RENDERS**, and no further patch of that
+kind was worth writing. §6i replaced assertions-about-source with a
+provenance-carrying value: `netSalesPaisa` is the only producer, it mints a
+frozen box registered in a module-private `WeakSet`, and a renderer verifies
+membership before it prints. A spread, `Object.assign`, `structuredClone` or a
+double type assertion all produce a value that is not in that set, so the card
+fails closed and prints a `role="alert"` defect notice instead of a number.
+
+**Round 10** then found that I had applied the redesign to one of three sinks.
+The Analytics chart and the CSV export still unwrapped into an open expression,
+and the card still took a metric OBJECT, which is an indirect caption prop. The
+reviewer plotted ৳80.00 as ৳230.00, exported ৳400.00 as ৳500.00, and captioned
+an authentic net figure "Monthly recurring run rate". The principle I had
+under-applied: **provenance must end at the OUTPUT, not at the unwrap.** The
+fix gives each sink ownership of its own conversion and caption, and the card
+takes one of two literal metric IDs instead of an object.
+
+Two of my own test flaws found in the same pass are recorded in §6j: a props
+assertion that scanned the whole file and fired on a private component's prop,
+and a compile-negative harness that built one TypeScript program per case and
+timed out. Both were fixed by making the assertion more precise, not by
+loosening it.
+
+---
+
 ## 6. Preservation, verified
 
 - **No `audit-artifacts/**` file was modified.** The historical H-9 sealed
