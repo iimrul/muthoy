@@ -1003,6 +1003,92 @@ reads had been pointing an auditor at nothing.
 
 ---
 
+## 6l. ROUNDS 12-15, and the founder decision that closed the privacy question
+
+Four more rounds followed §6k, and the shape of all four was the same defect
+class: **verification that stops one step short of the output.**
+
+| Round | Findings | What the money defect actually was |
+|---|---|---|
+| 12 | 10 | `netChartPoints` and `netExportTaka` handed back a plain array and a plain string; the page owned everything after them |
+| 13 | 9 | the public `ReportTable.rows` was plain text, substitutable at the handler, so both serializers returned 200 with a forged figure |
+| 14 | 12 | `reportId` drove verification while `title` and `columns` carried the caption independently, so one could be replaced and the other kept |
+| 15 | 7 | the k-anonymity composition rule was keyed to days the Dashboard publishes, and the disclosure came from a different page entirely |
+
+Round 14 produced the structural answer rather than a fifth position for the
+same check. A report table is now **minted**: `buildReportTable` freezes it,
+registers it in a module-private `WeakSet`, and records what the module itself
+computed in a `WeakMap`. Every output path - the CSV, the PDF and the
+on-screen table - reads the `WeakMap`, so the public `table.rows` is a
+convenience that nothing trusts. A symbol-keyed brand would not have done
+this: a brand survives spread, `Object.assign` and `structuredClone`, and a
+`WeakSet` membership does not.
+
+### The disclosure round 15 found, and why no further patch could fix it
+
+Codex reproduced this against the real pages:
+
+> Five pharmacies each sell 100.00 today; one refunds 80.00. The Dashboard
+> withholds its net figure. The five shop drill-downs each publish **Gross
+> sales today = 100.00** (`app/shops/[id]/page.tsx:196`; `shops.read` is held
+> by all four roles). The monthly report publishes **420.00**, in CSV and PDF.
+> 500 - 420 = **80.00**: the withheld refund, recovered through ordinary page
+> access.
+
+And then the second half, which is the part that cannot be patched: a figure
+published **yesterday** is still remembered. Keying any rule to "today" was
+never sound, because midnight does not erase a disclosure.
+
+Stated precisely, because it decides the rule: **per-shop GROSS is visible by
+design** (accepted 8.2 functionality). **Per-shop REFUNDS are visible
+nowhere.** Net = gross - refunds. So a published net figure, standing beside
+visible gross figures, can only disclose refunds.
+
+The rule is therefore: a month publishes only if **every day's refund side**
+has at least k distinct refunding pharmacies.
+
+### FOUNDER DECISION, 2026-10-29: Option A
+
+Three options existed and only one of them was a code decision:
+
+| | Option | Consequence |
+|---|---|---|
+| **A** | Keep the refund-side rule | No disclosure. Monthly net figures mostly withheld until the platform has enough pharmacies |
+| **B** | Remove "Gross sales today" from the drill-down | Net aggregates publish freely - but deletes accepted 8.2 functionality |
+| **C** | Accept the disclosure | Aggregates publish freely; an admin can derive any single pharmacy's refunds, and k=5 stops being a confidentiality claim |
+
+**The founder approved Option A** on 2026-10-29, directing that per-shop Gross
+Sales Today be preserved and that conservative k=5 suppression be maintained.
+B and C are refused.
+
+### The Beta-scale limitation, stated as the founder required
+
+At Beta scale - about ten pharmacies - almost no single day has five distinct
+**refunding** pharmacies, because refunds are much rarer than sales. The
+consequence, expected and accepted:
+
+- the **W4-04 monthly net report** (`refund_net_pharmacy_sales`, CSV and PDF)
+  will be **withheld on most months**;
+- the **Analytics net series** will be **withheld on most months**;
+- the Dashboard's net-today figure is withheld whenever either side of the day
+  is below k.
+
+This is not a malfunction. It is k-anonymity returning the correct answer for a
+population in which five contributors genuinely do not exist. Each withheld
+figure is rendered as an explicit withholding with its reason, never as a zero
+and never as a blank that could be mistaken for no activity.
+
+### What is NOT claimed
+
+Per the same founder directive: **no claim of mathematical anonymity is made
+here.** The rule is a conservative suppression policy. Cross-page inference,
+historical release, repeated querying and differencing have been examined
+adversarially across rounds 11-15 and each round found something, which is
+precisely why the claim is withheld until an independent review of those four
+attack classes comes back without a finding.
+
+---
+
 ## 7. What would make these pages DONE
 
 | Gate | What it needs | Who |
