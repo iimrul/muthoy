@@ -17,7 +17,6 @@
 
 import { describe, expect, test } from 'vitest';
 import { asPaisa } from '@muthoy/types';
-import { NetSalesProvenanceError } from '@muthoy/utils';
 import { ADMIN_REPORT_IDS, adminReportExportQuerySchema } from '@muthoy/validation';
 import { requireMetric } from './adminMetrics';
 import { SUPPRESSED_DISPLAY, SUPPRESSION_K } from './adminSuppression';
@@ -31,7 +30,9 @@ import {
   buildReportTable,
   exportTaka,
   reportDefinition,
+  assertAuthenticReportTable,
   reportDownload,
+  ReportTableProvenanceError,
   reportTextRows,
   reportFilename,
   reportMetric,
@@ -937,7 +938,7 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     }
   });
 
-  test('a WHOLE month answers, and answers the same in a wider window', () => {
+  test('a WHOLE month is WITHHELD when a day inside it is withheld', () => {
     const whole = buildReportTable(
       'refund_net_pharmacy_sales',
       october(),
@@ -959,13 +960,16 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       }),
     );
 
-    // Six contributors across the whole month, so October is released -- and
-    // it is 580.00 in BOTH windows. There is no pair of answers to subtract.
-    expect(reportTextRows(whole)).toEqual([['2026-10', '580.00']]);
-    expect(reportTextRows(wider).find((row) => row[0] === '2026-10')).toEqual([
-      '2026-10',
-      '580.00',
-    ]);
+    // ROUND 13 FINDING 2 CHANGED THIS ANSWER, and the change is the point.
+    //
+    // Six contributors across the month clears the floor on the month's own
+    // union, which is what this test used to assert. But October 2 has ONE
+    // contributor, and the Dashboard publishes a DAY -- so a visible month
+    // minus a visible day recovers that one pharmacy's figure. A month is
+    // releasable only if every day inside it is, and this fixture's second
+    // day is not.
+    expect(reportTextRows(whole)).toEqual([['2026-10', '']]);
+    expect(reportTextRows(wider).find((row) => row[0] === '2026-10')).toEqual(['2026-10', '']);
   });
 
   test('an open-ended range is still allowed, and still whole-month', () => {
@@ -975,7 +979,36 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
     );
 
-    expect(reportTextRows(open)).toEqual([['2026-10', '580.00']]);
+    // Accepted rather than refused -- the range IS whole months. The figure is
+    // withheld for round 13 finding 2's reason, not for the period's.
+    expect(reportTextRows(open)).toEqual([['2026-10', '']]);
+  });
+
+  test('a month whose EVERY DAY clears the floor still publishes', () => {
+    // Non-vacuity for the sub-period rule: it must not withhold everything.
+    // Six pharmacies trade on both days, so neither day is identifying.
+    const shops = Array.from({ length: SUPPRESSION_K + 1 }, (_unused, index) => index + 1);
+    const sales = [
+      ...shops.map((index) =>
+        saleTotal(index, { businessDate: '2026-10-01', totalPaisa: asPaisa(10_000) }),
+      ),
+      ...shops.map((index) =>
+        saleTotal(index, { businessDate: '2026-10-02', totalPaisa: asPaisa(10_000) }),
+      ),
+    ];
+    const table = buildReportTable(
+      'refund_net_pharmacy_sales',
+      data({ sales, tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }] }),
+      query({
+        reportId: 'refund_net_pharmacy_sales',
+        format: 'csv',
+        from: '2026-10-01',
+        to: '2026-10-31',
+      }),
+    );
+
+    // 12 x 100.00 = 1200.00, published.
+    expect(reportTextRows(table)).toEqual([['2026-10', '1200.00']]);
   });
 
   test('February and a leap year are month ends too, not a 30/31 guess', () => {
@@ -1148,15 +1181,21 @@ describe('ROUND 12 FINDING 4: the export cell stays opaque until the serializer'
     };
 
     // Every output path refuses it, because every output path IS this check.
-    expect(() => reportTextRows(mutated)).toThrow(NetSalesProvenanceError);
-    expect(() => reportToCsv(mutated)).toThrow(NetSalesProvenanceError);
-    expect(() => reportToPdf(mutated)).toThrow(NetSalesProvenanceError);
+    //
+    // ROUND 13 FINDING 1 made the refusal STRONGER and so changed which error
+    // arrives: the spread copy is not a table this module built, so it is
+    // rejected before anything looks at a cell. That is the stricter answer --
+    // identity, captions and rows are bound together now, rather than the rows
+    // being checked against an identity a caller could also replace.
+    expect(() => reportTextRows(mutated)).toThrow(ReportTableProvenanceError);
+    expect(() => reportToCsv(mutated)).toThrow(ReportTableProvenanceError);
+    expect(() => reportToPdf(mutated)).toThrow(ReportTableProvenanceError);
     expect(() =>
       reportDownload(mutated, query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' })),
-    ).toThrow(NetSalesProvenanceError);
+    ).toThrow(ReportTableProvenanceError);
     expect(() =>
       reportDownload(mutated, query({ reportId: 'refund_net_pharmacy_sales', format: 'pdf' })),
-    ).toThrow(NetSalesProvenanceError);
+    ).toThrow(ReportTableProvenanceError);
   });
 
   test('the net columns are DERIVED, so blanking them cannot disable the check', () => {
@@ -1173,7 +1212,47 @@ describe('ROUND 12 FINDING 4: the export cell stays opaque until the serializer'
       suppressedBuckets: 0,
     } as unknown as ReturnType<typeof buildReportTable>;
 
-    expect(() => reportToCsv(mutated)).toThrow(NetSalesProvenanceError);
+    expect(() => reportToCsv(mutated)).toThrow(ReportTableProvenanceError);
+  });
+
+  test('ROUND 13 FINDING 1: swapping reportId does not move the caption away', () => {
+    // The reviewer kept the net heading in `title`/`columns` and changed the
+    // IDENTITY that drove verification:
+    //
+    //   reportDownload({ ...table, reportId: 'plan_distribution',
+    //     rows: table.rows.map((row) => [row[0], '500.00']) }, query)
+    //
+    // -> 200, canonical net caption, 500.00. Identity and captions were
+    // independent fields, so one could be changed without the other.
+    const table = monthly();
+    const mutated = {
+      ...table,
+      reportId: 'plan_distribution' as const,
+      rows: table.rows.map((row) => [row[0] ?? '', '500.00']),
+    } as unknown as ReturnType<typeof buildReportTable>;
+
+    expect(() => reportToCsv(mutated)).toThrow(ReportTableProvenanceError);
+    expect(() => reportToPdf(mutated)).toThrow(ReportTableProvenanceError);
+  });
+
+  test('ROUND 13 FINDING 1: an APPENDED column cannot carry the net heading', () => {
+    // The other half: keep `reportId`, and move the net heading onto a new
+    // plain-string column that verification never looked at.
+    const table = monthly();
+    const mutated = {
+      ...table,
+      columns: [...table.columns, table.columns[1] ?? ''],
+      rows: table.rows.map((row) => [...row, '500.00']),
+    } as unknown as ReturnType<typeof buildReportTable>;
+
+    expect(() => reportToCsv(mutated)).toThrow(ReportTableProvenanceError);
+  });
+
+  test('the table built by this module IS accepted, so the check is not just "fail"', () => {
+    const table = monthly();
+
+    expect(() => reportToCsv(table)).not.toThrow();
+    expect(() => assertAuthenticReportTable(table)).not.toThrow();
   });
 
   test('a report with no money column is unaffected', () => {

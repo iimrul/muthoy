@@ -509,16 +509,31 @@ describe('every page is gated server-side (W4-07)', () => {
   });
 
   test.each(PAGES.filter((page) => !PUBLIC_PAGES.has(page.path)).map((page) => page.path))(
-    '%s calls requireAdminPermission',
+    '%s demands a permission on the SERVER before it renders',
     (path) => {
       const page = PAGES.find((candidate) => candidate.path === path);
-      expect(page?.contents).toMatch(/await requireAdminPermission\('[a-z.]+'\)/);
+      // ROUND 13 FINDING 7 added the any-of form. `/audit` holds two views
+      // with two different permissions -- the platform log needs `audit.read`
+      // and the per-pharmacy log needs `shop_audit.read` -- and demanding the
+      // first before anything else made the second unreachable for `support`,
+      // the role the §4.2 matrix grants it to.
+      //
+      // Both forms are a server gate, which is what this test is about. It is
+      // NOT widened to accept a visibility check: `permissions.includes(...)`
+      // still satisfies nothing here, and lib/adminRoles.test.ts separately
+      // requires every permission to have a server gate somewhere.
+      expect(page?.contents).toMatch(
+        /await require(AdminPermission\('[a-z._]+'\)|AnyAdminPermission\(\[)/,
+      );
     },
   );
 
   test('the gate comes BEFORE any data read on every gated page', () => {
     for (const page of PAGES.filter((candidate) => !PUBLIC_PAGES.has(candidate.path))) {
-      const gate = page.contents.indexOf('requireAdminPermission');
+      // Either form of the gate, whichever this page uses.
+      const gate = page.contents.indexOf('requireAdminPermission') >= 0
+        ? page.contents.indexOf('requireAdminPermission')
+        : page.contents.indexOf('requireAnyAdminPermission');
       // Every loader a page can call. The list must grow with each new page,
       // or the assertion passes vacuously for exactly the page nobody checked.
       const loaders = ['listAccountSummaries(', 'listSubscriptionSummaries(', 'listPaymentOrderSummaries(',

@@ -55,6 +55,11 @@ class RecordingBuilder {
     return this.record('lte', column, value);
   }
 
+  /** Round 13 finding 4: the strict bound a half-open instant range needs. */
+  lt(column: string, value: unknown): this {
+    return this.record('lt', column, value);
+  }
+
   or(expression: string): this {
     return this.record('or', expression);
   }

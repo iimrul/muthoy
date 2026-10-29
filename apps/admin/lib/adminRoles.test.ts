@@ -346,9 +346,19 @@ describe('ROUND 11 FINDING 6 / ROUND 12 FINDING 9: every permission has a SERVER
         expect(CODE).toContain("permissions.includes('" + permission + "')");
         return;
       }
+      // Round 13 finding 7: `requireAnyAdminPermission([...])` is a server
+      // gate too, and /audit needs it because two different permissions open
+      // two different sections of that page. Matched on the quoted name
+      // appearing inside such a call, not merely anywhere in the file.
+      const named = "'" + permission + "'";
+      const direct = CODE.includes('requireAdminPermission(' + named);
+      const anyOf = [...CODE.matchAll(/requireAnyAdminPermission\(\[([^\]]*)\]/g)].some(
+        (match) => (match[1] ?? '').includes(named),
+      );
+
       expect(
-        CODE.includes("requireAdminPermission('" + permission + "'"),
-        permission + ' has no requireAdminPermission gate in shipped code',
+        direct || anyOf,
+        permission + ' has no server-side permission gate in shipped code',
       ).toBe(true);
     });
   }

@@ -695,6 +695,7 @@ describe('ROUND 12 FINDINGS 6 and 10: the export reads completely, or refuses', 
       eq: [string, string][];
       range: [number, number] | null;
       limit: number | null;
+      cursor: string | null;
     }[] = [];
 
     const client = {
@@ -706,6 +707,7 @@ describe('ROUND 12 FINDINGS 6 and 10: the export reads completely, or refuses', 
               eq: [] as [string, string][],
               range: null as [number, number] | null,
               limit: null as number | null,
+              cursor: null as string | null,
             };
             seen.push(call);
             const chain: Record<string, unknown> = {};
@@ -722,6 +724,16 @@ describe('ROUND 12 FINDINGS 6 and 10: the export reads completely, or refuses', 
               // with `range`. A fake that honoured only one of them would
               // measure the wrong thing -- an uncalled `range` must mean
               // "everything", not "one row".
+              // Round 13 finding 5: the keyset cursor. `or(...)` carries
+              // "strictly older than (at, id)", and the fake honours it by
+              // dropping everything up to and including that row -- which is
+              // what makes the duplicate-under-concurrent-insert test real
+              // rather than a claim about a query string.
+              if (call.cursor !== null) {
+                const at = call.cursor;
+                const seen = matched.findIndex((row) => String(row.id ?? '') === at);
+                matched = seen === -1 ? matched : matched.slice(seen + 1);
+              }
               if (call.limit !== null) matched = matched.slice(0, call.limit);
               if (call.range === null) return { data: matched, error: null };
               const [from, to] = call.range;
@@ -742,6 +754,14 @@ describe('ROUND 12 FINDINGS 6 and 10: the export reads completely, or refuses', 
             };
             chain.gte = () => chain;
             chain.lte = () => chain;
+            chain.lt = () => chain;
+            chain.or = (expression: string) => {
+              // `and(at.eq."<at>",id.lt."<id>")` — the id is the tiebreaker,
+              // and it is what identifies the last row of the previous page.
+              const match = /id\.lt\."([^"]+)"/.exec(expression);
+              call.cursor = match?.[1] ?? null;
+              return chain;
+            };
             chain.range = (from: number, to: number) => {
               call.range = [from, to];
               return chain;
@@ -817,8 +837,34 @@ describe('ROUND 12 FINDINGS 6 and 10: the export reads completely, or refuses', 
     ]);
   });
 
+  test('a page with no cursor is REFUSED, rather than falling back to an offset', async () => {
+    // Round 13 finding 5's fail-closed half, which this suite found: without
+    // `id` the next page would have to be an offset, and an offset is what
+    // that finding removed. Two full pages are needed to reach the cursor.
+    const rows = Array.from({ length: 2_500 }, (_unused, index) => ({
+      at: '2026-10-25T06:00:00.000Z',
+      actor: 'ops',
+      actor_verified: true,
+      role: 'support',
+      action: 'login',
+      target: String(index),
+      outcome: 'success',
+      meta: {},
+    }));
+    const { client } = createPagingReader(rows);
+
+    await expect(readAdminAuditLogForExport({}, { client })).rejects.toThrow(
+      /no cursor to continue from/,
+    );
+  });
+
   test('beyond the ceiling it REFUSES rather than truncating', async () => {
+    // `id` is present because round 13 finding 5 pages by the `(at, id)`
+    // cursor rather than by offset. A row with no id is refused outright --
+    // correctly, since the alternative is continuing with an offset -- and a
+    // fixture without one would measure that refusal instead of the ceiling.
     const many = Array.from({ length: AUDIT_EXPORT_MAX + 10 }, (_unused, index) => ({
+      id: 'event-' + String(index).padStart(6, '0'),
       at: '2026-10-25T06:00:00.000Z',
       actor: 'ops',
       actor_verified: true,
