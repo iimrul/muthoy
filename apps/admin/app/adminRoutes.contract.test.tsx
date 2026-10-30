@@ -798,6 +798,53 @@ describe('§8.1 the Dashboard renders its nine figures and all five alerts', () 
     seedPlatform();
   });
 
+  test('ROUND 3 FINDINGS 2 and 4: the reason does not move with refunds, and the COUNT still shows', async () => {
+    // FINDING 2 — THE REASON WAS AN ORACLE. The withheld explanation changed
+    // from "fewer than five pharmacies recorded a refund" to "immutable
+    // snapshots" at the moment the fifth pharmacy refunded. With five
+    // sole-sale pharmacies whose grosses a reader remembers, that transition
+    // identifies every one of those refunds -- while every numeric cell stayed
+    // blank. An explanation that varies with the protected data is a readout.
+    //
+    // FINDING 4 — THE COUNT WAS OVER-WITHHELD. It was gated on the money
+    // verdict, so under the shipped policy it could never display, while the
+    // activity report beside it published the same pharmacies.
+    const sellers = Array.from({ length: 5 }, (_unused, index) => ({
+      id: 's' + index,
+      shop_id: '7b000000-0000-4000-8000-00000000004' + index,
+      business_date: '2026-09-10',
+      total: 10_000,
+      created_at: '2026-09-10T00:00:00.000Z',
+    }));
+    const refundsBy = (count: number) =>
+      Array.from({ length: count }, (_unused, index) => ({
+        id: 'r' + index,
+        shop_id: '7b000000-0000-4000-8000-00000000004' + index,
+        business_date: '2026-09-10',
+        total_amount: 1_000,
+        created_at: '2026-09-10T00:00:00.000Z',
+      }));
+
+    await signInAs('founder', 'super_admin');
+
+    clientBox.rowsByTable.sales = sellers;
+    clientBox.rowsByTable.sale_refunds = refundsBy(2);
+    const underFloor = await render('./page');
+
+    clientBox.calls.length = 0;
+    clientBox.rowsByTable.sales = sellers;
+    clientBox.rowsByTable.sale_refunds = refundsBy(5);
+    const overFloor = await render('./page');
+
+    // The money reason is the SAME sentence either side of the k boundary.
+    expect(underFloor).toContain('immutable snapshots');
+    expect(overFloor).toContain('immutable snapshots');
+    expect(underFloor).not.toContain('pharmacies recorded a refund on this business date');
+
+    // And the count crosses the floor and appears, which it never could before.
+    expect(overFloor).toContain('Distinct pharmacies that recorded a sale on this business date.');
+  });
+
   test('FOUNDER DECISION 2: net today is withheld even when BOTH floors clear', async () => {
     // Non-vacuity for the publication policy at the page layer. Five
     // pharmacies sold and the same five refunded, so neither floor is the
@@ -852,8 +899,21 @@ describe('§8.1 the Dashboard renders its nine figures and all five alerts', () 
 
     const html = await render('./page');
 
-    expect(html).toContain('recorded a refund');
-    expect(html).not.toContain('fewer than five pharmacies recorded a sale');
+    // ROUND 3 FINDINGS 2 AND 4 INVERTED THIS EXPECTATION, and the intent is
+    // what survives. The test was written because the page named the SALE side
+    // when the refund side had failed -- a caption naming a rule that did not
+    // fail. The fix then was to name the side that did.
+    //
+    // The reviewer showed that naming the refund side is itself a readout: the
+    // sentence moved when the fifth pharmacy refunded, which identifies those
+    // refunds while every number stays blank. And under the shipped policy the
+    // floor is never the operative reason for the money anyway -- revisability
+    // is. So the page names NEITHER side for the money, and the side-naming
+    // that still matters is tested where it is decided, in
+    // `adminSuppression.test.ts`'s `withheldSide` cases.
+    expect(html).toContain('immutable snapshots');
+    expect(html).not.toContain('recorded a refund on this business date');
+    expect(html).not.toContain('fewer than five pharmacies recorded a sale on this business date');
   });
 
   test('an authorized role reaches every source table it needs', async () => {

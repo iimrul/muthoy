@@ -690,8 +690,19 @@ describe('§6i ROUND 11: provenance ends at the OUTPUT, not at the data structur
     // All three outputs hang off ONE verdict. Hiding only the headline leaks
     // the amount, because gross less refunds IS the amount.
     expect(page).toContain('withheld={netTodayWithheld}');
-    expect(page).toMatch(/netTodayWithheld[\s\S]{0,400}gross \$\{formatMoney/);
-    expect(page).toMatch(/netTodayWithheld \? EMPTY_VALUE : formatCount\(activeToday\)/);
+    expect(page).toMatch(/netTodayWithheld[\s\S]{0,1200}gross \$\{formatMoney/);
+    // ROUND 3 FINDING 4 split these two deliberately. The COUNT is gated on
+    // the floor verdict alone, because a count is not a financial aggregate and
+    // gating it on the revision policy too meant it could never display while
+    // the activity report beside it published the same pharmacies. The
+    // round-11 property -- the count is withheld WITH the figure whenever the
+    // floor is the reason -- is what `countWithheld` carries.
+    expect(page).toMatch(/countWithheld \? EMPTY_VALUE : formatCount\(activeToday\)/);
+    // ROUND 3 FINDING 4: on the SALE floor alone. The count is a count of
+    // SELLERS; the refund floor has nothing to do with whether publishing "N
+    // pharmacies traded" identifies anyone, and gating it on the money verdict
+    // both over-withheld it and let its explanation move with refund activity.
+    expect(page).toContain('const countWithheld = saleSideWithheld;');
   });
 
   test('FINDING 1: one contributing pharmacy withholds, five release', () => {
@@ -752,7 +763,7 @@ describe('§6i ROUND 12: the boundary is the bytes, and the floor is per side', 
     expect(page).toMatch(/refundShopIds: stats\.refundContributorShopIds/);
     expect(page).toContain('withheldSide(todaySides)');
     expect(page).toContain('withheld={netTodayWithheld}');
-    expect(page).toMatch(/netTodayWithheld \? EMPTY_VALUE : formatCount\(activeToday\)/);
+    expect(page).toMatch(/countWithheld \? EMPTY_VALUE : formatCount\(activeToday\)/);
   });
 
   test('FINDING 2: the two sides are collected separately in the read', () => {

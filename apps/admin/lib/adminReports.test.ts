@@ -287,6 +287,11 @@ describe('k-anonymity at the boundary', () => {
       'refund_net_pharmacy_sales',
       data({ sales, tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }] }),
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
+      // ROUND 3 FINDING 5: `revisionSafe: true` on a NEGATIVE floor test too.
+      // Without it the shipped default withholds this cell anyway, so the
+      // assertion passed even with the whole k/side stage removed -- the
+      // reviewer proved that by deleting the stage in memory.
+      { revisionSafe: true },
     );
 
     expect(reportTextRows(table)[0]?.[0]).toBe('2026-10');
@@ -310,6 +315,11 @@ describe('k-anonymity at the boundary', () => {
         tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }],
       }),
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
+      // ROUND 3 FINDING 5: `revisionSafe: true` on a NEGATIVE floor test too.
+      // Without it the shipped default withholds this cell anyway, so the
+      // assertion passed even with the whole k/side stage removed -- the
+      // reviewer proved that by deleting the stage in memory.
+      { revisionSafe: true },
     );
 
     expect(reportTextRows(table)[0]?.[1], 'the single refund was disclosed').toBe('');
@@ -971,7 +981,15 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     const first = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
       saleTotal(index + 1, { businessDate: '2026-10-01', totalPaisa: asPaisa(10_000) }),
     );
-    const second = [saleTotal(99, { businessDate: '2026-10-02', totalPaisa: asPaisa(8_000) })];
+    // ROUND 3 FINDING 3 made `daysReleasable` check BOTH sides of every day
+    // (Decision 1 removed the per-shop gross that justified checking only the
+    // refund side). October 2 used to be one pharmacy selling 80.00, which now
+    // fails the SALE floor and withholds the month -- so the same 80.00 is
+    // spread across five pharmacies. The month's gross is unchanged at 580.00,
+    // which is what keeps every expectation below readable.
+    const second = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      saleTotal(index + 1, { businessDate: '2026-10-02', totalPaisa: asPaisa(1_600) }),
+    );
     const sales = [...first, ...second];
     return data({
       sales,
@@ -1216,6 +1234,64 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     );
 
     expect(reportTextRows(table)).toEqual([['2026-10', '']]);
+  });
+
+  test('ROUND 3 FINDING 1: a refund-only month produces NO ROW while its money is withheld', () => {
+    // THE BLANK CELL WAS NOT THE WHOLE DISCLOSURE. A month with no sales and
+    // one refund used to produce `['2026-10', '']` -- correctly withheld money,
+    // in a row that had not existed before the refund arrived. Its EXISTENCE
+    // says a refund happened in October, and with one remembered prior sale the
+    // amount follows. Suppressing a value while publishing the fact that there
+    // was one to suppress is not suppression.
+    const refundOnly = data({
+      sales: [saleTotal(1, { businessDate: '2026-09-20', totalPaisa: asPaisa(8_000) })],
+      refunds: [saleTotal(1, { businessDate: '2026-10-05', totalPaisa: asPaisa(8_000) })],
+      tallies: [{ label: 'sales', counted: 1, loaded: 1 }],
+    });
+    const october = query({
+      reportId: 'refund_net_pharmacy_sales',
+      format: 'csv',
+      from: '2026-10-01',
+      to: '2026-10-31',
+    });
+
+    // No row at all -- not a row with a blank.
+    expect(reportTextRows(buildReportTable('refund_net_pharmacy_sales', refundOnly, october)))
+      .toEqual([]);
+    // And the floor path, not only the revisability path: one refunder is
+    // under k, so the same omission has to happen there too.
+    expect(
+      reportTextRows(
+        buildReportTable('refund_net_pharmacy_sales', refundOnly, october, { revisionSafe: true }),
+      ),
+    ).toEqual([]);
+  });
+
+  test('ROUND 3 FINDING 1: a month with SALES still shows its withheld row', () => {
+    // Non-vacuity. The omission is narrow: it applies only to a bucket that
+    // would not exist without its refunds. A month that traded keeps its row
+    // and its explicit withholding, because that row discloses nothing a
+    // reader did not already know -- the month had sales.
+    const traded = data({
+      sales: [saleTotal(1, { businessDate: '2026-10-05', totalPaisa: asPaisa(8_000) })],
+      refunds: [saleTotal(1, { businessDate: '2026-10-06', totalPaisa: asPaisa(1_000) })],
+      tallies: [{ label: 'sales', counted: 1, loaded: 1 }],
+    });
+
+    expect(
+      reportTextRows(
+        buildReportTable(
+          'refund_net_pharmacy_sales',
+          traded,
+          query({
+            reportId: 'refund_net_pharmacy_sales',
+            format: 'csv',
+            from: '2026-10-01',
+            to: '2026-10-31',
+          }),
+        ),
+      ),
+    ).toEqual([['2026-10', '']]);
   });
 
   test('FOUNDER DECISION 2: by DEFAULT the same month is withheld, floor or no floor', () => {

@@ -644,6 +644,20 @@ export type ReportCell = string | NetExportCell;
 
 interface AggregateRow {
   key: string;
+  /**
+   * Whether this bucket would EXIST even with no refunds in it.
+   *
+   * ROUND 3 FINDING 1 — THE BLANK CELL WAS NOT THE WHOLE DISCLOSURE. A month
+   * with no sales and one refund produced a row whose money was correctly
+   * withheld, `['2026-10', '']` -- and the row had not been there before the
+   * refund arrived. Its mere EXISTENCE says a refund happened in October, and
+   * with one remembered prior sale the amount follows. Suppressing a value and
+   * publishing the fact that there was one to suppress is not suppression.
+   *
+   * `undefined` means the question does not apply to this report, and the row
+   * is kept as before.
+   */
+  existsWithoutRefunds?: boolean;
   /** The already-formatted cells after the key, in column order. */
   values: readonly ReportCell[];
   contributorIds: readonly string[];
@@ -851,8 +865,13 @@ function suppressRows(
   // the refund-net money columns, so this reaches `refund_net_pharmacy_sales`
   // and nothing else.
   if (!revisionSafe && netIndexes.length > 0) {
+    // ROUND 3 FINDING 1: a bucket that exists ONLY because of its refunds is
+    // omitted rather than blanked. A blank row still announces that there was
+    // something to withhold, and for a month with no sales that announcement
+    // is the refund.
+    const publishable = rows.filter((row) => row.existsWithoutRefunds !== false);
     return {
-      rows: rows.map((row) => [
+      rows: publishable.map((row) => [
         row.key,
         ...row.values.map((value, index) =>
           netIndexes.includes(index) ? withheldNetCell() : value,
@@ -898,6 +917,9 @@ function suppressRows(
       const subBlocked = subPeriodBlocks(row);
       if (subBlocked || perValue.some((entry) => entry.suppressed)) suppressedBuckets += 1;
       if (subBlocked) {
+        // ROUND 3 FINDING 1, on the FLOOR path too: a bucket that exists only
+        // because of its refunds announces them by appearing at all.
+        if (row.existsWithoutRefunds === false) continue;
         out.push([row.key, ...row.values.map((_value, index) => suppressedCell(index))]);
         continue;
       }
@@ -916,6 +938,9 @@ function suppressRows(
       || subPeriodBlocks(row)
     ) {
       suppressedBuckets += 1;
+      // ROUND 3 FINDING 1, on the FLOOR path too: a bucket that exists only
+      // because of its refunds announces them by appearing at all.
+      if (row.existsWithoutRefunds === false) continue;
       out.push([row.key, ...row.values.map((_value, index) => suppressedCell(index))]);
       continue;
     }
@@ -1133,6 +1158,9 @@ function buildPharmacySalesByMonth(
     const total = netSalesPaisa(sumPaisaOf(monthSales), sumPaisaOf(monthRefunds));
     return {
       key: month,
+      // ROUND 3 FINDING 1: a month that only exists because something was
+      // refunded in it must not appear at all while its money is withheld.
+      existsWithoutRefunds: monthSales.length > 0,
       // §6i ROUND 11: the cell is OPAQUE, and `toTextRows` verifies it on the
       // way to the bytes.
       //

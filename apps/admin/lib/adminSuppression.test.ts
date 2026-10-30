@@ -239,6 +239,30 @@ describe('FOUNDER DECISION 3: a zero refund side is protected, and a quiet day i
     expect(daysReleasable(both)).toBe(false);
   });
 
+  test('ROUND 3 FINDING 3: a REFUND-ONLY day is withheld, and a dead day is not', () => {
+    // My exemption said `saleShopIds.length === 0`, meaning "nobody traded".
+    // It also matched a day with no sales and ONE refund -- a refund against a
+    // sale made earlier -- and let it through, which discloses that one
+    // pharmacy's refund. The intent was always both sides empty.
+    expect(withheldSide(day(0, 1))).toBe('refund');
+    expect(withheldSide(day(0, 0))).toBe(null);
+  });
+
+  test('ROUND 3 FINDING 3: a month checks BOTH sides of every day', () => {
+    // `daysReleasable` used to check only the refund side, justified by
+    // per-pharmacy GROSS being published -- so gating sales protected nothing.
+    // FOUNDER DECISION 1 removed that gross, which voided the justification and
+    // left a real hole: (1 seller, 5 refunders) failed `dayReleasable` and
+    // PASSED `daysReleasable`, so a month could be composed from a day that
+    // identifies its single seller.
+    const thinSellerDay = day(1, SUPPRESSION_K);
+
+    expect(dayReleasable(thinSellerDay)).toBe(false);
+    expect(daysReleasable([thinSellerDay])).toBe(false);
+    // And the two agree on a day that clears both floors.
+    expect(daysReleasable([day(SUPPRESSION_K, SUPPRESSION_K)])).toBe(true);
+  });
+
   test('MUTATION: restoring the empty-set exemption reopens the zero disclosure', () => {
     // The rule stated as the defect it prevents. The old predicate was
     // `ids.length === 0 || distinctCount(ids) >= k`, so an empty refund list

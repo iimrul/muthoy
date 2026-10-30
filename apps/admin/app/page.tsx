@@ -23,7 +23,6 @@ import { dashboardOverview, type DashboardOverview } from '../lib/adminPlatformQ
 import {
   PUBLICATION_IS_REVISION_SAFE,
   REVISABLE_WITHHOLDING,
-  SUPPRESSION_K,
   suppressSeriesBelowK,
   withheldSide,
   type DaySides,
@@ -202,11 +201,52 @@ export default async function DashboardPage() {
    * operator acts on it -- and the activity chart beside it was already
    * publishing the ten.
    */
-  const withheldReason = withheld === null
+  /**
+   * ROUND 3 FINDING 2 — THE REASON ITSELF WAS AN ORACLE.
+   *
+   * I had it backwards: the floor-specific sentence was used whenever a floor
+   * failed, and the revision sentence only when none did. So the caption
+   * CHANGED from "fewer than five pharmacies recorded a refund" to "immutable
+   * snapshots" at the moment the fifth pharmacy refunded. With five sole-sale
+   * pharmacies whose grosses a reader remembers, that transition identifies
+   * every one of those refunds -- while every numeric cell on the page stayed
+   * blank. A withholding explanation that varies with the protected data is
+   * not an explanation, it is a readout.
+   *
+   * So the revision policy, which does not depend on today's refunds at all,
+   * answers whenever it is in force. The floor sentences are reachable only
+   * when publication is revision-safe, and then they carry no information the
+   * published figure does not already carry.
+   */
+  const withheldReason = !PUBLICATION_IS_REVISION_SAFE
     ? REVISABLE_WITHHOLDING
     : saleSideWithheld
       ? 'Withheld: fewer than five pharmacies recorded a sale on this business date.'
       : 'Withheld: fewer than five pharmacies recorded a refund on this business date.';
+
+  /**
+   * The COUNT's own verdict: the SALE floor, and nothing else.
+   *
+   * ROUND 3 FINDINGS 2 AND 4, which turned out to be the same defect in two
+   * places. Round 11 finding 1 withheld this count under the money verdict,
+   * and the reason was sound at the time: a count of 1 beside a PUBLISHED
+   * amount names the pharmacy whose takings it was. Two things changed. The
+   * amount is no longer published at all, so there is nothing for the count to
+   * sit beside; and gating it on the money verdict meant it could never
+   * display, while the activity report beside it published the same
+   * pharmacies.
+   *
+   * Worse, it carried the oracle: the count's explanation named the REFUND
+   * side, so the sentence moved when the fifth pharmacy refunded. A count of
+   * sellers has nothing to do with the refund floor.
+   *
+   * What governs this count is whether publishing "N pharmacies traded"
+   * identifies anyone, and that is exactly the sale floor. So it says so, and
+   * its sentence cannot move with refund activity because it does not read it.
+   */
+  const countWithheld = saleSideWithheld;
+  const countWithheldReason =
+    'Withheld: fewer than five pharmacies recorded a sale on this business date.';
 
   const alerts = dashboardAlerts({ shops, subscriptions, entitlements, orders, events }, nowMs);
   const raisedAlerts = alerts.filter((alert) => alert.count > 0).length;
@@ -269,10 +309,16 @@ export default async function DashboardPage() {
           // Round 11 finding 1: withheld under the same verdict as the net
           // figure. A count of 1 beside a withheld amount names the pharmacy
           // whose takings were withheld.
-          value={netTodayWithheld ? EMPTY_VALUE : formatCount(activeToday)}
+          //
+          // ROUND 3 FINDING 4: on the FLOOR verdict only. A count is not a
+          // financial aggregate, and gating it on the revision policy as well
+          // meant it could never display at all -- while the activity report
+          // beside it published the same ten pharmacies. That is
+          // over-withholding, which this batch has been caught by before.
+          value={countWithheld ? EMPTY_VALUE : formatCount(activeToday)}
           note={
-            netTodayWithheld
-              ? withheldReason
+            countWithheld
+              ? countWithheldReason
               : 'Distinct pharmacies that recorded a sale on this business date.'
           }
           href="/analytics"
@@ -336,7 +382,11 @@ export default async function DashboardPage() {
           // to withhold.
           composition={
             netTodayWithheld
-              ? `All shops · ${stats.day.businessDate} (Asia/Dhaka) · withheld: fewer than ${SUPPRESSION_K} pharmacies recorded a ${saleSideWithheld ? 'sale' : 'refund'}`
+              // ROUND 3 FINDING 7: the same oracle as the note above. The
+              // composition line blamed too few refunders while the revision
+              // policy was the actual reason, so it moved with the protected
+              // data. One reason, shared with the note.
+              ? `All shops · ${stats.day.businessDate} (Asia/Dhaka) · ${withheldReason}`
               : `All shops · ${stats.day.businessDate} (Asia/Dhaka) · gross ${formatMoney(stats.grossSalesToday)} less refunds ${formatMoney(stats.refundsToday)}`
           }
         />

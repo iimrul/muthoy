@@ -179,7 +179,12 @@ function sideReleasable(ids: readonly string[], k: number): boolean {
  * whether it is protected.
  */
 function refundSideReleasable(day: DaySides, k: number): boolean {
-  if (day.saleShopIds.length === 0) return true;
+  // ROUND 3 FINDING 3 CORRECTED THIS. The exemption used to be
+  // `day.saleShopIds.length === 0`, which let a REFUND-ONLY day through: zero
+  // sellers, one refunder, releasable -- and that day discloses exactly one
+  // pharmacy's refund against a sale it made earlier. The intent was always
+  // "nobody traded at all", so that is what it now says.
+  if (day.saleShopIds.length === 0 && day.refundShopIds.length === 0) return true;
   return distinctCount(day.refundShopIds) >= k;
 }
 
@@ -266,9 +271,15 @@ export function daysReleasable(
   days: readonly DaySides[],
   k: number = SUPPRESSION_K,
 ): boolean {
-  // The REFUND side of every day, now including the zero case -- see
-  // `refundSideReleasable` and FOUNDER DECISION 3.
-  return days.every((day) => refundSideReleasable(day, k));
+  // BOTH SIDES of every day, which is a change ROUND 3 FINDING 3 forced and
+  // FOUNDER DECISION 1 made correct. This used to check only the refund side,
+  // and the justification was explicit: per-pharmacy GROSS was published, so
+  // gating the sale side here protected nothing while hiding a great deal.
+  // Decision 1 removed per-pharmacy gross, so that justification is void --
+  // and the asymmetry it left behind was a real hole, since `(1 seller, 5
+  // refunders)` failed `dayReleasable` and passed `daysReleasable`, letting a
+  // month be composed from a day that identifies its single seller.
+  return days.every((day) => dayReleasable(day, k));
 }
 
 export function suppressTotalAcrossBuckets<T>(
