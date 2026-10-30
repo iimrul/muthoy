@@ -365,3 +365,32 @@ medicines are not folded, and closing that needs a folded-key column on
 `medicines` plus an FTS rebuild — a SQLite migration — which is Batch 3 work.
 It is recorded as the W2-03 completion blocker here, in the handoff and in the
 delivery ledger.
+
+---
+
+## 9. Ownership addendum — 2026-10-23 (delivery regrouping, FIVE batches to SIX)
+
+**No statement above is retracted and no status changes.** Sections 1–8 were
+written on 2026-10-21/22 and are accurate as of then; Batch 6 did not exist when
+they were written. The founder extended the delivery grouping on 2026-10-23, and
+this addendum records only where the gates this batch opened are owned NOW.
+
+| Gate opened by Batch 2 | Status | Owner now |
+|---|---|---|
+| **E7 — real licensed medicine dataset** | OPEN. Zero catalogue rows ship; the ~21,000 figure is not claimed | **Batch 6, B6-01.** Obtain and verify a licensed dataset, report the MEASURED count truthfully, and integrate it through this batch's existing schema, JSONL importer, search provider and offline lookup — which are preserved, not rebuilt |
+| **E8 — bKash merchant contract** (and **W4-09**, never implemented) | OPEN. Three undocumented surfaces | **Batch 6, B6-02.** Previously recorded as moving to Batch 4. bKash is the ONLY approved subscription gateway and SSLCommerz is never reactivated for new subscription payments |
+| **E9 — `captureOnly` capture cleanup** | DESCOPED and documented | unchanged — not a pending gate |
+
+**What does NOT move to Batch 6:** W2-03's remaining Bangla/Banglish search over
+EXISTING SHOP MEDICINES stays **Batch 3**, with its SQLite folded-key migration,
+FTS rebuild and data-preservation verification. W4-04, W4-05, the H-9 migration
+dependencies (E4) and the durable admin audit table also stay **Batch 3**.
+Barcode scanning remains **EXCLUDED**.
+
+**What this batch delivered is preserved and not restarted:** the medicine OCR
+implementation, the offline catalogue schema, the JSONL importer, the catalogue
+UI integration, the multilingual normalisation foundation, admin
+authentication / pages / RBAC / write actions, and the safe SSLCommerz
+initiation retirement. Pending EXTERNAL acceptance does not make implemented
+work incomplete — the CODE-COMPLETE and DEVICE/PRODUCTION-VERIFIED axes stay
+separate, and nothing here is DEVICE/PRODUCTION-VERIFIED.

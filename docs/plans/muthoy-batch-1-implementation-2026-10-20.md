@@ -460,3 +460,19 @@ this needs to scale.
 | Server-side `'stale'` return from `sync_apply_row` (closes the push-detection blind spot) | needs a migration **and** a function redeploy |
 | W4-04 and W4-05 | Batch 3, behind the H-9 migration-chain seal |
 | Migration `0031` on a real device | ships with the next build; additive `ALTER TABLE` on a table that is empty everywhere |
+
+### Ownership addendum — 2026-10-23 (delivery regrouping, FIVE batches to SIX)
+
+**Nothing above is retracted.** The table was written on 2026-10-20 and was
+accurate then; Batch 6 did not exist. This addendum records only where two
+items are owned NOW, after the founder extended the delivery grouping on
+2026-10-23:
+
+| Item from above | Owner when written | Owner now |
+|---|---|---|
+| Live payment acceptance (gate E6, raised during Batch 1 closure) | Batch 5 | **Batch 6, B6-02** — direct bKash merchant gateway |
+| The payment-provider decision (gate E5) | founder, open | **CLOSED by the founder**: SSLCommerz is no longer approved and direct bKash is the only approved subscription gateway. Batch 2's W4-10 retired SSLCommerz initiation; delivery of bKash is **B6-02** |
+
+Everything else in this table stands as written: H-8 and H-6 keep their owners,
+and W4-04/W4-05 remain Batch 3 behind the H-9 seal. No Batch 1 task's status
+changes — all nine remain CODE-COMPLETE and none is DEVICE-VERIFIED.

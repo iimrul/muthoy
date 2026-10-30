@@ -10,6 +10,15 @@
 > V3) is the roadmap. `apps/prototype-web` defines WHAT the user sees.
 > Production SQLite/domain/auth/sync/RLS defines HOW it works. This plan adds no
 > second roadmap and no new architecture.
+>
+> **Delivery grouping note, added 2026-10-23.** Work now SHIPS in **six delivery
+> batches** (the founder extended the grouping from five on 2026-10-23); the
+> authoritative mapping of task to batch is
+> `docs/plans/muthoy-five-batch-delivery-ledger.md`, whose filename is kept
+> despite now describing six. **The waves below are unchanged** — a wave says
+> what the work IS, a batch says when it ships, and nothing in this document's
+> wave plan is altered by the regrouping. Batch references inside the wave
+> tables are historical status annotations and stay as written.
 
 ---
 

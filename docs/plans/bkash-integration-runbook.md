@@ -1,6 +1,11 @@
 # Direct bKash integration — runbook for a BLOCKED feature
 
-**Status: BLOCKED (gate E8). W4-09 is NOT implemented and no part of it ships.**
+**Status: BLOCKED (gate E8). Owner: Batch 6, deliverable B6-02** (founder
+decision 2026-10-23). W4-09 is **NOT implemented and no part of it ships**;
+delivering it is B6-02, where bKash is the ONLY approved subscription gateway
+and SSLCommerz is never reactivated for new subscription payments. The verified
+contract, the three undocumented surfaces and the identifier analysis below are
+unchanged — only the delivery ownership moved.
 Batch 2 shipped only the *refusal* side: W4-10 retires SSLCommerz, and the
 provider seam refuses every environment, so subscription payments **fail
 closed**.

@@ -1,6 +1,10 @@
 # The medicine catalogue: provenance, licensing and what "done" requires
 
-**Status: BLOCKED (gate E7).** The code is complete and tested. **Zero
+**Status: BLOCKED (gate E7). Owner: Batch 6, deliverable B6-01** (founder
+decision 2026-10-23, which extended the delivery grouping from five batches to
+six). The investigation, provenance findings and licensing analysis below are
+unchanged — only the delivery ownership moved. The code is complete and tested.
+**Zero
 catalogue rows ship**, and the figure "21,000 medicines" is **not claimed**
 anywhere in the product or its documentation.
 
