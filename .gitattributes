@@ -27,3 +27,12 @@ backend/supabase/deploy/H9-LOCAL-REMEDIATION.md text eol=lf
 # reads a comment.
 backend/supabase/migrations/20261023000000_e4_batch3_admin_platform.sql text eol=lf
 backend/supabase/checks/e4_postmigration_checks.sql text eol=lf
+
+# E4-B (migration 36) and its successor manifest. Same rule, and one difference
+# that matters: `successorPinDrift` in
+# backend/supabase/pgtest/live-chain-succession.pgtest.ts hashes the migration's
+# RAW BYTES, not the CRLF-folded text the E4 manifest's `hashFile` uses. The E4
+# manifest would survive a CRLF checkout; this pin would not. So for these two
+# files the eol pin is load-bearing rather than belt-and-braces.
+backend/supabase/migrations/20261030000000_e4b_publication_snapshots.sql text eol=lf
+backend/supabase/migrations/post-e4-source-hashes.json text eol=lf

@@ -9,7 +9,7 @@ migration below as reversible, redeployable, or forward-only, and carries the
 decision table for who calls a restore.
 
 <!-- rollback-classification:start -->
-Rollback classification: **A: 8 · B: 18 · C: 9 — of 35.** Source: [rollback-classification.json](rollback-classification.json).
+Rollback classification: **A: 8 · B: 19 · C: 9 — of 36.** Source: [rollback-classification.json](rollback-classification.json).
 <!-- rollback-classification:end -->
 
 The data backup at step 2 of "Required sequence" is the only way back from a

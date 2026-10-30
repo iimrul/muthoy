@@ -35,7 +35,8 @@
     "20261008000000_h9_enrollment_hold_constraint_normalization.sql": "B",
     "20261008000100_h9_sync_staging_cleanup_schedule.sql": "A",
     "20261015000000_h9_api_role_table_privileges.sql": "A",
-    "20261023000000_e4_batch3_admin_platform.sql": "C"
+    "20261023000000_e4_batch3_admin_platform.sql": "C",
+    "20261030000000_e4b_publication_snapshots.sql": "B"
   },
   "postgresDeclaredOverrides": [
     "20260813000000_initial_schema.sql",

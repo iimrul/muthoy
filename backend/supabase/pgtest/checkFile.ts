@@ -70,7 +70,14 @@ export const M35_FILE = '20261023000000_e4_batch3_admin_platform.sql';
  * the evidence manifest; the successor gate asserts the first of those, and a
  * missing manifest entry is drift.
  */
-export const POST_E4_MIGRATIONS: readonly string[] = Object.freeze([]);
+export const POST_E4_MIGRATIONS: readonly string[] = Object.freeze([
+  // Migration 36, E4-B. The financial publication snapshot: the persisted,
+  // immutable state that lets a published pharmacy money figure be READ rather
+  // than recomputed. See the file's own header for why no stateless rule
+  // closes the revision channel, and for the part it deliberately does NOT
+  // close (the k=5 refund-side floor, which stands).
+  '20261030000000_e4b_publication_snapshots.sql',
+]);
 
 /**
  * The chain as it stood when E4 was signed off: everything up to and including

@@ -142,11 +142,11 @@ describe('a volatile ADD COLUMN default is a backfill', () => {
 
 describe('the corrected PostgreSQL classification', () => {
   it('covers every migration on disk exactly once', () => {
-    expect(pg.length).toBe(35);
-    expect(new Set(pg.map((row) => row.name)).size).toBe(35);
+    expect(pg.length).toBe(36);
+    expect(new Set(pg.map((row) => row.name)).size).toBe(36);
   });
 
-  it('is A 8 / B 18 / C 8 — not the 14 forward-only the first audit claimed', () => {
+  it('is A 8 / B 19 / C 9 — not the 14 forward-only the first audit claimed', () => {
     // Hardcoded on purpose. A migration that changes class has to change this
     // number too, which is the point at which somebody looks at it.
     // A2.3 added the registry plus its persistent-hold hotfix: function and
@@ -168,7 +168,12 @@ describe('the corrected PostgreSQL classification', () => {
     // tables, five indexes and 25 privilege statements, and writes NO data, so
     // the mechanical rule scores it B. It is class C by DECLARED override —
     // see the second entry below.
-    expect(classCounts(pg)).toEqual({ A: 8, B: 18, C: 9 });
+    // E4-B (2026-10-30): the publication snapshot is the 36th. Two functions,
+    // two triggers, one table, one index, no DML -- and class B BY DESIGN, not
+    // by luck. See its ROLLBACK.md row: the alternative shape was a second
+    // append-only evidence store, which would have been a second class C whose
+    // only recovery is the restore H-11 C5 has never rehearsed.
+    expect(classCounts(pg)).toEqual({ A: 8, B: 19, C: 9 });
   });
 
   it('declares its two judgements instead of inferring them', () => {
@@ -203,7 +208,7 @@ describe('the corrected PostgreSQL classification', () => {
   );
 
   it('states the corrected headline count in the document itself', () => {
-    expect(ROLLBACK_DOC).toContain('**A: 8 · B: 18 · C: 9 — of 35.**');
+    expect(ROLLBACK_DOC).toContain('**A: 8 · B: 19 · C: 9 — of 36.**');
   });
 
   it('carries no OTHER headline anywhere in any of the three documents', () => {

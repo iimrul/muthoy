@@ -50,6 +50,11 @@ const PLAN_MATRIX: Readonly<Record<string, readonly [boolean, boolean, boolean, 
   'reports.export': [true, true, false, false],
   'settings.read': [true, true, true, true],
   'settings.write': [true, false, false, false],
+  // E4-B: publishing an immutable financial snapshot. super_admin only.
+  // Transcribed here independently, like every other row — billing holds
+  // revenue.read and must NOT hold this, because reading money and deciding
+  // money is public are different authorities.
+  'publications.write': [true, false, false, false],
 };
 
 describe('the role table', () => {

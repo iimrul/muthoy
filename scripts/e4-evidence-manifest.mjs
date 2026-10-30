@@ -144,6 +144,36 @@ function stringify(manifest) {
   return `${JSON.stringify(manifest, null, 2)}\n`;
 }
 
+/** Where a post-E4 successor declares the transitions it required. */
+export const SUCCESSOR_MANIFEST_PATH = 'backend/supabase/migrations/post-e4-source-hashes.json';
+
+/**
+ * The declared `{path: {e4, now}}` supersessions, or {} when there are none.
+ *
+ * READ AS JSON rather than imported from scripts/post-e4-evidence-manifest.mjs,
+ * which imports this module. One direction only: a cycle between the two
+ * manifests is the kind of thing that works until the day it is loaded in the
+ * other order.
+ *
+ * Returns {} on a missing, malformed or non-object manifest, which means a
+ * damaged successor manifest FORGIVES NOTHING and every real drift is still
+ * reported. Failing open here would be a privacy-adjacent gate that disables
+ * itself when its input is broken.
+ */
+export function supersededBy() {
+  const path = resolve(SUCCESSOR_MANIFEST_PATH);
+  if (!existsSync(path)) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return {};
+  }
+  const declared = parsed?.supersedes;
+  if (declared === null || typeof declared !== 'object' || Array.isArray(declared)) return {};
+  return declared;
+}
+
 /**
  * Compares the recorded manifest with the tree and returns the paths that
  * disagree. `--write` regenerates it instead.
@@ -161,9 +191,25 @@ export function checkOrWrite(mode = '--check') {
   if (!existsSync(path)) throw new Error(`E4 evidence manifest is missing: ${MANIFEST_PATH}`);
   const recorded = JSON.parse(readFileSync(path, 'utf8'));
 
+  // DECLARED SUPERSESSION. See scripts/post-e4-evidence-manifest.mjs for why
+  // this exists and what it costs: declaring a post-E4 migration necessarily
+  // moves five of the files pinned here, and the three ways of handling that
+  // were (a) regenerate this manifest, which the founder forbade by name,
+  // (b) leave the gate failing with no way to tell a successor from tampering,
+  // or (c) require the transition to be declared at BOTH ends. This is (c).
+  //
+  // A drift is forgiven only when the successor manifest says the file moved
+  // FROM exactly the hash recorded here TO exactly the hash now on disk. A
+  // file that moved twice, or whose declaration names the wrong origin, still
+  // fails — and so does a file nothing declares at all.
+  const superseded = supersededBy();
   const drift = [];
   for (const [filePath, hash] of Object.entries(built.files)) {
-    if (recorded.files?.[filePath] !== hash) drift.push(filePath);
+    const before = recorded.files?.[filePath];
+    if (before === hash) continue;
+    const declared = superseded[filePath];
+    if (declared?.e4 === before && declared?.now === hash) continue;
+    drift.push(filePath);
   }
   for (const filePath of Object.keys(recorded.files ?? {})) {
     if (!(filePath in built.files)) drift.push(`${filePath} (recorded but absent)`);

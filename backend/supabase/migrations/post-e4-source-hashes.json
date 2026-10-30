@@ -1,0 +1,42 @@
+{
+  "batch": 3,
+  "gate": "E4-B",
+  "supersedesManifest": "backend/supabase/migrations/e4-source-hashes.json",
+  "counts": {
+    "migrations": 1,
+    "supersededEvidenceFiles": 7
+  },
+  "files": {
+    "20261030000000_e4b_publication_snapshots.sql": "bbaa077235a00353d91425af17433740fb673f2d0261bba9ccaf3e0981dcebe7"
+  },
+  "supersedes": {
+    "scripts/h9-prod-preflight.mjs": {
+      "e4": "bac816d16d670af8ed464e75cafeb2a85455610f733afcd8aabcb5e5c44ad41d",
+      "now": "1909ca96d1c34ae62cffeccd347a8305635e04229dc27c757b41df25d2ea88c6"
+    },
+    "backend/supabase/migrations/rollback-classification.json": {
+      "e4": "08c50fd579a5d6e0a24ffdefade12d8ac126503c15765b081e286b7d5f010d75",
+      "now": "464f59cc45b554138ad6daad913d3b7039781502186a438b86da9ecfdbf6e0ea"
+    },
+    "backend/supabase/migrations/ROLLBACK.md": {
+      "e4": "9b61681b89bee9394b9093b4932d39a70cac31f699931419f1619f084f9f5d0a",
+      "now": "b43e296e40036cd4357da649920e19718bc2620e4e44f22787425a5730a9cd84"
+    },
+    "backend/supabase/migrations/README.md": {
+      "e4": "9114aafed4be01c0abe3ff4f4e0388d868ebb7fcabd9221278ec528d0c80f51f",
+      "now": "32123e141877e38a95c29f7fa8de40b4455bbbe831ded3891af9ce291230dd45"
+    },
+    "apps/mobile/tests/migration-rollback-classification.test.ts": {
+      "e4": "17db87a58ea6242d4f8fbbcb60651fbc3f8ba7244bdeed83b470debda7c5c9ce",
+      "now": "87b035b5de7942f89fbe5879eed39b845cf218d8953086b20015f563b9972d5b"
+    },
+    "backend/supabase/pgtest/checkFile.ts": {
+      "e4": "4157698d9275e4e77003f879bffdb39a27b7dad81094b37de43ac8523f4deff4",
+      "now": "73130d4b6db5fbd9c751559cb3445451b70b69a6d57328aa616f65de3255bb9e"
+    },
+    ".gitattributes": {
+      "e4": "1fb9331e11aaebe9786d9364b874985a3a274f7b2afb67050e51adcf2dc331a4",
+      "now": "e56ed2f360425cdaf8dbe16a642d18fa42a9f183073fb1331ab349345e1c1c3a"
+    }
+  }
+}

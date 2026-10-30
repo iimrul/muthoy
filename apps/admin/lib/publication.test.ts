@@ -1,0 +1,626 @@
+// Batch 3 E4-B — the publication policy and the reader, executed.
+//
+// THE ONE ASSERTION THAT MATTERS MOST is `serves the PUBLISHED figure, not the
+// recomputed one`. Everything else in this file supports it. If a published
+// month were served from a recomputation, the whole mechanism would be
+// decoration: the recomputation is what moves, and the movement is the
+// disclosure.
+//
+// So every published fixture here deliberately records a value the
+// recomputation does NOT produce. A test whose published and recomputed figures
+// agreed could not tell which one the reader used — which is the class of
+// vacuous assertion this batch has been caught by repeatedly.
+
+import { describe, expect, test } from 'vitest';
+import { asPaisa, type Paisa } from '@muthoy/types';
+import { parseCsv } from '@muthoy/utils';
+import { adminReportExportQuerySchema } from '@muthoy/validation';
+import { SUPPRESSED_DISPLAY, SUPPRESSION_K, type DaySides } from './adminSuppression';
+import {
+  buildReportTable,
+  reportTextRows,
+  reportToCsv,
+  reportToPdf,
+  type ReportData,
+  type ReportSaleTotalRow,
+} from './adminReports';
+import {
+  PUBLICATION_COHORT,
+  PUBLICATION_METRIC,
+  dayAxisAgreesWithSuppression,
+  monthOf,
+  periodEligibility,
+  periodEndOf,
+  periodStartOf,
+  publicationDrift,
+  publishedAmount,
+  recordIsServable,
+  resolveMonthlyMoney,
+  type PublicationLookup,
+  type PublicationRecord,
+} from './publication';
+
+const REPORT = 'refund_net_pharmacy_sales';
+const DIGEST = 'f'.repeat(64);
+const COMPLETE = [
+  { label: 'sales', counted: 0, loaded: 0 },
+  { label: 'refunds', counted: 0, loaded: 0 },
+];
+
+function query(raw: Record<string, string>) {
+  const parsed = adminReportExportQuerySchema.safeParse(raw);
+  if (!parsed.success) throw new Error('fixture does not parse: ' + parsed.error.message);
+  return parsed.data;
+}
+
+function row(shop: number, day: string, paisa: number): ReportSaleTotalRow {
+  return { shopId: 'shop-' + shop, businessDate: day, totalPaisa: asPaisa(paisa) };
+}
+
+/**
+ * A month that CLEARS the floor: `shops` distinct pharmacies both sell and
+ * refund on every trading day.
+ *
+ * Non-vacuity depends on this existing. If no fixture ever cleared k=5, every
+ * publication assertion below would pass by withholding, and the suite would
+ * prove only that withholding works.
+ */
+function eligibleMonth(days: readonly string[], shops = SUPPRESSION_K + 1) {
+  const sales: ReportSaleTotalRow[] = [];
+  const refunds: ReportSaleTotalRow[] = [];
+  for (const day of days) {
+    for (let shop = 1; shop <= shops; shop += 1) {
+      sales.push(row(shop, day, 100_000));
+      refunds.push(row(shop, day, 10_000));
+    }
+  }
+  return { sales, refunds };
+}
+
+function data(overrides: Partial<ReportData> = {}): ReportData {
+  return {
+    shops: [],
+    subscriptions: [],
+    orders: [],
+    sales: [],
+    refunds: [],
+    tallies: COMPLETE,
+    ...overrides,
+  };
+}
+
+function record(overrides: Partial<PublicationRecord> = {}): PublicationRecord {
+  return {
+    metricFamily: PUBLICATION_METRIC,
+    cohortKey: PUBLICATION_COHORT,
+    periodStart: '2026-10-01',
+    periodEnd: '2026-10-31',
+    // 5000.00 - 1000.00 = 4000.00. The fixture month recomputes to something
+    // else entirely, which is how these tests can tell them apart.
+    grossPaisa: asPaisa(500_000),
+    refundsPaisa: asPaisa(100_000),
+    valuePaisa: asPaisa(400_000),
+    sourceSaleRows: 6,
+    sourceRefundRows: 6,
+    sourceDigest: DIGEST,
+    kFloor: SUPPRESSION_K,
+    contributorCount: SUPPRESSION_K + 1,
+    publishedAt: '2026-10-31T18:00:00.000Z',
+    ...overrides,
+  };
+}
+
+const lookupFor = (...records: readonly PublicationRecord[]): PublicationLookup => {
+  const byMonth = new Map(records.map((entry) => [monthOf(entry), entry]));
+  return (month) => byMonth.get(month);
+};
+
+const WHOLE_OCTOBER = { reportId: REPORT, format: 'csv', from: '2026-10-01', to: '2026-10-31' };
+
+function octoberTable(
+  source: { sales: ReportSaleTotalRow[]; refunds: ReportSaleTotalRow[] },
+  publications?: PublicationLookup,
+) {
+  return buildReportTable(
+    REPORT,
+    data({
+      sales: source.sales,
+      refunds: source.refunds,
+      tallies: [
+        { label: 'sales', counted: source.sales.length, loaded: source.sales.length },
+        { label: 'refunds', counted: source.refunds.length, loaded: source.refunds.length },
+      ],
+    }),
+    query(WHOLE_OCTOBER),
+    publications === undefined ? {} : { publications },
+  );
+}
+
+/**
+ * A WITHHELD money cell, as the EXPORT path writes it.
+ *
+ * `SUPPRESSED_EXPORT` (empty), not `SUPPRESSED_DISPLAY` (the em dash). The two
+ * are deliberately different and I had this wrong at first: the em dash is what
+ * a PAGE renders, and an export must write an empty cell so a spreadsheet
+ * totalling the column does not pick up a placeholder it would treat as text or
+ * as zero. `reportTextRows`, CSV and PDF are all the export path.
+ */
+const WITHHELD_TEXT = '';
+
+/** The net cell's text for the first data row. */
+function netCellText(table: ReturnType<typeof buildReportTable>): string {
+  const rows = reportTextRows(table);
+  return rows[0]?.[1] ?? '(no row)';
+}
+
+/** The last CSV row, which is the data row after the preamble. */
+function csvDataRow(csv: string): readonly string[] {
+  return parseCsv(csv).at(-1) ?? [];
+}
+
+// ──────────────────────────────────────────────── 1-2. the figure and its sides
+
+describe('the published figure, and which one is served', () => {
+  test('serves the PUBLISHED figure, not the recomputed one', () => {
+    const source = eligibleMonth(['2026-10-01', '2026-10-02']);
+    const withheld = octoberTable(source);
+    expect(netCellText(withheld)).toBe(WITHHELD_TEXT);
+
+    const published = octoberTable(source, lookupFor(record()));
+    // 4000.00 is the SNAPSHOT. The recomputation is 10800.00, and it is nowhere
+    // in this table.
+    expect(netCellText(published)).toBe('4000.00');
+    expect(reportTextRows(published).flat().join(' ')).not.toContain('10800.00');
+  });
+
+  test('the published value goes through the shared gross-minus-refunds subtraction', () => {
+    // CLAUDE.md rule 4. `netExportCell` takes a branded NetSales that only
+    // `netSalesPaisa` mints, so the cell is rebuilt from the record's two sides
+    // rather than cast from its value column. A record whose sides did not
+    // subtract to its value is refused outright by `recordIsServable`, which
+    // the test below exercises.
+    const table = octoberTable(
+      eligibleMonth(['2026-10-01']),
+      lookupFor(
+        record({
+          grossPaisa: asPaisa(300_000),
+          refundsPaisa: asPaisa(50_000),
+          valuePaisa: asPaisa(250_000),
+        }),
+      ),
+    );
+    expect(netCellText(table)).toBe('2500.00');
+  });
+
+  test('refuses to serve a record whose value is not gross minus refunds', () => {
+    const broken = record({ valuePaisa: asPaisa(999_999) });
+    expect(recordIsServable(broken, '2026-10')).toContain('gross minus refunds');
+    const money = resolveMonthlyMoney('2026-10', periodEligibility([], []), lookupFor(broken));
+    expect(money.kind).toBe('failed');
+    // NOT published, and NOT the broken number.
+    expect(publishedAmount(money)).toBeNull();
+  });
+});
+
+// ──────────────────────────────────────── 3-7. eligibility, the policy itself
+
+describe('period eligibility', () => {
+  const day = (d: string, sellers: number, refunders: number): DaySides => ({
+    day: d,
+    saleShopIds: Array.from({ length: sellers }, (_, i) => 'shop-' + i),
+    refundShopIds: Array.from({ length: refunders }, (_, i) => 'shop-' + i),
+  });
+
+  test('an eligible month clears both axes and gives no reason', () => {
+    const eligibility = periodEligibility(
+      [day('2026-10-01', 6, 6), day('2026-10-02', 5, 5)],
+      ['a', 'b', 'c', 'd', 'e'],
+    );
+    expect(eligibility.eligible).toBe(true);
+    expect(eligibility.reason).toBeNull();
+    expect(eligibility.daysRequiringFloor).toBe(2);
+    expect(eligibility.daysClearingFloor).toBe(2);
+  });
+
+  test('one short refund day withholds the whole month, and says which count', () => {
+    const eligibility = periodEligibility(
+      [day('2026-10-01', 6, 6), day('2026-10-02', 6, 1)],
+      ['a', 'b', 'c', 'd', 'e', 'f'],
+    );
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.daysRequiringFloor).toBe(2);
+    expect(eligibility.daysClearingFloor).toBe(1);
+    expect(eligibility.reason).toContain('1 of 2 trading days');
+  });
+
+  test('a quiet day does NOT require the floor, so one does not withhold a month', () => {
+    // The over-withholding round 14 was reproduced for. A day nobody traded on
+    // reveals no pharmacy's figure.
+    const eligibility = periodEligibility(
+      [day('2026-10-01', 6, 6), day('2026-10-02', 0, 0)],
+      ['a', 'b', 'c', 'd', 'e'],
+    );
+    expect(eligibility.daysRequiringFloor).toBe(1);
+    expect(eligibility.eligible).toBe(true);
+  });
+
+  test('a month with trade but too few contributors overall is withheld', () => {
+    const eligibility = periodEligibility([day('2026-10-01', 6, 6)], ['a', 'b']);
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.reason).toContain('below the k=5 floor');
+  });
+
+  test('a month with NO trade is eligible with zero contributors', () => {
+    const eligibility = periodEligibility([day('2026-10-01', 0, 0)], []);
+    expect(eligibility.eligible).toBe(true);
+    expect(eligibility.contributorCount).toBe(0);
+  });
+
+  test('the day axis agrees with daysReleasable, which is the one shared rule', () => {
+    // Asserted rather than claimed in a comment. If the publication path and
+    // the report path ever applied different rules, one of them would be wrong
+    // and this is where it surfaces.
+    const cases: readonly DaySides[][] = [
+      [],
+      [day('2026-10-01', 6, 6)],
+      [day('2026-10-01', 6, 1)],
+      [day('2026-10-01', 1, 6)],
+      [day('2026-10-01', 0, 0)],
+      [day('2026-10-01', 0, 3)],
+      [day('2026-10-01', 6, 6), day('2026-10-02', 0, 0)],
+      [day('2026-10-01', 6, 6), day('2026-10-02', 4, 6)],
+    ];
+    for (const days of cases) {
+      expect(dayAxisAgreesWithSuppression(days), JSON.stringify(days)).toBe(true);
+    }
+  });
+});
+
+// ──────────────────────────────────── 8-9, 13. late rows and repeated queries
+
+describe('a published figure does not move', () => {
+  const source = eligibleMonth(['2026-10-01']);
+
+  test('a LATE REFUND arriving after publication changes nothing', () => {
+    const published = lookupFor(record());
+    const before = octoberTable(source, published);
+    // A pharmacy syncs a refund it entered three days ago, against a closed
+    // month. This is the round-1B oracle: the same query answered 457.00 and
+    // then 450.00, and the 7.00 difference was one pharmacy's refund.
+    const late = {
+      sales: source.sales,
+      refunds: [...source.refunds, row(1, '2026-10-01', 700)],
+    };
+    const after = octoberTable(late, published);
+    expect(netCellText(after)).toBe(netCellText(before));
+    expect(netCellText(after)).toBe('4000.00');
+  });
+
+  test('a LATE SALE from a device that was offline changes nothing', () => {
+    const published = lookupFor(record());
+    const late = {
+      sales: [...source.sales, row(9, '2026-10-01', 250_000)],
+      refunds: source.refunds,
+    };
+    expect(netCellText(octoberTable(late, published))).toBe('4000.00');
+  });
+
+  test('a NEW pharmacy joining, changing the contributor population, changes nothing', () => {
+    const published = lookupFor(record());
+    const grown = eligibleMonth(['2026-10-01'], SUPPRESSION_K + 4);
+    expect(netCellText(octoberTable(grown, published))).toBe('4000.00');
+  });
+
+  test('the population DROPPING below the floor still serves the published figure', () => {
+    // A published figure wins unconditionally, before eligibility. Withdrawing
+    // it later would itself be a disclosure: the withdrawal says the crowd
+    // shrank, and the figure was already read.
+    const published = lookupFor(record());
+    const shrunk = eligibleMonth(['2026-10-01'], 1);
+    expect(netCellText(octoberTable(shrunk, published))).toBe('4000.00');
+  });
+
+  test('a hundred repeated reads give one answer', () => {
+    const published = lookupFor(record());
+    const answers = new Set(
+      Array.from({ length: 100 }, () => netCellText(octoberTable(source, published))),
+    );
+    expect([...answers]).toEqual(['4000.00']);
+  });
+});
+
+// ─────────────────────────────── 10-12. inference, subset sums, differencing
+
+describe('what cannot be inferred from a publication', () => {
+  test('an UNPUBLISHED month is absent from the figures, not shown as zero', () => {
+    const table = octoberTable(eligibleMonth(['2026-10-01']));
+    const text = reportTextRows(table).flat();
+    expect(text).toContain(WITHHELD_TEXT);
+    // "Do not display a suppressed amount as zero." A spreadsheet totalling
+    // this column must not pick up a 0.00 that was never a figure.
+    expect(text).not.toContain('0.00');
+  });
+
+  test('publishing September does not disclose an unpublished October by subtraction', () => {
+    // The composition rule: the two months are separate published buckets, and
+    // an unpublished one contributes NO visible figure to subtract from.
+    const september = eligibleMonth(['2026-09-01']);
+    const october = eligibleMonth(['2026-10-01']);
+    const table = buildReportTable(
+      REPORT,
+      data({
+        sales: [...september.sales, ...october.sales],
+        refunds: [...september.refunds, ...october.refunds],
+        tallies: COMPLETE,
+      }),
+      query({ reportId: REPORT, format: 'csv', from: '2026-09-01', to: '2026-10-31' }),
+      { publications: lookupFor(record({ periodStart: '2026-09-01', periodEnd: '2026-09-30' })) },
+    );
+    const rows = reportTextRows(table);
+    expect(rows.find((entry) => entry[0] === '2026-09')?.[1]).toBe('4000.00');
+    // October is present as a bucket and withheld as a figure. There is no
+    // range total anywhere in this table to subtract September from.
+    expect(rows.find((entry) => entry[0] === '2026-10')?.[1]).toBe(WITHHELD_TEXT);
+    expect(rows.flat()).not.toContain('0.00');
+  });
+
+  test('a partial month is refused outright, so no window can be chosen inside one', () => {
+    // Round 11 finding 2, still closed. The differencing attack needs a
+    // caller-chosen window; a month-grained report answers only whole months.
+    expect(() =>
+      buildReportTable(
+        REPORT,
+        data({ ...eligibleMonth(['2026-10-01']), tallies: COMPLETE }),
+        query({ reportId: REPORT, format: 'csv', from: '2026-10-01', to: '2026-10-02' }),
+        { publications: lookupFor(record()) },
+      ),
+      // The REFUSAL's own wording, not a word any error could contain. The
+      // first version of this matcher was /month/i, and it would have passed
+      // on "fixture does not parse" — which is exactly how a negative test
+      // ends up asserting nothing.
+    ).toThrow(/answers for whole months only/);
+  });
+
+  test('a record for ANOTHER period is not served for this one', () => {
+    // A lookup that returned the wrong month's record would publish September's
+    // figure under October's label, which is a disclosure AND a lie.
+    const wrongMonth = record({ periodStart: '2026-09-01', periodEnd: '2026-09-30' });
+    expect(recordIsServable(wrongMonth, '2026-10')).toContain('is not 2026-10-01');
+  });
+
+  test('a record carrying a second cohort is refused, not served', () => {
+    const otherCohort = record({ cohortKey: 'banani' });
+    expect(recordIsServable(otherCohort, '2026-10')).toContain('unexpected cohort');
+    expect(
+      resolveMonthlyMoney('2026-10', periodEligibility([], []), lookupFor(otherCohort)).kind,
+    ).toBe('failed');
+  });
+
+  test('a record carrying another metric family is refused, not served', () => {
+    const otherMetric = record({ metricFamily: 'subscription_revenue_and_renewals' });
+    expect(recordIsServable(otherMetric, '2026-10')).toContain('unexpected metric');
+  });
+});
+
+// ────────────────────────────────────────── 14-15. zero refunds, the k floor
+
+describe('zero refunds and the k floor', () => {
+  test('a day with sellers and NO refunders is withheld, not published as safe', () => {
+    // Founder decision 3. Ten pharmacies sold and none refunded: publishing
+    // tells a reader all ten refunded nothing, and identifies all ten, because
+    // the set of zero-refunders is the whole set of sellers.
+    const source = { sales: eligibleMonth(['2026-10-01']).sales, refunds: [] };
+    const eligibility = periodEligibility(
+      [{ day: '2026-10-01', saleShopIds: ['a', 'b', 'c', 'd', 'e', 'f'], refundShopIds: [] }],
+      ['a', 'b', 'c', 'd', 'e', 'f'],
+    );
+    expect(eligibility.eligible).toBe(false);
+    expect(netCellText(octoberTable(source))).toBe(WITHHELD_TEXT);
+  });
+
+  test('the floor is on DISTINCT shops, not on row count', () => {
+    const oneShopManyRows: DaySides = {
+      day: '2026-10-01',
+      saleShopIds: Array.from({ length: 50 }, () => 'shop-1'),
+      refundShopIds: Array.from({ length: 50 }, () => 'shop-1'),
+    };
+    expect(periodEligibility([oneShopManyRows], ['shop-1']).eligible).toBe(false);
+  });
+});
+
+// ─────────────────────── 16-18. every output, and no way round the boundary
+
+describe('every output path, and the boundary', () => {
+  const source = eligibleMonth(['2026-10-01']);
+
+  test('CSV, PDF and the rendered rows all carry the SAME published figure', () => {
+    const table = octoberTable(source, lookupFor(record()));
+    const csv = reportToCsv(table);
+    const pdf = reportToPdf(table);
+    expect(csvDataRow(csv)[1]).toBe('4000.00');
+    expect(pdf).toContain('4000.00');
+    expect(netCellText(table)).toBe('4000.00');
+    // And the recomputation appears in none of them.
+    expect(csv).not.toContain('10800.00');
+    expect(pdf).not.toContain('10800.00');
+  });
+
+  test('CSV writes an EMPTY cell for a withheld month, never a placeholder', () => {
+    const csv = reportToCsv(octoberTable(source));
+    expect(csvDataRow(csv)[1]).toBe(WITHHELD_TEXT);
+  });
+
+  test('a caller that does not pass a lookup gets WITHHELD, never published', () => {
+    // THE DEFAULT IS THE SAFE ONE. A route, a cache or an export that has not
+    // been taught about publications cannot disclose anything by omission —
+    // which is the direct-reader-bypass case, and the reason the option is
+    // absent rather than defaulting to "assume published".
+    const table = octoberTable(source);
+    expect(netCellText(table)).toBe(WITHHELD_TEXT);
+    expect(table.subtitle).toContain('could change');
+  });
+
+  test('the subtitle says what happened rather than asserting the policy', () => {
+    const published = octoberTable(source, lookupFor(record()));
+    expect(published.subtitle).toContain('published from immutable snapshots');
+    // The old unconditional sentence would now contradict its own rows.
+    expect(published.subtitle).not.toContain('could change');
+  });
+
+  test('a lookup that THROWS yields failed, not a figure and not a zero', () => {
+    const exploding: PublicationLookup = () => {
+      throw new Error('connection reset');
+    };
+    const money = resolveMonthlyMoney('2026-10', periodEligibility([], []), exploding);
+    expect(money.kind).toBe('failed');
+    expect(publishedAmount(money)).toBeNull();
+    if (money.kind === 'failed') expect(money.reason).toContain('connection reset');
+  });
+});
+
+// ─────────────────────────────────────────────────── the five distinct states
+
+describe('the five states stay distinguishable', () => {
+  const eligible = periodEligibility(
+    [
+      {
+        day: '2026-10-01',
+        saleShopIds: ['a', 'b', 'c', 'd', 'e'],
+        refundShopIds: ['a', 'b', 'c', 'd', 'e'],
+      },
+    ],
+    ['a', 'b', 'c', 'd', 'e'],
+  );
+
+  test('published', () => {
+    const money = resolveMonthlyMoney('2026-10', eligible, lookupFor(record()));
+    expect(money.kind).toBe('published');
+    expect(publishedAmount(money)).toBe(400_000 as Paisa);
+  });
+
+  test('withheld for the floor, with the floor reason', () => {
+    const short = periodEligibility(
+      [{ day: '2026-10-01', saleShopIds: ['a', 'b', 'c', 'd', 'e'], refundShopIds: ['a'] }],
+      ['a', 'b', 'c', 'd', 'e'],
+    );
+    const money = resolveMonthlyMoney('2026-10', short, () => undefined);
+    expect(money.kind).toBe('withheld');
+    if (money.kind === 'withheld') expect(money.reason).toContain('refunding pharmacies');
+  });
+
+  test('withheld although ELIGIBLE, with a different reason an operator can act on', () => {
+    // These two are different situations with different remedies: one needs
+    // more pharmacies, the other needs somebody to press publish. Telling an
+    // operator "fewer than five pharmacies" about a period that cleared the
+    // floor sends them after the wrong thing.
+    const money = resolveMonthlyMoney('2026-10', eligible, () => undefined);
+    expect(money.kind).toBe('withheld');
+    if (money.kind === 'withheld') {
+      expect(money.reason).toContain('has not been published');
+      expect(money.reason).not.toContain('fewer than');
+    }
+  });
+
+  test('no_activity, which is not the same as withheld', () => {
+    const quiet = periodEligibility(
+      [{ day: '2026-10-01', saleShopIds: [], refundShopIds: [] }],
+      [],
+    );
+    expect(resolveMonthlyMoney('2026-10', quiet, () => undefined).kind).toBe('no_activity');
+  });
+
+  test('failed, and it carries no amount', () => {
+    const money = resolveMonthlyMoney(
+      '2026-10',
+      eligible,
+      lookupFor(record({ cohortKey: 'elsewhere' })),
+    );
+    expect(money.kind).toBe('failed');
+    expect(publishedAmount(money)).toBeNull();
+  });
+
+  test('every state is reachable, so none of the above is dead code', () => {
+    const kinds = new Set([
+      resolveMonthlyMoney('2026-10', eligible, lookupFor(record())).kind,
+      resolveMonthlyMoney('2026-10', eligible, () => undefined).kind,
+      resolveMonthlyMoney(
+        '2026-10',
+        periodEligibility([{ day: '2026-10-01', saleShopIds: [], refundShopIds: [] }], []),
+        () => undefined,
+      ).kind,
+      resolveMonthlyMoney('2026-10', eligible, lookupFor(record({ cohortKey: 'x' }))).kind,
+    ]);
+    expect([...kinds].sort()).toEqual(['failed', 'no_activity', 'published', 'withheld']);
+  });
+});
+
+// ──────────────────────────────────────────── drift detection, for audit only
+
+describe('drift detection', () => {
+  test('no drift when the recomputation agrees', () => {
+    expect(publicationDrift(record(), asPaisa(400_000), DIGEST)).toBeNull();
+  });
+
+  test('reports a changed value, with the delta', () => {
+    const drift = publicationDrift(record(), asPaisa(399_300), DIGEST);
+    expect(drift?.deltaPaisa).toBe(-700);
+    expect(drift?.month).toBe('2026-10');
+  });
+
+  test('reports a changed source even when the total happens to match', () => {
+    // Two offsetting changes leave the total alone. The digest is what catches
+    // it, which is why provenance is recorded and not just the figure.
+    const drift = publicationDrift(record(), asPaisa(400_000), 'e'.repeat(64));
+    expect(drift).not.toBeNull();
+    expect(drift?.digestMatches).toBe(false);
+    expect(drift?.deltaPaisa).toBe(0);
+  });
+
+  test('detecting drift does NOT change what is served', () => {
+    // The served figure is the published row, drift or no drift. A publication
+    // that corrected itself would be a revision, and the revision is the
+    // disclosure.
+    const base = eligibleMonth(['2026-10-01']);
+    const late = { sales: base.sales, refunds: [...base.refunds, row(1, '2026-10-01', 700)] };
+    expect(publicationDrift(record(), asPaisa(399_300), 'e'.repeat(64))).not.toBeNull();
+    expect(netCellText(octoberTable(late, lookupFor(record())))).toBe('4000.00');
+  });
+});
+
+// ──────────────────────────────────────────────────────── the period helpers
+
+describe('the withheld cell has two forms and they must not be confused', () => {
+  test('the export form is empty and the display form is the em dash', () => {
+    // I WROTE THIS TEST BECAUSE I GOT IT WRONG. The first version of this file
+    // asserted the em dash against `reportTextRows`, which is the EXPORT path,
+    // and seven tests failed with `expected '' to be '—'`. The two forms exist
+    // for different reasons and conflating them in either direction is a
+    // defect: an export writing '—' gives a spreadsheet a placeholder in a
+    // money column, and a page rendering '' gives an operator a blank cell with
+    // no indication anything was withheld.
+    expect(WITHHELD_TEXT).toBe('');
+    expect(SUPPRESSED_DISPLAY).not.toBe(WITHHELD_TEXT);
+    const csv = reportToCsv(octoberTable(eligibleMonth(['2026-10-01'])));
+    expect(csvDataRow(csv)[1]).toBe('');
+    // Scoped to the DATA ROW. My first version asserted the em dash was absent
+    // from the whole document, and the column heading "Pharmacy sales, net of
+    // refunds" sits next to one in the preamble — so a true claim about the
+    // money cell was written as a false claim about the file.
+    expect(csvDataRow(csv).join('|')).not.toContain(SUPPRESSED_DISPLAY);
+  });
+});
+
+describe('period arithmetic', () => {
+  test('month ends are computed, not tabulated', () => {
+    expect(periodEndOf('2026-01')).toBe('2026-01-31');
+    expect(periodEndOf('2026-02')).toBe('2026-02-28');
+    expect(periodEndOf('2028-02')).toBe('2028-02-29');
+    expect(periodEndOf('2026-04')).toBe('2026-04-30');
+    expect(periodEndOf('2026-12')).toBe('2026-12-31');
+  });
+
+  test('period starts and the month round-trip', () => {
+    expect(periodStartOf('2026-10')).toBe('2026-10-01');
+    expect(monthOf(record())).toBe('2026-10');
+  });
+});

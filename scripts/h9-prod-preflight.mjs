@@ -65,9 +65,25 @@ export const H9_MIGRATIONS = Object.freeze([
   '20261008000100_h9_sync_staging_cleanup_schedule.sql',
   '20261015000000_h9_api_role_table_privileges.sql',
 ]);
-// E4 / Batch 3 — the only migration added since H-9 sealed the chain at 34.
+// E4 / Batch 3 — everything added since H-9 sealed the chain at 34.
+//
+// THE TAIL, and it is checked as a tail: the chain assertions below require
+// whatever follows the H-9 trio to equal this list EXACTLY, in order. So a
+// post-E4 migration that is not declared here is refused as
+// `migration-chain-unexpected`, and one declared here but absent from the
+// workdir is refused the same way.
+//
+// The name still says E4 because that is what every reader of this constant
+// calls the post-H-9 tail. `POST_E4_MIGRATIONS` in
+// backend/supabase/pgtest/checkFile.ts is the authoritative successor list, and
+// live-chain-succession.pgtest.ts asserts the two agree — so this cannot drift
+// from it without a gate failing.
 export const E4_MIGRATIONS = Object.freeze([
   '20261023000000_e4_batch3_admin_platform.sql',
+  // Migration 36, E4-B. The financial publication snapshot. NOT applied to any
+  // hosted project: this preflight is what refuses a workdir whose chain does
+  // not match, and declaring the file here is what makes that refusal accurate.
+  '20261030000000_e4b_publication_snapshots.sql',
 ]);
 // The chain, pinned by NAME rather than by count.
 //

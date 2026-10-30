@@ -666,6 +666,13 @@ describe('the GROSS boundary', () => {
     // call that cannot take a non-net argument in the first place.
     pharmacyNetSales: [
       'sumNetSales(result.pharmacy.pharmacySalesByMonth.map((month)=>month.totalPaisa),)',
+      // E4-B, lib/publicationWriter.ts: the figure being PUBLISHED, from the
+      // month's two sums through the shared subtraction. A third derivation
+      // site, declared to this guard rather than exempted from it — the
+      // NET_BOUNDARY_FILES exemptions are earned by standing at the provenance
+      // boundary and VERIFYING an opaque value, and the writer derives one, so
+      // it does not qualify for that exemption and must not be given it.
+      'netSalesPaisa(gross,refunds)',
     ],
   };
 
@@ -1433,6 +1440,12 @@ describe('the net anchors appear ONLY where they are pinned', () => {
       // renders. Three now rather than two: §6i added the card, which takes
       // the OPAQUE amount instead of a string the page formatted itself.
       'app/revenue/page.tsx': 3,
+      // E4-B: the binding, and the unwrap on the way to the RPC. TWO, and the
+      // second one matters — it is `netSalesAmount(pharmacyNetSales)`, which
+      // VERIFIES provenance before unwrapping. That line was a bare cast to
+      // number until a test caught it handing the opaque box itself to a
+      // bigint parameter, so this occurrence is the fix being pinned.
+      'lib/publicationWriter.ts': 2,
     },
   };
 

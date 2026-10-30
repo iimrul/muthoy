@@ -41,6 +41,14 @@ export const ADMIN_PERMISSIONS = [
   'reports.export',
   'settings.read',
   'settings.write',
+  // E4-B, 2026-10-30. Publishing an immutable financial snapshot. super_admin
+  // ONLY, and that is the strictest grant in this list for a reason: the action
+  // is irreversible by design — the database forbids UPDATE and DELETE on a
+  // published row — and it moves a pharmacy money figure from withheld to
+  // disclosed permanently. `revenue.read` lets a role look at money.
+  // `publications.write` lets a role decide that money is public. billing holds
+  // the first and deliberately not the second.
+  'publications.write',
 ] as const;
 export type AdminPermission = (typeof ADMIN_PERMISSIONS)[number];
 

@@ -423,6 +423,10 @@ export default defineConfig({
       // what was approved, and fails until a new migration is declared and
       // classified.
       "backend/supabase/pgtest/live-chain-succession.pgtest.ts",
+      // E4-B, migration 36. This list ENUMERATES files and discovers nothing,
+      // so an entry omitted here is a gate that silently never runs — the
+      // defect that nearly shipped with the live-chain gate itself.
+      "backend/supabase/pgtest/e4b-publication.pgtest.ts",
       // W4-05. Both barriers proven INDEPENDENTLY — the owner gate with the pin
       // bypassed, the pin with the gate bypassed — plus the seven working paths.
       "backend/supabase/pgtest/w405-shop-identity.pgtest.ts",

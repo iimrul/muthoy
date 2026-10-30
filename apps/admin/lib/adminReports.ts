@@ -67,6 +67,11 @@ import {
   type Aggregate,
   type DaySides,
 } from './adminSuppression';
+import {
+  periodEligibility,
+  resolveMonthlyMoney,
+  type PublicationLookup,
+} from './publication';
 import { formatCount, type PaymentOrderRow, type SubscriptionRow } from './adminViews';
 
 export type AdminReportId = (typeof ADMIN_REPORT_IDS)[number];
@@ -874,9 +879,25 @@ function suppressRows(
   netIndexes: readonly number[],
   confidentiality: ReportConfidentiality,
   revisionSafe: boolean,
+  publication: {
+    /** Looks a published snapshot up by `YYYY-MM`. */
+    readonly lookup: PublicationLookup;
+    /** The report's own bucket. Publications exist for whole months only. */
+    readonly grain: ReportDefinition['period'];
+  },
 ): {
   rows: readonly (readonly ReportCell[])[];
   suppressedBuckets: number;
+  /**
+   * How many money buckets came from a PUBLISHED snapshot.
+   *
+   * Returned so the subtitle can state what actually happened instead of
+   * asserting the policy. Before E4-B the caption said "this figure could
+   * change" unconditionally, which stops being true the moment one month is
+   * published — and a caption contradicting the rows is the defect GATE 5
+   * FINDING 9 was about.
+   */
+  publishedBuckets: number;
 } {
   // The withheld cell for one value column.
   //
@@ -924,7 +945,16 @@ function suppressRows(
   // price list rather than from any pharmacy's sales. A billing report that
   // ever joins to `sales` stops satisfying that and must be reclassified.
   if (confidentiality === 'platform_billing') {
-    return { rows: rows.map((row) => [row.key, ...row.values]), suppressedBuckets: 0 };
+    return {
+      rows: rows.map((row) => [row.key, ...row.values]),
+      suppressedBuckets: 0,
+      // Muthoy's own billing is not published through the snapshot mechanism
+      // and deliberately cannot be: the database CHECK on `metric_family`
+      // accepts only the pharmacy metric. These figures come from the
+      // operator-maintained price list, so they have no revision channel into
+      // protected pharmacy data to close.
+      publishedBuckets: 0,
+    };
   }
 
   // FOUNDER DECISION 2, 2026-10-30. A pharmacy MONEY figure that could still
@@ -939,22 +969,66 @@ function suppressRows(
   // the refund-net money columns, so this reaches `refund_net_pharmacy_sales`
   // and nothing else.
   if (!revisionSafe && netIndexes.length > 0) {
-    // ROUND 3 FINDING 1: a bucket that exists ONLY because of its refunds is
-    // omitted rather than blanked. A blank row still announces that there was
-    // something to withhold, and for a month with no sales that announcement
-    // is the refund.
-    const publishable = rows.filter((row) => row.existsWithoutRefunds !== false);
-    return {
-      rows: publishable.map((row) => [
+    // E4-B. A month is published or it is not, bucket by bucket.
+    //
+    // THE PUBLISHED VALUE REPLACES THE RECOMPUTED ONE. `row.values` already
+    // holds `netExportCell(<recomputed net>)`, and that cell is DISCARDED for a
+    // published month in favour of the snapshot's figure. That substitution is
+    // the entire point: serving the recomputation would reintroduce the channel
+    // the snapshot exists to close, because the recomputation is what moves.
+    //
+    // Publications are whole-month only, so a day- or snapshot-grained money
+    // report gets an empty lookup rather than one keyed on something that is
+    // not a month. `assertAnswerablePeriod` already refuses a partial month
+    // before any row is built, so a month key here covers the same window the
+    // publication does.
+    const lookup: PublicationLookup =
+      publication.grain === 'month' ? publication.lookup : () => undefined;
+    const out: (readonly ReportCell[])[] = [];
+    let withheld = 0;
+    let published = 0;
+    for (const row of rows) {
+      const money = resolveMonthlyMoney(
+        row.key,
+        periodEligibility(row.subPeriodDays ?? [], row.contributorIds),
+        lookup,
+      );
+      if (money.kind === 'published') {
+        published += 1;
+        out.push([
+          row.key,
+          ...row.values.map((value, index) =>
+            netIndexes.includes(index)
+              // THROUGH the shared subtraction, not around it. `netExportCell`
+              // takes a branded NetSales that only `netSalesPaisa` mints, so
+              // the published figure is rebuilt from its two published sides.
+              // The database CHECK value_paisa = gross_paisa - refunds_paisa
+              // makes this identical to what was published; a cast would have
+              // produced the brand without the guarantee.
+              ? netExportCell(netSalesPaisa(money.grossPaisa, money.refundsPaisa))
+              : value,
+          ),
+        ]);
+        continue;
+      }
+      // ROUND 3 FINDING 1: a bucket that exists ONLY because of its refunds is
+      // omitted rather than blanked. A blank row still announces that there was
+      // something to withhold, and for a month with no sales that announcement
+      // is the refund. Still true when the month is unpublished — and NOT true
+      // when it is published, which is why this test sits after the published
+      // branch rather than before the loop as a filter.
+      if (row.existsWithoutRefunds === false) continue;
+      // ROUND 4 FINDING 1: only what is SHOWN is counted, so the subtitle
+      // cannot disclose an omitted bucket.
+      withheld += 1;
+      out.push([
         row.key,
         ...row.values.map((value, index) =>
           netIndexes.includes(index) ? withheldNetCell() : value,
         ),
-      ]),
-      // ROUND 4 FINDING 1: `rows.length` counted the omitted bucket, so the
-      // subtitle disclosed it. Only what is shown is counted.
-      suppressedBuckets: publishable.length,
-    };
+      ]);
+    }
+    return { rows: out, suppressedBuckets: withheld, publishedBuckets: published };
   }
 
   for (const row of rows) {
@@ -1027,7 +1101,10 @@ function suppressRows(
     out.push([row.key, ...row.values]);
   }
 
-  return { rows: out, suppressedBuckets };
+  // The k-floor path, reached only when publication is revision-safe by policy.
+  // Nothing here reads a snapshot: these are the non-money aggregates and the
+  // floor-governed counts, which have no publication identity.
+  return { rows: out, suppressedBuckets, publishedBuckets: 0 };
 }
 
 /**
@@ -1316,6 +1393,16 @@ export function buildReportTable(
      * is the vacuity this batch has been caught by three times.
      */
     revisionSafe?: boolean;
+    /**
+     * E4-B. Looks up a published immutable snapshot by `YYYY-MM`.
+     *
+     * OPTIONAL, AND ABSENT MEANS WITHHELD — never "assume published". Omitting
+     * it makes every money bucket resolve to withheld, which is exactly the
+     * behaviour before this option existed, so a caller that has not been
+     * taught about publications cannot accidentally disclose anything. The
+     * dangerous default would have been the other one.
+     */
+    publications?: PublicationLookup;
   } = {},
 ): ReportTable {
   const revisionSafe = options.revisionSafe ?? PUBLICATION_IS_REVISION_SAFE;
@@ -1347,15 +1434,23 @@ export function buildReportTable(
   // §6i round 11: the net columns are resolved — and verified — HERE, on the
   // rows that become the exported bytes.
   const netIndexes = netValueIndexes(entry);
-  const { cells, suppressedBuckets } =
+  const { cells, suppressedBuckets, publishedBuckets } =
     entry.kind === 'aggregate'
       ? (() => {
-          const gated = suppressRows(built, netIndexes, entry.confidentiality, revisionSafe);
-          return { cells: gated.rows, suppressedBuckets: gated.suppressedBuckets };
+          const gated = suppressRows(built, netIndexes, entry.confidentiality, revisionSafe, {
+            lookup: options.publications ?? (() => undefined),
+            grain: entry.period,
+          });
+          return {
+            cells: gated.rows,
+            suppressedBuckets: gated.suppressedBuckets,
+            publishedBuckets: gated.publishedBuckets,
+          };
         })()
       : {
           cells: built.map((row) => [row.key, ...row.values]),
           suppressedBuckets: 0,
+          publishedBuckets: 0,
         };
   // NOT flattened here. Round 12 finding 4: the text is produced by
   // `reportTextRows`, at the serializer, so there is no window between a
@@ -1382,8 +1477,22 @@ export function buildReportTable(
   } else if (entry.kind === 'aggregate') {
     parts.push("Muthoy's own subscription billing — no pharmacy floor applies");
   }
+  // E4-B. Say what happened, not what the policy is.
+  //
+  // This used to push REVISABLE_WITHHOLDING unconditionally, which asserts
+  // "this figure could change" over rows that may now carry an immutable
+  // published value. A caption contradicting its own rows is GATE 5 FINDING 9,
+  // and it would be the same defect in the other direction: understating what
+  // has been disclosed.
   if (!revisionSafe && netIndexes.length > 0) {
-    parts.push(REVISABLE_WITHHOLDING);
+    if (publishedBuckets > 0) {
+      parts.push(
+        publishedBuckets + ' published from immutable snapshots'
+        + (suppressedBuckets > 0 ? '; the rest withheld' : ''),
+      );
+    } else {
+      parts.push(REVISABLE_WITHHOLDING);
+    }
   }
 
   return mintTable({
@@ -1401,8 +1510,13 @@ export function buildReportTable(
 export async function buildReport(
   query: AdminReportExportQuery,
   source: ReportSource,
+  options: { publications?: PublicationLookup } = {},
 ): Promise<ReportTable> {
-  return buildReportTable(query.reportId, await source(query), query);
+  // FORWARDED, not re-derived. CSV, PDF and the API routes all reach the table
+  // through here, so threading the lookup at this one point is what makes
+  // "every output uses the same publication policy" true rather than claimed.
+  // A second path that built its own lookup would be a second policy.
+  return buildReportTable(query.reportId, await source(query), query, options);
 }
 
 // ───────────────────────────────────────────────────────────────── the exports
