@@ -1,0 +1,33 @@
+// Separate N0 child boundary. No credential retrieval. No hosted transport.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { NODE, SOURCE_REVISION, refuse, sha256, noReparse } from './h9-a5-dev-readonly.mjs';
+
+export const APPROVAL_ID = 'founder-N0-final-20261019';
+export const BOUNDARY = 'N0_GET_ONLY_20261019';
+export const POWERSHELL = Object.freeze({ path: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', sha256: 'bfb46af89433268872ddb43d1ca7a3f433452ee91ed356a9786940f90118e285' });
+export const FILES = Object.freeze(['h9-a5-dev-readonly.mjs', 'n0-account-inventory.mjs', 'n0-runtime.mjs', 'n0-with-token.ps1', 'run-n0.cmd', 'verify-n0.cmd'].sort());
+
+export function verifyN0Runtime(root) {
+  noReparse(root);
+  const path = join(root, 'runtime-manifest.json');
+  noReparse(path);
+  const m = JSON.parse(readFileSync(path, 'utf8'));
+  if (m.version !== 1 || m.boundary !== BOUNDARY || m.approvalId !== APPROVAL_ID || m.runtimeFilesGitCommit !== null || m.runtimeFilesUncommitted !== true || !/^[a-f0-9]{40}$/.test(m.workingTreeBaseCommit ?? '') || m.historicalSourceRevisionLabel !== SOURCE_REVISION || JSON.stringify(m.node) !== JSON.stringify(NODE) || JSON.stringify(Object.keys(m.files ?? {}).sort()) !== JSON.stringify(FILES)) refuse('n0-runtime-manifest');
+  if (process.execArgv.length || process.execPath.toLowerCase() !== NODE.path.toLowerCase() || process.version !== NODE.version || sha256(readFileSync(process.execPath)) !== NODE.sha256) refuse('n0-runtime-process');
+  for (const name of FILES) {
+    const file = join(root, name);
+    noReparse(file);
+    if (!/^[a-f0-9]{64}$/.test(m.files[name]) || sha256(readFileSync(file)) !== m.files[name]) refuse('n0-runtime-hash');
+  }
+  noReparse(POWERSHELL.path);
+  if (sha256(readFileSync(POWERSHELL.path)) !== POWERSHELL.sha256) refuse('n0-runtime-powershell');
+  // Ask the pinned launcher to re-prove owner/ACL/ancestor/executable checks. Only
+  // allowlisted OS environment survives; the token never enters this verifier.
+  const env = {};
+  for (const key of ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA']) if (process.env[key] !== undefined) env[key] = process.env[key];
+  const check = spawnSync(POWERSHELL.path, ['-NoProfile', '-File', join(root, 'n0-with-token.ps1'), '-VerifyOnly'], { env, encoding: 'utf8', windowsHide: true, timeout: 30_000 });
+  if (check.status !== 0 || check.error || check.stdout.trim() !== 'N0 LAUNCH VERIFIED; credentials=not-read' || check.stderr.trim()) refuse('n0-runtime-acl');
+  return m;
+}

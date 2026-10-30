@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "projectRef": "btfprhticjgeihcngpif",
+  "approvalDate": "2026-10-19",
+  "approvalSource": "Founder answer: Approve proposal",
+  "recoveryOwner": "Founder Imrul",
+  "scheduledMaintenanceMinutes": 90,
+  "rpo": "Zero committed DEV transaction loss at the accepted stable checkpoint; offline/unpushed device work excluded",
+  "restoreVerificationRtoMinutes": 60,
+  "minimumEncryptedRetentionDays": 7,
+  "automaticDeletion": false,
+  "credentialMethod": "Separate reviewed H5 launcher; masked founder entry; private stdin; one-use mode-0600 tmpfs passfile",
+  "backupKeyCustody": "Distinct founder-held backup recovery passphrase through protected prompt",
+  "executionGatesRemainRequired": true,
+  "writerPauseStarted": false,
+  "backupOrRestoreAccepted": false
+}
