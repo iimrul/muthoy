@@ -116,6 +116,37 @@ evidence file would change E4's accepted counts, and rewriting what was accepted
 is a different act from updating its checks. The successor gate is post-E4 work
 under its own review.
 
+### The SIXTH gate, which my own probe could not have found
+
+Having written the above I went looking for a gate that a probe cannot find, and
+there is one. **`scripts/h9-prod-preflight.mjs` pins the chain as a hardcoded
+35-entry `EXPECTED_CHAIN`** and refuses `migration-chain-unexpected` on any
+workdir that does not match it exactly.
+
+It did not appear in the 13 failures, and it could not have. **It never reads
+the migrations directory.** So a new migration does not make it fail — it makes
+it *silently wrong*, and you would find out when a hosted preflight refused a
+legitimate workdir. Nothing locally cross-checked its list against the real
+chain; I verified that `apps/mobile/tests/h9-prod-preflight.test.ts` never
+mentions `EXPECTED_CHAIN`, `migrationFiles` or `readdirSync`.
+
+This is the same defect as the fifth gate, one layer further out. The parity
+test's own comment warned about exactly this shape — a gate that constrains the
+chain without naming the number — and I still had to go looking a second time
+rather than finding it by measurement.
+
+**Fixed, and mutation-checked:** the live-chain gate now asserts
+`EXPECTED_CHAIN` equals the declared live chain. The preflight keeps its own
+hardcoded list, because its comment is right that deriving it from the workdir
+it checks would make the check circular — two independent declarations are
+fine, two that can drift apart unnoticed are not. Declaring a migration the
+preflight does not know about now fails three tests locally instead of one
+hosted preflight later.
+
+**So a migration joining the chain must now move three things together:**
+`POST_E4_MIGRATIONS`, `rollback-classification.json`, and the preflight's
+`EXPECTED_CHAIN`. The live-chain gate fails until all three agree.
+
 **Still retained:** all suppression. Option B removes the blocker to building
 the publication mechanism; it publishes nothing and relaxes nothing.
 

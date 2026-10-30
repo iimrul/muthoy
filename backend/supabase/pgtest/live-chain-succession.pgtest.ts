@@ -8,6 +8,7 @@ import {
   e4ChainMigrationFiles,
   expectedLiveMigrationFiles,
 } from './checkFile';
+import { EXPECTED_CHAIN } from '../../../scripts/h9-prod-preflight.mjs';
 
 // THE LIVE CHAIN GATE — founder Option B, approved 2026-10-30.
 //
@@ -84,6 +85,20 @@ describe('the live migration chain is exactly the approved chain', () => {
 
   it('keeps the H-9 block contiguous', () => {
     expect(h9BlockDrift(migrationFiles())).toBeNull();
+  });
+
+  it('keeps the production preflight in step with the declared chain', () => {
+    // THE SIXTH GATE, and it fails differently from the other five: it never
+    // reads the migrations directory, so a new migration does not make it fail
+    // -- it makes it SILENTLY WRONG, and you find out when a hosted preflight
+    // refuses a legitimate workdir with `migration-chain-unexpected`.
+    //
+    // Its own comment says the list is "hardcoded deliberately ... so deriving
+    // it from that workdir would make the check circular", and that is right:
+    // it must stay an independent expectation at run time. Two independent
+    // declarations are fine; two that can drift apart unnoticed are not. So the
+    // preflight keeps its own list and this asserts the two agree.
+    expect([...EXPECTED_CHAIN]).toEqual(expectedLiveMigrationFiles());
   });
 
   it('classifies every post-E4 migration for rollback before it may ship', () => {
