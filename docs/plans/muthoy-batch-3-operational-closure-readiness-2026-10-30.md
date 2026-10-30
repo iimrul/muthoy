@@ -3,10 +3,10 @@
 **Date:** 2026-10-30, revised the same day after the founder's Round 9 decisions
 **Accepted application code:** `ef08537` (unchanged by this work)
 **Delivered:** `origin/main` at `87ec9dc`, CI run `41022095283` success
-**Local tip:** `d6f6f8f` — **nine** commits, **not yet pushed**
-**Classification:** **CODE-COMPLETE, NOT CLOSED.** The nine outgoing commits
-include four written after the last dual review, so they are **NOT yet
-dual-reviewed** — see §5.4.
+**Delivered:** `origin/main` at **`d395ce8`** — 18 commits, dual-accepted and
+pushed; CI run `41052144668` **success**
+**Classification:** **CODE-COMPLETE AND DUAL-REVIEWED, NOT CLOSED.** See §5.15
+for the delivery record and §6 for what remains open.
 
 > **Revision note.** This report is revised, not rewritten. The corrections
 > round 9 forced on me are left visible in §2 and §3.5 rather than tidied away:
@@ -329,7 +329,13 @@ writer, the reader integration, and local privacy verification — then a hosted
 authorization. **All suppression is retained until every one of those is done
 and independently verified.** Nothing about Option B changes what publishes.
 
-### 5.3 Dual-reviewed implementation — **PARTIAL, and this is the honest gap**
+### 5.3 Dual-reviewed implementation — **COMPLETE, after seven rounds**
+
+**Resolved.** Rounds 10 to 17 closed this gap; the record is §§5.9-5.15 and the
+dual verdict on `d395ce8` is in §5.15. What follows is the gap as it stood when
+this section was first written, kept rather than rewritten.
+
+#### As it stood before those rounds
 
 | Revision | Reviewed |
 |---|---|
@@ -342,12 +348,11 @@ Round 10 reviewed `72729ca` and returned **REVISE** with 2 HIGH and 2 MEDIUM.
 It also corrected the wording here: "four of nine" was imprecise. The accurate
 statement is in §5.9, which records that round and what it changed.
 
-### 5.4 Pushed and CI-verified changes — **NONE since `87ec9dc`**
+### 5.4 Pushed and CI-verified changes — **DONE**
 
-`origin/main` is still `87ec9dc` with CI run `41022095283` success. **Nine
-commits are local and unpushed.** No CI has run on any of them. The push is
-conditionally authorized by the founder *after* the acceptance and safety gates
-pass, and §5.3 is the gate that has not.
+`origin/main` is **`d395ce8`**, 18 commits delivered, CI run `41052144668`
+success. The acceptance and safety gates the founder made the push conditional
+on are recorded in §5.15, including what CI did and did not run.
 
 ### 5.5 Hosted approvals pending — **ALL OF THEM**
 
@@ -674,6 +679,65 @@ EPERM`), the complete disk fixture, the installer behavioural cases or the full
 native probe.** So the standing limitation holds to the end: **there are not two
 independently executed test suites, and my own execution totals cannot be
 authenticated from repository contents alone.**
+
+### 5.15 The dual acceptance, and the delivery
+
+**Both verdicts name the same revision**, which is what the protocol required
+and what seven rounds were spent reaching.
+
+| Agent | Verdict |
+|---|---|
+| Codex | **`ROUND 17: ACCEPT d395ce86de2c5938756dedc75ca4c5c8cc8206c3`** -- "No remaining blocker found." Documentation-only delta confirmed; application code and suppression unchanged; four sealed SQL files identical to upstream; zero token or private-key matches across 18 commits' messages, patches **and changed blobs**; E4 manifest no drift |
+| Claude | **ACCEPT `d395ce8`** as a revision safe to deliver, with the limitations recorded in this section. I authored every line in the range, so this acceptance is only meaningful because Codex reviewed it afterwards -- which is the rule this directive imposed |
+
+**Pre-push safety, each verified rather than assumed:**
+
+| Check | Result |
+|---|---|
+| `origin/main` had not moved | still `87ec9dc` at push time |
+| Fast-forward | `origin/main` an ancestor of HEAD; 0 behind, 18 ahead |
+| HEAD equals the accepted SHA | exact match |
+| Index | empty, so only committed work shipped |
+| Push form | explicit refspec, **non-force**, nothing rewritten |
+
+**Delivery, read back from the remote:**
+
+| Step | Result |
+|---|---|
+| Push | `87ec9dc..d395ce8` on `main` |
+| Remote tip, via `git ls-remote` | **`d395ce8`** -- exactly the dual-accepted revision |
+| History preserved | `87ec9dc` is still an ancestor of the new tip |
+| Local and remote | in sync, 0 ahead / 0 behind |
+| GitHub CI | run **`41052144668`**, head_sha matches, `main`, push event, **completed / success** |
+
+**What CI actually ran, stated precisely because the name matters.** That run
+has **one job: `lint-and-typecheck`.** So CI success means lint and typecheck
+passed on the delivered revision. **It did not run the test suite.** The 516
+vitest, 165 node, 27 PowerShell and 13-check probe figures are my local
+execution on this revision, not CI's, and Codex's closing line applies to them:
+*"Your reported test totals remain uncorroborated measurements."*
+
+**My own final verification on `d395ce8`,** offered as measurement and not as
+corroborated fact:
+
+| Check | Result |
+|---|---|
+| Chain, evidence, preflight and suppression gates | 516 passed across 12 files |
+| H-9 node suites | 165 passed, 0 failed |
+| Installer staging gate | 27 checks; staging 0, execution 0, credentials 0, network 0 |
+| Path-lock probe | 13 passed, 0 skipped, 0 failed |
+| Workspace typecheck | 7 of 7 |
+| E4 evidence manifest | no drift |
+| Migrations 34 and 35, both check SQL files | identical to upstream |
+| `audit-artifacts/**`, prototype-web, application code in range | 0, 0, 0 |
+| Preview worktree | untouched, detached at `bd0fa4d` |
+
+**The limitation that stands at the end, unchanged from the beginning.** Codex
+could not start vitest in any of the seven rounds (`spawn EPERM`), nor run the
+installer behavioural cases, nor the full native probe. **There are two
+independent code reviews plus its Node and PGlite probes -- not two
+independently executed test suites.** Nothing in this report should be read as
+claiming otherwise.
 
 ---
 
