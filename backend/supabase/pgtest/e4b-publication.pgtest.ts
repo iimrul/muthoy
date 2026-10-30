@@ -405,10 +405,31 @@ describe('E4-B publication snapshots', () => {
     expect(row.n).toBe('0');
   });
 
-  it('refuses an all-zero row at the CONSTRAINT too, not only in the function', async () => {
+  it('refuses a no-trade row at the CONSTRAINT, isolated from the k floor', async () => {
+    // ROUND 24 FINDING 2. The test here supplied zero trading days AND zero
+    // contributors, so removing `days_requiring_floor > 0` from the constraint
+    // still rejected the row through `contributor_count >= k_floor` — the
+    // reviewer deleted the control this test names and all 41 pgtests passed.
+    //
+    // SIX CONTRIBUTORS, deliberately: that clears the k floor, so the only
+    // thing left to refuse the row is the no-trade clause. The two
+    // implementations now disagree on this input, which is the whole point of
+    // asserting it.
     const refusal = await attemptAsOwner(
       rawInsert(`${quote(METRIC)}, ${quote(COHORT)}, 'month', '2026-06-01', '2026-06-30',
-         0, 0, 0, 0, 0, ${quote(DIGEST_A)}, 5, 0, 0, 0, 'x'`),
+         0, 0, 0, 0, 0, ${quote(DIGEST_A)}, 5, 6, 0, 0, 'x'`),
+    );
+    expect(refusal?.code).toBe('23514');
+    expect(refusal?.message).toContain('cohort_eligible');
+  });
+
+  it('refuses a below-floor row too, so the clause above is not the only one', async () => {
+    // The other half of the same constraint, isolated the other way: real
+    // trade, a cohort of four. Without both tests, one clause could be deleted
+    // unnoticed.
+    const refusal = await attemptAsOwner(
+      rawInsert(`${quote(METRIC)}, ${quote(COHORT)}, 'month', '2026-06-01', '2026-06-30',
+         1, 0, 1, 1, 0, ${quote(DIGEST_A)}, 5, 4, 1, 1, 'x'`),
     );
     expect(refusal?.code).toBe('23514');
     expect(refusal?.message).toContain('cohort_eligible');
@@ -457,24 +478,47 @@ describe('E4-B publication snapshots', () => {
     expect(refusal?.message).toContain('finite_period');
   });
 
-  it('judges "has it ended" by the DHAKA date, not the server date', async () => {
-    // ROUND 19 FINDING 3. This was `current_date`, the database's own date in
-    // its own timezone — UTC on a hosted project. Dhaka is UTC+6, so for six
-    // hours of every day the two disagree, and a month that had ended in Dhaka
-    // was refused. GATE 5 FINDING 10 was the same class of defect: six hours of
-    // every day filed on the wrong side of a boundary.
+  it('declares the period-ended guard against the DHAKA date, structurally', async () => {
+    // ROUND 24 FINDING 1, AND THE TEST THAT USED TO BE HERE WAS VACUOUS.
     //
-    // Asserted as a RELATIONSHIP rather than against a fixed clock, because a
-    // test pinned to a date stops testing this the day after it is written.
-    const row = await h.one<{ dhaka: string; server: string; ahead: boolean }>(`
+    // It compared `(now() at time zone 'Asia/Dhaka')::date` with `current_date`
+    // in SQL and asserted Dhaka was not behind — a property of PostgreSQL, not
+    // of this migration. The reviewer reverted the guard to bare `current_date`
+    // and all 41 pgtests still passed. I had even written a comment praising it
+    // for asserting "a RELATIONSHIP rather than against a fixed clock", which
+    // was precisely the error.
+    //
+    // STRUCTURAL, and deliberately so. The behavioural test below exercises the
+    // real function but can only distinguish the two implementations during the
+    // six-hour window where the dates differ — a quarter of the day. This
+    // assertion catches the mutation at every hour, which is what a guard
+    // against regression has to do.
+    const source = migrationSql('20261030000000_e4b_publication_snapshots.sql');
+    expect(source).toContain("p_period_end >= (now() at time zone 'Asia/Dhaka')::date");
+    // And no bare `current_date` comparison survives anywhere in the file.
+    expect(source).not.toMatch(/p_period_end\s*>=\s*current_date/);
+  });
+
+  it('refuses a period ending on the Dhaka day it is still inside, and accepts yesterday', async () => {
+    // The BEHAVIOURAL half, through the real RPC, with both boundaries computed
+    // from the database's own Dhaka date so the test does not depend on when it
+    // is run.
+    const today = await h.one<{ dhaka: string; prev: string; first: string }>(`
       select (now() at time zone 'Asia/Dhaka')::date::text as dhaka,
-             current_date::text as server,
-             (now() at time zone 'Asia/Dhaka')::date >= current_date as ahead`);
-    // Dhaka is never BEHIND UTC, which is what makes the fix a strict relaxation.
-    expect(row.ahead).toBe(true);
-    // And the guard reads the Dhaka one: a period ending on Dhaka's yesterday
-    // publishes, whatever the server's date happens to be.
-    expect(row.dhaka >= row.server).toBe(true);
+             ((now() at time zone 'Asia/Dhaka')::date - 1)::text as prev,
+             date_trunc('month', (now() at time zone 'Asia/Dhaka')::date)::date::text as first`);
+
+    // A period whose end is TODAY in Dhaka has not ended.
+    const refused = await attempt(
+      'service_role',
+      publishCall({ start: today.first, end: today.dhaka }),
+    );
+    expect(refused?.code).toBe('23001');
+    expect(refused?.message).toContain('has not ended in Dhaka');
+
+    // And the refusal names the Dhaka date rather than the server's, which is
+    // the distinction the structural assertion above pins.
+    expect(refused?.message).toContain(today.dhaka);
   });
 
   it('refuses a k_floor below the approved 5, so the floor is not caller-selectable', async () => {

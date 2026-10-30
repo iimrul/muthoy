@@ -331,6 +331,15 @@ export function monthEnd(day: string): string {
   return periodEndOf(day.slice(0, 7));
 }
 
+/** A `YYYY-MM-DD` that is a real calendar date. */
+function isCalendarDay(day: string): boolean {
+  if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(day)) return false;
+  // The day must exist in that month: 2026-02-30 matches the shape and is not
+  // a date. Compared against the arithmetic month end, which is the same
+  // function the range rule uses, so the two cannot disagree.
+  return day <= monthEnd(day);
+}
+
 /**
  * Refuses a range a report cannot answer without becoming reconstructable.
  *
@@ -379,6 +388,20 @@ export function assertWholeMonthRange(
   range: { from?: string; to?: string },
   subject: string,
 ): void {
+  // THE SHAPE FIRST. ROUND 24 FINDING 3: this compared `to === monthEnd(to)`
+  // and nothing validated `to`, so an invalid month whose arithmetic end was
+  // itself validated against itself. The control has to check its own input
+  // rather than rely on arithmetic to reject it — and `periodEndOf` now throws
+  // on an invalid month, so comparing first would throw instead of refusing.
+  for (const bound of [range.from, range.to]) {
+    if (bound !== undefined && !isCalendarDay(bound)) {
+      throw new AdminReportFilterError(
+        subject + ' was given a range bound that is not a calendar date: ' + bound
+        + '. Use YYYY-MM-DD.',
+      );
+    }
+  }
+
   const starts = range.from === undefined || range.from.endsWith('-01');
   const ends = range.to === undefined || range.to === monthEnd(range.to);
   if (starts && ends) return;

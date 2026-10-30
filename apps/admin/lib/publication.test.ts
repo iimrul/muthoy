@@ -591,12 +591,44 @@ describe('zero refunds and the k floor', () => {
   });
 
   test('the floor is on DISTINCT shops, not on row count', () => {
+    // ROUND 24 FINDING 4. This used to pass `['shop-1']` as the period's
+    // contributors, so the row was refused TWICE OVER — once by the daily
+    // deduplication this test names, and once by the period cohort of one
+    // falling below k. The reviewer removed the deduplication and the
+    // assertion still held, so the test proved nothing about the rule in its
+    // own title.
+    //
+    // SIX PERIOD CONTRIBUTORS and a SECOND QUALIFYING DAY, so the cohort floor
+    // is satisfied and the only thing left to refuse the period is the one
+    // shop repeated fifty times on day one.
     const oneShopManyRows: DaySides = {
       day: '2026-10-01',
       saleShopIds: Array.from({ length: 50 }, () => 'shop-1'),
       refundShopIds: Array.from({ length: 50 }, () => 'shop-1'),
     };
-    expect(periodEligibility([oneShopManyRows], ['shop-1']).eligible).toBe(false);
+    const sixDistinctShops: DaySides = {
+      day: '2026-10-02',
+      saleShopIds: ['a', 'b', 'c', 'd', 'e', 'f'],
+      refundShopIds: ['a', 'b', 'c', 'd', 'e', 'f'],
+    };
+    const cohort = ['shop-1', 'a', 'b', 'c', 'd', 'e', 'f'];
+
+    const eligibility = periodEligibility([oneShopManyRows, sixDistinctShops], cohort);
+    expect(eligibility.eligible).toBe(false);
+    // Exactly ONE of the two days failed, and it is the deduplicated one.
+    expect(eligibility.daysRequiringFloor).toBe(2);
+    expect(eligibility.daysClearingFloor).toBe(1);
+    // And the cohort floor is NOT what refused it, which is the isolation.
+    expect(eligibility.contributorCount).toBe(7);
+    expect(eligibility.reason).not.toContain('below the k=5 floor');
+
+    // The control, stated: the same day with fifty DISTINCT shops passes.
+    const fiftyDistinct: DaySides = {
+      day: '2026-10-01',
+      saleShopIds: Array.from({ length: 50 }, (_, i) => 'shop-' + i),
+      refundShopIds: Array.from({ length: 50 }, (_, i) => 'shop-' + i),
+    };
+    expect(periodEligibility([fiftyDistinct, sixDistinctShops], cohort).eligible).toBe(true);
   });
 });
 

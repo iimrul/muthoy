@@ -414,10 +414,27 @@ const MONTH_LENGTHS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
  * (`Date.UTC(2026, 13, 0)` being 2027-01-31) which round 21 found.
  */
 export function periodEndOf(month: string): string {
+  // AN INVALID MONTH MUST NOT PRODUCE A SELF-VALIDATING ANSWER.
+  //
+  // ROUND 24 FINDING 3, and it was a regression I introduced. The fallback used
+  // to be `?? 0`, so `periodEndOf('2026-13')` returned `'2026-13-00'` — and
+  // `assertWholeMonthRange` tests `to === monthEnd(to)`, so a range ending
+  // `2026-13-00` validated against itself and was ACCEPTED. The `Date`-based
+  // version it replaced returned 2027-01-31 and refused it. My fix for a
+  // date-normalisation bug made a privacy control more permissive.
+  //
+  // `assertWholeMonthRange` is the control that stops a caller picking a window
+  // INSIDE a month and differencing two overlapping ranges, so "more
+  // permissive" there is the direction that matters. Throwing is the right
+  // answer: every legitimate caller has already validated the month, and a
+  // caller that has not should not receive a plausible-looking string.
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw new RangeError('not a calendar month: ' + month);
+  }
   const year = Number(month.slice(0, 4));
   const monthNumber = Number(month.slice(5, 7));
   const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  const length = monthNumber === 2 && leap ? 29 : (MONTH_LENGTHS[monthNumber - 1] ?? 0);
+  const length = monthNumber === 2 && leap ? 29 : MONTH_LENGTHS[monthNumber - 1]!;
   return month + '-' + String(length).padStart(2, '0');
 }
 
