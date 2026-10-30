@@ -615,11 +615,54 @@ patches.**
 | 11 | 2 HIGH, 1 MEDIUM |
 | 12 | 1 MEDIUM, 1 LOW |
 | 13 | 1 MEDIUM, 2 LOW |
-| 14 | **1 LOW, test tooling only, no implementation regression** |
+| 14 | 1 LOW, test tooling only, no implementation regression |
+| 15 | 1 LOW, **documentation only** -- the arithmetic two lines below |
 
-Seven HIGH or MEDIUM findings across five rounds, **every one of them mine**,
-and three of them defects in my fix to the previous round's defect. The
-protocol is the only reason any of them surfaced.
+**Nine** HIGH or MEDIUM findings across these rounds, **every one of them
+mine**. I first wrote "seven" here, in the sentence where I was being
+self-critical, and round 15's only finding was that the number contradicted my
+own table. It did: 4 + 3 + 1 + 1 = 9.
+
+The other claim in that sentence was understated too, and the corrected version
+is worse: I said three findings were defects in my fix to the previous round's
+defect. Recounting, **five of the six rounds found their defects entirely inside
+the immediately preceding remediation** -- round 11 in round 10's work, round 12
+in round 11's, round 13 in round 12's, round 14 in round 13's, and round 15 in
+round 14's own record. Only round 10 reviewed work that was not itself a
+remediation.
+
+**The protocol is the only reason any of this surfaced.** Left to my own
+verification I would have shipped after round 9.
+
+### 5.14 Round 15 -- documentation only, on the push candidate
+
+**`ROUND 15: REVISE` on `ff282bc`. One LOW, documentation only.** The verdict's
+own words: **"No HIGH/MEDIUM or new implementation regression found."**
+
+The finding was that my "seven HIGH or MEDIUM" contradicted my own table, which
+totals nine. Reproduced by arithmetic. Corrected above, together with a second
+understated claim in the same sentence.
+
+**What round 15 verified on the code**, which is what the push gate needs:
+
+| Check | Result |
+|---|---|
+| The digest expectation is independent of the reader | **confirmed** -- both the always-read-34 and always-read-35 mutations fail |
+| CRLF folding matches the manifest convention | **confirmed** -- LF and CRLF both pass, content changes fail, and an EOL-only checkout change cannot break the digest |
+| `successorNameDrift` matches the assertions it replaced | **confirmed** -- all 35 existing filenames satisfy it; malformed and non-successor cases fail |
+| Any further unguarded live-chain expectation | **none found** |
+| Application code and financial suppression | **unchanged** |
+| Migrations 34 and 35, both check SQL files | **identical to upstream by Git blob AND by raw working-tree bytes** |
+| `audit-artifacts/**` or prototype paths in any commit | **none**; index empty; four prototype paths unstaged |
+| Token and private-key scans | **zero matches across all 16 commits' messages and patches** |
+
+It executed 100 Node tests, 23 of the 24 live-chain test bodies through
+in-memory transpilation, six PGlite history probes, the reader mutations, and
+the manifest and diff checks. **It still could not execute vitest (`spawn
+EPERM`), the complete disk fixture, the installer behavioural cases or the full
+native probe.** So the standing limitation holds to the end: **there are not two
+independently executed test suites, and my own execution totals cannot be
+authenticated from repository contents alone.**
 
 ---
 
