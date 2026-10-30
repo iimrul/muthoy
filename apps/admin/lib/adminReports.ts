@@ -887,6 +887,15 @@ function suppressRows(
   publication: {
     /** Looks a published snapshot up by `YYYY-MM`. */
     readonly set: PublicationSet;
+    /**
+     * Whether a month is inside the REQUESTED range.
+     *
+     * Passed in rather than computed here, because this function has no query:
+     * I wrote `monthInRange(month, query)` inside it while fixing ROUND 22
+     * FINDING 3 and it referenced a parameter that does not exist. The range is
+     * caller-chosen and public, so scoping by it leaks nothing.
+     */
+    readonly inScope: (month: string) => boolean;
     /** The report's own bucket. Publications exist for whole months only. */
     readonly grain: ReportDefinition['period'];
   },
@@ -1044,7 +1053,8 @@ function suppressRows(
   // reveals which private buckets exist.
   const publicationReadFailed =
     netIndexes.length > 0
-    && (publicationSet === 'unavailable' || setHasUnservableRecord(publicationSet));
+    && (publicationSet === 'unavailable'
+      || setHasUnservableRecord(publicationSet, publication.inScope));
 
 
   for (const row of rows) {
@@ -1633,6 +1643,7 @@ export function buildReportTable(
       ? (() => {
           const gated = suppressRows(built, netIndexes, entry.confidentiality, revisionSafe, {
             set: options.publications ?? [],
+            inScope: (month) => monthInRange(month, query),
             grain: entry.period,
           });
           return {
@@ -1694,8 +1705,12 @@ export function buildReportTable(
     // not, because the extent is the disclosure.
     if (publicationReadFailed) {
       parts.push(
-        'the published record could NOT be read — money figures are withheld '
-        + 'because of that, not because policy withheld them',
+        // ROUND 22 FINDING 3: this asserted an OUTCOME. A malformed September
+        // record on an October-only report produced this sentence over a table
+        // that had withheld nothing and exported its figure happily. The
+        // diagnostic is worth keeping; the claim was not.
+        'the published record could NOT be read in full — any money figure that '
+        + 'depends on it is withheld for that reason, not by policy',
       );
     }
     if (publishedBuckets > 0) {

@@ -106,6 +106,32 @@ function toRecord(row: PublicationRow): PublicationRecord {
   };
 }
 
+/**
+ * Why a read cannot be trusted to be complete, or null when it can.
+ *
+ * ROUND 22 FINDING 1. The previous version skipped the check when `count` was
+ * null or undefined, which treats AN UNKNOWN COUNT AS PROOF OF COMPLETENESS. If
+ * the server omits `Content-Range` the SDK returns `count: null`, so a
+ * truncated response was accepted — and the truncation that makes audit history
+ * look SHORTER is the direction that releases money rather than withholding it.
+ *
+ * An unknown count is not evidence. `NaN`, a non-number, and the incoherent
+ * `{ data: null, error: null, count: null }` are all refused for the same
+ * reason: this function answers "can I prove I saw everything", and only an
+ * exact number proves it.
+ *
+ * ONE PREDICATE, TWO CALLERS, deliberately. The two reads had the same check
+ * written out twice, and two copies of a rule is how rounds 13 through 15
+ * happened in this project.
+ */
+export function readIsIncomplete(rowCount: number, count: unknown): string | null {
+  if (typeof count !== 'number' || !Number.isFinite(count)) {
+    return 'the server did not report an exact row count (' + String(count) + ')';
+  }
+  if (rowCount < count) return rowCount + ' of ' + count + ' rows were returned';
+  return null;
+}
+
 export interface PublicationReadDeps {
   client?: Pick<ReturnType<typeof getSupabaseAdmin>, 'from'>;
 }
@@ -159,11 +185,9 @@ export async function readPublishedMonths(
   }
 
   const rows = (data ?? []) as unknown as PublicationRow[];
-  if (count !== null && count !== undefined && rows.length < count) {
-    console.error(
-      '[admin] the financial_publications read was truncated:',
-      rows.length + ' of ' + count + ' rows',
-    );
+  const truncation = readIsIncomplete(rows.length, count);
+  if (truncation !== null) {
+    console.error('[admin] the financial_publications read is not trustworthy:', truncation);
     return 'unavailable';
   }
 
@@ -242,11 +266,9 @@ async function readAuditedMonths(
   // Same refusal as the publications read, and more load-bearing here: this is
   // the side a truncated read makes look SHORTER, which is the direction that
   // releases money rather than withholding it.
-  if (count !== null && count !== undefined && rows.length < count) {
-    console.error(
-      '[admin] the publication audit read was truncated:',
-      rows.length + ' of ' + count + ' rows',
-    );
+  const truncation = readIsIncomplete(rows.length, count);
+  if (truncation !== null) {
+    console.error('[admin] the publication audit read is not trustworthy:', truncation);
     return 'unavailable';
   }
   const months = new Set<string>();

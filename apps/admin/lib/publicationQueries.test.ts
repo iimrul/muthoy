@@ -18,7 +18,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => undefined }) }));
 
-const { readPublishedMonths } = await import('./publicationQueries');
+const { readPublishedMonths, readIsIncomplete } = await import('./publicationQueries');
 const { resolveMonthlyMoney, periodEligibility, publishedAmount, publicationsByMonth } =
   await import('./publication');
 
@@ -35,6 +35,9 @@ interface ClientOptions {
   /** The EXACT count the server reports; omit to match the rows returned. */
   count?: number;
   auditCount?: number;
+  /** Report no count at all, as a server omitting Content-Range does. */
+  noCount?: boolean;
+  noAuditCount?: boolean;
   /** Rows for `admin_audit_log`, as `{ target }`. */
   auditTargets?: (string | null)[];
   auditError?: string;
@@ -59,13 +62,21 @@ function createClient(options: ClientOptions = {}) {
             return { data: null, error: { message: options.auditError }, count: null };
           }
           const audit = (options.auditTargets ?? []).map((target) => ({ target }));
-          return { data: audit, error: null, count: options.auditCount ?? audit.length };
+          return {
+            data: audit,
+            error: null,
+            count: options.noAuditCount === true ? null : (options.auditCount ?? audit.length),
+          };
         }
         if (options.error !== undefined) {
           return { data: null, error: { message: options.error }, count: null };
         }
         const pubs = options.rows ?? [];
-        return { data: pubs, error: null, count: options.count ?? pubs.length };
+        return {
+          data: pubs,
+          error: null,
+          count: options.noCount === true ? null : (options.count ?? pubs.length),
+        };
       };
       const builder: Record<string, unknown> = {
         select(columns: string, opts?: { count?: string }) {
@@ -243,6 +254,42 @@ describe('a truncated read is refused, not answered', () => {
       auditCount: 1001,
     });
     expect(await readPublishedMonths({ client: client as never })).toBe('unavailable');
+  });
+
+  test('an UNKNOWN count is refused, because it is not proof of completeness', async () => {
+    // ROUND 22 FINDING 1. My round-21 fix skipped the check when `count` was
+    // null or undefined, which treats an unknown count as proof. A server that
+    // omits `Content-Range` makes the SDK return `count: null`, so 1,000 of
+    // 1,001 audited months was accepted and the omitted month read as "never
+    // published" — releasing recomputed money against a figure already
+    // disclosed. An unknown count is not evidence.
+    const publications = createClient({ rows: [dbRow()], noCount: true });
+    expect(await readPublishedMonths({ client: publications.client as never })).toBe(
+      'unavailable',
+    );
+
+    const audit = createClient({
+      rows: [dbRow()],
+      auditTargets: [AUDITED_OCTOBER],
+      noAuditCount: true,
+    });
+    expect(await readPublishedMonths({ client: audit.client as never })).toBe('unavailable');
+  });
+
+  test('the completeness predicate refuses every untrustworthy count', () => {
+    // Exercised directly, because the shapes that matter are shapes the fake
+    // client cannot all produce.
+    expect(readIsIncomplete(0, 0)).toBeNull();
+    expect(readIsIncomplete(5, 5)).toBeNull();
+    expect(readIsIncomplete(4, 5)).toContain('4 of 5');
+    expect(readIsIncomplete(5, null)).toContain('did not report an exact row count');
+    expect(readIsIncomplete(5, undefined)).toContain('did not report an exact row count');
+    expect(readIsIncomplete(5, Number.NaN)).toContain('did not report an exact row count');
+    expect(readIsIncomplete(5, '5')).toContain('did not report an exact row count');
+    expect(readIsIncomplete(5, Number.POSITIVE_INFINITY)).toContain('exact row count');
+    // A row count ABOVE the reported count is not truncation; it is a server
+    // disagreeing with itself, and refusing it would break a legitimate read.
+    expect(readIsIncomplete(6, 5)).toBeNull();
   });
 
   test('a COMPLETE read is served, so the rule is truncation and not size', async () => {

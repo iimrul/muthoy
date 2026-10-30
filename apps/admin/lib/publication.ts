@@ -369,9 +369,27 @@ export function publishedMonths(set: PublicationSet): readonly string[] {
  * of the published set, which is the same category of information as the option
  * itself, so reporting it reveals nothing about which private buckets exist.
  */
-export function setHasUnservableRecord(set: PublicationSet): boolean {
+export function setHasUnservableRecord(
+  set: PublicationSet,
+  /**
+   * Restricts the question to records whose month this report could serve.
+   *
+   * ROUND 22 FINDING 3. Asking the WHOLE set meant a malformed September record
+   * produced an outage caption on an October-only report that had withheld
+   * nothing and exported 4000.00 happily — a caption asserting an outcome that
+   * did not occur, which is the GATE 5 FINDING 9 defect in a new place.
+   *
+   * The requested range is caller-chosen and public, so narrowing by it leaks
+   * nothing — unlike narrowing by which source buckets exist, which is what
+   * rounds 19 and 20 were about.
+   */
+  inScope: (month: string) => boolean = () => true,
+): boolean {
   if (set === 'unavailable') return false;
-  return set.some((record) => recordIsServable(record, monthOf(record)) !== null);
+  return set.some(
+    (record) =>
+      inScope(monthOf(record)) && recordIsServable(record, monthOf(record)) !== null,
+  );
 }
 
 /** `YYYY-MM` → the first day of that month. */
@@ -379,11 +397,28 @@ export function periodStartOf(month: string): string {
   return month + '-01';
 }
 
-/** `YYYY-MM` → the last day of that month, leap years included. */
+const MONTH_LENGTHS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const;
+
+/**
+ * `YYYY-MM` → the last day of that month, leap years included.
+ *
+ * ARITHMETIC, NOT `Date`. ROUND 22 FINDING 2: this used
+ * `Date.UTC(year, monthNumber, 0)`, and `Date.UTC` maps a year of 0–99 into
+ * 1900–1999. So a record spanning `0026-10-01` to `1926-10-31` validated
+ * perfectly — the expectation was derived through the normalisation, which is
+ * the same defect as round 21 finding 3 and my fix for that one still went
+ * through `Date`.
+ *
+ * The Gregorian leap rule is three lines and has no surprises in it. `Date` has
+ * at least two: the two-digit year mapping above, and month overflow
+ * (`Date.UTC(2026, 13, 0)` being 2027-01-31) which round 21 found.
+ */
 export function periodEndOf(month: string): string {
   const year = Number(month.slice(0, 4));
   const monthNumber = Number(month.slice(5, 7));
-  return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const length = monthNumber === 2 && leap ? 29 : (MONTH_LENGTHS[monthNumber - 1] ?? 0);
+  return month + '-' + String(length).padStart(2, '0');
 }
 
 /** The `YYYY-MM` a record is for. */

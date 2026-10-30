@@ -472,6 +472,58 @@ describe('what cannot be inferred from a publication', () => {
     expect(reportToCsv(table)).not.toContain('4000.00');
   });
 
+  test('an EARLY-YEAR record is refused, where Date.UTC would have normalised it', () => {
+    // ROUND 22 FINDING 2, and my round-21 fix for the month-13 case still went
+    // through `Date`. `Date.UTC` maps a year of 0-99 into 1900-1999, so a
+    // record spanning 0026-10-01 to 1926-10-31 validated perfectly against an
+    // expectation derived through that normalisation, and exported
+    // `0026-10,4000.00`.
+    //
+    // `periodEndOf` is now arithmetic. The Gregorian leap rule is three lines
+    // and has no surprises; `Date` has at least two, and both of them have now
+    // produced a finding.
+    expect(periodEndOf('0026-10')).toBe('0026-10-31');
+    const normalised = record({ periodStart: '0026-10-01', periodEnd: '1926-10-31' });
+    expect(recordIsServable(normalised, '0026-10')).toContain('not a whole month');
+    const table = buildReportTable(
+      REPORT,
+      data({ sales: [], refunds: [], tallies: COMPLETE }),
+      query({ reportId: REPORT, format: 'csv' }),
+      { publications: [normalised] },
+    );
+    expect(reportTextRows(table).flat().join(' ')).not.toContain('0026-10');
+  });
+
+  test('month ends are arithmetic in every century, including leap rules', () => {
+    // 1900 is not a leap year, 2000 is, 2024 is, 2100 is not. A `Date`-based
+    // implementation gets these right and gets early years wrong; arithmetic
+    // has to get both right.
+    expect(periodEndOf('1900-02')).toBe('1900-02-28');
+    expect(periodEndOf('2000-02')).toBe('2000-02-29');
+    expect(periodEndOf('2024-02')).toBe('2024-02-29');
+    expect(periodEndOf('2100-02')).toBe('2100-02-28');
+    expect(periodEndOf('0004-02')).toBe('0004-02-29');
+  });
+
+  test('a malformed record OUTSIDE the requested range does not claim a withholding', () => {
+    // ROUND 22 FINDING 3. The outage flag asked the WHOLE set, so a malformed
+    // September record produced the outage caption on an October-only report
+    // that had withheld nothing and exported its figure happily — a caption
+    // asserting an outcome that did not occur, which is GATE 5 FINDING 9 in a
+    // new place.
+    //
+    // The requested range is caller-chosen and public, so narrowing by it leaks
+    // nothing — unlike narrowing by which source buckets exist, which is what
+    // rounds 19 and 20 were about.
+    const malformedSeptember = record({
+      periodStart: '2026-09-01',
+      periodEnd: '2026-09-29',
+    });
+    const table = octoberTable(eligibleMonth(['2026-10-01']), [record(), malformedSeptember]);
+    expect(netCellText(table)).toBe('4000.00');
+    expect(table.subtitle).not.toContain('could NOT be read');
+  });
+
   test('a record whose period end is not a real date is refused', () => {
     expect(
       recordIsServable(record({ periodEnd: '2026-10-32' }), '2026-10'),
@@ -584,7 +636,10 @@ describe('every output path, and the boundary', () => {
     expect(netCellText(withheld)).toBe(WITHHELD_TEXT);
     // Same cell, different caption. That is the whole fix.
     expect(failed.subtitle).toContain('could NOT be read');
-    expect(failed.subtitle).toContain('not because policy withheld them');
+    // ROUND 22 FINDING 3 reworded this: the old sentence asserted an OUTCOME
+    // ("money figures are withheld because of that") and could appear over a
+    // table that withheld nothing.
+    expect(failed.subtitle).toContain('not by policy');
     expect(withheld.subtitle).not.toContain('could NOT be read');
     expect(failed.subtitle).not.toBe(withheld.subtitle);
   });
