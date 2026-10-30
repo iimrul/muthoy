@@ -110,10 +110,21 @@ try {
         try {
             $lb = [Text.StringBuilder]::new($buffer)
             $ln = [H9PathLockProbe]::GetFinalPathNameByHandleW($linkStream.SafeFileHandle.DangerousGetHandle(),$lb,[uint32]$buffer,[uint32]0)
-            $linkFinal = $lb.ToString(0,[int]$ln)
-            $results['junction DETECTED: resolved != invoked'] = ($linkFinal -ine ('\\?\' + $viaLink))
+            # ROUND 13 FINDING 1. This branch lacked the validity check the
+            # ordinary file case has. A return of 0 left the resolved name
+            # empty, and an empty string is of course unequal to the invoked
+            # path -- so a FAILED resolution reported successful junction
+            # detection. The most important check in this probe could pass
+            # without measuring anything, which is the same defect round 12
+            # found in the summary accounting, one branch to the side.
+            if ($ln -le 0 -or $ln -ge $buffer) {
+                $results['junction DETECTED: resolved != invoked'] = $false
+            } else {
+                $linkFinal = $lb.ToString(0,[int]$ln)
+                $results['junction DETECTED: resolved != invoked'] = ($linkFinal -ine ('\\?\' + $viaLink))
+            }
             Write-Output ("    via junction, invoked : " + $viaLink)
-            Write-Output ("    via junction, resolved: " + $linkFinal)
+            Write-Output ("    via junction, resolved: " + $(if ($ln -gt 0 -and $ln -lt $buffer) { $lb.ToString(0,[int]$ln) } else { '<RESOLUTION FAILED>' }))
         } finally { $linkStream.Dispose() }
     } else {
         $results['junction DETECTED: resolved != invoked'] = 'SKIPPED (could not create a junction)'

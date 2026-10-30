@@ -182,11 +182,15 @@ function classifiedMigrations(): Record<string, string> {
  */
 export function classificationDrift(
   declared: readonly string[],
-  classified: Record<string, string>,
+  classified: Record<string, unknown>,
 ): string | null {
   for (const name of declared) {
-    const grade = classified[name];
+    const grade: unknown = classified[name];
     if (grade === undefined) return `${name} is not classified for rollback`;
+    // ROUND 13 FINDING 2, a regression I introduced. `RegExp.test` COERCES, so
+    // `['A']` stringifies to 'A' and passed -- where the `toMatch()` matcher
+    // this replaced rejected any non-string. The type check is explicit now.
+    if (typeof grade !== 'string') return `${name} has a non-string rollback class`;
     if (!/^[ABC]$/.test(grade)) return `${name} has an invalid rollback class: ${grade}`;
   }
   return null;
@@ -425,6 +429,12 @@ describe('the live chain gate, against histories where the answer is known', () 
     expect(classificationDrift([NAME], {})).toMatch(/not classified for rollback/);
     expect(classificationDrift([NAME], { [NAME]: 'D' })).toMatch(/invalid rollback class/);
     expect(classificationDrift([NAME], { [NAME]: '' })).toMatch(/invalid rollback class/);
+    // ROUND 13 FINDING 2: a one-element array stringifies to a valid grade, so
+    // it has to be rejected by TYPE rather than by pattern.
+    for (const coercible of [['A'], ['B'], ['C'], 1, true, {}, null]) {
+      expect(classificationDrift([NAME], { [NAME]: coercible }), String(coercible))
+        .toMatch(/non-string rollback class/);
+    }
     for (const grade of ['A', 'B', 'C']) {
       expect(classificationDrift([NAME], { [NAME]: grade })).toBeNull();
     }
@@ -468,6 +478,25 @@ describe('the live chain gate, against histories where the answer is known', () 
 
       writeFileSync(path, JSON.stringify({ files: { [NAME]: DIGEST } }));
       expect(successorPinDrift([NAME], pinSourceOnDisk(path), bytes)).toBeNull();
+
+      // ROUND 13 FINDING 3: every case above injects the bytes reader, so
+      // `migrationBytesOnDisk` itself stayed dormant -- replacing it with
+      // `return null` left everything green. These drive the REAL reader.
+      expect(migrationBytesOnDisk('20261231999999_not_on_disk.sql')).toBeNull();
+      const realBytes = migrationBytesOnDisk(M35_FILE);
+      expect(realBytes).not.toBeNull();
+      expect(realBytes!.length).toBeGreaterThan(0);
+      const realDigest = createHash('sha256').update(realBytes!).digest('hex');
+
+      // End to end through BOTH real adapters: a pin recording migration 35's
+      // actual digest passes, and one digit changed does not.
+      writeFileSync(path, JSON.stringify({ files: { [M35_FILE]: realDigest } }));
+      expect(successorPinDrift([M35_FILE], pinSourceOnDisk(path), migrationBytesOnDisk)).toBeNull();
+
+      const wrong = realDigest.slice(0, -1) + (realDigest.endsWith('0') ? '1' : '0');
+      writeFileSync(path, JSON.stringify({ files: { [M35_FILE]: wrong } }));
+      expect(successorPinDrift([M35_FILE], pinSourceOnDisk(path), migrationBytesOnDisk))
+        .toMatch(/does not match its recorded digest/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

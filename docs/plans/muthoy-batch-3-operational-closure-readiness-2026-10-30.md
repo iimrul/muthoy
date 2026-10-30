@@ -532,6 +532,51 @@ temp-directory creation, and dynamic native probing hit `ConstrainedLanguage`.
 
 **Still not reviewed:** the round 12 remediation itself.
 
+### 5.12 Round 13 -- the same defect, one branch to the side
+
+**`ROUND 13: REVISE` on `220501d`. One MEDIUM, two LOW, no HIGH.** All three
+were mine, and the MEDIUM is the clearest illustration of this batch's recurring
+failure that the whole sequence has produced.
+
+| # | Severity | Finding | What I did |
+|---|---|---|---|
+| 1 | MEDIUM | **The junction branch never validated its own return length.** Round 12 made me fix the probe's *accounting*; this is the adjacent branch of the same probe. If path resolution returned 0 the resolved name was empty, and an empty string is of course unequal to the invoked path -- so a **failed resolution reported successful junction detection**. The most important check could still pass without measuring | The branch now requires `0 < length < buffer` before comparing, and a failed resolution is a **failure**, not a pass and not a skip |
+| 2 | LOW | **A regression I introduced.** `RegExp.test()` coerces, so a classification value of `['A']` stringified to `'A'` and passed -- where the `toMatch()` matcher I had replaced rejected any non-string | An explicit `typeof` check, plus cases for `['A']`, `['B']`, `['C']`, a number, a boolean, an object and `null` |
+| 3 | LOW | **`migrationBytesOnDisk` was still dormant.** Every case in my "real disk adapter" test injected the bytes reader, so replacing the real one with `return null` left everything green | Cases that drive the real reader: an absent migration, migration 35's actual bytes, and an end-to-end pin check through **both** real adapters with a correct digest and then one digit changed |
+
+**That first finding is the ninth-and-tenth instance of one mistake**, now
+visible in a single file: I closed the accounting hole and left the validity
+check missing in the branch beside it. The sink, the public rows, the caption,
+the registry, the audit log, the bucket count, the chart label, the error
+message, the Dashboard's copy of the read -- and now the probe's summary and the
+probe's own junction branch.
+
+**Mutations: 4 of 5 caught, and the fifth is unkillable here by construction.**
+The reviewer's own three cases -- resolution returning 0, the string check
+removed, and the bytes reader returning null -- are all caught, as is a reader
+that ignores its argument. The fifth disabled the validity guard itself while
+leaving resolution working, and on a machine where resolution succeeds a
+disabled guard is a no-op with nothing to observe. **That is not a 5/5 I can
+claim.** The guard is verified from the only direction that can verify it:
+forcing its condition, which fails correctly.
+
+**What round 13 confirmed:** the summary accounting is now correct for every
+value the results table can hold; the creation assertions correctly model writes
+inside a pinned directory; the temp directory is cleaned up even when an
+assertion fails after allocation; **no fourth preflight predicate exists**; and
+application code, suppression, the pinned SQL, `audit-artifacts/**` and the four
+prototype paths are all as stated.
+
+**One fair caution it repeated, which I accept:** my earlier execution counts
+cannot be authenticated from repository contents alone, so **a blanket claim of
+non-vacuity is unsupported** and this report should not be read as making one.
+Each specific mutation result above is reproducible from the harnesses; the
+aggregate figures from earlier rounds are my measurements, not independently
+confirmed ones.
+
+**Execution limits unchanged:** vitest `spawn EPERM`, the installer behavioural
+cases and the full native probe still unrunnable in the reviewer's sandbox.
+
 ---
 
 ## 6. Is Batch 3 operationally closed?
