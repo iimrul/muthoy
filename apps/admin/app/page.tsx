@@ -21,9 +21,12 @@ import {
 } from '../lib/adminMetrics';
 import { dashboardOverview, type DashboardOverview } from '../lib/adminPlatformQueries';
 import {
+  PUBLICATION_IS_REVISION_SAFE,
+  REVISABLE_WITHHOLDING,
   SUPPRESSION_K,
-  suppressBelowK,
   suppressSeriesBelowK,
+  withheldSide,
+  type DaySides,
 } from '../lib/adminSuppression';
 import { EMPTY_VALUE, formatCount, formatDhakaDate } from '../lib/adminViews';
 import { toDisplayMessage } from '../lib/errors';
@@ -170,15 +173,27 @@ export default async function DashboardPage() {
   //   - today's ACTIVE PHARMACY COUNT, which is the number of SELLERS. "1"
   //     beside any of the above names the pharmacy.
   //
-  // An EMPTY side is not withheld: "no pharmacy refunded today" is a fact
-  // about nobody, and there is no individual behind it to protect.
-  const sideWithheld = (contributors: readonly string[]) =>
-    contributors.length > 0
-    && suppressBelowK({ value: null, contributingShopIds: contributors }).suppressed;
-
-  const saleSideWithheld = sideWithheld(stats.saleContributorShopIds);
-  const refundSideWithheld = sideWithheld(stats.refundContributorShopIds);
-  const netTodayWithheld = saleSideWithheld || refundSideWithheld;
+  // FOUNDER DECISION 3, 2026-10-30 OVERTURNED THE SENTENCE THAT USED TO BE
+  // HERE. It read: "An EMPTY side is not withheld: 'no pharmacy refunded
+  // today' is a fact about nobody, and there is no individual behind it to
+  // protect." That was wrong, and the reviewer said why: when ten pharmacies
+  // sold and none refunded, the figure tells a reader that every one of those
+  // ten refunded nothing, and the set of zero-refunders is fully identified
+  // because it is all of them.
+  //
+  // This page also kept its own inline copy of the rule, which is how round 14
+  // finding 2 happened. It now asks the shared predicate, and the predicate
+  // answers the caption as well as the gate, so the two cannot disagree.
+  const todaySides: DaySides = {
+    day: stats.day.businessDate,
+    saleShopIds: stats.saleContributorShopIds,
+    refundShopIds: stats.refundContributorShopIds,
+  };
+  const withheld = withheldSide(todaySides);
+  const saleSideWithheld = withheld === 'sale';
+  // FOUNDER DECISION 2: today's figure is the MOST revisable one in the panel --
+  // the day is not even over. It is withheld whatever the floors say.
+  const netTodayWithheld = withheld !== null || !PUBLICATION_IS_REVISION_SAFE;
   /**
    * WHICH SIDE actually failed, because round 1B finding 7 caught the caption
    * telling the truth's opposite: ten pharmacies sold and two refunded, and the
@@ -187,9 +202,11 @@ export default async function DashboardPage() {
    * operator acts on it -- and the activity chart beside it was already
    * publishing the ten.
    */
-  const withheldReason = saleSideWithheld
-    ? 'Withheld: fewer than five pharmacies recorded a sale on this business date.'
-    : 'Withheld: fewer than five pharmacies recorded a refund on this business date.';
+  const withheldReason = withheld === null
+    ? REVISABLE_WITHHOLDING
+    : saleSideWithheld
+      ? 'Withheld: fewer than five pharmacies recorded a sale on this business date.'
+      : 'Withheld: fewer than five pharmacies recorded a refund on this business date.';
 
   const alerts = dashboardAlerts({ shops, subscriptions, entitlements, orders, events }, nowMs);
   const raisedAlerts = alerts.filter((alert) => alert.count > 0).length;

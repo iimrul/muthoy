@@ -102,14 +102,112 @@ export interface DaySides {
   refundShopIds: readonly string[];
 }
 
+/**
+ * WHETHER A PUBLISHED FIGURE CAN STILL CHANGE — and today it can, so
+ * confidentiality-sensitive pharmacy money is not published at all.
+ *
+ * FOUNDER DECISION 2, 2026-10-30: "Published confidentiality-sensitive
+ * financial aggregates must follow a stable, defensible publication policy. A
+ * freshness delay alone is not sufficient unless the data is demonstrably final
+ * and cannot later change in a way that discloses sensitive differences." And
+ * the fallback, which is what applies here: "If a safe publication mechanism
+ * cannot be implemented within the authorized local scope, retain suppression
+ * and report the exact unresolved acceptance blocker."
+ *
+ * THE DISCLOSURE, as the reviewer reproduced it (round 1B finding 3). The same
+ * whole-month query answered 457.00, then 450.00 after one more refund arrived.
+ * Both answers cleared every floor. The difference is one pharmacy's 7.00
+ * refund, and no floor can see it, because the floor examines one answer at a
+ * time and the attack needs two.
+ *
+ * WHY NO STORAGE-FREE RULE CLOSES IT. The obvious candidate is "publish only
+ * finished periods", and it fails on this product's own architecture: refunds
+ * bucket by their own business date (`adminReports.ts`), so a month is stable
+ * once it ends ONLY IF every device has synced. Muthoy is offline-first by
+ * design. A pharmacy offline for three days syncs rows carrying their original
+ * dates, so a closed month moves afterwards, and `shops.updated_at` cannot
+ * prove otherwise -- it is a last-write-wins client timestamp, not a statement
+ * that the device had nothing older queued. A delay long enough to be safe
+ * would be a delay nobody can justify as safe, which is the "unproven freshness
+ * delay" the decision refuses by name.
+ *
+ * SO THE ANSWER IS SUPPRESSION, and this constant is where it is stated once.
+ * Making a figure publishable requires an immutable, versioned publication
+ * snapshot -- persisted state, therefore a migration, therefore a hosted apply
+ * the founder has reserved to a separate authorization. The migration is
+ * implementable locally without touching a sealed artifact (the successor-file
+ * pattern E4 already used); it just cannot DO anything until it is applied. See
+ * `docs/plans/admin-architecture-rbac.md` §6n.
+ *
+ * Flip this to `true` only together with that mechanism, and only when a
+ * published figure is read from a snapshot rather than recomputed.
+ */
+export const PUBLICATION_IS_REVISION_SAFE = false;
+
+/** The sentence a figure withheld for revisability gets, everywhere. */
+export const REVISABLE_WITHHOLDING =
+  'Withheld: this figure could change as offline pharmacies sync, and a changed '
+  + 'figure would disclose the difference. Publication needs immutable snapshots.';
+
 /** Whether one SIDE of one day may be published on its own. */
 function sideReleasable(ids: readonly string[], k: number): boolean {
   return ids.length === 0 || distinctCount(ids) >= k;
 }
 
+/**
+ * The REFUND side, where an EMPTY set is not a free pass.
+ *
+ * FOUNDER DECISION 3, 2026-10-30: "Treat zero-valued refund contributions as
+ * protected under the relevant release threat model. Do not automatically
+ * publish a previously suppressed result merely because the refund side is
+ * zero."
+ *
+ * WHY ZERO IS A DISCLOSURE. Ten pharmacies sold and none refunded: publishing
+ * the day tells a reader that every one of those ten refunded NOTHING, and it
+ * identifies all ten, because the set of zero-refunders is the whole set of
+ * sellers. k=5 protects the IDENTITY of a contributor inside a crowd; with
+ * zero refunders there is no crowd to hide in. Five refunders out of ten
+ * sellers is the case k was designed for -- five did and five did not, and
+ * which is which stays unknown.
+ *
+ * AND WHY EMPTINESS ALONE IS NOT THE TEST. A day on which nobody traded
+ * discloses nothing about anybody: there is no pharmacy whose zero is being
+ * revealed. Keying the rule to an empty refund list alone would have withheld
+ * every month containing one quiet day, which is over-withholding with no
+ * privacy gain -- the defect round 14 was reproduced for. So the sale side
+ * decides whether there is anything to protect, and the refund side decides
+ * whether it is protected.
+ */
+function refundSideReleasable(day: DaySides, k: number): boolean {
+  if (day.saleShopIds.length === 0) return true;
+  return distinctCount(day.refundShopIds) >= k;
+}
+
 /** Whether a whole DAY may be published: every non-empty side clears the floor. */
 export function dayReleasable(day: DaySides, k: number = SUPPRESSION_K): boolean {
-  return sideReleasable(day.saleShopIds, k) && sideReleasable(day.refundShopIds, k);
+  return withheldSide(day, k) === null;
+}
+
+/** Which side of a day failed the floor, or null if the day may be published. */
+export type WithheldSide = 'sale' | 'refund' | null;
+
+/**
+ * WHICH SIDE, as one exported answer, because two copies of this rule is how
+ * round 14 finding 2 happened: the Dashboard gated per side with its own
+ * inline `suppressBelowK` calls while the report composed days through
+ * `daysReleasable`, and the two drifted. The caption and the gate now read the
+ * same function, so a page cannot withhold for one reason and say another --
+ * which is round 1B finding 7 -- and cannot publish what the report would
+ * withhold.
+ *
+ * The sale side is reported first when both fail, because that is the one an
+ * operator can act on: no sales means no trading, and a missing refund crowd
+ * is a privacy floor rather than an operational fact.
+ */
+export function withheldSide(day: DaySides, k: number = SUPPRESSION_K): WithheldSide {
+  if (!sideReleasable(day.saleShopIds, k)) return 'sale';
+  if (!refundSideReleasable(day, k)) return 'refund';
+  return null;
 }
 
 /**
@@ -168,10 +266,9 @@ export function daysReleasable(
   days: readonly DaySides[],
   k: number = SUPPRESSION_K,
 ): boolean {
-  // The REFUND side of every day. The sale side is public per pharmacy on the
-  // drill-down, so gating it here protects nothing while hiding a great deal;
-  // the refund side is the only part a net figure can disclose.
-  return days.every((day) => sideReleasable(day.refundShopIds, k));
+  // The REFUND side of every day, now including the zero case -- see
+  // `refundSideReleasable` and FOUNDER DECISION 3.
+  return days.every((day) => refundSideReleasable(day, k));
 }
 
 export function suppressTotalAcrossBuckets<T>(

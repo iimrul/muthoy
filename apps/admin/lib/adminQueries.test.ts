@@ -225,7 +225,7 @@ describe('the reads themselves', () => {
     expect(await getAccountDetail('89999999-9999-4999-8999-999999999999')).toBeNull();
   });
 
-  test('getShopDetail returns the shop, its staff count and GROSS day sales', async () => {
+  test('getShopDetail returns the shop and its staff count, and NO money', async () => {
     supabase.countByTable.set('users', 3);
     seed('sales', [{ total: 1_000 }, { total: 2_500 }]);
 
@@ -236,9 +236,17 @@ describe('the reads themselves', () => {
       tier: 'pro',
       entitlementStatus: 'active',
       activeStaffCount: 3,
-      grossSalesTodayPaisa: 3_500,
       saleCountToday: 2,
     });
+    // FOUNDER DECISION 1, 2026-10-30. The two sales of 1 000 and 2 500 are
+    // still READ -- the count needs them -- and their total is no longer
+    // produced. `toMatchObject` would not have caught a surviving field, so
+    // the absence is asserted directly.
+    expect(detail).not.toHaveProperty('grossSalesTodayPaisa');
+    // 3 500 is 1 000 + 2 500: the total that used to be produced here. Checked
+    // against the serialised object so a field under any other name cannot
+    // smuggle it back.
+    expect(JSON.stringify(detail)).not.toContain('3500');
   });
 
   test('getShopDetail bounds the sales read to the Dhaka day', async () => {

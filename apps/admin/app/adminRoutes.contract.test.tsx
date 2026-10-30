@@ -798,6 +798,35 @@ describe('§8.1 the Dashboard renders its nine figures and all five alerts', () 
     seedPlatform();
   });
 
+  test('FOUNDER DECISION 2: net today is withheld even when BOTH floors clear', async () => {
+    // Non-vacuity for the publication policy at the page layer. Five
+    // pharmacies sold and the same five refunded, so neither floor is the
+    // reason -- and the figure is still withheld, because today is the most
+    // revisable period in the panel: the day is not over, and offline
+    // pharmacies have not finished syncing it.
+    clientBox.rowsByTable.sales = Array.from({ length: 5 }, (_unused, index) => ({
+      id: 's' + index,
+      shop_id: '7b000000-0000-4000-8000-00000000003' + index,
+      business_date: '2026-09-10',
+      total: 10_000,
+      created_at: '2026-09-10T00:00:00.000Z',
+    }));
+    clientBox.rowsByTable.sale_refunds = Array.from({ length: 5 }, (_unused, index) => ({
+      id: 'r' + index,
+      shop_id: '7b000000-0000-4000-8000-00000000003' + index,
+      business_date: '2026-09-10',
+      total_amount: 1_000,
+      created_at: '2026-09-10T00:00:00.000Z',
+    }));
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./page');
+
+    expect(html).toContain('immutable snapshots');
+    // And the figure itself is absent: 500.00 gross less 50.00 refunds.
+    expect(html).not.toContain('450.00');
+  });
+
   test('the withheld caption names the side that FAILED, not the other one', async () => {
     // ROUND 1B FINDING 7. Five pharmacies sold and two refunded, so the SALE
     // side clears the floor and the REFUND side does not -- and the panel said

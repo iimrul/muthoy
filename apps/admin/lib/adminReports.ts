@@ -58,6 +58,8 @@ import {
 } from './adminMetrics';
 import { PDF_CONTENT_TYPE, PDF_LATIN1_NOTICE, toPdf } from './adminPdf';
 import {
+  PUBLICATION_IS_REVISION_SAFE,
+  REVISABLE_WITHHOLDING,
   SUPPRESSED_EXPORT,
   SUPPRESSION_K,
   daysReleasable,
@@ -176,9 +178,37 @@ export type ReportSource = (query: AdminReportExportQuery) => Promise<ReportData
 
 export type ReportKind = 'registration_metadata' | 'aggregate';
 
+/**
+ * WHOSE confidentiality a report's figures belong to.
+ *
+ * FOUNDER DECISION 4, 2026-10-30, which defines the scope of the k=5 policy:
+ * it "protects sensitive pharmacy operational financial information and
+ * derived platform aggregates, including sales, refunds and net sales", while
+ * "Muthoy's own subscription-billing revenue is a separate financial category"
+ * that "does not automatically require pharmacy-operational k=5 suppression".
+ *
+ * WHY THIS EXISTS AS A FIELD rather than a list of ids somewhere. Round 1B
+ * finding 5 was an INCONSISTENCY, not a leak: `/payments` published a verified
+ * payment order that its own report withheld, because the report layer applied
+ * the pharmacy floor to every aggregate it had. Resolving that by deleting a
+ * suppression call would have been exactly the "blindly removing privacy
+ * checks" the decision forbids. A report now has to SAY which category it is,
+ * and the gate reads that.
+ *
+ * `platform_billing` is NOT ungoverned. It stays behind the same RBAC as
+ * before, carries no secrets or tokens, and its amounts come from the
+ * operator-maintained `plan_offerings` price list -- they are not derived from
+ * any pharmacy's sales or refunds, so they cannot be an inference channel into
+ * protected pharmacy data. That last clause is the test to re-apply if a
+ * billing report ever starts joining to `sales`.
+ */
+export type ReportConfidentiality = 'pharmacy_operational' | 'platform_billing';
+
 export interface ReportDefinition {
   id: AdminReportId;
   title: string;
+  /** See `ReportConfidentiality`. Decides whether the pharmacy k-floor applies. */
+  confidentiality: ReportConfidentiality;
   kind: ReportKind;
   columns: readonly string[];
   /**
@@ -327,6 +357,8 @@ const MONEY_UNIT_SUFFIX = ' (BDT)';
 export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.freeze([
   definition({
     id: 'pharmacy_registrations',
+    // Registration metadata about pharmacies. Not money, and already unsuppressed by its own builder; classified with the pharmacies because the subjects are pharmacies.
+    confidentiality: 'pharmacy_operational',
     period: 'day',
     title: 'Pharmacy registrations',
     kind: 'registration_metadata',
@@ -337,6 +369,8 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
   }),
   definition({
     id: 'subscriptions',
+    // How many PHARMACIES are on each tier, cycle and status. The money is Muthoy's; the subjects are pharmacies, and a filtered count plus its complement identifies a small group of them.
+    confidentiality: 'pharmacy_operational',
     period: 'snapshot',
     title: 'Subscriptions by tier, cycle and status',
     kind: 'aggregate',
@@ -347,6 +381,8 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
   }),
   definition({
     id: 'subscription_revenue_and_renewals',
+    // Muthoy's own collected revenue. This is the report round 1B finding 5 caught withholding what /payments publishes.
+    confidentiality: 'platform_billing',
     period: 'month',
     // The heading is the MANIFEST's label, resolved at module load.
     title: requireMetric('collected_subscription_payments_trend').label,
@@ -362,6 +398,8 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
   }),
   definition({
     id: 'plan_distribution',
+    // How many PHARMACIES are on each plan. Round 12 finding 3 reproduced the status-filter complement on exactly this report.
+    confidentiality: 'pharmacy_operational',
     period: 'snapshot',
     title: 'Plan distribution',
     kind: 'aggregate',
@@ -372,6 +410,8 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
   }),
   definition({
     id: 'activity_summary',
+    // How many pharmacies traded. Counts, but counts ABOUT pharmacies.
+    confidentiality: 'pharmacy_operational',
     period: 'day',
     title: 'Activity summary',
     kind: 'aggregate',
@@ -382,6 +422,8 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
   }),
   definition({
     id: 'refund_net_pharmacy_sales',
+    // The pharmacies' own money, net of their own refunds. The reason the whole floor exists.
+    confidentiality: 'pharmacy_operational',
     period: 'month',
     title: requireMetric('pharmacy_sales_net').label,
     kind: 'aggregate',
@@ -742,6 +784,8 @@ function toTextRows(
 function suppressRows(
   rows: readonly AggregateRow[],
   netIndexes: readonly number[],
+  confidentiality: ReportConfidentiality,
+  revisionSafe: boolean,
 ): {
   rows: readonly (readonly ReportCell[])[];
   suppressedBuckets: number;
@@ -780,6 +824,43 @@ function suppressRows(
       && !daysReleasable(row.subPeriodDays));
   const out: (readonly ReportCell[])[] = [];
   let suppressedBuckets = 0;
+
+  // FOUNDER DECISION 4, 2026-10-30. The pharmacy floor governs PHARMACY money.
+  // A platform-billing report's figures are Muthoy's own revenue, so they pass
+  // through unsuppressed -- which is what resolves round 1B finding 5, where
+  // `/payments` published a verified order its own report withheld.
+  //
+  // This is a classification, not a removal: the report had to declare itself
+  // `platform_billing` to get here, the RBAC in front of it is unchanged, and
+  // the reason it is safe is that its amounts come from the operator-maintained
+  // price list rather than from any pharmacy's sales. A billing report that
+  // ever joins to `sales` stops satisfying that and must be reclassified.
+  if (confidentiality === 'platform_billing') {
+    return { rows: rows.map((row) => [row.key, ...row.values]), suppressedBuckets: 0 };
+  }
+
+  // FOUNDER DECISION 2, 2026-10-30. A pharmacy MONEY figure that could still
+  // change is not published, because the change itself is the disclosure --
+  // round 1B finding 3 read 457.00 and then 450.00 from the same query and the
+  // difference was one pharmacy's refund. See `PUBLICATION_IS_REVISION_SAFE`
+  // for why no storage-free rule closes this.
+  //
+  // MONEY ONLY. A count of pharmacies that traded, or of registrations, is not
+  // a "confidentiality-sensitive financial aggregate", and withholding those
+  // would hide operational facts for no privacy gain. `netIndexes` is exactly
+  // the refund-net money columns, so this reaches `refund_net_pharmacy_sales`
+  // and nothing else.
+  if (!revisionSafe && netIndexes.length > 0) {
+    return {
+      rows: rows.map((row) => [
+        row.key,
+        ...row.values.map((value, index) =>
+          netIndexes.includes(index) ? withheldNetCell() : value,
+        ),
+      ]),
+      suppressedBuckets: rows.length,
+    };
+  }
 
   for (const row of rows) {
     // GATE 5 FINDING 4 — PER-VALUE GATING.
@@ -1114,7 +1195,22 @@ export function buildReportTable(
   reportId: string,
   data: ReportData,
   query: AdminReportExportQuery,
+  options: {
+    /**
+     * Whether a published figure is immutable. Defaults to the shipped policy,
+     * `PUBLICATION_IS_REVISION_SAFE`, which is currently FALSE.
+     *
+     * This file had an options parameter until earlier today and I deleted it
+     * because its only member had become dead -- so re-adding one deserves the
+     * distinction stated plainly: this member is READ, on every build, and the
+     * tests that pass `true` are the ones whose subject is the k floor. Without
+     * it, every floor assertion in this file would pass by withholding, which
+     * is the vacuity this batch has been caught by three times.
+     */
+    revisionSafe?: boolean;
+  } = {},
 ): ReportTable {
+  const revisionSafe = options.revisionSafe ?? PUBLICATION_IS_REVISION_SAFE;
   const entry = requireReportDefinition(reportId);
   assertCompleteRead(data.tallies);
 
@@ -1146,7 +1242,7 @@ export function buildReportTable(
   const { cells, suppressedBuckets } =
     entry.kind === 'aggregate'
       ? (() => {
-          const gated = suppressRows(built, netIndexes);
+          const gated = suppressRows(built, netIndexes, entry.confidentiality, revisionSafe);
           return { cells: gated.rows, suppressedBuckets: gated.suppressedBuckets };
         })()
       : {
@@ -1162,12 +1258,24 @@ export function buildReportTable(
   if (query.status !== undefined && query.status.length > 0) {
     parts.push('status ' + query.status);
   }
-  if (entry.kind === 'aggregate') {
+  // FOUNDER DECISION 4: say the policy that actually governs this report.
+  //
+  // The caption used to announce the pharmacy floor on every aggregate. Once
+  // the floor stopped applying to Muthoy's own subscription billing, that
+  // sentence
+  // became a claim the report does not honour -- and a subtitle contradicting
+  // the rows is the defect GATE 5 FINDING 9 was about, in the other direction.
+  if (entry.kind === 'aggregate' && entry.confidentiality === 'pharmacy_operational') {
     parts.push(
       'buckets with fewer than ' + SUPPRESSION_K + ' '
       + (entry.contributorNoun ?? 'contributors') + ' are withheld'
       + (suppressedBuckets > 0 ? ' (' + suppressedBuckets + ' withheld)' : ''),
     );
+  } else if (entry.kind === 'aggregate') {
+    parts.push("Muthoy's own subscription billing — no pharmacy floor applies");
+  }
+  if (!revisionSafe && netIndexes.length > 0) {
+    parts.push(REVISABLE_WITHHOLDING);
   }
 
   return mintTable({

@@ -9,7 +9,12 @@ import { parseListQuery } from '../../lib/adminFilters';
 import { requireMetric } from '../../lib/adminMetrics';
 import { analyticsOverview, type AnalyticsOverview } from '../../lib/adminPlatformQueries';
 import { featureState } from '../../lib/adminSettings';
-import { daysReleasable, SUPPRESSION_K, suppressBelowK } from '../../lib/adminSuppression';
+import {
+  PUBLICATION_IS_REVISION_SAFE,
+  daysReleasable,
+  SUPPRESSION_K,
+  suppressBelowK,
+} from '../../lib/adminSuppression';
 import { toDisplayMessage } from '../../lib/errors';
 
 // Batch 3 §8.5 — Analytics.
@@ -227,7 +232,10 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
     return {
       label: bucket.month,
       amount: bucket.totalPaisa,
-      suppressed: gated.suppressed || !daysReleasable(bucket.days),
+      // FOUNDER DECISION 2: a net month that could still move is not published.
+      suppressed: gated.suppressed
+        || !daysReleasable(bucket.days)
+        || !PUBLICATION_IS_REVISION_SAFE,
     };
   });
   const plans = toPoints(

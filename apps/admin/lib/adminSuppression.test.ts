@@ -11,11 +11,15 @@ import {
   SUPPRESSED_DISPLAY,
   SUPPRESSED_EXPORT,
   SUPPRESSION_K,
+  dayReleasable,
+  daysReleasable,
   displaySuppressed,
   exportSuppressed,
   suppressBelowK,
   suppressSeriesBelowK,
   visiblePoints,
+  withheldSide,
+  type DaySides,
 } from './adminSuppression';
 
 function shops(count: number): readonly string[] {
@@ -152,5 +156,100 @@ describe('rendering and exporting a suppressed value', () => {
       .toBe(false);
     // ...and with the real floor it is withheld.
     expect(suppressBelowK({ value: 5_000, contributingShopIds: shops(4) }).suppressed).toBe(true);
+  });
+});
+
+
+describe('FOUNDER DECISION 3: a zero refund side is protected, and a quiet day is not', () => {
+  const day = (sellers: number, refunders: number): DaySides => ({
+    day: '2026-10-01',
+    saleShopIds: shops(sellers),
+    refundShopIds: shops(refunders),
+  });
+
+  test('ORDINARY ZERO: pharmacies sold and none refunded — withheld, naming the refund side', () => {
+    // The disclosure, stated as the numbers: ten sold, none refunded, so a
+    // published figure says every one of those ten refunded NOTHING. Unlike
+    // five-of-ten, the set of zero-refunders is fully identified because it is
+    // all of them, and there is no crowd for k to hide anyone in.
+    expect(withheldSide(day(10, 0))).toBe('refund');
+    expect(dayReleasable(day(10, 0))).toBe(false);
+  });
+
+  test('NOBODY TRADED: no sales and no refunds — releasable, because no zero belongs to anyone', () => {
+    expect(withheldSide(day(0, 0))).toBe(null);
+    expect(dayReleasable(day(0, 0))).toBe(true);
+  });
+
+  test('the boundary on the refund side is the same k, and it is exact', () => {
+    expect(withheldSide(day(10, SUPPRESSION_K - 1))).toBe('refund');
+    expect(withheldSide(day(10, SUPPRESSION_K))).toBe(null);
+  });
+
+  test('the SALE side is reported first when both fail, because an operator can act on it', () => {
+    expect(withheldSide(day(1, 0))).toBe('sale');
+  });
+
+  test('COHORT DIFFERENCE: the same refunder counted twice is still one pharmacy', () => {
+    // Five refund ROWS from one shop is not five contributors. The floor is on
+    // distinct pharmacies, which is the only thing that makes it a floor.
+    expect(
+      withheldSide({
+        day: '2026-10-01',
+        saleShopIds: shops(10),
+        refundShopIds: ['shop-0', 'shop-0', 'shop-0', 'shop-0', 'shop-0'],
+      }),
+    ).toBe('refund');
+  });
+
+  test('A QUIET DAY INSIDE A MONTH does not withhold the month', () => {
+    // The over-withholding this rule was shaped to avoid. A Friday on which
+    // nobody traded discloses nothing, so a month containing one must still be
+    // able to publish -- otherwise every real month is withheld and the rule
+    // asserts nothing.
+    const month: readonly DaySides[] = [
+      day(10, SUPPRESSION_K),
+      { day: '2026-10-02', saleShopIds: [], refundShopIds: [] },
+      { day: '2026-10-03', saleShopIds: shops(10), refundShopIds: shops(SUPPRESSION_K) },
+    ];
+
+    expect(daysReleasable(month)).toBe(true);
+  });
+
+  test('ONE zero-refund trading day withholds the whole month', () => {
+    const month: readonly DaySides[] = [
+      day(10, SUPPRESSION_K),
+      { day: '2026-10-02', saleShopIds: shops(10), refundShopIds: [] },
+    ];
+
+    expect(daysReleasable(month)).toBe(false);
+  });
+
+  test('OVERLAPPING PERIODS: a month and a wider window containing it agree', () => {
+    // Differencing needs two answers that differ. September alone and
+    // September-plus-October are evaluated by the same per-day rule, so a day
+    // that withholds one withholds the other; there is no window in which the
+    // same day is releasable and not releasable.
+    const september: readonly DaySides[] = [
+      { day: '2026-09-30', saleShopIds: shops(10), refundShopIds: [] },
+    ];
+    const both: readonly DaySides[] = [...september, day(10, SUPPRESSION_K)];
+
+    expect(daysReleasable(september)).toBe(false);
+    expect(daysReleasable(both)).toBe(false);
+  });
+
+  test('MUTATION: restoring the empty-set exemption reopens the zero disclosure', () => {
+    // The rule stated as the defect it prevents. The old predicate was
+    // `ids.length === 0 || distinctCount(ids) >= k`, so an empty refund list
+    // passed. Reproduced here as the arithmetic rather than by editing the
+    // module: ten sellers, zero refunders, and the old disjunction answers
+    // TRUE where the shipped rule answers FALSE.
+    const sides = day(10, 0);
+    const oldRule = sides.refundShopIds.length === 0
+      || new Set(sides.refundShopIds).size >= SUPPRESSION_K;
+
+    expect(oldRule).toBe(true);
+    expect(dayReleasable(sides)).toBe(false);
   });
 });

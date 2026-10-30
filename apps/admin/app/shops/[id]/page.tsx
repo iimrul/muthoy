@@ -4,7 +4,6 @@ import DataTable, { type DataColumn } from '../../../components/DataTable';
 import DetailList from '../../../components/DetailList';
 import ErrorNotice from '../../../components/ErrorNotice';
 import { EmptyState } from '../../../components/PageParts';
-import { formatMoney } from '@muthoy/utils';
 import { requireAdminPermission } from '../../../lib/adminAuthz';
 import {
   hasPlottableCoordinates,
@@ -190,13 +189,6 @@ export default async function ShopDetailPage({ params }: ShopPageProps) {
             { label: 'Archived', value: formatDhakaDate(shop.archivedAt) },
             { label: 'Active staff', value: String(detail.activeStaffCount) },
             { label: 'Sales today (count)', value: String(detail.saleCountToday) },
-            {
-              // GROSS, and labelled gross: the ledger's interim safety boundary
-              // 1 binds this batch, so no figure here is called revenue or net.
-              label: 'Gross sales today',
-              value: formatMoney(detail.grossSalesTodayPaisa),
-              isMoney: true,
-            },
             {
               label: 'Billing account',
               value: detail.accountId === null

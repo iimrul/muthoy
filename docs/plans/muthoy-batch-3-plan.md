@@ -582,6 +582,24 @@ plants two subscription rows for one account and asserts the count is one.
 - A source test asserts no page renders a bare `formatMoney(` on anything that is
   not a `Metric`, so the manifest cannot be bypassed.
 - `ARR` and `profit` stay banned outright in labels — neither is computed.
+> **AMENDED 2026-10-30 BY FOUNDER DECISION — OPTION B.** The requirement
+> below is SUPERSEDED. Per-pharmacy `Gross sales today` has been REMOVED from
+> the Admin shop drill-down, and the reader no longer computes it. The original
+> text is kept unrewritten because the reasoning it records is still correct for
+> what it was addressing — a per-shop figure must never be labelled net — and
+> because rewriting an accepted requirement to match the code would destroy the
+> evidence that the scope changed and when.
+>
+> **Why it changed.** Round 1B finding 1: ten pharmacies with distinct known
+> gross figures publish 1 023; a published platform net of 682 gives refunds of
+> 341; exactly one of the 1 024 subsets sums to 341. While one pharmacy's gross
+> was published, no value of k protected a platform net aggregate, because k
+> counts how many pharmacies contributed and says nothing about which. Pharmacy
+> owners still see their own sales in their own POS; what is gone is the
+> centrally accessible per-shop disclosure.
+>
+> Recorded in `admin-architecture-rbac.md` §4.2 and §6n.
+
 - The shop drill-down keeps `Gross sales today` **verbatim**: a per-shop figure
   stays gross because `sale_refunds` is read platform-wide.
 

@@ -333,6 +333,10 @@ describe('k-anonymity at the boundary', () => {
         tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }],
       }),
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
+      // `revisionSafe: true` because this test's subject is the k FLOOR.
+      // The shipped default withholds every pharmacy money figure (FOUNDER
+      // DECISION 2), which would make the assertion below pass by withholding.
+      { revisionSafe: true },
     );
 
     expect(reportTextRows(table)[0]?.[1]).toBe('7000.00');
@@ -523,6 +527,53 @@ describe('the filters', () => {
 
     // Five verified orders at 500.00 each; the failed one contributes nothing.
     expect(reportTextRows(table)[0]).toEqual(['2026-10', '2500.00', String(SUPPRESSION_K)]);
+  });
+
+  test('FOUNDER DECISION 4: ONE verified payment publishes — it is Muthoy money, not a pharmacy figure', () => {
+    // ROUND 1B FINDING 5 was an INCONSISTENCY, not a leak: `/payments`
+    // published a verified order that this report withheld, because the report
+    // layer applied the PHARMACY floor to every aggregate it had.
+    //
+    // FOUNDER DECISION 4, 2026-10-30 settles which it is. k=5 protects
+    // pharmacy operational money -- sales, refunds, net. Muthoy's own
+    // subscription-billing REVENUE is a separate category and does not take
+    // the pharmacy floor. So a single collected payment publishes here, and
+    // the page and the report finally agree.
+    const orders = [order(1)];
+
+    const table = buildReportTable(
+      'subscription_revenue_and_renewals',
+      data({
+        orders,
+        tallies: [{ label: 'orders', counted: orders.length, loaded: orders.length }],
+      }),
+      query({ reportId: 'subscription_revenue_and_renewals', format: 'csv' }),
+    );
+
+    expect(reportTextRows(table)[0]).toEqual(['2026-10', '500.00', '1']);
+    expect(table.subtitle).not.toContain('withheld');
+  });
+
+  test('FOUNDER DECISION 4: the exemption reaches EXACTLY one report', () => {
+    // The guard on the classification. Decision 4 exempts "Muthoy's own
+    // subscription-billing revenue" and nothing else, and the two reports I
+    // first classified as billing -- `subscriptions` and `plan_distribution` --
+    // count PHARMACIES per tier and per plan. Round 12 finding 3 reproduced
+    // the status-filter complement on `plan_distribution` itself, so getting
+    // that wrong would have reopened a disclosure a previous round closed.
+    //
+    // Pinned by COUNT as well as by name: a new report defaulting to the
+    // exemption would change the count and fail here.
+    const billing = ADMIN_REPORT_IDS.filter(
+      (id) => requireReportDefinition(id).confidentiality === 'platform_billing',
+    );
+
+    expect(billing).toEqual(['subscription_revenue_and_renewals']);
+    expect(
+      ADMIN_REPORT_IDS.filter(
+        (id) => requireReportDefinition(id).confidentiality === 'pharmacy_operational',
+      ),
+    ).toHaveLength(ADMIN_REPORT_IDS.length - 1);
   });
 });
 
@@ -928,6 +979,32 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     });
   };
 
+  /**
+   * The same month with a REFUND SIDE THAT CLEARS THE FLOOR on every day.
+   *
+   * FOUNDER DECISION 3 made `october()` -- sales only -- a withheld month, so
+   * every test that needs a month which actually PUBLISHES needs this one
+   * instead. Without it the suite would still be green and would be asserting
+   * nothing: a rule that withholds everything passes every "is it withheld"
+   * test ever written.
+   *
+   * Gross 580.00 (5 x 100.00 on the 1st, 80.00 on the 2nd); refunds 100.00
+   * (five distinct pharmacies refunding 10.00 on each day); net 480.00.
+   */
+  const octoberPublishable = () => {
+    const base = october();
+    const refunders = Array.from({ length: SUPPRESSION_K }, (_unused, index) => index + 1);
+    const refunds = [
+      ...refunders.map((shop) =>
+        saleTotal(shop, { businessDate: '2026-10-01', totalPaisa: asPaisa(1_000) }),
+      ),
+      ...refunders.map((shop) =>
+        saleTotal(shop, { businessDate: '2026-10-02', totalPaisa: asPaisa(1_000) }),
+      ),
+    ];
+    return data({ sales: base.sales, refunds, tallies: base.tallies });
+  };
+
   test('a part-month window is REFUSED rather than answered', () => {
     for (const range of [
       { from: '2026-10-01', to: '2026-10-01' },
@@ -981,46 +1058,59 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     // answered differently, the difference would be September.
     const whole = buildReportTable(
       'refund_net_pharmacy_sales',
-      october(),
+      octoberPublishable(),
       query({
         reportId: 'refund_net_pharmacy_sales',
         format: 'csv',
         from: '2026-10-01',
         to: '2026-10-31',
       }),
+      // `revisionSafe: true` because this test's subject is the k FLOOR.
+      // The shipped default withholds every pharmacy money figure (FOUNDER
+      // DECISION 2), which would make the assertion below pass by withholding.
+      { revisionSafe: true },
     );
     const wider = buildReportTable(
       'refund_net_pharmacy_sales',
-      october(),
+      octoberPublishable(),
       query({
         reportId: 'refund_net_pharmacy_sales',
         format: 'csv',
         from: '2026-09-01',
         to: '2026-10-31',
       }),
+      // `revisionSafe: true` because this test's subject is the k FLOOR.
+      // The shipped default withholds every pharmacy money figure (FOUNDER
+      // DECISION 2), which would make the assertion below pass by withholding.
+      { revisionSafe: true },
     );
 
-    // 580.00 both ways. The fixture has no refunds, so under the refund-side
-    // rule there is nothing a net figure could disclose and the month answers
-    // -- which is also why ROUND 13 FINDING 2's withholding and ROUND 14's
-    // relaxation of it are both now history rather than behaviour.
-    expect(reportTextRows(whole)).toEqual([['2026-10', '580.00']]);
+    // 480.00 both ways: gross 580.00 less refunds 100.00. FOUNDER DECISION 3
+    // means the fixture has to carry a refund side that clears the floor on
+    // every day, or the month would be withheld and this test would be
+    // asserting that two blanks are equal.
+    expect(reportTextRows(whole)).toEqual([['2026-10', '480.00']]);
     expect(reportTextRows(wider).find((row) => row[0] === '2026-10')).toEqual([
       '2026-10',
-      '580.00',
+      '480.00',
     ]);
   });
 
   test('an open-ended range is still allowed, and still whole-month', () => {
     const open = buildReportTable(
       'refund_net_pharmacy_sales',
-      october(),
+      octoberPublishable(),
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
+      // `revisionSafe: true` because this test's subject is the k FLOOR.
+      // The shipped default withholds every pharmacy money figure (FOUNDER
+      // DECISION 2), which would make the assertion below pass by withholding.
+      { revisionSafe: true },
     );
 
     // Accepted rather than refused -- the range IS whole months -- and
-    // answered, because this fixture has no refund to disclose.
-    expect(reportTextRows(open)).toEqual([['2026-10', '580.00']]);
+    // ANSWERED, which is the half of this test that matters: an open-ended
+    // range must not become a silent withholding.
+    expect(reportTextRows(open)).toEqual([['2026-10', '480.00']]);
   });
 
   // RETIRED: 'a month is NOT withheld against a day nothing publishes'.
@@ -1072,19 +1162,43 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     expect(parsed.at(-1)).toEqual(['2026-10', '']);
   });
 
-  test('a sales-only month has no refund to disclose, so it answers', () => {
-    // ROUND 15 FINDINGS 1 and 2 replaced the published-day rule with the
-    // refund-side one. This fixture has no refunds at all, so there is nothing
-    // a net figure could disclose that the per-shop gross figures do not
-    // already show -- and withholding it would hide a legitimate total for no
-    // privacy gain.
+  test('a sales-only month is WITHHELD, because zero refunds identifies every seller', () => {
+    // THIS TEST ASSERTED THE OPPOSITE UNTIL 2026-10-30, and the history is the
+    // point. Round 15 keyed the rule to the refund side and reasoned that a
+    // sales-only month "has no refund to disclose, so it answers" -- which was
+    // true only while per-shop GROSS was published, because then the net
+    // figure told a reader nothing the drill-downs did not already show.
+    //
+    // FOUNDER DECISION 3, 2026-10-30 rejects that reasoning on its own terms:
+    // zero refunds is itself the disclosure. Six pharmacies sold here and none
+    // refunded, so publishing 580.00 tells a reader that every one of those
+    // six refunded NOTHING -- and unlike five-out-of-ten, the set of
+    // zero-refunders is fully identified, because it is all of them. There is
+    // no crowd for k to hide anyone in.
     const open = buildReportTable(
       'refund_net_pharmacy_sales',
       october(),
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
     );
 
-    expect(reportTextRows(open)).toEqual([['2026-10', '580.00']]);
+    expect(reportTextRows(open)).toEqual([['2026-10', '']]);
+  });
+
+  test('a month in which NOBODY traded is not withheld — there is no zero to protect', () => {
+    // The other half of FOUNDER DECISION 3, and the reason the rule is not
+    // simply "an empty refund list withholds". A day with no sales discloses
+    // nothing about anybody: there is no pharmacy whose zero is being
+    // revealed. Keying the rule to emptiness alone would have withheld every
+    // month containing one quiet day, which is the over-withholding round 14
+    // was reproduced for.
+    const quiet = buildReportTable(
+      'refund_net_pharmacy_sales',
+      data({ sales: [], tallies: [{ label: 'sales', counted: 0, loaded: 0 }] }),
+      query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01', to: '2026-10-31' }),
+    );
+
+    // No buckets at all, and no refusal: an empty month is empty, not withheld.
+    expect(reportTextRows(quiet)).toEqual([]);
   });
 
   test('one refunding pharmacy anywhere in the month withholds it', () => {
@@ -1104,10 +1218,72 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     expect(reportTextRows(table)).toEqual([['2026-10', '']]);
   });
 
+  test('FOUNDER DECISION 2: by DEFAULT the same month is withheld, floor or no floor', () => {
+    // The shipped policy, and the non-vacuity guard on every `revisionSafe:
+    // true` above: with the option left alone, a month that clears every floor
+    // is STILL withheld, because the figure could change as offline pharmacies
+    // sync and a changed figure discloses the difference (round 1B finding 3 --
+    // 457.00, then 450.00, difference one pharmacy's 7.00 refund).
+    const shops = Array.from({ length: SUPPRESSION_K + 1 }, (_unused, index) => index + 1);
+    const refunders = shops.slice(0, SUPPRESSION_K);
+    const sales = shops.map((index) =>
+      saleTotal(index, { businessDate: '2026-10-01', totalPaisa: asPaisa(10_000) }),
+    );
+    const refunds = refunders.map((index) =>
+      saleTotal(index, { businessDate: '2026-10-01', totalPaisa: asPaisa(1_000) }),
+    );
+    const build = (revisionSafe: boolean) =>
+      buildReportTable(
+        'refund_net_pharmacy_sales',
+        data({ sales, refunds, tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }] }),
+        query({
+          reportId: 'refund_net_pharmacy_sales',
+          format: 'csv',
+          from: '2026-10-01',
+          to: '2026-10-31',
+        }),
+        { revisionSafe },
+      );
+
+    // Same fixture, both ways round: the floor would publish it, the policy
+    // does not. One assertion is useless without the other.
+    expect(reportTextRows(build(true))).toEqual([['2026-10', '550.00']]);
+    expect(reportTextRows(build(false))).toEqual([['2026-10', '']]);
+    expect(build(false).subtitle).toContain('immutable snapshots');
+  });
+
+  test('FOUNDER DECISION 2 withholds MONEY, not counts', () => {
+    // "Confidentiality-sensitive financial aggregates" is the decision's own
+    // wording. A count of pharmacies that traded is not one, and withholding
+    // it would hide an operational fact for no privacy gain -- so the gate is
+    // keyed to the refund-net money columns and `activity_summary` is
+    // untouched by it.
+    const sales = Array.from({ length: SUPPRESSION_K }, (_unused, index) =>
+      saleTotal(index + 1, { businessDate: '2026-10-01', totalPaisa: asPaisa(10_000) }),
+    );
+    const table = buildReportTable(
+      'activity_summary',
+      data({ sales, tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }] }),
+      query({ reportId: 'activity_summary', format: 'csv' }),
+    );
+
+    expect(table.subtitle).not.toContain('immutable snapshots');
+    // Pinned at the mechanism rather than at a fixture's row shape: the gate
+    // is keyed to the refund-net money columns, and this report declares none,
+    // so there is no path by which it can reach these counts.
+    expect(requireReportDefinition('activity_summary').metricId).toBe(null);
+    expect(
+      reportTextRows(table).every((row) => row.every((cell) => cell !== '')),
+    ).toBe(true);
+  });
+
   test('a month whose EVERY DAY clears the floor still publishes', () => {
     // Non-vacuity for the sub-period rule: it must not withhold everything.
-    // Six pharmacies trade on both days, so neither day is identifying.
+    // Six pharmacies trade on both days, so neither day is identifying -- and
+    // since FOUNDER DECISION 3 five of them must also REFUND on each day, or
+    // the zero-refund rule withholds the month and this test proves nothing.
     const shops = Array.from({ length: SUPPRESSION_K + 1 }, (_unused, index) => index + 1);
+    const refunders = shops.slice(0, SUPPRESSION_K);
     const sales = [
       ...shops.map((index) =>
         saleTotal(index, { businessDate: '2026-10-01', totalPaisa: asPaisa(10_000) }),
@@ -1116,19 +1292,31 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
         saleTotal(index, { businessDate: '2026-10-02', totalPaisa: asPaisa(10_000) }),
       ),
     ];
+    const refunds = [
+      ...refunders.map((index) =>
+        saleTotal(index, { businessDate: '2026-10-01', totalPaisa: asPaisa(1_000) }),
+      ),
+      ...refunders.map((index) =>
+        saleTotal(index, { businessDate: '2026-10-02', totalPaisa: asPaisa(1_000) }),
+      ),
+    ];
     const table = buildReportTable(
       'refund_net_pharmacy_sales',
-      data({ sales, tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }] }),
+      data({ sales, refunds, tallies: [{ label: 'sales', counted: sales.length, loaded: sales.length }] }),
       query({
         reportId: 'refund_net_pharmacy_sales',
         format: 'csv',
         from: '2026-10-01',
         to: '2026-10-31',
       }),
+      // `revisionSafe: true` because this test's subject is the k FLOOR.
+      // The shipped default withholds every pharmacy money figure (FOUNDER
+      // DECISION 2), which would make the assertion below pass by withholding.
+      { revisionSafe: true },
     );
 
-    // 12 x 100.00 = 1200.00, published.
-    expect(reportTextRows(table)).toEqual([['2026-10', '1200.00']]);
+    // 12 x 100.00 less 10 x 10.00 = 1100.00, published.
+    expect(reportTextRows(table)).toEqual([['2026-10', '1100.00']]);
   });
 
   test('February and a leap year are month ends too, not a 30/31 guess', () => {

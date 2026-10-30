@@ -1264,7 +1264,7 @@ describe('the GROSS boundary', () => {
       && !fieldWithoutHelper.code.includes('netSalesPaisa')).toBe(true);
   });
 
-  test('the dashboard says net of refunds, and the shop drill-down still says GROSS', () => {
+  test('the dashboard says net of refunds, and the drill-down says no money at all', () => {
     // The two must not drift into each other. A per-shop figure stays gross
     // because sale_refunds is read platform-wide, so calling it net would be
     // the exact error this guard exists to stop.
@@ -1272,9 +1272,15 @@ describe('the GROSS boundary', () => {
     expect(dashboard?.code).toContain('net of refunds');
     expect(dashboard?.code).toContain('netSalesToday');
 
+    // FOUNDER DECISION 1 INVERTED THIS GUARD. It used to assert that the
+    // drill-down says 'Gross sales today' out loud -- the whole point being
+    // that a per-shop figure must never be labelled net. The figure itself is
+    // now gone, so the guard asserts the stronger thing: the page renders NO
+    // per-pharmacy money at all, under any label.
     const shopPage = SOURCES.find((file) => file.path === 'app/shops/[id]/page.tsx');
-    expect(shopPage?.code).toContain('Gross sales today');
+    expect(shopPage?.code).not.toContain('Gross sales today');
     expect(shopPage?.code).not.toContain('netSalesPaisa');
+    expect(shopPage?.code).not.toContain('formatMoney');
   });
 
   test('the dashboard still labels its figure as SALES, from the manifest', () => {
@@ -1295,10 +1301,22 @@ describe('the GROSS boundary', () => {
     expect(label.toLowerCase()).not.toContain('revenue');
   });
 
-  test('the shop drill-down says GROSS out loud', () => {
+  test('the shop drill-down renders NO per-pharmacy money, and cannot read any', () => {
+    // FOUNDER DECISION 1, 2026-10-30 — OPTION B, replacing 'the shop
+    // drill-down says GROSS out loud'. That test was right for as long as the
+    // figure existed: a per-shop figure labelled net would have been the error.
+    // The decision removed the figure, so the invariant is now absence, and it
+    // is checked at BOTH layers -- the page cannot render money, and the reader
+    // does not produce any for it to render.
     const shopPage = SOURCES.find((file) => file.path === 'app/shops/[id]/page.tsx');
+    expect(shopPage?.code).not.toContain('formatMoney');
+    expect(shopPage?.code).not.toContain('Paisa');
 
-    expect(shopPage?.code).toContain('Gross sales today');
+    const reader = SOURCES.find((file) => file.path === 'lib/adminQueries.ts');
+    expect(reader?.code).not.toContain('grossSalesTodayPaisa');
+
+    const view = SOURCES.find((file) => file.path === 'lib/adminViews.ts');
+    expect(view?.code).not.toContain('grossSalesTodayPaisa');
   });
 });
 

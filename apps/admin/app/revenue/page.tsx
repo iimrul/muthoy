@@ -12,7 +12,11 @@ import {
   type AnalyticsOverview,
   type RevenueOverview,
 } from '../../lib/adminPlatformQueries';
-import { daysReleasable, suppressTotalAcrossBuckets } from '../../lib/adminSuppression';
+import {
+  PUBLICATION_IS_REVISION_SAFE,
+  daysReleasable,
+  suppressTotalAcrossBuckets,
+} from '../../lib/adminSuppression';
 import { exportTaka } from '../../lib/adminReports';
 import { formatCount } from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
@@ -208,7 +212,10 @@ export default async function RevenuePage() {
       // month is how the composition rule already withholds a total whose
       // part is withheld -- so the day rule reaches the all-time figure
       // without a second mechanism.
-      contributingShopIds: daysReleasable(month.days)
+      // FOUNDER DECISION 2 joins the day rule here: an empty contributor set is
+      // how this page already withholds a total whose part is withheld, so a
+      // revisable month declares one and the all-time figure follows.
+      contributingShopIds: daysReleasable(month.days) && PUBLICATION_IS_REVISION_SAFE
         ? month.shopIds
         : [],
     })),

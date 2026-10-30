@@ -337,8 +337,17 @@ export interface ShopDetailView {
   ownerName: string | null;
   ownerPhone: string | null;
   lastSyncedChangeAt: string | null;
-  /** GROSS sales for the Dhaka day the caller asked for. Never called revenue. */
-  grossSalesTodayPaisa: Paisa;
+  /**
+   * FOUNDER DECISION 1, 2026-10-30. There is deliberately NO per-pharmacy money
+   * field here. A per-pharmacy gross-sales amount used to be, and removing it
+   * is an approved change to §8.2 rather than a tidy-up: while one pharmacy's
+   * gross
+   * was published, a platform net aggregate could be differenced against the
+   * published grosses to recover a single pharmacy's refunds, and no value of
+   * k prevented it.
+   *
+   * A count is not an amount, so this one stays.
+   */
   saleCountToday: number;
 }
 

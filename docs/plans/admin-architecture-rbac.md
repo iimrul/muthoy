@@ -185,7 +185,8 @@ trend is registration metadata and is not.
 |---|---|
 | **Code status** | COMPLETE. Search over name, Latin-script name and phone; district, plan and status filters; sort; `.range()` paging with an **exact count carrying the same filters**. The drill-down adds owner/account detail, contact, subscription status, latest activity, the support-notes block and the consent-gated location block. |
 | **Test evidence** | `adminFilters.test.ts`, `adminQueries.test.ts`, plus contract tests proving a search + plan filter + page all reach the query, that a malformed filter is reported with **no query issued**, that the support block renders the shop's own case, that the location block withholds the coordinate and names E13, and that a role without `maps.read` is told so while the rest of the page still works. |
-| **Missing** | Nothing from §8.2 — **as of the Gate 5 corrections.** The block headed "Support notes" previously read no notes, only case summaries, and the owner information and latest activity were not even selected. All three are now read: notes per case id (so there is no path to a note without a case belonging to this shop), the owner resolved by id from `users`, and `updated_at` labelled "Last synced change" rather than "last seen". A **real marker** needs E13. |
+| **Scope change** | **FOUNDER DECISION, 2026-10-30 — OPTION B.** Per-pharmacy **Gross sales today is REMOVED** from the drill-down, and `getShopDetail` no longer computes it. `saleCountToday` stays: a count is not an amount, and it is what answers "is this pharmacy trading?" for support. Two guards that used to assert the page says "Gross sales today" out loud now assert the page renders **no per-pharmacy money at all**, checked at the page AND at the reader. See §6n. |
+| **Missing** | Nothing from §8.2 — **as of the Gate 5 corrections**, and as amended above. The block headed "Support notes" previously read no notes, only case summaries, and the owner information and latest activity were not even selected. All three are now read: notes per case id (so there is no path to a note without a case belonging to this shop), the owner resolved by id from `users`, and `updated_at` labelled "Last synced change" rather than "last seen". A **real marker** needs E13. |
 | **Hosted** | NOT VERIFIED. |
 | **External** | E13 (location consent), E15. |
 
@@ -1221,6 +1222,150 @@ Codex's read-only Node probes, which have reproduced real defects in every
 round including this one. It does **not** mean two parties measured the test
 suite, because Codex cannot execute one. Any final report must say that in
 those words.
+
+---
+
+## 6n. THE FOUR FOUNDER DECISIONS of 2026-10-30, and what each one changed
+
+§6m left four questions with the founder. All four came back decided. This
+section records what was decided, what the code now does, and the one blocker
+that survives.
+
+### DECISION 1 — Option B approved: per-pharmacy gross is removed
+
+The founder approved changing accepted §8.2 scope. Removed:
+`app/shops/[id]/page.tsx`'s **Gross sales today** tile, the
+`grossSalesTodayPaisa` field on the shop-detail view, and its computation in
+`lib/adminQueries.ts` — the figure is not produced, not only not shown, because
+a value this reader still returned would be one a future caller could render.
+
+**Preserved**, as the decision requires: pharmacy owners see their own sales in
+their own POS; W4-04 refund-net reporting still exists and still computes;
+§8.10 confidentiality is unchanged; and the per-shop **sale COUNT** stays,
+because a count is not an amount and it answers an operational question support
+genuinely has. That last one is a judgement, stated as one in the code so the
+next reviewer can attack it.
+
+**The correlated-surface sweep** the decision asked for found that the
+drill-down was the only per-pharmacy money surface in the panel:
+`/pharmacies` renders no money at all, both money reports are platform
+aggregates, and the two guards in `lib/adminLabels.test.ts` that previously
+pinned the gross LABEL now assert the absence of money at both the page and the
+reader layer.
+
+**`sale_refunded` is now in the financial privacy threat model**, not filed as
+an audit-authorization matter. The audit rows are NOT deleted or rewritten —
+`shopAuditPage` applies `not('action','in','(sale_refunded)')` to the page and
+to the count, which is presentation redaction and data minimisation over an
+intact record, exactly as the decision directs.
+
+**Historical gross disclosures still bind.** Figures published before today are
+part of what a reader may already know, so no previously suppressed period is
+released on the strength of the gross card having been removed. The suppression
+rules were not relaxed anywhere in this change.
+
+### DECISION 2 — stable publications, and the blocker that remains
+
+A freshness delay was explicitly ruled insufficient, and the investigation
+confirms it cannot be made sufficient here: refunds bucket by their own
+business date, so a month is stable once it ends **only if every device has
+synced**, and Muthoy is offline-first by design. `shops.updated_at` is a
+last-write-wins client timestamp and cannot prove a device had nothing older
+queued.
+
+So the interim posture is **suppression**, stated once in
+`lib/adminSuppression.ts` as `PUBLICATION_IS_REVISION_SAFE = false`, and
+applied to pharmacy **money** at four surfaces: the report layer's refund-net
+columns, the Dashboard's net today, the Analytics net series and the Revenue
+all-time total. **Money only** — a registration or activity COUNT is not a
+"confidentiality-sensitive financial aggregate", and withholding those would
+hide operational facts for no privacy gain.
+
+`buildReportTable` regained an options parameter carrying `revisionSafe`. It is
+worth being explicit that I deleted an options parameter from this same
+function earlier the same day for being dead: this one is **read on every
+build**, and the tests that pass `true` are precisely the ones whose subject is
+the k floor — without that, every floor assertion in the file would pass by
+withholding, which is the vacuity this batch has been caught by three times.
+
+**THE MIGRATION LINEAGE, inspected rather than assumed** (the decision required
+this):
+
+| Fact | Evidence |
+|---|---|
+| The chain is **35** migrations, ending `20261023000000` | `e4-source-hashes.json` `expectedChain`, `counts.migrations` |
+| H-9's sealed checks assert **nothing after migration 34** | `backend/supabase/checks/h9_postmigration_checks.sql:380` — `not exists (… where version > '20261015000000')` |
+| Which is why E4 added a **successor** checks file rather than editing it | `e4_postmigration_checks.sql:7` says so in its own words |
+| E4's successor in turn refuses any migration not in its expected list | `e4_postmigration_checks.sql:81-83`, list ends `20261023000000` |
+| `h9BaselineUnchanged` pins two hashes, and a NEW migration changes neither | `postmigrationChecks` `361a400a…`, `migration34` `0b949fa9…` |
+| `apps/mobile/tests/e4-evidence-manifest.test.ts` is **not** hash-recorded | absent from the 48 keys in `e4-source-hashes.json` |
+| `backend/supabase/pgtest/e4-chain-succession.pgtest.ts` **is** recorded, and pins the tail | line 69 pins `history_has_no_missing_version` to `20261023000000` |
+
+**Conclusion: a successor migration is implementable locally without modifying
+any sealed artifact** — add the migration, add its own successor checks file and
+successor pgtest, update the one non-recorded test, regenerate the manifest, and
+both H-9 baseline pins stay byte-identical. It was not implemented, for one
+reason:
+
+> **THE BLOCKER. An unapplied migration protects nothing.** The panel reads
+> hosted Supabase. A snapshot table that exists only as a migration file gives
+> zero runtime immutability, so suppression would have to be retained anyway —
+> and each successor consumes a chain succession and churns hash-recorded gate
+> files for a mechanism that cannot run. **Hosted apply requires separate
+> founder authorization, which Decision 2 withholds.** That is the exact
+> unresolved acceptance blocker, and it is the only thing standing between the
+> withheld figures and publication.
+
+### DECISION 3 — a zero refund side is protected
+
+`sideReleasable`'s empty-set exemption is gone from the refund side. Ten
+pharmacies sold and none refunded used to publish; it discloses that every one
+of those ten refunded nothing, and unlike five-of-ten the set is **fully
+identified because it is all of them** — there is no crowd for k to hide anyone
+in.
+
+**But emptiness alone is not the test.** A day on which nobody traded discloses
+nothing about anybody, so `refundSideReleasable` asks the sale side whether
+there is anything to protect before asking the refund side whether it is
+protected. Keying the rule to an empty list alone would have withheld every
+month containing one quiet day — the over-withholding round 14 was reproduced
+for.
+
+The Dashboard also stopped keeping its own inline copy of the side rule. It now
+calls the shared `withheldSide`, which answers the **caption** as well as the
+gate, so a page can no longer withhold for one reason and say another (round 1B
+finding 7) or publish what the report layer would withhold (round 14 finding 2).
+
+### DECISION 4 — the k=5 scope, classified before anything was changed
+
+`ReportDefinition` gained `confidentiality`, and every report declares it. The
+pharmacy floor applies to `pharmacy_operational`; `platform_billing` passes
+through.
+
+**Exactly one report is `platform_billing`:
+`subscription_revenue_and_renewals`.** I first classified `subscriptions` and
+`plan_distribution` as billing too, and the test suite caught it: round 12
+finding 3's status-filter complement is reproduced on `plan_distribution`
+itself. Those two count **pharmacies** per tier and per plan — the money may be
+Muthoy's, but the subjects are pharmacies, and a filtered count plus its
+complement identifies a small group of them. Decision 4 exempts "Muthoy's own
+subscription-billing **revenue**", and that is the collected-payments report
+alone.
+
+The `/payments` field classification the decision required, before any
+presentation changed: account label, plan tier and cycle, **order amount**,
+status, provider, failure code, event count, latest event status, created
+timestamp. Every one is Muthoy's own billing record; the amount comes from the
+operator-maintained `plan_offerings` price list and is **not derived from any
+pharmacy's sales or refunds**, so it cannot be an inference channel into
+protected pharmacy data. No secrets, tokens or unnecessary billing details are
+exposed, and the RBAC in front of the page is unchanged. That derivation test is
+written into the code as the condition to re-apply if a billing report ever
+starts joining to `sales`.
+
+The subtitle follows the classification: a billing aggregate no longer
+advertises a pharmacy floor it does not honour, which would have been Gate 5
+finding 9's defect in the other direction.
 
 ---
 

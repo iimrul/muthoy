@@ -26,7 +26,6 @@ import {
   summarizeAccounts,
   summarizePaymentOrders,
   summarizeSubscriptions,
-  sumPaisa,
   type AccountRow,
   type AccountSummary,
   type EntitlementRow,
@@ -434,7 +433,19 @@ export async function getShopDetail(
     ownerName,
     ownerPhone,
     lastSyncedChangeAt,
-    grossSalesTodayPaisa: sumPaisa(saleRows.map((row) => Number(row.total ?? 0))),
+    // FOUNDER DECISION 1, 2026-10-30 — OPTION B. The per-pharmacy GROSS figure
+    // is gone, and it is not computed either. Data minimisation is the point:
+    // a figure this module still produced would be one a future caller could
+    // render, and the whole reason it was removed is that publishing one
+    // pharmacy's gross makes every platform net aggregate differenceable down
+    // to a single shop's refunds (round 1B finding 1, subset-sum).
+    //
+    // The COUNT stays. It is not money, it does not give an amount, and it is
+    // what makes "is this pharmacy actually trading?" answerable for support --
+    // one of the legitimate administrative operations the decision preserves.
+    // Stated as a judgement rather than a fact, because it is one: if the
+    // reviewer can turn a per-shop sale count into a per-shop amount, it goes
+    // the same way as the gross.
     saleCountToday: saleRows.length,
   };
 }

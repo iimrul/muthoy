@@ -680,9 +680,13 @@ describe('§6i ROUND 11: provenance ends at the OUTPUT, not at the data structur
     const page = source('app/page.tsx');
 
     // The gate exists at all. Round 12 finding 2 replaced the single union
-    // input with the two SIDES; the per-side assertions are in round 12's
-    // block below, and this one keeps the round-11 property: there IS a gate.
-    expect(page).toContain('suppressBelowK({');
+    // input with the two SIDES; FOUNDER DECISION 3 then replaced this page's
+    // inline copy of the side rule with the SHARED predicate, which is why
+    // this no longer looks for `suppressBelowK({` here. The property is
+    // unchanged and is what is asserted: there IS a gate, and the page does
+    // not compute one of its own.
+    expect(page).toContain('withheldSide(todaySides)');
+    expect(page).not.toContain('suppressBelowK(');
     // All three outputs hang off ONE verdict. Hiding only the headline leaks
     // the amount, because gross less refunds IS the amount.
     expect(page).toContain('withheld={netTodayWithheld}');
@@ -739,9 +743,14 @@ describe('§6i ROUND 12: the boundary is the bytes, and the floor is per side', 
     expect(page).not.toContain('netContributorShopIds');
     expect(page).toContain('stats.saleContributorShopIds');
     expect(page).toContain('stats.refundContributorShopIds');
-    // One verdict, built from both sides, gates all four outputs.
-    expect(page).toContain('sideWithheld(stats.saleContributorShopIds)');
-    expect(page).toContain('sideWithheld(stats.refundContributorShopIds)');
+    // One verdict, built from BOTH sides, gates all four outputs. Since
+    // FOUNDER DECISION 3 the sides are handed to the shared predicate as one
+    // day rather than tested by two inline calls -- the point of that change
+    // being that the page can no longer hold a rule the report layer does not
+    // share, which is exactly how this finding happened.
+    expect(page).toMatch(/saleShopIds: stats\.saleContributorShopIds/);
+    expect(page).toMatch(/refundShopIds: stats\.refundContributorShopIds/);
+    expect(page).toContain('withheldSide(todaySides)');
     expect(page).toContain('withheld={netTodayWithheld}');
     expect(page).toMatch(/netTodayWithheld \? EMPTY_VALUE : formatCount\(activeToday\)/);
   });
