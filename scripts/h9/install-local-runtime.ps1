@@ -124,8 +124,27 @@ Protect $testPath $false
 # loop above.
 $stagedTest = (Get-FileHash -LiteralPath $testPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($stagedTest -cne $REVIEWED['scripts/h9/h9-a5.test.mjs']) { throw 'Refused staged test bytes.' }
-# ALL-OR-NOTHING, restated at the point of execution: every staged file above
-# has been compared against $REVIEWED by its destination bytes, and any
-# mismatch threw before reaching this line.
+# ROUND 9 REMEDIATION, COMPLETED UNDER THE FOUNDER DIRECTIVE OF 2026-10-30:
+# NO WRITE WINDOW BETWEEN THE FINAL VERIFICATION AND EXECUTION.
+#
+# Each file above was checked as it was staged, but the manifest write and the
+# test copy run after the earliest of those checks, so the first file verified
+# sat unexamined across them. The staged tree is ACL-protected to this owner,
+# SYSTEM and Administrators, so no untrusted principal can write in that span --
+# a process running as this same owner still could. The whole set is therefore
+# compared against $REVIEWED once more here, all-or-nothing, with nothing
+# between this loop and the invocation below.
+#
+# The manifest deliberately does NOT gain the test's digest: the runtime pins
+# the exact key set of manifest.files (RUNTIME_FILES in h9-a5-dev-readonly.mjs),
+# so recording an eighth entry would make the staged runtime refuse itself.
+$verified = $mapping.Clone()
+$verified['h9-a5.test.mjs'] = 'scripts/h9/h9-a5.test.mjs'
+foreach ($name in $verified.Keys | Sort-Object) {
+    $path = Join-Path $Destination $name
+    if (-not [IO.File]::Exists($path)) { throw "Refused missing staged file: $name" }
+    if (([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Refused staged reparse: $name" }
+    if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $REVIEWED[$verified[$name]]) { throw "Refused staged bytes at execution: $name" }
+}
 & 'C:\Program Files\PowerShell\7\pwsh.exe' -NoProfile -File (Join-Path $Destination 'a5-with-token.ps1') -VerifyOnly
 if ($LASTEXITCODE -ne 0) { throw 'Installed runtime refused verification; no credentials accessed.' }
