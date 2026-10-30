@@ -69,7 +69,13 @@ interface NetSalesCardProps {
    * string is a COMPILE error, and verified at runtime so a value assigned
    * over the field is a RENDER failure.
    */
-  amount: NetSales;
+  /**
+   * ROUND 7 FINDING 1: NULL when the amount was never produced, because the
+   * refunds behind it were not read. The withheld branch below runs FIRST, so
+   * a null never reaches the provenance check -- and a null that arrives
+   * WITHOUT `withheld` still fails closed through it.
+   */
+  amount: NetSales | null;
   /**
    * Composition, for the reader who needs to know why the number moved: the
    * gross and refund sides, already formatted, plus the business date. It is
@@ -114,7 +120,12 @@ export default function NetSalesCard({
   // The runtime half. Reproduction A reaches exactly here: the field was
   // overwritten with a gross number, the types never saw it, and this is what
   // refuses it.
-  if (!isNetSales(amount)) return <ProvenanceFailure label={metric.label} />;
+  // ORDER MATTERS. `withheld` is checked before provenance: a withheld card
+  // renders no figure at all, so there is nothing for an unauthentic amount to
+  // become, and a policy withholding must not raise a provenance alert at the
+  // operator. An amount that is absent or unauthentic while NOT withheld is
+  // still the alert, which is the case this guard exists for.
+  if (!withheld && !isNetSales(amount)) return <ProvenanceFailure label={metric.label} />;
 
   // CLAUDE.md rule 6: money in the DM Mono variable. Decided here from the
   // metric's own unit, not from a caller's flag.
@@ -129,7 +140,11 @@ export default function NetSalesCard({
           + (isMoney ? 'font-mono' : 'font-sans font-semibold')
         }
       >
-        {withheld ? '—' : formatMoney(netSalesAmount(amount))}
+        {/* `amount === null` cannot reach here unwithheld: the guard above
+            returns the provenance alert for it. The check is written out
+            anyway, because a cast here would be the one place a null could
+            become a number. */}
+        {withheld || amount === null ? '—' : formatMoney(netSalesAmount(amount))}
       </p>
       {composition === undefined ? null : (
         <p className="mt-1 text-xs text-midGray">{composition}</p>

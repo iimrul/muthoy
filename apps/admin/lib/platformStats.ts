@@ -48,7 +48,15 @@ export interface PharmacyRow {
 export interface PlatformStats {
   totalShops: number;
   grossSalesToday: Paisa;
-  refundsToday: Paisa;
+  /**
+   * ROUND 7 FINDING 1: NULL when the refunds were not read at all.
+   *
+   * Not zero. A zero would make `netSalesToday` equal the GROSS and leave it
+   * looking like an ordinary net figure -- which is the defect class rounds 9
+   * to 15 spent five rounds closing. `null` makes the absence a thing the type
+   * system forces every reader to handle.
+   */
+  refundsToday: Paisa | null;
   /**
    * grossSalesToday − refundsToday, via the shared @muthoy/utils definition.
    *
@@ -58,7 +66,7 @@ export interface PlatformStats {
    * and by laundering the value through an identity-shaped call. The renderer
    * verifies provenance before it formats, so neither substitution survives.
    */
-  netSalesToday: NetSales;
+  netSalesToday: NetSales | null;
   /**
    * The DISTINCT pharmacies that SOLD today, and separately those that
    * REFUNDED today.

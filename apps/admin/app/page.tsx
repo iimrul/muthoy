@@ -387,7 +387,12 @@ export default async function DashboardPage() {
               // policy was the actual reason, so it moved with the protected
               // data. One reason, shared with the note.
               ? `All shops · ${stats.day.businessDate} (Asia/Dhaka) · ${withheldReason}`
-              : `All shops · ${stats.day.businessDate} (Asia/Dhaka) · gross ${formatMoney(stats.grossSalesToday)} less refunds ${formatMoney(stats.refundsToday)}`
+              : stats.refundsToday === null
+                // Unreachable: refunds are unread only while the policy
+                // withholds, and that withholds this line too. Stated rather
+                // than cast, because the type is the thing keeping it true.
+                ? `All shops · ${stats.day.businessDate} (Asia/Dhaka) · ${withheldReason}`
+                : `All shops · ${stats.day.businessDate} (Asia/Dhaka) · gross ${formatMoney(stats.grossSalesToday)} less refunds ${formatMoney(stats.refundsToday)}`
           }
         />
       </div>

@@ -2,6 +2,7 @@ import 'server-only';
 
 import { AdminDataError } from './errors';
 import { assertCompleteRead } from './adminReports';
+import { PUBLICATION_IS_REVISION_SAFE } from './adminSuppression';
 import { netSalesPaisa } from '@muthoy/utils';
 import {
   dhakaDayRange,
@@ -139,10 +140,26 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
       .range(from, to),
   );
 
-  // Through the same bounded pager as sales, so paging, the is_deleted filter
-  // and the AdminDataError path behave identically on both sides rather than
-  // one being assumed to match the other.
-  const refundRows = await readAllPages<SaleRefundTotalRow>('sale_refunds', (from, to) =>
+  // The one condition, named once. Same predicate the report layer uses, for
+  // the same reason -- see `PUBLICATION_IS_REVISION_SAFE`.
+  const readRefunds = PUBLICATION_IS_REVISION_SAFE;
+
+  // ROUND 7 FINDING 1 — THE DASHBOARD HAD THE SAME CHANNEL AS THE REPORT.
+  //
+  // Round 6 stopped the REPORT reading refunds while the revision policy
+  // withholds its money, because the cap and completeness paths were a
+  // deterministic refund oracle. This read is the sibling I left open, and the
+  // reviewer reproduced it here: 100 001 known eligible sales, no sales today,
+  // and the Dashboard renders normally at 100 000 refunds and turns into a
+  // persistent error on the 100 001st. No concurrency, every count agreeing.
+  // The sixth instance of fixing one surface and leaving its neighbour.
+  //
+  // While the policy withholds, the refunds reach NO Dashboard output: the net
+  // figure is withheld, the composition line is withheld with it, and the
+  // active count is gated on the SALE side alone. So they are not read, and the
+  // absence is carried as `null` rather than zero.
+  const refundRows = readRefunds
+    ? await readAllPages<SaleRefundTotalRow>('sale_refunds', (from, to) =>
     supabase
       .from('sale_refunds')
       .select('total_amount, shop_id')
@@ -150,7 +167,8 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
       .eq('business_date', day.businessDate)
       .order('id', { ascending: true })
       .range(from, to),
-  );
+    )
+    : [];
 
   // ROUND 13 FINDING 3 — THE DASHBOARD IS INSIDE THE COMPLETENESS GATE TOO.
   //
@@ -164,17 +182,24 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
   // So both reads are counted independently and compared with what loaded.
   // `head: true` asks for the count and no rows, so this is two cheap queries
   // rather than a second pass over the data.
+  // THE COUNT GOES WITH THE READ. Gating the rows and leaving the count was my
+  // own break, caught by the suite before it left this machine: the count still
+  // ran, `refundRows.length` was 0, and the completeness gate then threw on any
+  // day with a refund -- turning the whole Dashboard into an error, which is a
+  // far louder refund oracle than the one round 7 closed.
   const [saleCount, refundCount] = await Promise.all([
     supabase
       .from('sales')
       .select('id', { count: 'exact', head: true })
       .eq('is_deleted', false)
       .eq('business_date', day.businessDate),
-    supabase
-      .from('sale_refunds')
-      .select('id', { count: 'exact', head: true })
-      .eq('is_deleted', false)
-      .eq('business_date', day.businessDate),
+    readRefunds
+      ? supabase
+        .from('sale_refunds')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_deleted', false)
+        .eq('business_date', day.businessDate)
+      : Promise.resolve({ count: 0, error: null }),
   ]);
   if (saleCount.error) {
     console.error('[admin] sales count query failed:', saleCount.error.message);
@@ -188,11 +213,15 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
   // wrong figure, and showing it is worse than showing an error.
   assertCompleteRead([
     { label: 'sales', counted: saleCount.count ?? 0, loaded: saleRows.length },
-    { label: 'sale_refunds', counted: refundCount.count ?? 0, loaded: refundRows.length },
+    // Only when it was read. An unread source has no completeness to assert,
+    // and asserting one against zero loaded rows is how this broke.
+    ...(readRefunds
+      ? [{ label: 'sale_refunds', counted: refundCount.count ?? 0, loaded: refundRows.length }]
+      : []),
   ]);
 
   const grossSalesToday = sumSaleTotals(saleRows);
-  const refundsToday = sumRefundTotals(refundRows);
+  const refundsToday = readRefunds ? sumRefundTotals(refundRows) : null;
 
   // SEPARATELY, not unioned. Round 12 finding 2: a union of the two sides
   // cleared the floor for a day on which ONE pharmacy sold and four others
@@ -206,7 +235,8 @@ export async function getPlatformStats(now: Date = new Date()): Promise<Platform
     totalShops: count ?? 0,
     grossSalesToday,
     refundsToday,
-    netSalesToday: netSalesPaisa(grossSalesToday, refundsToday),
+    netSalesToday:
+      refundsToday === null ? null : netSalesPaisa(grossSalesToday, refundsToday),
     saleContributorShopIds,
     refundContributorShopIds,
     day,

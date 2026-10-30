@@ -571,6 +571,36 @@ describe('§8.5 Analytics renders all four missing figures (Gate 5 finding 8)', 
     expect(html).not.toContain('fewer than 5 accounts have been granted a trial');
   });
 
+  test('ROUND 7 FINDING 1: the DASHBOARD does not touch sale_refunds either', async () => {
+    // Round 6 closed this channel in the REPORT layer and I left the sibling
+    // open. The reviewer reproduced it here: 100 001 known eligible sales, no
+    // sales today, and the Dashboard renders normally at 100 000 refunds and
+    // becomes a persistent error on the 100 001st -- no concurrency, every
+    // count agreeing. The error itself announces that every eligible sale was
+    // refunded, which is louder than the export oracle it mirrors.
+    //
+    // While the policy withholds, refunds reach no Dashboard output: the net
+    // figure is withheld, the composition line goes with it, and the active
+    // count is gated on the SALE side alone.
+    clientBox.rowsByTable.sale_refunds = [
+      {
+        id: 'r1',
+        shop_id: SHOP_ID,
+        business_date: '2026-09-10',
+        total_amount: 8_000,
+        created_at: '2026-09-10T00:00:00.000Z',
+      },
+    ];
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./page');
+
+    expect(clientBox.calls.filter((call) => call.table === 'sale_refunds')).toEqual([]);
+    // Non-vacuity: the page did render, and it did read its own sales source.
+    expect(html).not.toContain('role="alert"');
+    expect(clientBox.calls.some((call) => call.table === 'sales')).toBe(true);
+  });
+
   test('ROUND 6 FINDINGS 1 and 2: no report TOUCHES sale_refunds while money is withheld', async () => {
     // The claim at the layer it lives in: the refund table is not read, so
     // there is no refund tally, no cap to cross and no completeness refusal to

@@ -642,8 +642,19 @@ describe('the GROSS boundary', () => {
    * Whitespace is stripped entirely, so reformatting does not break a pin.
    */
   const PINNED_DERIVATIONS: Readonly<Record<string, readonly string[]>> = {
-    // lib/queries.ts: the shared subtraction, called directly.
-    netSalesToday: ['netSalesPaisa(grossSalesToday,refundsToday)'],
+    // lib/queries.ts: the shared subtraction, called directly — now behind a
+    // null guard, because ROUND 7 FINDING 1 stopped the Dashboard reading
+    // refunds while the revision policy withholds its money, and the absence is
+    // carried as `null` rather than as a zero that would make the net figure
+    // equal the GROSS.
+    //
+    // The pin moved deliberately and this is the whole reason the pin is exact
+    // text: the only expression that can produce a non-null value here is still
+    // the shared subtraction, and the guard had to be shown the new shape
+    // rather than left to accept any conditional around it.
+    netSalesToday: [
+      'refundsToday===null?null:netSalesPaisa(grossSalesToday,refundsToday)',
+    ],
     // app/revenue/page.tsx: summed by `sumNetSales`, which VERIFIES each
     // monthly part, from totals lib/adminPlatformQueries.ts produced through
     // netSalesPaisa.
@@ -1236,7 +1247,19 @@ describe('the GROSS boundary', () => {
     // is the whole point of the redesign -- a plain number in this field is
     // what let round 9 assign gross over it -- so the predicate follows.
     const declaresType = (code: string) => code.includes(`${NET_FIELD}: NetSales`);
-    const assignsValue = (code: string) => code.includes(`${NET_FIELD}: netSalesPaisa(`);
+    // ROUND 7 FINDING 1 changed this shape. The assignment is now guarded --
+    // `netSalesToday: refundsToday === null ? null : netSalesPaisa(...)` --
+    // because the Dashboard stops reading refunds while the revision policy
+    // withholds the money, and the absence is carried as `null` rather than as
+    // a zero that would make the net figure equal the GROSS.
+    //
+    // Whitespace-stripped so reformatting cannot break it, and still a LITERAL
+    // rather than a pattern: the point is that only the shared subtraction can
+    // put a non-null value in this field, and the exact text is what says so.
+    const assignsValue = (code: string) =>
+      code.replace(/\s+/g, '').includes(
+        `${NET_FIELD}:refundsToday===null?null:netSalesPaisa(`,
+      );
 
     expect(SOURCES.filter((file) => declaresType(file.code)).map((file) => file.path))
       .toEqual(['lib/platformStats.ts']);
