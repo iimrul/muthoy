@@ -39,6 +39,8 @@ import {
   reportMetric,
   reportToCsv,
   reportToPdf,
+  moneyColumnIndexes,
+  reportReadsRefunds,
   requireReportDefinition,
   type ReportData,
   type ReportSaleTotalRow,
@@ -624,6 +626,45 @@ describe('the filters', () => {
 
     expect(reportTextRows(table)[0]).toEqual(['2026-10', '500.00', '1']);
     expect(table.subtitle).not.toContain('withheld');
+  });
+
+  test('ROUND 6 FINDING 1: the net report does not READ refunds while its money is withheld', () => {
+    // I CALLED THIS RESIDUAL WEAK AND I WAS WRONG. My argument was that a
+    // completeness refusal is only a concurrency race and that `sales`,
+    // `sale_refunds` and `shops` could all cause it, so it attributed nothing.
+    // The reviewer showed the CAP path is deterministic and refund-specific:
+    // zero October sales, 100 001 known September sales, and at 100 000 October
+    // refunds the export returns 200 while refunding the last one produces a
+    // PERSISTENT 409 — no concurrency, every count agreeing, and this report
+    // reads only sales and refunds so `shops` cannot explain it. The threshold
+    // itself announces that every eligible sale was refunded.
+    //
+    // Better wording could not close that. While the money is withheld the
+    // refunds reach NO output — the cell is withheld, the bucket set comes from
+    // sales, `existsWithoutRefunds` counts sales — so their only effect is on
+    // tallies, caps and error paths. They are not read.
+    expect(reportReadsRefunds('refund_net_pharmacy_sales')).toBe(false);
+    // Non-vacuity from the other side: the predicate is about the POLICY, not
+    // about this report being special, and it is the money that decides.
+    expect(reportReadsRefunds('activity_summary')).toBe(false);
+    expect(reportReadsRefunds('subscription_revenue_and_renewals')).toBe(false);
+  });
+
+  test('ROUND 6 FINDING 3: a COUNT column is not money, whatever report it sits in', () => {
+    // The page asked `reportMetric(definition) !== null` and then styled every
+    // column after the key as money, so the billing report's "Verified
+    // payments" count rendered in DM Mono — CLAUDE.md rule 6 says money uses
+    // that font and every other number does not. The definition already marks
+    // an amount with the `(BDT)` heading suffix.
+    const billing = requireReportDefinition('subscription_revenue_and_renewals');
+
+    expect(billing.columns).toHaveLength(3);
+    expect(moneyColumnIndexes(billing)).toEqual([1]);
+
+    // And a report with no money at all has no money column.
+    expect(moneyColumnIndexes(requireReportDefinition('activity_summary'))).toEqual([]);
+    // While the net report's one amount is still found.
+    expect(moneyColumnIndexes(requireReportDefinition('refund_net_pharmacy_sales'))).toEqual([1]);
   });
 
   test('FOUNDER DECISION 4: the exemption reaches EXACTLY one report', () => {

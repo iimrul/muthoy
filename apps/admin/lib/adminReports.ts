@@ -463,6 +463,51 @@ export const ADMIN_REPORT_DEFINITIONS: readonly ReportDefinition[] = Object.free
   }),
 ]);
 
+/**
+ * WHICH COLUMNS CARRY MONEY, by index.
+ *
+ * ROUND 6 FINDING 3. The reports page asked `reportMetric(definition) !== null`
+ * and then styled EVERY column after the key as money, so the billing report's
+ * "Verified payments" COUNT rendered in DM Mono — a straight CLAUDE.md rule 6
+ * violation, money in the money font and every other number in Plus Jakarta
+ * Sans. The heading's `(BDT)` suffix is what the definition already uses to say
+ * a column is an amount, so it is what decides the font.
+ */
+export function moneyColumnIndexes(entry: ReportDefinition): readonly number[] {
+  return entry.columns
+    .map((heading, index) => (heading.endsWith(MONEY_UNIT_SUFFIX) ? index : -1))
+    .filter((index) => index >= 0);
+}
+
+/**
+ * Whether this report's REFUND source is worth reading at all.
+ *
+ * ROUND 6 FINDING 1 — AND I HAD CALLED THIS RESIDUAL WEAK. I argued that a
+ * completeness refusal was only a concurrency race and that `sales`,
+ * `sale_refunds` and `shops` could all cause it, so it attributed nothing. The
+ * reviewer showed the CAP path is deterministic and refund-specific: with zero
+ * October sales and 100 001 known September sales, 100 000 October refunds
+ * export 200 and refunding the last one produces a PERSISTENT 409. No
+ * concurrency, every count and page agreeing, and this report reads only sales
+ * and refunds — so `shops` cannot explain it. The threshold itself announces
+ * that every eligible sale was refunded.
+ *
+ * The close is not better wording. While the money is withheld the refunds
+ * affect NO published output — the net cell is withheld, the bucket set comes
+ * from sales, and `existsWithoutRefunds` counts sales — so their only effect is
+ * on tallies, caps and error paths. So they are not read.
+ *
+ * When publication becomes revision-safe this returns true again, and the
+ * completeness evidence returns with it.
+ */
+export function reportReadsRefunds(reportId: string): boolean {
+  const entry = reportDefinition(reportId);
+  if (entry === undefined) return false;
+  if (moneyColumnIndexes(entry).length === 0) return false;
+  if (entry.confidentiality !== 'pharmacy_operational') return false;
+  return PUBLICATION_IS_REVISION_SAFE;
+}
+
 export function reportDefinition(id: string): ReportDefinition | undefined {
   return ADMIN_REPORT_DEFINITIONS.find((candidate) => candidate.id === id);
 }

@@ -571,6 +571,29 @@ describe('§8.5 Analytics renders all four missing figures (Gate 5 finding 8)', 
     expect(html).not.toContain('fewer than 5 accounts have been granted a trial');
   });
 
+  test('ROUND 6 FINDINGS 1 and 2: no report TOUCHES sale_refunds while money is withheld', async () => {
+    // The claim at the layer it lives in: the refund table is not read, so
+    // there is no refund tally, no cap to cross and no completeness refusal to
+    // observe. Asserted for the money report AND for activity_summary, which
+    // never needed refunds and used to pull a tally anyway because `refunds`
+    // rode along with `sales`.
+    await signInAs('founder', 'super_admin');
+
+    for (const reportId of ['refund_net_pharmacy_sales', 'activity_summary'] as const) {
+      clientBox.calls.length = 0;
+      await render('./reports/page', { reportId, from: '2026-10-01', to: '2026-10-31' });
+
+      expect(
+        clientBox.calls.filter((call) => call.table === 'sale_refunds'),
+        reportId + ' read the refund table',
+      ).toEqual([]);
+      // Non-vacuity: the money report really did read its own source.
+      if (reportId === 'refund_net_pharmacy_sales') {
+        expect(clientBox.calls.some((call) => call.table === 'sales')).toBe(true);
+      }
+    }
+  });
+
   test('ROUND 4 FINDING 2: a refund-only month does not appear in EITHER analytics region', async () => {
     // Round 3 stopped the REPORT emitting a row for a month that exists only
     // because something was refunded in it. This page kept emitting the month

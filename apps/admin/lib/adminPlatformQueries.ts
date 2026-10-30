@@ -47,6 +47,7 @@ import {
 import {
   assertCompleteRead,
   assertWholeMonthRange,
+  reportReadsRefunds,
   type ReportData,
   type ReportSaleTotalRow,
   type ReportShopRow,
@@ -1118,14 +1119,18 @@ function withRange<B extends ListFilterBuilder>(builder: B, column: string, boun
  */
 const REPORT_TABLES: ReadonlyMap<
   string,
-  readonly ('shops' | 'subscriptions' | 'orders' | 'sales')[]
+  readonly ('shops' | 'subscriptions' | 'orders' | 'sales' | 'refunds')[]
 > = new Map([
   ['pharmacy_registrations', ['shops']],
   ['subscriptions', ['subscriptions']],
   ['subscription_revenue_and_renewals', ['orders']],
   ['plan_distribution', ['shops']],
   ['activity_summary', ['shops', 'sales']],
-  ['refund_net_pharmacy_sales', ['sales']],
+  // ROUND 6 FINDING 2: `refunds` is its own source now. It used to ride along
+  // with `sales`, so `activity_summary` -- which never reads a refund -- pulled
+  // a refund tally anyway, and a refund-only count/page race returned 409 on a
+  // report whose own inputs were complete.
+  ['refund_net_pharmacy_sales', ['sales', 'refunds']],
 ]);
 
 /**
@@ -1270,6 +1275,17 @@ export async function platformReportData(query: AdminReportExportQuery): Promise
     // Through the SAME tallied reader, so paging, the is_deleted filter and the
     // completeness evidence behave identically on both sides of the subtraction
     // rather than one being assumed to match the other.
+    //
+    // ROUND 6 FINDINGS 1 AND 2 put two conditions in front of it. The report
+    // must DECLARE refunds as a source -- `activity_summary` does not, and used
+    // to get a tally it never read -- and the refunds must actually reach an
+    // output, which they do not while the revision policy withholds the money.
+    // See `reportReadsRefunds`: the cap and completeness paths were a
+    // deterministic refund oracle, and the close is to not read what nothing
+    // publishes.
+  }
+
+  if (needed.includes('refunds') && reportReadsRefunds(query.reportId)) {
     const readRefunds = await readTallied(
       'sale_refunds',
       withRange(

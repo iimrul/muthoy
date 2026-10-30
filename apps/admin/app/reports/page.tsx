@@ -10,8 +10,8 @@ import {
   ADMIN_REPORT_DEFINITIONS,
   ReportCompletenessError,
   buildReport,
+  moneyColumnIndexes,
   reportDefinition,
-  reportMetric,
   reportTextColumns,
   reportTextRows,
   type ReportTable,
@@ -131,7 +131,12 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   // Whether this report has a money column at all, decided from §5.2's
   // manifest rather than from the column's position or its heading's words.
   const definition = reportDefinition(reportId);
-  const hasMoneyColumn = definition !== undefined && reportMetric(definition) !== null;
+  // ROUND 6 FINDING 3: BY COLUMN, not by report. This was
+  // `reportMetric(definition) !== null`, and every column after the key then
+  // rendered in DM Mono -- so the billing report's "Verified payments" COUNT
+  // came out in the money font, which CLAUDE.md rule 6 forbids outright. The
+  // definition already marks an amount with the `(BDT)` heading suffix.
+  const moneyColumns = definition === undefined ? [] : moneyColumnIndexes(definition);
 
   // ROUND 12 FINDING 4: the cells are opaque until HERE. `reportTextRows`
   // verifies every refund-net cell and is the only thing that turns one into
@@ -262,7 +267,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                         // the manifest, not from the heading's words.
                         className={
                           'py-1 ' +
-                          (hasMoneyColumn && cellIndex > 0 ? 'font-mono tabular-nums' : '')
+                          (moneyColumns.includes(cellIndex) ? 'font-mono tabular-nums' : '')
                         }
                       >
                         {/* An EMPTY cell is a withheld bucket. It reads as the
@@ -276,7 +281,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                             // the operator the wrong rule -- the same mistake as
                             // round 4 finding 4, in the opposite direction.
                             title={
-                              hasMoneyColumn
+                              moneyColumns.includes(cellIndex)
                                 ? moneyWithholdingReason(
                                   'Withheld: fewer than five contributors.',
                                 )
