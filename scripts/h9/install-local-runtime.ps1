@@ -6,7 +6,31 @@ Set-StrictMode -Version Latest
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $expected = 'C:\Users\Imrul\.muthoy-h9-ws\b8ca5d8\ws1-a5'
 if ([IO.Path]::GetFullPath($Destination) -cne $expected) { throw 'Refused destination.' }
-if ((git -C $repo rev-parse HEAD) -cne 'b8ca5d8c9538fd41605b09d5a9475e16ff496c3d') { throw 'Refused revision.' }
+# Content-addressed staging guard. The reviewed runtime files were authored while HEAD was
+# b8ca5d8 and committed afterwards, so a `git rev-parse HEAD` equality test refused every
+# later revision even when the staged bytes were identical to the reviewed ones. Identity of
+# what gets staged is a property of the BYTES, not of the commit that happens to contain
+# them, so the gate below pins the exact reviewed SHA-256 of every staged file and is
+# verified all-or-nothing before the first copy. The manifest keeps writing sourceRevision
+# b8ca5d8: that value labels this reviewed byte set and is what the sealed H1/F12 artifacts
+# and SOURCE_REVISION already attest to, so it is deliberately NOT rewritten here.
+$REVIEWED = @{
+    'scripts/h9/a5-with-token.ps1' = '90e64b7ce6c5bcc2bd31e9b3317085fcf833cdaec3ed7a4baefc4252dff81211'
+    'scripts/h9/run-a5.cmd' = 'a728e5a1f37c75cfce1f6275a4a193c7a632a0ba2590fc5d9915764f868ad244'
+    'scripts/h9/verify-a5.cmd' = '15de923c9e9ed95c0c63c5f880b67e824830d87383556db95c9da96c69eaf59a'
+    'scripts/h9/h9-a5-dev-readonly.mjs' = '00f00bd999b9a5b71516c3d57f29ec2dd0f83353e1b9bdc81838e006a2459370'
+    'scripts/h9/h9-a5.test.mjs' = '28c9e5cf788ef93213d5d6b9e33d1c036577fe96013aaab8ff4624dec5473ced'
+    'scripts/h9-f12-hosted-preflight.mjs' = 'fa58c4ce286cab50c29a368febf44433a523689ef305cfff749652f87854f32b'
+    'backend/supabase/checks/h9_hosted_preflight.sql' = '9bf8998891cd7cc9de8c945ffccad388038fd901a3c4135d58dceec8e43efa2a'
+    'backend/supabase/checks/h9_postmigration_checks.sql' = '361a400a29025f2d859b4cd3e4f826afcdcd2c134a332b3412b9a2e0af1e2bd9'
+}
+foreach ($relative in $REVIEWED.Keys | Sort-Object) {
+    $source = Join-Path $repo $relative
+    if (-not [IO.File]::Exists($source)) { throw "Refused missing reviewed source: $relative" }
+    if (([IO.File]::GetAttributes($source) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Refused reparse source: $relative" }
+    $actual = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -cne $REVIEWED[$relative]) { throw "Refused unreviewed bytes: $relative" }
+}
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
 $trusted = @($sid.Value,'S-1-5-18','S-1-5-32-544')
 Add-Type @'
