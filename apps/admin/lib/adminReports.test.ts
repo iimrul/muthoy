@@ -15,7 +15,7 @@
 // That is asserted against the DEFINITIONS and against built output, because
 // the claim is about what the module can produce, not about one fixture.
 
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { asPaisa } from '@muthoy/types';
 import { parseCsv } from '@muthoy/utils';
 import { ADMIN_REPORT_IDS, adminReportExportQuerySchema } from '@muthoy/validation';
@@ -191,14 +191,44 @@ describe('the completeness gate', () => {
     );
   });
 
-  test('the refusal names both numbers, so the operator knows what was lost', () => {
+  test('the refusal names NO numbers and NO table — it logs them instead', () => {
+    // THIS TEST ASSERTED THE OPPOSITE UNTIL ROUND 5, and it was called "the
+    // refusal names both numbers, so the operator knows what was lost". That
+    // was a deliberate choice and the reviewer showed what it cost.
+    //
+    // ROUND 5 FINDING 1: the message reaches the browser -- the reports page
+    // renders it, the export route returns it with a 409 -- so a month whose
+    // row, count and chart label are all correctly omitted announced itself
+    // the moment a refund synced between the count read and the page read:
+    // `sale_refunds read 1 of 0 rows`, which with one remembered prior sale
+    // names the full refund. Five rounds spent closing output surfaces, and
+    // the failure message was one of them.
+    //
+    // The operator keeps the detail, in the server log. The browser gets a
+    // sentence that says what to do.
+    const logged: unknown[][] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args);
+    });
     try {
-      assertCompleteRead([{ label: 'sales', counted: 1500, loaded: 1000 }]);
+      assertCompleteRead([{ label: 'sale_refunds', counted: 0, loaded: 1 }]);
       expect.unreachable('the gate did not throw');
     } catch (error: unknown) {
-      expect((error as Error).message).toContain('1000 of 1500');
-      expect((error as Error).message).toContain('has not been produced');
+      const message = (error as Error).message;
+      expect(message).toContain('has not been produced');
+      // Neither count, and not the table either: `sales`, `sale_refunds` and
+      // `shops` all fail through this one gate, so naming it would restore the
+      // attribution that made the leak specific.
+      expect(message).not.toMatch(/\d/);
+      expect(message).not.toContain('sale_refunds');
+    } finally {
+      spy.mockRestore();
     }
+
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toEqual(
+      expect.arrayContaining(['[admin] incomplete report source read:', 'sale_refunds', 1, 'of', 0]),
+    );
   });
 
   test('loading MORE than counted is also refused — it is not "good enough"', () => {
@@ -209,16 +239,31 @@ describe('the completeness gate', () => {
     );
   });
 
-  test('a count above the explicit cap is refused with the cap named', () => {
-    expect(() =>
-      assertCompleteRead([
-        {
-          label: 'sales',
-          counted: MAX_EXPORT_SOURCE_ROWS + 1,
-          loaded: MAX_EXPORT_SOURCE_ROWS + 1,
-        },
-      ]),
-    ).toThrow(/cap of/);
+  test('a count above the explicit cap is refused, and the cap is logged not shown', () => {
+    // ROUND 5 FINDING 1 applies to this message too: a row count IS the
+    // protected quantity. The refusal keeps the one thing the operator can act
+    // on -- narrow the range -- and the numbers go to the log.
+    const logged: unknown[][] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args);
+    });
+    try {
+      expect(() =>
+        assertCompleteRead([
+          {
+            label: 'sales',
+            counted: MAX_EXPORT_SOURCE_ROWS + 1,
+            loaded: MAX_EXPORT_SOURCE_ROWS + 1,
+          },
+        ]),
+      ).toThrow(/Narrow the date range/);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(logged[0]).toEqual(
+      expect.arrayContaining(['[admin] report source above cap:', 'sales', MAX_EXPORT_SOURCE_ROWS + 1]),
+    );
   });
 
   test('NO tally at all is refused — a gate that can be skipped is not a gate', () => {
@@ -226,12 +271,25 @@ describe('the completeness gate', () => {
   });
 
   test('every tally is checked, not just the first', () => {
-    expect(() =>
-      assertCompleteRead([
-        { label: 'shops', counted: 10, loaded: 10 },
-        { label: 'sales', counted: 1500, loaded: 1000 },
-      ]),
-    ).toThrow(/sales/);
+    // The failing tally is the SECOND one, and since round 5 the message no
+    // longer names it -- so the claim is made against the LOG, which is where
+    // the detail went.
+    const logged: unknown[][] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      logged.push(args);
+    });
+    try {
+      expect(() =>
+        assertCompleteRead([
+          { label: 'shops', counted: 10, loaded: 10 },
+          { label: 'sales', counted: 1500, loaded: 1000 },
+        ]),
+      ).toThrow(ReportCompletenessError);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(logged[0]).toEqual(expect.arrayContaining(['sales', 1000, 'of', 1500]));
   });
 
   test('the gate runs BEFORE the table is built, so no partial rows exist', () => {

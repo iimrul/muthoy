@@ -118,17 +118,46 @@ export function assertCompleteRead(tallies: readonly SourceTally[]): void {
     throw new ReportCompletenessError('No source read was recorded for this report.');
   }
 
+  // ROUND 5 FINDING 1 — THE ERROR PATH IS A PUBLICATION SURFACE, and I had
+  // not been treating it as one.
+  //
+  // These messages used to name the table and both row counts, and they reach
+  // the operator: the reports page renders them and the export route returns
+  // them with a 409. So a month with no sales, whose row and count and chart
+  // label are all correctly omitted, announced itself the moment a refund
+  // synced between the count read and the page read --
+  // `sale_refunds read 1 of 0 rows` -- and with one remembered prior sale that
+  // names the full refund. Five rounds of closing output surfaces, and the
+  // failure message was one.
+  //
+  // The counts now go to the server log and the operator gets a sentence that
+  // says what to do. The table is not named either: `sales`, `sale_refunds`
+  // and `shops` all fail through this one gate, so naming it would restore the
+  // attribution that made the leak specific.
+  //
+  // RESIDUAL, stated rather than implied: that an error occurred AT ALL is
+  // still observable, and no wording fixes that. It is weak -- a completeness
+  // failure means some concurrent write landed mid-read, which any of the
+  // three tables can cause -- and the alternative is to answer with an
+  // incomplete financial figure, which CLAUDE.md rule 10 forbids outright.
+  // Failing closed and saying less is the trade this makes.
   for (const tally of tallies) {
     if (tally.counted > MAX_EXPORT_SOURCE_ROWS) {
+      console.error(
+        '[admin] report source above cap:', tally.label, tally.counted, 'of max',
+        MAX_EXPORT_SOURCE_ROWS,
+      );
       throw new ReportCompletenessError(
-        tally.label + ' has ' + tally.counted + ' rows, above this export’s cap of '
-        + MAX_EXPORT_SOURCE_ROWS + '. Narrow the date range.',
+        'This report covers more rows than one export may carry. Narrow the date range.',
       );
     }
     if (tally.loaded !== tally.counted) {
+      console.error(
+        '[admin] incomplete report source read:', tally.label, tally.loaded, 'of', tally.counted,
+      );
       throw new ReportCompletenessError(
-        tally.label + ' read ' + tally.loaded + ' of ' + tally.counted
-        + ' rows. The export is incomplete and has not been produced.',
+        'A source read for this report was incomplete, so the report has not been produced. '
+        + 'Try again.',
       );
     }
   }

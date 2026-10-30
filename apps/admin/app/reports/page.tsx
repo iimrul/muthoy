@@ -270,9 +270,18 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                             the two right answers for the two media. */}
                         {cell.length === 0 && cellIndex > 0 ? (
                           <span
-                            title={moneyWithholdingReason(
-                              'Withheld: fewer than five contributors.',
-                            )}
+                            // ROUND 5 FINDING 3: the MONEY explanation only for
+                            // a money column. A count cell is gated by k, not
+                            // by the revision policy, and saying otherwise told
+                            // the operator the wrong rule -- the same mistake as
+                            // round 4 finding 4, in the opposite direction.
+                            title={
+                              hasMoneyColumn
+                                ? moneyWithholdingReason(
+                                  'Withheld: fewer than five contributors.',
+                                )
+                                : 'Withheld: fewer than five contributors.'
+                            }
                           >
                             {EMPTY_VALUE}
                           </span>

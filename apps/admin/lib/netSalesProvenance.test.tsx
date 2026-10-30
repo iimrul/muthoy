@@ -793,13 +793,17 @@ describe('§6i ROUND 12: the boundary is the bytes, and the floor is per side', 
     expect(() => assertCompleteRead([{ label: 'sales', counted: 6, loaded: 5 }])).toThrow(
       ReportCompletenessError,
     );
-    // And the refusal names both numbers, so an operator knows what was lost.
+    // ROUND 5 FINDING 1 moved the numbers OUT of the message: it reaches the
+    // browser, and on a month with no sales a tally like `sale_refunds read 1
+    // of 0` named a single refund. The gate's job here is to REFUSE, which is
+    // what this test is about; the detail now goes to the server log and
+    // `adminReports.test.ts` asserts it there.
     try {
       assertCompleteRead([{ label: 'sales', counted: 6, loaded: 5 }]);
       expect.unreachable('the gate did not throw');
     } catch (error) {
-      expect((error as Error).message).toContain('6');
-      expect((error as Error).message).toContain('5');
+      expect((error as Error).message).toContain('has not been produced');
+      expect((error as Error).message).not.toMatch(/\d/);
     }
   });
 

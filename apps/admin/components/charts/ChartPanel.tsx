@@ -17,6 +17,22 @@
 
 import { moneyWithholdingReason } from '../../lib/adminSuppression';
 import { EMPTY_VALUE } from '../../lib/adminViews';
+
+/**
+ * ROUND 5 FINDINGS 2 AND 3 — THE MONEY REASON BELONGS TO MONEY ONLY.
+ *
+ * Round 4 gave this panel the shared money explanation and I applied it to
+ * every chart, so a COUNT chart gated by k said "immutable snapshots" -- the
+ * revision policy does not govern counts, and a five-shop control publishes
+ * its count under that same policy. Meanwhile the money TABLE CELL below kept
+ * the floor sentence, so this file managed to be wrong in both directions at
+ * once.
+ *
+ * `isMoney` already distinguishes them, for CLAUDE.md rule 6's font. It is the
+ * same distinction.
+ */
+const withheldExplanationFor = (isMoney: boolean) => (floorReason: string) =>
+  isMoney ? moneyWithholdingReason(floorReason) : floorReason;
 import ChartLoader, { type ChartKind } from './ChartLoader';
 import type { ChartPoint } from './PlatformCharts';
 
@@ -50,6 +66,7 @@ export default function ChartPanel({
   format,
 }: ChartPanelProps) {
   const headingId = 'chart-' + heading.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const withheldExplanation = withheldExplanationFor(isMoney);
   const hasPlottable = points.some((point) => point.value !== null);
   const render = format ?? ((value: number) => String(value));
 
@@ -81,7 +98,7 @@ export default function ChartPanel({
           {withheld > 0 ? (
             <p className="mt-2 text-xs text-midGray">
               {withheld} {withheld === 1 ? 'bucket was' : 'buckets were'} withheld.{' '}
-              {moneyWithholdingReason(
+              {withheldExplanation(
                 'Fewer than five pharmacies contributed to '
                 + (withheld === 1 ? 'it' : 'them')
                 + '.',
@@ -117,7 +134,11 @@ export default function ChartPanel({
                     }
                   >
                     {point.value === null ? (
-                      <span title="Withheld: fewer than five pharmacies contributed.">
+                      <span
+                        title={withheldExplanation(
+                          'Withheld: fewer than five pharmacies contributed.',
+                        )}
+                      >
                         {EMPTY_VALUE}
                       </span>
                     ) : (
