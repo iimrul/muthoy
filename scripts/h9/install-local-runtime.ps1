@@ -140,29 +140,91 @@ if ($stagedTest -cne $REVIEWED['scripts/h9/h9-a5.test.mjs']) { throw 'Refused st
 # so recording an eighth entry would make the staged runtime refuse itself.
 $verified = $mapping.Clone()
 $verified['h9-a5.test.mjs'] = 'scripts/h9/h9-a5.test.mjs'
-# ROUND 10 HIGH. My previous answer to this was another hash loop, and the
-# reviewer was right that a hash loop CANNOT close a same-owner window: every
-# rehash releases the file again, so the launcher can be replaced after its own
-# digest is taken and while the later files are still being checked. The DACL
-# permits that owner by design, so the guarantee had to stop depending on
-# timing.
+# ROUND 11 HIGH. Round 10 told me to hold handles that deny write and delete,
+# and round 11 corrected its own advice: `Open` FOLLOWS reparse points, so the
+# handle protects the RESOLVED TARGET and says nothing about the path that is
+# about to be invoked. Replace the destination with a junction after the handles
+# are taken and the invocation walks a different tree while the handles still
+# guard the reviewed one.
 #
-# So the bytes are PINNED rather than re-measured. Each staged file is opened
-# with FileShare.Read before it is hashed and stays open until the child has
-# exited: other readers are unaffected, and nobody can write, rename or delete
-# it in between -- FileShare.Read withholds FILE_SHARE_WRITE and
-# FILE_SHARE_DELETE, so replace-by-rename fails too. The digest is then computed
-# FROM the held handle, so the bytes measured are provably the bytes the handle
-# protects, not whatever a path lookup resolves to a moment later.
+# Content identity was never the whole problem. Path identity is the other half,
+# so both are bound here:
+#
+#   1. Every directory of the staged tree, and every ancestor inside the
+#      dedicated H-9 workspace, is opened with FILE_SHARE_READ and held. A
+#      directory held that way cannot be renamed, replaced or deleted, so the
+#      path cannot be re-pointed after it is checked.
+#   2. Each staged file's handle is resolved with GetFinalPathNameByHandle and
+#      must equal the path we will invoke. If a junction had redirected it, the
+#      resolved name differs and this refuses.
+#   3. Only then are the digests taken, from the held streams.
+#
+# BOUNDARY, stated rather than implied: the pins cover the workspace root
+# downward, which is the attacker-writable part. Above it -- the user profile,
+# the Users directory, the volume root -- the controls are the OS ACLs and the
+# reparse checks above, not these handles. Pinning the whole profile would deny
+# write sharing on a directory unrelated software uses.
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class H9PathLock {
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+ public static extern IntPtr CreateFileW(string path,uint access,uint share,IntPtr security,uint disposition,uint flags,IntPtr template);
+ [DllImport("kernel32.dll",SetLastError=true)]
+ public static extern bool CloseHandle(IntPtr handle);
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+ public static extern uint GetFinalPathNameByHandleW(IntPtr handle,StringBuilder path,uint size,uint flags);
+}
+'@
+$GENERIC_READ = [uint32]2147483648
+$SHARE_READ = [uint32]1
+$OPEN_EXISTING = [uint32]3
+$BACKUP_SEMANTICS = [uint32]33554432
+$INVALID_HANDLE = [IntPtr](-1)
+$WORKSPACE_ROOT = 'C:\Users\Imrul\.muthoy-h9-ws'
+$pathBuffer = 32768
+$directoryHandles = [Collections.Generic.List[IntPtr]]::new()
 $handles = [Collections.Generic.List[IO.FileStream]]::new()
 try {
+    # 1. Pin the staged tree's directories and its in-workspace ancestors.
+    $directories = [Collections.Generic.List[string]]::new()
+    $add = { param([string]$Path) if (-not $directories.Contains($Path)) { $directories.Add($Path) } }
+    & $add $Destination
+    foreach ($name in $verified.Keys) {
+        $walk = [IO.Path]::GetDirectoryName((Join-Path $Destination $name))
+        while ($walk.Length -gt $Destination.Length) { & $add $walk; $walk = [IO.Path]::GetDirectoryName($walk) }
+    }
+    $walk = [IO.Path]::GetDirectoryName($Destination)
+    while ($walk -and $walk.Length -ge $WORKSPACE_ROOT.Length -and $walk.StartsWith($WORKSPACE_ROOT,[StringComparison]::OrdinalIgnoreCase)) {
+        & $add $walk
+        $walk = [IO.Path]::GetDirectoryName($walk)
+    }
+    foreach ($directory in ($directories | Sort-Object)) {
+        if (-not [IO.Directory]::Exists($directory)) { throw "Refused missing execution path: $directory" }
+        if (([IO.File]::GetAttributes($directory) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Refused reparse on the execution path: $directory" }
+        $locked = [H9PathLock]::CreateFileW($directory,$GENERIC_READ,$SHARE_READ,[IntPtr]::Zero,$OPEN_EXISTING,$BACKUP_SEMANTICS,[IntPtr]::Zero)
+        if ($locked -eq $INVALID_HANDLE) { throw "Refused: cannot pin the execution path: $directory" }
+        $directoryHandles.Add($locked)
+    }
+
+    # 2. Open each staged file, and prove the handle resolves to THAT path.
     $names = @($verified.Keys | Sort-Object)
     foreach ($name in $names) {
         $path = Join-Path $Destination $name
         if (-not [IO.File]::Exists($path)) { throw "Refused missing staged file: $name" }
         if (([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Refused staged reparse: $name" }
-        $handles.Add([IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read))
+        $stream = [IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+        $handles.Add($stream)
+        $resolved = [Text.StringBuilder]::new($pathBuffer)
+        $written = [H9PathLock]::GetFinalPathNameByHandleW($stream.SafeFileHandle.DangerousGetHandle(),$resolved,[uint32]$pathBuffer,[uint32]0)
+        if ($written -eq 0 -or $written -ge $pathBuffer) { throw "Refused: cannot resolve the staged handle: $name" }
+        # Case-insensitive: the resolved name carries the on-disk casing, which
+        # is not necessarily the casing of the constant above.
+        if ($resolved.ToString(0,[int]$written) -ne ('\\?\' + $path)) { throw "Refused redirected staged path: $name" }
     }
+
+    # 3. Digests, from the held streams.
     $sha = [Security.Cryptography.SHA256]::Create()
     try {
         for ($i = 0; $i -lt $names.Count; $i++) {
@@ -172,10 +234,12 @@ try {
             if ($digest -cne $REVIEWED[$verified[$names[$i]]]) { throw ("Refused staged bytes at execution: " + $names[$i]) }
         }
     } finally { $sha.Dispose() }
-    # The handles are still open here and stay open until the finally below, so
-    # what executes is what was hashed.
+
+    # Both the bytes and every directory of the path they sit on are held open
+    # until the finally below, so what executes is what was verified.
     & 'C:\Program Files\PowerShell\7\pwsh.exe' -NoProfile -File (Join-Path $Destination 'a5-with-token.ps1') -VerifyOnly
     if ($LASTEXITCODE -ne 0) { throw 'Installed runtime refused verification; no credentials accessed.' }
 } finally {
-    foreach ($handle in $handles) { $handle.Dispose() }
+    foreach ($stream in $handles) { $stream.Dispose() }
+    foreach ($locked in $directoryHandles) { [void][H9PathLock]::CloseHandle($locked) }
 }

@@ -28,8 +28,16 @@
 #
 # So the destination branch is pinned here by assertions on the code shape that
 # makes it reachable at all: the digest check exists for every staged name, the
-# recorded manifest uses the destination hash and not the source hash, and the
-# bytes are held open against write and delete through execution.
+# recorded manifest uses the destination hash and not the source hash, the bytes
+# are held open against write and delete through execution, and -- after round
+# 11 -- every directory of the execution path is held too, with each staged
+# handle required to RESOLVE to the path that is invoked.
+#
+# The handle and path mechanics themselves are verified separately by execution,
+# in an isolated temp fixture: a pinned directory refuses rename and delete, a
+# held file refuses write and delete, GetFinalPathNameByHandle equals the
+# invoked path for a real file, and through a junction it resolves elsewhere --
+# which is the redirection round 11 described. 10/10.
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))
@@ -89,7 +97,21 @@ $checks++
 $tryAst=$ast.Find({param($node) $node -is [System.Management.Automation.Language.TryStatementAst] -and $node.Body.Extent.Text -match 'pwsh\.exe'},$true)
 if(-not $tryAst){Fail 'the invocation is not inside a try that holds the staged handles'}
 if($tryAst.Body.Extent.Text -notmatch '\$handles\.Add\('){Fail 'the handle-holding try does not open the handles'}
-if(-not $tryAst.Finally -or $tryAst.Finally.Extent.Text -notmatch '\$handle\.Dispose\(\)'){Fail 'the handles are not disposed in the finally'}
+if(-not $tryAst.Finally){Fail 'the invocation is not wrapped in a try/finally'}
+if($tryAst.Finally.Extent.Text -notmatch '\$stream\.Dispose\(\)'){Fail 'the file handles are not disposed in the finally'}
+if($tryAst.Finally.Extent.Text -notmatch 'CloseHandle\('){Fail 'the directory handles are not closed in the finally'}
+$checks++
+
+# 3b. ROUND 11 FINDING 1. Content identity is not enough: `Open` follows reparse
+#     points, so the handle protects the resolved target and says nothing about
+#     the path about to be invoked. Both halves are pinned here.
+#     (i) every directory of the staged tree is held open against rename/delete,
+if($text -notmatch 'CreateFileW\(\$directory,\$GENERIC_READ,\$SHARE_READ'){Fail 'the execution path directories are not pinned'}
+if($text -notmatch '\$BACKUP_SEMANTICS\s*=\s*\[uint32\]33554432'){Fail 'directory handles are not opened with FILE_FLAG_BACKUP_SEMANTICS'}
+if($text -notmatch 'Refused reparse on the execution path'){Fail 'the execution path is not checked for reparse points'}
+#     (ii) and each staged handle must RESOLVE to the path that gets invoked.
+if($text -notmatch 'GetFinalPathNameByHandleW\(\$stream\.SafeFileHandle'){Fail 'the staged handle is not resolved to a real path'}
+if($text -notmatch 'Refused redirected staged path'){Fail 'a redirected staged path is not refused'}
 $checks++
 
 # 4. The held set covers every staged file, the separately copied test included.

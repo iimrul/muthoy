@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { migrationFiles } from './harness';
@@ -8,7 +9,11 @@ import {
   e4ChainMigrationFiles,
   expectedLiveMigrationFiles,
 } from './checkFile';
-import { EXPECTED_CHAIN } from '../../../scripts/h9-prod-preflight.mjs';
+import {
+  E4_MIGRATIONS,
+  EXPECTED_CHAIN,
+  H9_MIGRATIONS,
+} from '../../../scripts/h9-prod-preflight.mjs';
 
 // THE LIVE CHAIN GATE — founder Option B, approved 2026-10-30.
 //
@@ -86,19 +91,80 @@ export function versionOrderDrift(chain: readonly string[]): string | null {
   return null;
 }
 
+/** The three filesystem facts the byte-pin check needs, injectable for tests. */
+export interface PinSource {
+  readonly path: string;
+  exists(): boolean;
+  isFile(): boolean;
+  read(): string;
+}
+
+/** The real successor byte-pin, read from disk. */
+export function pinSourceOnDisk(path: string): PinSource {
+  return {
+    path,
+    exists: () => existsSync(path),
+    isFile: () => statSync(path).isFile(),
+    read: () => readFileSync(path, 'utf8'),
+  };
+}
+
+/** Reads a migration's bytes, or null when it is not on disk. */
+export function migrationBytesOnDisk(name: string): Buffer | null {
+  const path = resolve('backend/supabase/migrations', name);
+  return existsSync(path) ? readFileSync(path) : null;
+}
+
 /**
- * Does this declared set still need a byte-pin? True when migrations are
- * declared and no successor manifest records them.
+ * What is wrong with the successor byte-pin for this declared set, or null.
  *
- * A predicate rather than an inline check, because the real list is empty today
- * and an inline check would be vacuous — and asserting the real list STAYS
- * empty would block the very path Option B exists to open.
+ * ROUND 11 FINDING 2. My first version checked that a FILENAME EXISTED and
+ * nothing more. The reviewer made all 21 assertions pass by reporting a
+ * manifest with garbage contents, and counted zero reads of it. A guard that
+ * never opens the thing it guards is not a guard.
+ *
+ * So this reads it. The file must parse, cover exactly the declared set, and
+ * carry a digest matching the migration's ACTUAL bytes. An empty file, a
+ * directory, an undeclared entry, a malformed digest and a stale hash each
+ * fail, and the caller is told which.
  */
-export function needsSuccessorPin(
+export function successorPinDrift(
   declared: readonly string[],
-  successorManifestExists: boolean,
-): boolean {
-  return declared.length > 0 && !successorManifestExists;
+  source: PinSource,
+  migrationBytes: (name: string) => Buffer | null,
+): string | null {
+  if (declared.length === 0) return null;
+  if (!source.exists()) return `no successor byte-pin at ${source.path}`;
+  if (!source.isFile()) return `${source.path} is not a file`;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source.read());
+  } catch {
+    return `${source.path} is not valid JSON`;
+  }
+  const files = (parsed as { files?: unknown } | null)?.files;
+  if (files === null || typeof files !== 'object' || Array.isArray(files)) {
+    return `${source.path} has no files map`;
+  }
+  const recorded = files as Record<string, unknown>;
+
+  for (const extra of Object.keys(recorded)) {
+    if (!declared.includes(extra)) {
+      return `${source.path} records an undeclared migration: ${extra}`;
+    }
+  }
+  for (const name of declared) {
+    const hash = recorded[name];
+    if (typeof hash !== 'string') return `${source.path} does not record ${name}`;
+    if (!/^[a-f0-9]{64}$/.test(hash)) return `${source.path} records a malformed digest for ${name}`;
+    const bytes = migrationBytes(name);
+    if (bytes === null) return `${name} is declared and pinned but absent from disk`;
+    if (createHash('sha256').update(bytes).digest('hex') !== hash) {
+      return `${name} does not match its recorded digest`;
+    }
+  }
+  return null;
 }
 
 function classifiedMigrations(): Record<string, string> {
@@ -137,6 +203,17 @@ describe('the live migration chain is exactly the approved chain', () => {
     // declarations are fine; two that can drift apart unnoticed are not. So the
     // preflight keeps its own list and this asserts the two agree.
     expect([...EXPECTED_CHAIN]).toEqual(expectedLiveMigrationFiles());
+
+    // ROUND 11 FINDING 3. EXPECTED_CHAIN is not the preflight's only chain
+    // constraint: it separately requires the whole post-H9 tail to equal
+    // E4_MIGRATIONS, so a successor declared in BOTH the chain and
+    // EXPECTED_CHAIN still returned `migration-chain-unexpected`. Both of its
+    // declarations are cross-checked here, not just the first one I found.
+    const live = expectedLiveMigrationFiles();
+    const h9Start = live.indexOf(H9_MIGRATIONS[0]!);
+    expect(h9Start).toBeGreaterThan(0);
+    expect(live.slice(h9Start, h9Start + H9_MIGRATIONS.length)).toEqual([...H9_MIGRATIONS]);
+    expect(live.slice(h9Start + H9_MIGRATIONS.length)).toEqual([...E4_MIGRATIONS]);
   });
 
   it('keeps the E4 evidence manifest scoped to the chain it is evidence about', () => {
@@ -165,11 +242,14 @@ describe('the live migration chain is exactly the approved chain', () => {
     // the message says what to build. It is dormant while the list is empty,
     // which is why the two assertions below also exercise it directly.
     expect(
-      needsSuccessorPin(POST_E4_MIGRATIONS, existsSync(resolve(SUCCESSOR_MANIFEST))),
-      `${POST_E4_MIGRATIONS.length} post-E4 migration(s) are declared but their bytes are pinned nowhere. ` +
-        `Create ${SUCCESSOR_MANIFEST} recording a SHA-256 per post-E4 migration, on the E4 manifest's pattern, ` +
-        `before any of them is applied to a hosted project.`,
-    ).toBe(false);
+      successorPinDrift(
+        POST_E4_MIGRATIONS,
+        pinSourceOnDisk(resolve(SUCCESSOR_MANIFEST)),
+        migrationBytesOnDisk,
+      ),
+      `Create ${SUCCESSOR_MANIFEST} holding {"files":{"<migration>.sql":"<sha256>"}} for every ` +
+        `post-E4 migration, before any of them is applied to a hosted project.`,
+    ).toBeNull();
   });
 
   it('classifies every post-E4 migration for rollback before it may ship', () => {
@@ -270,12 +350,54 @@ describe('the live chain gate, against histories where the answer is known', () 
     expect(versionOrderDrift([...chain(), '20261231000001_real_successor.sql'])).toBeNull();
   });
 
-  it('demands a byte-pin for a declared migration, and is satisfied by one', () => {
-    expect(needsSuccessorPin(['20261231000001_real.sql'], false)).toBe(true);
-    expect(needsSuccessorPin(['20261231000001_real.sql'], true)).toBe(false);
-    // And an empty declaration needs nothing, with or without the manifest.
-    expect(needsSuccessorPin([], false)).toBe(false);
-    expect(needsSuccessorPin([], true)).toBe(false);
+  it('reads the successor byte-pin rather than trusting that a file exists', () => {
+    // ROUND 11 FINDING 2's reproduction, as cases. A manifest that merely
+    // EXISTS must not satisfy this, and nor must one whose contents are wrong.
+    const NAME = '20261231000001_real.sql';
+    const BYTES = Buffer.from('-- successor\nselect 1;\n');
+    const DIGEST = createHash('sha256').update(BYTES).digest('hex');
+    const bytes = (n: string) => (n === NAME ? BYTES : null);
+
+    const src = (
+      text: string,
+      options: { exists?: boolean; isFile?: boolean } = {},
+    ): PinSource => ({
+      path: 'post-e4-source-hashes.json',
+      exists: () => options.exists ?? true,
+      isFile: () => options.isFile ?? true,
+      read: () => text,
+    });
+    const pin = (files: string) => src(`{"files":${files}}`);
+
+    // Nothing declared: nothing required.
+    expect(successorPinDrift([], src('', { exists: false }), bytes)).toBeNull();
+
+    // Declared, but the pin is absent or is not a file.
+    expect(successorPinDrift([NAME], src('', { exists: false }), bytes))
+      .toMatch(/no successor byte-pin/);
+    expect(successorPinDrift([NAME], src('', { isFile: false }), bytes))
+      .toMatch(/is not a file/);
+
+    // Present, and useless -- the exact shape that passed before.
+    expect(successorPinDrift([NAME], src('not json at all'), bytes)).toMatch(/not valid JSON/);
+    expect(successorPinDrift([NAME], src(''), bytes)).toMatch(/not valid JSON/);
+    expect(successorPinDrift([NAME], src('{}'), bytes)).toMatch(/no files map/);
+    expect(successorPinDrift([NAME], pin('[]'), bytes)).toMatch(/no files map/);
+
+    // Present and specific, but incomplete, malformed, undeclared or stale.
+    expect(successorPinDrift([NAME], pin('{}'), bytes)).toMatch(/does not record/);
+    expect(successorPinDrift([NAME], pin(`{"${NAME}":"nope"}`), bytes))
+      .toMatch(/malformed digest/);
+    expect(successorPinDrift([NAME], pin(`{"${NAME}":"${'a'.repeat(64)}"}`), bytes))
+      .toMatch(/does not match its recorded digest/);
+    expect(
+      successorPinDrift([NAME], pin(`{"${NAME}":"${DIGEST}","other.sql":"${DIGEST}"}`), bytes),
+    ).toMatch(/records an undeclared migration/);
+    expect(successorPinDrift([NAME], pin(`{"${NAME}":"${DIGEST}"}`), () => null))
+      .toMatch(/absent from disk/);
+
+    // And the one shape that is correct.
+    expect(successorPinDrift([NAME], pin(`{"${NAME}":"${DIGEST}"}`), bytes)).toBeNull();
   });
 
   it('does not mistake an appended migration for a wedge', () => {

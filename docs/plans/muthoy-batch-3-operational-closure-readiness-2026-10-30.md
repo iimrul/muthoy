@@ -385,10 +385,9 @@ review, and two of them were in claims I had made *about* that work.
 | 3b | MEDIUM | **My "cannot be tested" claim was too strong.** A caller-scoped `Get-FileHash` wrapper can do it with no race and no production bypass | Accepted and corrected in the test's own header. It is still not run here, for a narrower and honest reason: the technique needs the installer dot-sourced, and its destination is pinned to the real protected staging directory, so running it would write to sealed custody |
 | 4 | MEDIUM | **Duplicate migration versions were accepted.** `20261023000000_z_duplicate_version.sql` sorts after migration 35's filename while repeating its version, and Postgres keys the chain by version | The chain is now checked **by version** — unique and strictly increasing across the whole of it. The reviewer's exact filename is a test case |
 
-**Mutation-checked, 6 of 6 caught**, including round 10's own defeating
-mutation, plus: handles permitting write, hashing by path instead of from the
-held stream, dropping the dispose, recording the source hash, and dropping the
-test from the pinned set.
+**Mutation-checked, 6 of 6 caught** at the time, including round 10's own
+defeating mutation. **Round 11 then found the fix itself incomplete** — see
+§5.10 — so these figures describe that round's state, not the final one.
 
 **What round 10 confirmed rather than faulted:** the sealed pins, counts and
 chain are unchanged and exactly three manifest hashes moved; keeping post-E4
@@ -416,6 +415,68 @@ take.
 **Still not reviewed:** everything after `72729ca` — the round 10 remediation
 itself. A further round is required before the push gate is met, on the exact
 final revision.
+
+### 5.10 Round 11 — the review of the remediation, and two more HIGH
+
+**`ROUND 11: REVISE` on `dc6496c`.** Two HIGH and one MEDIUM, and the reviewer
+began by **correcting its own round 10 advice** — which is the clearest argument
+yet for the alternating protocol.
+
+| # | Severity | Finding | What I did |
+|---|---|---|---|
+| 1 | **HIGH** | **Held handles pin the bytes, not the path.** `Open` follows reparse points, so the handle protects the *resolved target* and says nothing about the path about to be invoked. Replace the destination with a junction after the handles are taken, and the invocation walks a different tree while the handles still guard the reviewed one | Both halves are now bound. Every directory of the staged tree, and every ancestor inside the dedicated H-9 workspace, is opened with `FILE_SHARE_READ` and held, so the path cannot be re-pointed. Each staged handle is then resolved with `GetFinalPathNameByHandle` and must equal the path that gets invoked |
+| 2 | **HIGH** | **My byte-pin guard checked that a filename EXISTED and nothing more.** The reviewer made all 21 assertions pass by reporting a manifest with garbage contents, and counted **zero reads** of it | It reads it now. The pin must parse, cover exactly the declared set, and carry a digest matching the migration's **actual bytes**. An empty file, a directory, an undeclared entry, a malformed digest and a stale hash each fail with the reason |
+| 3 | MEDIUM | **The preflight has a SECOND tail constraint.** My cross-check covered `EXPECTED_CHAIN`; the preflight separately requires the whole post-H9 tail to equal `E4_MIGRATIONS`, so a successor declared in both still returned `migration-chain-unexpected` | Both of its declarations are cross-checked now, not just the first one I found |
+
+**The mechanism is verified by execution, not argued.** The reviewer could not
+run a native handle probe in its sandbox (`ConstrainedLanguage`), so I ran one
+in an isolated temp fixture — **10 of 10 checks**:
+
+| Check | Result |
+|---|---|
+| a pinned directory refuses **rename** | PASS |
+| a pinned directory refuses **delete**, and survives | PASS |
+| a held file refuses **write** | PASS |
+| a held file refuses **delete** | PASS |
+| `GetFinalPathNameByHandle` equals the invoked path for a real file | PASS |
+| **through a junction it resolves ELSEWHERE** — the exact redirection round 11 described | PASS |
+
+That last row is the one that matters: invoked `…\link\a5-with-token.ps1`,
+resolved `…\elsewhere\a5-with-token.ps1`.
+
+**The probe also corrected me about my own mechanism.** My first version ran a
+recursive directory delete before opening the file, and the delete removed the
+**file** while failing on the pinned directory. **A directory pin protects that
+directory object, not its children.** The installer holds handles on both, which
+is why both are covered there — but I would not have known that from reasoning.
+
+**Mutations: 10 of 10 caught** — round 10's own defeating mutation, file handles
+permitting write, hashing by path instead of from the stream, dropping either
+dispose, removing the directory pinning, dropping the resolved-path comparison,
+weakening the reparse check, recording the source hash, and dropping the test
+from the pinned set.
+
+**What round 11 confirmed:** `FileShare.Read` does withhold write and delete
+sharing including rename; no staged file is written by the child, so the held
+handles cannot break the runtime; bounding the E4 manifest is legitimate for
+historical E4 evidence; the duplicate-version fix rejects its exact filename
+with no further bypass found; and **no suppression is relaxed, with application
+code unchanged**.
+
+**Its execution limits, again recorded because they bound the evidence.** Vitest
+still fails to start in its sandbox (`spawn EPERM`); the installer behavioural
+cases still could not run there (temp-directory creation denied); the native
+handle probe and the Windows junction exploit could not be run there either.
+**There are still not two independently executed test suites**, and the
+behavioural and mutation evidence above rests on my execution alone.
+
+**It also faulted my wording, correctly:** §5.9's remediation-complete claims
+overstated what was done, because the three constraints in finding 2 were still
+open when I wrote them. §2 now states the four coordinated updates and the
+byte-pin gap rather than implying the work was finished.
+
+**Still not reviewed:** the round 11 remediation itself. A further round is
+required on the exact final revision before the push gate is met.
 
 ---
 
