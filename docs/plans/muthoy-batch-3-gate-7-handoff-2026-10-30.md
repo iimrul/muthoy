@@ -190,7 +190,23 @@ documentation and test regexes, the E4 manifest's own SHA-256 evidence hashes,
 and one npm integrity digest in `pnpm-lock.yaml`. No `sb_secret_`, no JWT, no
 private key, no cloud token.
 
-Push and CI status is appended below once performed.
+**Pushed:** `c25924e..b339b3f` on `main` — **69 commits, fast-forward, no
+force, nothing rewritten.** Verified as a fast-forward before pushing
+(`git merge-base --is-ancestor origin/main HEAD`), so no history was replaced.
+
+**GitHub CI:** run `41022095283` on `b339b3f` — **completed, success.**
+
+| Delivery step | Result |
+|---|---|
+| Secret audit of the outgoing range | 223 files, no secret-shaped values |
+| Fast-forward check | `origin/main` 0 behind, ancestor of HEAD |
+| Push | `c25924e..b339b3f`, non-force |
+| CI | `41022095283` **success** |
+
+The one value worth recording from the audit: an 88-character base64 string
+decoding to 64 bytes, which is key-shaped and had to be identified rather than
+assumed. It is the npm integrity digest for `tiny-invariant@1.3.3` in
+`pnpm-lock.yaml`.
 
 ---
 
