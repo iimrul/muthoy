@@ -95,7 +95,20 @@ foreach ($name in $mapping.Keys | Sort-Object) {
     if ([IO.File]::Exists($target) -and ([IO.File]::GetAttributes($target) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Refused reparse input.' }
     [IO.File]::Copy((Join-Path $repo $mapping[$name]),$target,$true)
     Protect $target $false
+    # ROUND 9 HIGH — TIME OF CHECK IS NOT TIME OF USE.
+    #
+    # The gate above hashes the SOURCE. `Copy` then reopens that source, and
+    # this line recorded whatever actually arrived -- so a source replaced
+    # between the two was staged, recorded faithfully, and executed below,
+    # while the manifest still claimed sourceRevision b8ca5d8. The reviewer
+    # reproduced exactly that with harmless files: sourceGateAccepted=true,
+    # stagedEqualsReviewed=false, manifestEqualsCopied=true. The source ACL
+    # grants Authenticated Users: Modify, so the window is not theoretical.
+    #
+    # What is executed is the DESTINATION, so the destination is what must
+    # match the reviewed digest. Checked here, per file, before anything runs.
     $files[$name] = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($files[$name] -cne $REVIEWED[$mapping[$name]]) { throw "Refused staged bytes: $name" }
 }
 $manifest = [ordered]@{ version=1; sourceRevision='b8ca5d8c9538fd41605b09d5a9475e16ff496c3d'; ownerSid=$sid.Value; node=[ordered]@{path='C:\Program Files\nodejs\node.exe';version='v22.22.2';sha256='ae1a50511be58e987483fdbc12125407443926d2d394669ade2352776e920dd3'}; files=$files }
 $manifestPath = Join-Path $Destination 'runtime-manifest.json'
@@ -106,5 +119,13 @@ $testPath = Join-Path $Destination 'h9-a5.test.mjs'
 if ([IO.File]::Exists($testPath) -and ([IO.File]::GetAttributes($testPath) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Refused test reparse.' }
 [IO.File]::Copy((Join-Path $repo 'scripts/h9/h9-a5.test.mjs'),$testPath,$true)
 Protect $testPath $false
+# The test is copied separately, so it needs the same destination check -- the
+# reviewer named it specifically. It is not in $files and never reached the
+# loop above.
+$stagedTest = (Get-FileHash -LiteralPath $testPath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($stagedTest -cne $REVIEWED['scripts/h9/h9-a5.test.mjs']) { throw 'Refused staged test bytes.' }
+# ALL-OR-NOTHING, restated at the point of execution: every staged file above
+# has been compared against $REVIEWED by its destination bytes, and any
+# mismatch threw before reaching this line.
 & 'C:\Program Files\PowerShell\7\pwsh.exe' -NoProfile -File (Join-Path $Destination 'a5-with-token.ps1') -VerifyOnly
 if ($LASTEXITCODE -ne 0) { throw 'Installed runtime refused verification; no credentials accessed.' }
