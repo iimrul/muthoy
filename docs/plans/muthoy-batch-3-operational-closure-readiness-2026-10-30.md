@@ -551,14 +551,16 @@ the registry, the audit log, the bucket count, the chart label, the error
 message, the Dashboard's copy of the read -- and now the probe's summary and the
 probe's own junction branch.
 
-**Mutations: 4 of 5 caught, and the fifth is unkillable here by construction.**
-The reviewer's own three cases -- resolution returning 0, the string check
-removed, and the bytes reader returning null -- are all caught, as is a reader
-that ignores its argument. The fifth disabled the validity guard itself while
-leaving resolution working, and on a machine where resolution succeeds a
-disabled guard is a no-op with nothing to observe. **That is not a 5/5 I can
-claim.** The guard is verified from the only direction that can verify it:
-forcing its condition, which fails correctly.
+**Mutations: 4 of 5 caught; the fifth survived the successful-resolution
+fixture.** The reviewer's own three cases -- resolution returning 0, the string
+check removed, and the bytes reader returning null -- are all caught, as is a
+reader that ignores its argument. The fifth disabled the validity guard while
+leaving resolution working, and with resolution succeeding a disabled guard is a
+no-op with nothing to observe. **That is not a 5/5 I can claim.** Round 14
+corrected my wording here too: "unkillable" was wrong, because **fault injection
+does make it observable** -- a zero-return fixture plus guard removal shows the
+current branch failing and the mutant passing. The honest statement is that it
+survived the fixture I ran, not that no fixture could kill it.
 
 **What round 13 confirmed:** the summary accounting is now correct for every
 value the results table can hold; the creation assertions correctly model writes
@@ -576,6 +578,48 @@ confirmed ones.
 
 **Execution limits unchanged:** vitest `spawn EPERM`, the installer behavioural
 cases and the full native probe still unrunnable in the reviewer's sandbox.
+
+### 5.13 Round 14 -- one LOW, and the end of the sequence
+
+**`ROUND 14: REVISE` on `3415020`.** The verdict's own words: **"One remaining
+LOW, confined to test tooling. No HIGH/MEDIUM or new implementation regression
+found."**
+
+| # | Severity | Finding | What I did |
+|---|---|---|---|
+| 1 | LOW | **The reader test took its expectation from the reader it was testing.** `realDigest` came from `migrationBytesOnDisk`, then validated that same function -- so a reader hard-wired to a different migration still passed all 23 cases | The expectation now comes from the **E4 manifest's independently recorded digest** for migration 35, computed by a different function in a different file, plus an assertion that migration 34's bytes are not migration 35's. The reviewer's exact mutation -- keep the existence check, always read migration 34 -- is now caught |
+
+I also took up its advisory note and extracted `successorNameDrift`, so the
+filename and version rules are exercised against malformed inputs instead of
+iterating an empty list: eight bad names, plus two well-formed names that do not
+sort after migration 35.
+
+**What round 14 confirmed on the previous fixes:** the junction guard is correct
+at lengths 0, 32768 and 32769, and failure is the right classification because
+resolution was attempted; **no third branch in the probe can report success
+without attempting its measurement**; `classificationDrift` is now equivalent to
+the Vitest matcher across 22 sampled values; `successorPinDrift` and
+`versionOrderDrift` carry no equivalent coercion regression; **no additional
+unguarded live-chain expectation exists**; and the range is clean -- application
+code unchanged, suppression unchanged, migrations 34 and 35 and both check files
+byte-identical to upstream by Git blob, no `audit-artifacts/**` or prototype
+changes in any commit, empty index, and **zero Supabase-token, webhook, JWT,
+GitHub-token or private-key matches across all 15 commits' messages and
+patches.**
+
+**The severity trend across the sequence**, which is the thing worth reading:
+
+| Round | Findings |
+|---|---|
+| 10 | 2 HIGH, 2 MEDIUM |
+| 11 | 2 HIGH, 1 MEDIUM |
+| 12 | 1 MEDIUM, 1 LOW |
+| 13 | 1 MEDIUM, 2 LOW |
+| 14 | **1 LOW, test tooling only, no implementation regression** |
+
+Seven HIGH or MEDIUM findings across five rounds, **every one of them mine**,
+and three of them defects in my fix to the previous round's defect. The
+protocol is the only reason any of them surfaced.
 
 ---
 

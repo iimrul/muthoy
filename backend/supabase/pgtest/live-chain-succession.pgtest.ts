@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { migrationFiles } from './harness';
 import {
+  M34_FILE,
   M35_FILE,
   POST_E4_MIGRATIONS,
   e4ChainMigrationFiles,
@@ -69,6 +70,18 @@ export function h9BlockDrift(chain: readonly string[]): string | null {
   if (absent >= 0) return H9_TRIO[absent];
   if (at[1] !== at[0] + 1) return chain[at[0] + 1]!.slice(0, 14);
   if (at[2] !== at[1] + 1) return chain[at[1] + 1]!.slice(0, 14);
+  return null;
+}
+
+/**
+ * What is wrong with a declared successor's FILENAME, or null.
+ *
+ * ROUND 14's advisory note: the filename and version assertions iterated a list
+ * that is empty today, so they never saw a malformed input. A predicate can.
+ */
+export function successorNameDrift(name: string, afterVersion: string): string | null {
+  if (!/^\d{14}_[a-z0-9_]+\.sql$/.test(name)) return `${name} is not a valid migration filename`;
+  if (name.slice(0, 14) <= afterVersion) return `${name} does not sort after ${afterVersion}`;
   return null;
 }
 
@@ -283,9 +296,7 @@ describe('the live migration chain is exactly the approved chain', () => {
 
   it('requires every post-E4 migration to have a 14-digit version AFTER migration 35', () => {
     for (const name of POST_E4_MIGRATIONS) {
-      expect(name, name).toMatch(/^\d{14}_[a-z0-9_]+\.sql$/);
-      // By VERSION, not by filename -- round 10 finding 4.
-      expect(versionOf(name) > versionOf(M35_FILE), name).toBe(true);
+      expect(successorNameDrift(name, versionOf(M35_FILE)), name).toBeNull();
     }
     expect(new Set(POST_E4_MIGRATIONS).size).toBe(POST_E4_MIGRATIONS.length);
   });
@@ -360,6 +371,27 @@ describe('the live chain gate, against histories where the answer is known', () 
     expect(versionOf(duplicate)).toBe(versionOf(M35_FILE));
     expect(versionOf(duplicate) > versionOf(M35_FILE)).toBe(false);
     expect(versionOrderDrift([...chain(), duplicate])).toBe('20261023000000');
+  });
+
+  it('rejects malformed successor filenames, which the live list never exercises', () => {
+    const after = versionOf(M35_FILE);
+    expect(successorNameDrift('20261231000001_real_successor.sql', after)).toBeNull();
+    for (const bad of [
+      'nope.sql',
+      '2026123100000_short.sql',
+      '202612310000012_long.sql',
+      '20261231000001_Caps.sql',
+      '20261231000001-dashes.sql',
+      '20261231000001_real.txt',
+      '20261231000001_real',
+      '',
+    ]) {
+      expect(successorNameDrift(bad, after), bad).toMatch(/not a valid migration filename/);
+    }
+    // Well-formed, but not after migration 35.
+    expect(successorNameDrift('20260813000000_initial_schema.sql', after))
+      .toMatch(/does not sort after/);
+    expect(successorNameDrift(M35_FILE, after)).toMatch(/does not sort after/);
   });
 
   it('catches an out-of-order version even when every name is distinct', () => {
@@ -486,6 +518,28 @@ describe('the live chain gate, against histories where the answer is known', () 
       const realBytes = migrationBytesOnDisk(M35_FILE);
       expect(realBytes).not.toBeNull();
       expect(realBytes!.length).toBeGreaterThan(0);
+
+      // ROUND 14 FINDING 1. This took its expectation FROM the reader it was
+      // testing, so a reader hard-wired to a different migration still passed.
+      // The E4 manifest already records migration 35's digest independently,
+      // computed by a different function in a different file, so that is the
+      // expectation now -- it pins WHICH bytes the reader returned, not merely
+      // that it returned some. The manifest folds CRLF to LF, so this does too.
+      const recorded = JSON.parse(readFileSync(resolve(E4_MANIFEST), 'utf8')).files[
+        `backend/supabase/migrations/${M35_FILE}`
+      ];
+      expect(recorded, 'migration 35 must be recorded in the E4 manifest').toMatch(
+        /^[a-f0-9]{64}$/,
+      );
+      const folded = realBytes!.toString('utf8').replace(/\r\n/g, '\n');
+      expect(createHash('sha256').update(folded, 'utf8').digest('hex')).toBe(recorded);
+
+      // And the reader must distinguish its argument: migration 34's bytes are
+      // not migration 35's.
+      const m34 = migrationBytesOnDisk(M34_FILE);
+      expect(m34).not.toBeNull();
+      expect(m34!.equals(realBytes!)).toBe(false);
+
       const realDigest = createHash('sha256').update(realBytes!).digest('hex');
 
       // End to end through BOTH real adapters: a pin recording migration 35's
