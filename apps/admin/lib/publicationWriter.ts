@@ -41,6 +41,7 @@ import {
   type AdminAuthzDeps,
   type AdminEnvironment,
 } from './adminAuthz';
+import { dhakaTodayLabel } from './adminDashboard';
 import { SUPPRESSION_K, type DaySides } from './adminSuppression';
 import { AdminDataError } from './errors';
 import {
@@ -227,7 +228,16 @@ export async function publishMonthlySnapshot(
   // The RPC refuses this too, against the database's own `current_date`, and
   // that is the authority. This check exists so the operator gets a sentence
   // instead of a SQLSTATE.
-  const today = (deps.now ?? (() => new Date()))().toISOString().slice(0, 10);
+  // THE DHAKA BUSINESS DATE, not UTC.
+  //
+  // ROUND 19 FINDING 3. This sliced the UTC ISO string, and Dhaka is UTC+6: at
+  // 2026-08-31T18:30Z it is already September 1st in Dhaka, August HAS ended,
+  // and this refused it for another six hours. The same class of defect as GATE
+  // 5 FINDING 10, which filed registrations under the UTC day while the
+  // Dashboard used the Dhaka one -- six hours of every day on the wrong side of
+  // a boundary. `dhakaTodayLabel` is the shared helper those fixes produced, so
+  // this uses it rather than repeating the offset arithmetic a fourth time.
+  const today = dhakaTodayLabel((deps.now ?? (() => new Date()))().getTime());
   if (periodEndOf(month) >= today) {
     await audit('publication.refused', 'denied', month, 'period_not_ended');
     return {

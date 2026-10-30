@@ -7,7 +7,7 @@
     "supersededEvidenceFiles": 7
   },
   "files": {
-    "20261030000000_e4b_publication_snapshots.sql": "e24c6e8859adaa3e47b9414ee7043ae5c4ae715f1f3b3c2db04d6753145212f7"
+    "20261030000000_e4b_publication_snapshots.sql": "45996922bbbbca54dd46545831056fc39584125f15517373b01d543529214071"
   },
   "supersedes": {
     "scripts/h9-prod-preflight.mjs": {
@@ -20,7 +20,7 @@
     },
     "backend/supabase/migrations/ROLLBACK.md": {
       "e4": "9b61681b89bee9394b9093b4932d39a70cac31f699931419f1619f084f9f5d0a",
-      "now": "b43e296e40036cd4357da649920e19718bc2620e4e44f22787425a5730a9cd84"
+      "now": "85d8d7fe0dc7b1debf01133ce9c8d8b6e2b313e91e8d3870c4213c61f3a8f35d"
     },
     "backend/supabase/migrations/README.md": {
       "e4": "9114aafed4be01c0abe3ff4f4e0388d868ebb7fcabd9221278ec528d0c80f51f",

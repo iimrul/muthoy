@@ -205,29 +205,42 @@ export function periodEligibility(
   }
 
   if (failing.length > 0) {
-    // WHICH SIDE ACTUALLY FAILED.
+    // WHICH SIDE ACTUALLY FAILED, AND ON HOW MANY DAYS EACH.
     //
-    // ROUND 18 FINDING 8. This said "fewer than k distinct refunding
+    // ROUND 18 FINDING 8 was that this said "fewer than k distinct refunding
     // pharmacies" whatever the cause, and `dayReleasable` fails when EITHER
-    // side is short — so a day with one seller and five refunders was refused
-    // with a sentence blaming the refunders. That is the defect round 1B
-    // finding 7 was about: withholding for one reason and stating another.
+    // side is short — so one seller and five refunders was refused with a
+    // sentence blaming the refunders. The defect round 1B finding 7 was about:
+    // withholding for one reason and stating another.
     //
-    // `withheldSide` is the shared answer the Dashboard and the report already
-    // use, so there is one rule and one explanation of it.
-    const side = withheldSide(failing[0]!, k);
-    const short = failing.length;
-    const noun = side === 'sale' ? 'selling' : 'refunding';
+    // ROUND 19 FINDING 6 was that my fix was still wrong on MIXED input. I took
+    // the noun from `failing[0]` and the count from `failing.length`, so a
+    // period failing one day on the sale side and another on the refund side
+    // reported "2 days had fewer than 5 selling pharmacies" when exactly one
+    // did. A true word and a true number, combined into a false sentence —
+    // which is a worse failure than the original, because it reads as precise.
+    //
+    // So each side is counted separately and only the sides that actually
+    // failed are named. `withheldSide` is the shared answer the Dashboard and
+    // the report already use, so there is one rule and one explanation of it.
+    const saleShort = failing.filter((day) => withheldSide(day, k) === 'sale').length;
+    const refundShort = failing.length - saleShort;
+    const clause = (count: number, noun: string): string =>
+      count + ' with fewer than ' + k + ' distinct ' + noun + ' pharmacies';
+    const clauses: string[] = [];
+    if (saleShort > 0) clauses.push(clause(saleShort, 'selling'));
+    if (refundShort > 0) clauses.push(clause(refundShort, 'refunding'));
     return {
       eligible: false,
       daysRequiringFloor,
       daysClearingFloor,
       contributorCount,
       reason:
-        'Withheld: ' + short + ' of ' + daysRequiringFloor + ' trading '
-        + (daysRequiringFloor === 1 ? 'day' : 'days') + ' in this period had fewer than '
-        + k + ' distinct ' + noun + ' pharmacies. Publishing the period would disclose '
-        + (short === 1 ? 'that day' : 'those days') + ' by subtraction.',
+        'Withheld: ' + failing.length + ' of ' + daysRequiringFloor + ' trading '
+        + (daysRequiringFloor === 1 ? 'day' : 'days') + ' in this period cannot be '
+        + 'published — ' + clauses.join(', and ') + '. Publishing the period would '
+        + 'disclose ' + (failing.length === 1 ? 'that day' : 'those days')
+        + ' by subtraction.',
     };
   }
   if (daysRequiringFloor > 0 && contributorCount < k) {

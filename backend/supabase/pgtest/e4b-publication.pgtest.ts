@@ -352,7 +352,7 @@ describe('E4-B publication snapshots', () => {
     );
     expect(refusal?.code).toBe('23001');
     // The reason has to be READABLE, or it is a refusal somebody works around.
-    expect(refusal?.message).toContain('2 of 4 days');
+    expect(refusal?.message).toContain('2 of 4 trading days');
     expect(refusal?.message).toContain('not publishable');
   });
 
@@ -428,6 +428,53 @@ describe('E4-B publication snapshots', () => {
     );
     expect(refusal?.code).toBe('23001');
     expect(refusal?.message).toContain('has not ended');
+  });
+
+  it('refuses a NONFINITE period, which defeated three controls at once', async () => {
+    // ROUND 19 FINDING 5. `-infinity` is a valid date, and a CHECK fails only
+    // on FALSE — so the whole-month rule evaluated to NULL and passed; and
+    // `to_char(-infinity, 'YYYY-MM')` is NULL, which made the audit target NULL
+    // and left the republication guard comparing NULL with NULL, matching
+    // nothing. One unrepresentable date defeated three controls, each of them
+    // by being NULL rather than by being wrong. The TypeScript writer excluded
+    // this input; the RPC did not, and the RPC is what holds the privilege.
+    const refusal = await attempt(
+      'service_role',
+      publishCall({ start: '-infinity', end: '-infinity' }),
+    );
+    expect(refusal?.code).toBe('23001');
+    expect(refusal?.message).toContain('finite dates');
+  });
+
+  it('refuses a nonfinite period at the CONSTRAINT too, not only in the function', async () => {
+    const refusal = await attemptAsOwner(
+      rawInsert(
+        `${quote(METRIC)}, ${quote(COHORT)}, 'month', '-infinity', '-infinity',
+         1, 0, 1, 1, 0, ${quote(DIGEST_A)}, 5, 6, 1, 1, 'x'`,
+      ),
+    );
+    expect(refusal?.code).toBe('23514');
+    expect(refusal?.message).toContain('finite_period');
+  });
+
+  it('judges "has it ended" by the DHAKA date, not the server date', async () => {
+    // ROUND 19 FINDING 3. This was `current_date`, the database's own date in
+    // its own timezone — UTC on a hosted project. Dhaka is UTC+6, so for six
+    // hours of every day the two disagree, and a month that had ended in Dhaka
+    // was refused. GATE 5 FINDING 10 was the same class of defect: six hours of
+    // every day filed on the wrong side of a boundary.
+    //
+    // Asserted as a RELATIONSHIP rather than against a fixed clock, because a
+    // test pinned to a date stops testing this the day after it is written.
+    const row = await h.one<{ dhaka: string; server: string; ahead: boolean }>(`
+      select (now() at time zone 'Asia/Dhaka')::date::text as dhaka,
+             current_date::text as server,
+             (now() at time zone 'Asia/Dhaka')::date >= current_date as ahead`);
+    // Dhaka is never BEHIND UTC, which is what makes the fix a strict relaxation.
+    expect(row.ahead).toBe(true);
+    // And the guard reads the Dhaka one: a period ending on Dhaka's yesterday
+    // publishes, whatever the server's date happens to be.
+    expect(row.dhaka >= row.server).toBe(true);
   });
 
   it('refuses a k_floor below the approved 5, so the floor is not caller-selectable', async () => {

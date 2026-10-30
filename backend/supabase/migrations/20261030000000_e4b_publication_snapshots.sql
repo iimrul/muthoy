@@ -154,6 +154,19 @@ create table if not exists public.financial_publications (
   constraint financial_publications_identity
     unique (metric_family, cohort_key, period_grain, period_start),
 
+  -- FINITE DATES, and this constraint is the reason the one below means anything.
+  --
+  -- ROUND 19 FINDING 5. `-infinity` is a valid `date`, and every check that
+  -- examined it evaluated to NULL — a CHECK passes on NULL, because it only
+  -- fails on FALSE. So `period_start = period_end = '-infinity'` satisfied the
+  -- whole-month rule vacuously, and `to_char(-infinity, 'YYYY-MM')` is NULL,
+  -- which made the audit `target` NULL and the republication guard's equality
+  -- predicate match nothing. One unrepresentable date defeated three controls
+  -- at once, every one of them by being NULL rather than by being wrong.
+  constraint financial_publications_finite_period check (
+    isfinite(period_start) and isfinite(period_end)
+  ),
+
   -- A whole calendar month, both ends.
   constraint financial_publications_whole_month check (
     extract(day from period_start) = 1
@@ -294,6 +307,21 @@ declare
   v_new boolean := false;
   v_value bigint;
 begin
+  -- FINITE DATES FIRST, because every check below depends on them.
+  --
+  -- ROUND 19 FINDING 5. The table's CHECK refuses a nonfinite date now, but it
+  -- refuses it LAST — after the republication guard has already compared a NULL
+  -- target against a NULL target and found no match. So the guard has to be
+  -- reached with a real date, which means this is the first thing in the
+  -- function and not the last. Raised rather than left to the constraint for
+  -- the usual reason: the operator gets a sentence.
+  if not isfinite(p_period_start) or not isfinite(p_period_end) then
+    raise exception
+      'refused: the reporting period must be two finite dates (got % to %). A nonfinite date makes every check below evaluate to NULL, which a constraint accepts.',
+      p_period_start, p_period_end
+      using errcode = 'restrict_violation';
+  end if;
+
   -- THE ELIGIBILITY RE-CHECK, in SQL, before anything is written.
   --
   -- The table's CHECK constraints would reject an ineligible row anyway. This
@@ -302,8 +330,12 @@ begin
   -- about which day failed or what to do, and a privacy refusal that cannot be
   -- read is a privacy refusal somebody works around.
   if p_days_clearing_floor <> p_days_requiring_floor then
+    -- NO SIDE NAMED HERE, deliberately. ROUND 19 FINDING 6 was the application
+    -- naming a side it had not established; this function receives only counts
+    -- and cannot know which side failed, so it must not imply one. The readable
+    -- per-side breakdown is `periodEligibility`'s job and it does it there.
     raise exception
-      'refused: % of % days inside % need the k=% refund-side floor and did not clear it. The period is not publishable.',
+      'refused: % of % trading days inside % did not clear the k=% floor. The period is not publishable.',
       p_days_requiring_floor - p_days_clearing_floor, p_days_requiring_floor,
       to_char(p_period_start, 'YYYY-MM'), p_k_floor
       using errcode = 'restrict_violation';
@@ -334,10 +366,20 @@ begin
   -- of trade, irreversibly, by one click. A CHECK cannot express this because
   -- `current_date` is not immutable, and the function is the only writer, so
   -- here is where it belongs.
-  if p_period_end >= current_date then
+  -- THE DHAKA BUSINESS DATE, not the server's.
+  --
+  -- ROUND 19 FINDING 3. This was `current_date`, which is the database's own
+  -- date in its own timezone — UTC on a hosted project. Dhaka is UTC+6, so at
+  -- 2026-08-31T18:30Z it is already September 1st in Dhaka and August HAS
+  -- ended, while `current_date` still says August 31st and this refused it for
+  -- another six hours. The same class of defect as GATE 5 FINDING 10, which
+  -- filed registrations under the UTC day while the Dashboard used the Dhaka
+  -- one. This product's business day is Dhaka's, everywhere, including here.
+  if p_period_end >= (now() at time zone 'Asia/Dhaka')::date then
     raise exception
-      'refused: % has not ended (period_end %). A period still in progress is certain to change, and a published figure is never revised.',
-      to_char(p_period_start, 'YYYY-MM'), p_period_end
+      'refused: % has not ended in Dhaka (period_end %, Dhaka today %). A period still in progress is certain to change, and a published figure is never revised.',
+      to_char(p_period_start, 'YYYY-MM'), p_period_end,
+      (now() at time zone 'Asia/Dhaka')::date
       using errcode = 'restrict_violation';
   end if;
 
@@ -355,6 +397,26 @@ begin
   -- now authoritative rather than merely informative: a period that was
   -- published before cannot be published again at any value, even with the
   -- serving table freshly empty.
+  --
+  -- WHAT THIS GUARD DEPENDS ON, and ROUND 19 FINDING 2 is that it should be
+  -- written down rather than assumed. The guard is exactly as strong as audit
+  -- RETENTION: truncate admin_audit_log and a republication becomes possible
+  -- again, because missing history reads as "never published".
+  --
+  -- That is a real limitation and it is not closable here. The alternative
+  -- would be a second independent record of publications, which is a second
+  -- append-only evidence store — the exact thing this migration was shaped to
+  -- avoid, because it would be a second class C whose only recovery is the
+  -- restore H-11 C5 has never rehearsed. A third manifest would have the same
+  -- property one level up.
+  --
+  -- What bounds it instead: migration 35 grants admin_audit_log only INSERT and
+  -- SELECT to service_role, with no DELETE, no UPDATE and no TRUNCATE, so the
+  -- panel and its key cannot do this — the reviewer confirmed service_role
+  -- truncation fails with 42501. It takes a privileged session at a superuser
+  -- prompt, which is a deliberate act against an audit log, and migration 35
+  -- already records that "retention is an operator decision taken outside the
+  -- application". This guard inherits that decision; it does not replace it.
   if not exists (
         select 1 from public.financial_publications fp
          where fp.metric_family = p_metric_family

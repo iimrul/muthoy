@@ -116,6 +116,24 @@ function saleTotal(
   };
 }
 
+/**
+ * "I consulted the publication record and nothing is published."
+ *
+ * ROUND 19 FINDING 1. `revisionSafe: true` is the seam that keeps the k-floor
+ * assertions in this file from passing by withholding — without it they would
+ * all be vacuous, which is why round 3 finding 5 put it here. But round 18
+ * finding 5 had already established the general rule on a different seam
+ * (`deps.k`): **a test seam on a privacy control is a production hole.** I
+ * removed that one and left this one.
+ *
+ * `{ revisionSafe: true }` with no lookup released the RECOMPUTED figure while a
+ * snapshot sat in the database — 5400.00 exported through CSV and PDF against a
+ * published 4000.00. So releasing recomputed money now REQUIRES a lookup, and
+ * passing this constant is the explicit — and in these tests truthful —
+ * statement that the record was consulted and held nothing.
+ */
+const NO_PUBLICATIONS = () => undefined;
+
 function data(overrides: Partial<ReportData> = {}): ReportData {
   return {
     shops: [],
@@ -351,7 +369,7 @@ describe('k-anonymity at the boundary', () => {
       // Without it the shipped default withholds this cell anyway, so the
       // assertion passed even with the whole k/side stage removed -- the
       // reviewer proved that by deleting the stage in memory.
-      { revisionSafe: true },
+      { revisionSafe: true, publications: NO_PUBLICATIONS },
     );
 
     expect(reportTextRows(table)[0]?.[0]).toBe('2026-10');
@@ -379,7 +397,7 @@ describe('k-anonymity at the boundary', () => {
       // Without it the shipped default withholds this cell anyway, so the
       // assertion passed even with the whole k/side stage removed -- the
       // reviewer proved that by deleting the stage in memory.
-      { revisionSafe: true },
+      { revisionSafe: true, publications: NO_PUBLICATIONS },
     );
 
     expect(reportTextRows(table)[0]?.[1], 'the single refund was disclosed').toBe('');
@@ -406,7 +424,7 @@ describe('k-anonymity at the boundary', () => {
       // `revisionSafe: true` because this test's subject is the k FLOOR.
       // The shipped default withholds every pharmacy money figure (FOUNDER
       // DECISION 2), which would make the assertion below pass by withholding.
-      { revisionSafe: true },
+      { revisionSafe: true, publications: NO_PUBLICATIONS },
     );
 
     expect(reportTextRows(table)[0]?.[1]).toBe('7000.00');
@@ -424,7 +442,7 @@ describe('k-anonymity at the boundary', () => {
       // ROUND 4 FINDING 3: `revisionSafe: true`, same reason as the others —
       // without it the shipped default withholds this cell anyway and the
       // assertion survives the floor being deleted.
-      { revisionSafe: true },
+      { revisionSafe: true, publications: NO_PUBLICATIONS },
     );
 
     expect(reportTextRows(table)[0]?.[1]).toBe('');
@@ -1189,7 +1207,7 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       // `revisionSafe: true` because this test's subject is the k FLOOR.
       // The shipped default withholds every pharmacy money figure (FOUNDER
       // DECISION 2), which would make the assertion below pass by withholding.
-      { revisionSafe: true },
+      { revisionSafe: true, publications: NO_PUBLICATIONS },
     );
     const wider = buildReportTable(
       'refund_net_pharmacy_sales',
@@ -1203,7 +1221,7 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       // `revisionSafe: true` because this test's subject is the k FLOOR.
       // The shipped default withholds every pharmacy money figure (FOUNDER
       // DECISION 2), which would make the assertion below pass by withholding.
-      { revisionSafe: true },
+      { revisionSafe: true, publications: NO_PUBLICATIONS },
     );
 
     // 480.00 both ways: gross 580.00 less refunds 100.00. FOUNDER DECISION 3
@@ -1225,7 +1243,7 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       // `revisionSafe: true` because this test's subject is the k FLOOR.
       // The shipped default withholds every pharmacy money figure (FOUNDER
       // DECISION 2), which would make the assertion below pass by withholding.
-      { revisionSafe: true },
+      { revisionSafe: true, publications: NO_PUBLICATIONS },
     );
 
     // Accepted rather than refused -- the range IS whole months -- and
@@ -1303,7 +1321,7 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       // ROUND 4 FINDING 3: `revisionSafe: true`, same reason as the others —
       // without it the shipped default withholds this cell anyway and the
       // assertion survives the floor being deleted.
-      { revisionSafe: true },
+      { revisionSafe: true, publications: NO_PUBLICATIONS },
     );
 
     expect(reportTextRows(open)).toEqual([['2026-10', '']]);
@@ -1341,7 +1359,7 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       // ROUND 4 FINDING 3: `revisionSafe: true`, same reason as the others —
       // without it the shipped default withholds this cell anyway and the
       // assertion survives the floor being deleted.
-      { revisionSafe: true },
+      { revisionSafe: true, publications: NO_PUBLICATIONS },
     );
 
     expect(reportTextRows(table)).toEqual([['2026-10', '']]);
@@ -1381,7 +1399,7 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     // under k, so the same omission has to happen there too.
     expect(
       reportTextRows(
-        buildReportTable('refund_net_pharmacy_sales', refundOnly, october, { revisionSafe: true }),
+        buildReportTable('refund_net_pharmacy_sales', refundOnly, october, { revisionSafe: true, publications: NO_PUBLICATIONS }),
       ),
     ).toEqual([]);
   });
@@ -1437,7 +1455,11 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
           from: '2026-10-01',
           to: '2026-10-31',
         }),
-        { revisionSafe },
+        // ROUND 19 FINDING 1: the lookup is now required alongside
+        // `revisionSafe: true`, and this helper passes a variable, so it passes
+        // the lookup both ways round. `() => undefined` is the truthful claim
+        // here — this fixture publishes nothing.
+        { revisionSafe, publications: NO_PUBLICATIONS },
       );
 
     // Same fixture, both ways round: the floor would publish it, the policy
@@ -1507,7 +1529,7 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       // `revisionSafe: true` because this test's subject is the k FLOOR.
       // The shipped default withholds every pharmacy money figure (FOUNDER
       // DECISION 2), which would make the assertion below pass by withholding.
-      { revisionSafe: true },
+      { revisionSafe: true, publications: NO_PUBLICATIONS },
     );
 
     // 12 x 100.00 less 10 x 10.00 = 1100.00, published.

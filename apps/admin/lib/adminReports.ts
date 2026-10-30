@@ -900,14 +900,18 @@ function suppressRows(
    */
   publishedBuckets: number;
   /**
-   * How many money buckets could not be resolved because the publication
-   * lookup FAILED.
+   * Whether ANY publication read failed. A BOOLEAN, deliberately, and ROUND 19
+   * FINDING 4 is why it is not a count: a refund-only bucket is omitted from
+   * the table entirely, and a caption reporting "1 figure could not be read"
+   * for an omitted bucket would announce that the bucket exists -- which is
+   * round 4 finding 1, in a new place. The outage is reported; how many
+   * buckets it touched is not.
    *
    * ROUND 18 FINDING 6: an outage and a deliberate withholding produced a
    * byte-identical report with the same policy caption. The cell stays
    * withheld either way; this is what lets the caption tell them apart.
    */
-  failedBuckets: number;
+  publicationReadFailed: boolean;
 } {
   // The withheld cell for one value column.
   //
@@ -957,7 +961,7 @@ function suppressRows(
   if (confidentiality === 'platform_billing') {
     return {
       rows: rows.map((row) => [row.key, ...row.values]),
-      failedBuckets: 0,
+      publicationReadFailed: false,
       suppressedBuckets: 0,
       // Muthoy's own billing is not published through the snapshot mechanism
       // and deliberately cannot be: the database CHECK on `metric_family`
@@ -1022,7 +1026,8 @@ function suppressRows(
     }
   }
   let publishedBuckets = 0;
-  let failedBuckets = 0;
+  // A FLAG, NOT A COUNT. See the caption, and ROUND 19 FINDING 4.
+  let publicationReadFailed = false;
 
 
   for (const row of rows) {
@@ -1061,8 +1066,13 @@ function suppressRows(
     // we do not know whether a publication exists, and serving a recomputation
     // against an unknown publication is the pair channel again.
     if (money?.kind === 'failed') {
+      // SET BEFORE THE OMISSION, which ROUND 19 FINDING 4 required: a refund-only
+      // month is omitted entirely (round 3 finding 1), so incrementing after the
+      // omission meant an outage on exactly those periods was invisible -- and a
+      // refund-only period CAN legitimately be eligible. The flag is set here,
+      // before the row is dropped.
+      publicationReadFailed = true;
       if (row.existsWithoutRefunds === false) continue;
-      failedBuckets += 1;
       suppressedBuckets += 1;
       out.push([
         row.key,
@@ -1168,7 +1178,7 @@ function suppressRows(
   // The k-floor path, reached only when publication is revision-safe by policy.
   // Nothing here reads a snapshot: these are the non-money aggregates and the
   // floor-governed counts, which have no publication identity.
-  return { rows: out, suppressedBuckets, publishedBuckets, failedBuckets };
+  return { rows: out, suppressedBuckets, publishedBuckets, publicationReadFailed };
 }
 
 /**
@@ -1470,6 +1480,33 @@ export function buildReportTable(
   } = {},
 ): ReportTable {
   const revisionSafe = options.revisionSafe ?? PUBLICATION_IS_REVISION_SAFE;
+
+  // ROUND 19 FINDING 1 — RELEASING RECOMPUTED MONEY REQUIRES HAVING LOOKED.
+  //
+  // `revisionSafe: true` says "a recomputed pharmacy figure is releasable by
+  // policy". With no `publications` lookup, the resolution found no publication
+  // and the flag then released the recomputation — 5400.00 through CSV and PDF
+  // against a snapshot of 4000.00 sitting in the database. Two answers for one
+  // period, which is the whole thing the snapshot exists to prevent.
+  //
+  // This is ROUND 18 FINDING 5 repeating itself one layer up. That finding was
+  // `deps.k`, a test seam that let a caller lower the k floor, and the rule it
+  // established is that a test seam on a privacy control is a production hole.
+  // I removed `deps.k` and left this.
+  //
+  // So the unsafe combination is now IMPOSSIBLE rather than merely undefaulted.
+  // A caller that wants recomputed money released must pass a lookup — even
+  // `() => undefined`, which is the explicit claim "I consulted the publication
+  // record and it held nothing". Making that claim explicit is the point: the
+  // previous behaviour made it silently, on the caller's behalf, and wrongly.
+  if (options.revisionSafe === true && options.publications === undefined) {
+    throw new Error(
+      'buildReportTable: revisionSafe=true releases recomputed pharmacy money, so it '
+      + 'requires a publications lookup. Pass one — `() => undefined` states that the '
+      + 'publication record was consulted and held nothing. Without it a published '
+      + 'snapshot and a recomputation of the same period would both be readable.',
+    );
+  }
   const entry = requireReportDefinition(reportId);
   assertCompleteRead(data.tallies);
 
@@ -1498,7 +1535,7 @@ export function buildReportTable(
   // §6i round 11: the net columns are resolved — and verified — HERE, on the
   // rows that become the exported bytes.
   const netIndexes = netValueIndexes(entry);
-  const { cells, suppressedBuckets, publishedBuckets, failedBuckets } =
+  const { cells, suppressedBuckets, publishedBuckets, publicationReadFailed } =
     entry.kind === 'aggregate'
       ? (() => {
           const gated = suppressRows(built, netIndexes, entry.confidentiality, revisionSafe, {
@@ -1509,14 +1546,14 @@ export function buildReportTable(
             cells: gated.rows,
             suppressedBuckets: gated.suppressedBuckets,
             publishedBuckets: gated.publishedBuckets,
-            failedBuckets: gated.failedBuckets,
+            publicationReadFailed: gated.publicationReadFailed,
           };
         })()
       : {
           cells: built.map((row) => [row.key, ...row.values]),
           suppressedBuckets: 0,
           publishedBuckets: 0,
-          failedBuckets: 0,
+          publicationReadFailed: false,
         };
   // NOT flattened here. Round 12 finding 4: the text is produced by
   // `reportTextRows`, at the serializer, so there is no window between a
@@ -1558,12 +1595,14 @@ export function buildReportTable(
     // the caption was the only thing that could distinguish them — so it said
     // "policy" for both, and an operator reading a withheld figure during an
     // outage would conclude the floor was doing its job.
-    if (failedBuckets > 0) {
+    // NO COUNT. ROUND 19 FINDING 4: a refund-only bucket is omitted from the
+    // table, so a number here would announce that an omitted bucket exists —
+    // round 4 finding 1, in a new place. The outage is stated; its extent is
+    // not, because the extent is the disclosure.
+    if (publicationReadFailed) {
       parts.push(
-        failedBuckets + ' money '
-        + (failedBuckets === 1 ? 'figure' : 'figures')
-        + ' could NOT be read — these are withheld because the published record '
-        + 'was unavailable, not because policy withheld them',
+        'the published record could NOT be read — money figures are withheld '
+        + 'because of that, not because policy withheld them',
       );
     }
     if (publishedBuckets > 0) {

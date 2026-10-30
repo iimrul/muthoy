@@ -243,6 +243,35 @@ describe('eligibility is enforced before SQL', () => {
     expect(rpcCalls).toHaveLength(1);
   });
 
+  test('judges "has it ended" by the DHAKA date, not UTC', async () => {
+    // ROUND 19 FINDING 3. This sliced the UTC ISO string, and Dhaka is UTC+6 —
+    // so at 2026-08-31T18:30Z it is already September 1st in Dhaka, August HAS
+    // ended, and the guard refused it for another six hours. Exactly the shape
+    // of GATE 5 FINDING 10, which filed registrations under the UTC day while
+    // the Dashboard used the Dhaka one.
+    const { client, rpcCalls } = createClient();
+    const result = await publishMonthlySnapshot('2026-08', {
+      ...deps('super_admin', client, async () => eligible(['2026-08-01'])),
+      // 00:30 on September 1st in Dhaka. UTC still says August 31st.
+      now: () => new Date('2026-08-31T18:30:00.000Z'),
+    });
+    expect(result.ok).toBe(true);
+    expect(rpcCalls).toHaveLength(1);
+  });
+
+  test('and still refuses the hour BEFORE the Dhaka day rolls over', async () => {
+    // Non-vacuity for the test above: a guard that simply stopped checking
+    // would pass it. 17:30Z is 23:30 on August 31st in Dhaka — not ended.
+    const { client, rpcCalls } = createClient();
+    const result = await publishMonthlySnapshot('2026-08', {
+      ...deps('super_admin', client, async () => eligible(['2026-08-01'])),
+      now: () => new Date('2026-08-31T17:30:00.000Z'),
+    });
+    expect(result.ok).toBe(false);
+    expect(rpcCalls).toEqual([]);
+    if (!result.ok) expect(result.message).toContain('has not ended');
+  });
+
   test('a malformed month is refused before it reaches SQL', async () => {
     const { client, rpcCalls } = createClient();
     for (const bad of ['2026-13', '2026-1', 'october', '2026-10-01', "2026-10'; drop table"]) {

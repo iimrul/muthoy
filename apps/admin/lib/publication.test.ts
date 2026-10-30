@@ -279,6 +279,30 @@ describe('period eligibility', () => {
     expect(eligibility.reason).not.toContain('refunding');
   });
 
+  test('MIXED failing sides are counted separately, not merged into one false clause', () => {
+    // ROUND 19 FINDING 6, which was my round-18 fix still being wrong. I took
+    // the noun from the FIRST failing day and the count from ALL of them, so a
+    // period failing one day on the sale side and one on the refund side
+    // reported "2 days had fewer than 5 selling pharmacies" when exactly one
+    // did. A true word and a true number combined into a false sentence —
+    // worse than the original, because it reads as precise.
+    const eligibility = periodEligibility(
+      [day('2026-10-01', 1, 6), day('2026-10-02', 6, 1)],
+      ['a', 'b', 'c', 'd', 'e', 'f'],
+    );
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.daysRequiringFloor).toBe(2);
+    expect(eligibility.daysClearingFloor).toBe(0);
+    const reason = eligibility.reason ?? '';
+    // Both sides named, each with ITS OWN count of one.
+    expect(reason).toContain('1 with fewer than 5 distinct selling pharmacies');
+    expect(reason).toContain('1 with fewer than 5 distinct refunding pharmacies');
+    // And the total is still right.
+    expect(reason).toContain('2 of 2 trading days');
+    // The old sentence would have claimed two days on one side.
+    expect(reason).not.toContain('2 with fewer than');
+  });
+
   test('names the REFUND side when the refund side is what failed', () => {
     const eligibility = periodEligibility(
       [day('2026-10-01', 6, 1)],
@@ -520,6 +544,69 @@ describe('every output path, and the boundary', () => {
     expect(failed.subtitle).toContain('not because policy withheld them');
     expect(withheld.subtitle).not.toContain('could NOT be read');
     expect(failed.subtitle).not.toBe(withheld.subtitle);
+  });
+
+  test('revisionSafe WITHOUT a lookup is refused outright', () => {
+    // ROUND 19 FINDING 1, and it is round 18 finding 5 repeating one layer up.
+    // That finding was `deps.k` — a test seam that let a caller lower the k
+    // floor — and the rule it established is that a test seam on a privacy
+    // control is a production hole. I removed `deps.k` and left this one.
+    //
+    // `{ revisionSafe: true }` with no lookup resolved "no publication" and then
+    // released the recomputation: 5400.00 through CSV and PDF against a stored
+    // 4000.00. The combination is now impossible rather than merely
+    // ill-advised, so a caller must state that it consulted the record.
+    expect(() =>
+      buildReportTable(
+        REPORT,
+        data({ ...eligibleMonth(['2026-10-01']), tallies: COMPLETE }),
+        query(WHOLE_OCTOBER),
+        { revisionSafe: true },
+      ),
+    ).toThrow(/requires a publications lookup/);
+  });
+
+  test('revisionSafe WITH an empty lookup is allowed, so the rule is the claim not the ceremony', () => {
+    // Non-vacuity for the test above: if the combination were simply banned,
+    // every k-floor assertion in adminReports.test.ts would be unreachable.
+    // `() => undefined` is the explicit, truthful claim "I looked, nothing is
+    // published" — and it releases the recomputation, which is what
+    // `revisionSafe` means.
+    const table = buildReportTable(
+      REPORT,
+      data({ ...eligibleMonth(['2026-10-01']), tallies: COMPLETE }),
+      query(WHOLE_OCTOBER),
+      { revisionSafe: true, publications: () => undefined },
+    );
+    expect(netCellText(table)).toBe('5400.00');
+  });
+
+  test('a REFUND-ONLY month whose lookup failed still reports the outage', () => {
+    // ROUND 19 FINDING 4, and my round-18 fix was incomplete in a way worth
+    // recording. I set the failure counter AFTER the `existsWithoutRefunds`
+    // omission, so a refund-only month — which is omitted from the table
+    // entirely by round 3 finding 1, and which CAN legitimately be eligible —
+    // produced byte-identical output to a policy withholding, with no sign
+    // that anything had failed to read.
+    //
+    // The signal is now a BOOLEAN set before the omission, not a count. A count
+    // would have announced that an omitted bucket exists, which is round 4
+    // finding 1 in a new place: the outage is reported, its extent is not.
+    const refundOnly = { sales: [], refunds: eligibleMonth(['2026-10-01']).refunds };
+    const exploding: PublicationLookup = () => {
+      throw new Error('connection reset');
+    };
+    const failed = octoberTable(refundOnly, exploding);
+    const withheld = octoberTable(refundOnly);
+
+    // The row is omitted in BOTH, which is still correct.
+    expect(reportTextRows(failed)).toHaveLength(0);
+    expect(reportTextRows(withheld)).toHaveLength(0);
+    // But the captions differ, which is the fix.
+    expect(failed.subtitle).toContain('could NOT be read');
+    expect(withheld.subtitle).not.toContain('could NOT be read');
+    // And no number leaks the omitted bucket's existence.
+    expect(failed.subtitle).not.toMatch(/\d+ money figure/);
   });
 
   test('a failed lookup withholds even when revisionSafe is true', () => {
