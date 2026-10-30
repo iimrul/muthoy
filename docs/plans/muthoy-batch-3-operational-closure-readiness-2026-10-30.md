@@ -623,13 +623,24 @@ mine**. I first wrote "seven" here, in the sentence where I was being
 self-critical, and round 15's only finding was that the number contradicted my
 own table. It did: 4 + 3 + 1 + 1 = 9.
 
-The other claim in that sentence was understated too, and the corrected version
-is worse: I said three findings were defects in my fix to the previous round's
-defect. Recounting, **five of the six rounds found their defects entirely inside
-the immediately preceding remediation** -- round 11 in round 10's work, round 12
-in round 11's, round 13 in round 12's, round 14 in round 13's, and round 15 in
-round 14's own record. Only round 10 reviewed work that was not itself a
-remediation.
+The other claim in that sentence was also wrong, and **I then got it wrong twice
+more trying to fix it.** I first wrote that three findings were defects in my fix
+to the previous round's defect. Recounting, I claimed five of six rounds found
+their defects "entirely inside the immediately preceding remediation" -- and
+round 16 blamed the actual commits and showed only rounds 14 and 15 satisfy that
+strictly. Round 11's preflight gap originated in `81051d5`, before round 10's
+remediation; round 12's rollback coverage originated in `d6f6f8f`; and round
+13's junction defect originated in `864be73`, before round 12's remediation. I
+verified all three independently before accepting them.
+
+So the accurate statement, in the reviewer's words rather than a fourth number
+of mine: **"Rounds 11-15 reviewed preceding remediations and found further
+defects; some defects predated those remediations."**
+
+**Three successive attempts to quantify my own error rate were each wrong** --
+understated, then overstated, then overstated again. That is worth more than the
+statistic was: a self-assessment is not more reliable for being self-critical,
+and this one needed an independent reviewer three times to land.
 
 **The protocol is the only reason any of this surfaced.** Left to my own
 verification I would have shipped after round 9.
