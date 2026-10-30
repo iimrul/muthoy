@@ -15,6 +15,7 @@ import {
 import {
   PUBLICATION_IS_REVISION_SAFE,
   daysReleasable,
+  moneyWithholdingReason,
   suppressTotalAcrossBuckets,
 } from '../../lib/adminSuppression';
 import { exportTaka } from '../../lib/adminReports';
@@ -408,7 +409,9 @@ export default async function RevenuePage() {
             withheld={pharmacySales.suppressed}
             composition={
               pharmacySales.suppressed
-                ? 'Withheld: fewer than five pharmacies contributed, so the total would be those pharmacies’ own takings.'
+                ? moneyWithholdingReason(
+                  'Withheld: fewer than five pharmacies contributed, so the total would be those pharmacies’ own takings.',
+                )
                 : formatCount(pharmacySales.contributorCount)
                   + ' contributing pharmacies, all time. Their money, not Muthoy’s.'
             }

@@ -361,6 +361,10 @@ describe('k-anonymity at the boundary', () => {
       'refund_net_pharmacy_sales',
       data({ sales, tallies: [{ label: 'sales', counted: 100, loaded: 100 }] }),
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv' }),
+      // ROUND 4 FINDING 3: `revisionSafe: true`, same reason as the others —
+      // without it the shipped default withholds this cell anyway and the
+      // assertion survives the floor being deleted.
+      { revisionSafe: true },
     );
 
     expect(reportTextRows(table)[0]?.[1]).toBe('');
@@ -1197,6 +1201,10 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       'refund_net_pharmacy_sales',
       october(),
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
+      // ROUND 4 FINDING 3: `revisionSafe: true`, same reason as the others —
+      // without it the shipped default withholds this cell anyway and the
+      // assertion survives the floor being deleted.
+      { revisionSafe: true },
     );
 
     expect(reportTextRows(open)).toEqual([['2026-10', '']]);
@@ -1231,6 +1239,10 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
       'refund_net_pharmacy_sales',
       withRefund,
       query({ reportId: 'refund_net_pharmacy_sales', format: 'csv', from: '2026-10-01' }),
+      // ROUND 4 FINDING 3: `revisionSafe: true`, same reason as the others —
+      // without it the shipped default withholds this cell anyway and the
+      // assertion survives the floor being deleted.
+      { revisionSafe: true },
     );
 
     expect(reportTextRows(table)).toEqual([['2026-10', '']]);
@@ -1256,8 +1268,16 @@ describe('ROUND 11 FINDING 2: overlapping periods cannot reconstruct a withheld 
     });
 
     // No row at all -- not a row with a blank.
-    expect(reportTextRows(buildReportTable('refund_net_pharmacy_sales', refundOnly, october)))
-      .toEqual([]);
+    const table = buildReportTable('refund_net_pharmacy_sales', refundOnly, october);
+    expect(reportTextRows(table)).toEqual([]);
+
+    // ROUND 4 FINDING 1: AND NOT COUNTED EITHER. Round 3 removed the row and
+    // left `suppressedBuckets` incrementing, so the subtitle said
+    // "(1 withheld)" -- which announces the very refund the omission exists to
+    // hide, in SSR, CSV and PDF alike. The same defect as the finding it was
+    // fixing, one output over.
+    expect(table.subtitle).not.toContain('withheld)');
+    expect(table.subtitle).not.toContain('1 withheld');
     // And the floor path, not only the revisability path: one refunder is
     // under k, so the same omission has to happen there too.
     expect(

@@ -144,6 +144,25 @@ export interface DaySides {
  */
 export const PUBLICATION_IS_REVISION_SAFE = false;
 
+/**
+ * The sentence a withheld pharmacy MONEY figure gets, wherever it is shown.
+ *
+ * ROUND 4 FINDING 4. I fixed the Dashboard's explanation and left three
+ * others — the Revenue composition, the chart panel's withheld note and the
+ * report cell's tooltip — still blaming "fewer than five pharmacies
+ * contributed" when the revision policy was the actual refusal. None of them
+ * recreated the round 3 oracle, because each was a fixed sentence rather than
+ * one that moved with refunds, but all three told the operator something that
+ * was not true.
+ *
+ * Taking the floor sentence as an argument rather than hard-coding one keeps
+ * each surface's own wording for the case where the floor IS the reason, which
+ * is what they will say again once publication becomes revision-safe.
+ */
+export function moneyWithholdingReason(floorReason: string): string {
+  return PUBLICATION_IS_REVISION_SAFE ? floorReason : REVISABLE_WITHHOLDING;
+}
+
 /** The sentence a figure withheld for revisability gets, everywhere. */
 export const REVISABLE_WITHHOLDING =
   'Withheld: this figure could change as offline pharmacies sync, and a changed '

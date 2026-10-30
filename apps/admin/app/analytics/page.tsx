@@ -148,12 +148,30 @@ export default async function AnalyticsPage({ searchParams }: AnalyticsPageProps
   const {
     activeByDay,
     registeredByDay,
-    pharmacySalesByMonth,
+    pharmacySalesByMonth: allPharmacySalesByMonth,
     shopsByPlan,
     conversion,
     subscriptionsStartedByMonth,
     cancellationsByMonth,
   } = result.data;
+
+  /**
+   * ROUND 4 FINDING 2 — A MONTH LABEL IS A DISCLOSURE TOO.
+   *
+   * Round 3 stopped the report emitting a row for a month that exists only
+   * because something was refunded in it. This page kept emitting the month,
+   * in BOTH regions: the net series showed `2026-10 —` and the sales-volume
+   * series showed it independently, so fixing only the money chart would have
+   * left the same refund readable one panel over. A month that appears for the
+   * first time when a refund arrives announces that refund whatever its cell
+   * says.
+   *
+   * `saleCount === 0` is exactly that month: the reader seeds its buckets from
+   * sales AND refunds, and the count is sale rows only.
+   */
+  const pharmacySalesByMonth = allPharmacySalesByMonth.filter(
+    (bucket) => bucket.saleCount > 0,
+  );
 
   const distinct = (ids: readonly string[]) => new Set(ids).size;
 

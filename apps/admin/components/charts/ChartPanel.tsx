@@ -15,6 +15,7 @@
 // "withheld", and a line cannot, so plotting a gap as zero would draw a cliff
 // that is not in the data.
 
+import { moneyWithholdingReason } from '../../lib/adminSuppression';
 import { EMPTY_VALUE } from '../../lib/adminViews';
 import ChartLoader, { type ChartKind } from './ChartLoader';
 import type { ChartPoint } from './PlatformCharts';
@@ -79,8 +80,12 @@ export default function ChartPanel({
 
           {withheld > 0 ? (
             <p className="mt-2 text-xs text-midGray">
-              {withheld} {withheld === 1 ? 'bucket was' : 'buckets were'} withheld because fewer
-              than five pharmacies contributed to {withheld === 1 ? 'it' : 'them'}.
+              {withheld} {withheld === 1 ? 'bucket was' : 'buckets were'} withheld.{' '}
+              {moneyWithholdingReason(
+                'Fewer than five pharmacies contributed to '
+                + (withheld === 1 ? 'it' : 'them')
+                + '.',
+              )}
             </p>
           ) : null}
 

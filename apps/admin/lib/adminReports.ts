@@ -877,7 +877,9 @@ function suppressRows(
           netIndexes.includes(index) ? withheldNetCell() : value,
         ),
       ]),
-      suppressedBuckets: rows.length,
+      // ROUND 4 FINDING 1: `rows.length` counted the omitted bucket, so the
+      // subtitle disclosed it. Only what is shown is counted.
+      suppressedBuckets: publishable.length,
     };
   }
 
@@ -915,11 +917,16 @@ function suppressRows(
         };
       });
       const subBlocked = subPeriodBlocks(row);
+      // ROUND 4 FINDING 1: AN OMITTED BUCKET IS NOT A WITHHELD ONE.
+      //
+      // Round 3 stopped the refund-only row appearing and I left the COUNTER
+      // alone, so the subtitle said "(1 withheld)" — which announces exactly
+      // the refund the omission exists to hide, in SSR, CSV and PDF alike. The
+      // same mistake as the finding it was fixing, one output over: I closed
+      // the row and left the number that counts rows.
+      if (row.existsWithoutRefunds === false) continue;
       if (subBlocked || perValue.some((entry) => entry.suppressed)) suppressedBuckets += 1;
       if (subBlocked) {
-        // ROUND 3 FINDING 1, on the FLOOR path too: a bucket that exists only
-        // because of its refunds announces them by appearing at all.
-        if (row.existsWithoutRefunds === false) continue;
         out.push([row.key, ...row.values.map((_value, index) => suppressedCell(index))]);
         continue;
       }
@@ -937,10 +944,9 @@ function suppressRows(
       || complementBlocks(row.complementContributorIds)
       || subPeriodBlocks(row)
     ) {
-      suppressedBuckets += 1;
-      // ROUND 3 FINDING 1, on the FLOOR path too: a bucket that exists only
-      // because of its refunds announces them by appearing at all.
+      // ROUND 4 FINDING 1: omitted, therefore not counted. See above.
       if (row.existsWithoutRefunds === false) continue;
+      suppressedBuckets += 1;
       out.push([row.key, ...row.values.map((_value, index) => suppressedCell(index))]);
       continue;
     }

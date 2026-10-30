@@ -571,6 +571,51 @@ describe('§8.5 Analytics renders all four missing figures (Gate 5 finding 8)', 
     expect(html).not.toContain('fewer than 5 accounts have been granted a trial');
   });
 
+  test('ROUND 4 FINDING 2: a refund-only month does not appear in EITHER analytics region', async () => {
+    // Round 3 stopped the REPORT emitting a row for a month that exists only
+    // because something was refunded in it. This page kept emitting the month
+    // label in both regions -- the net series showed it and the sales-volume
+    // series showed it independently -- so the same refund stayed readable one
+    // panel over. A month that appears for the first time when a refund
+    // arrives announces that refund whatever its cell says.
+    clientBox.rowsByTable.sales = [
+      {
+        id: 's1',
+        shop_id: SHOP_ID,
+        business_date: '2026-09-20',
+        total: 8_000,
+        created_at: '2026-09-20T00:00:00.000Z',
+      },
+    ];
+    clientBox.rowsByTable.sale_refunds = [
+      {
+        id: 'r1',
+        shop_id: SHOP_ID,
+        business_date: '2026-10-05',
+        total_amount: 8_000,
+        created_at: '2026-10-05T00:00:00.000Z',
+      },
+    ];
+    await signInAs('founder', 'super_admin');
+
+    const html = await render('./analytics/page', { from: '2026-09-01', to: '2026-10-31' });
+
+    // Scoped to the two chart regions, because the FILTER FORM echoes the
+    // requested range and '2026-10-31' contains '2026-10' -- a whole-page
+    // assertion would have failed for a reason that is not a disclosure.
+    // EVERY chart region, not two named ones: the leak was that fixing the
+    // money chart alone left the volume chart showing the same month, so the
+    // assertion is over all of them.
+    const regions = html.split('aria-labelledby="chart-').slice(1);
+    expect(regions.length).toBeGreaterThan(3);
+
+    // September traded, so it is present somewhere. October exists only
+    // because of the refund, so it appears in no chart region at all. The
+    // filter form echoes '2026-10-31' and is deliberately outside this scope.
+    expect(regions.some((region) => region.includes('2026-09'))).toBe(true);
+    expect(regions.filter((region) => region.includes('2026-10'))).toEqual([]);
+  });
+
   test('refund-only shops do not lift the sale count over the floor', async () => {
     // GATE 5 DELTA FINDING 3. One shop sold; four others only refunded. The
     // refund-NET total legitimately has five contributors, but "how many

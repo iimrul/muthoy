@@ -17,6 +17,7 @@ import {
   type ReportTable,
 } from '../../lib/adminReports';
 import { featureState } from '../../lib/adminSettings';
+import { moneyWithholdingReason } from '../../lib/adminSuppression';
 import {
   COMMERCIAL_STATUSES,
   EMPTY_VALUE,
@@ -268,7 +269,13 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                             em dash here and as an empty cell in the export —
                             the two right answers for the two media. */}
                         {cell.length === 0 && cellIndex > 0 ? (
-                          <span title="Withheld: fewer than five contributors.">{EMPTY_VALUE}</span>
+                          <span
+                            title={moneyWithholdingReason(
+                              'Withheld: fewer than five contributors.',
+                            )}
+                          >
+                            {EMPTY_VALUE}
+                          </span>
                         ) : (
                           cell
                         )}
