@@ -143,9 +143,38 @@ fine, two that can drift apart unnoticed are not. Declaring a migration the
 preflight does not know about now fails three tests locally instead of one
 hosted preflight later.
 
-**So a migration joining the chain must now move three things together:**
-`POST_E4_MIGRATIONS`, `rollback-classification.json`, and the preflight's
-`EXPECTED_CHAIN`. The live-chain gate fails until all three agree.
+**ROUND 10 found two more, and my "unblocked" claim was premature.** The
+reviewer named three remaining constraints and was right about all of them:
+
+| Constraint | What it was | Resolution |
+|---|---|---|
+| `h9-cron-cleanup.pgtest.ts:451` | handed the **live** directory to the fixed E4 check. **My probe never ran this file**, so my "13 failures in 4 files" was an incomplete measurement presented as a blast radius | re-scoped to the E4 chain, with two sibling usages in the same file |
+| `h9-prod-preflight.mjs:290` | its independent 35-file chain | the cross-check above forces it to move; it is a registry update, not a blocker |
+| `e4-evidence-manifest.test.ts:41` | asserts 35 migrations and 48 entries — statements about what was **accepted**, which regeneration cannot satisfy | the manifest is now scoped to the chain it is evidence *about*, so those numbers are permanently true instead of true until the next migration. **Verified to change nothing today:** regenerating after the scoping produced no drift at all |
+
+**So a migration joining the chain must move four things together:**
+`POST_E4_MIGRATIONS`, `rollback-classification.json`, the preflight's
+`EXPECTED_CHAIN`, and a successor byte-pin. The live-chain gate fails until all
+four are done, and each failure names what to do.
+
+**The gap Option B leaves, stated rather than hidden.** The E4 manifest is
+correctly not evidence about a post-E4 migration, so **nothing pins a new
+migration's bytes.** Its chain membership is covered three ways; its bytes are
+not. The gate now refuses a declared migration whose bytes are pinned nowhere
+and tells you to create `post-e4-source-hashes.json`. That successor manifest is
+**required work before any post-E4 migration reaches a hosted project**, and it
+does not exist.
+
+**Proven by execution after the round 10 fixes,** with a probe staged *and*
+declared:
+
+| | Before Option B | After round 10 |
+|---|---|---|
+| `e4-chain-succession.pgtest.ts` | 3 failed | **8/8 pass** |
+| `h9-environment-parity.pgtest.ts` | 1 failed | **29/29 pass** |
+| `h9-cron-cleanup.pgtest.ts` | would have failed, unmeasured | **43/43 pass** |
+| `e4-evidence-manifest.test.ts` | 1 failed | **no drift from the migration** |
+| the live-chain gate | did not exist | fails on exactly the four things still to do |
 
 **Still retained:** all suppression. Option B removes the blocker to building
 the publication mechanism; it publishes nothing and relaxes nothing.
@@ -215,7 +244,7 @@ What was done, and what was checked:
 | Recovery reference | tag `recovery/pre-history-repair-20261030` and ref `refs/recovery/pre-repair-head`, both at `5c8d691` |
 | Reset | `--soft` to `d457306`, the verified `HEAD~3`. Never `--hard`, never `--mixed`, no force, no clean, no stash, no broad staging |
 | Rebuild | three commits by explicit path |
-| Content preserved | the resulting tree is **byte-identical** to the reviewed `5c8d691` (`1f635d4d…`), and the diff against the recovery ref is empty |
+| Content preserved | the rebuilt tree was **byte-identical** to the reviewed `5c8d691` (`1f635d4d…`) **at `f2550cc`**, which is the endpoint that claim refers to. **Round 10 corrected me here:** later commits changed 12 files, so the diff against the recovery ref is *not* empty at HEAD and was never meant to be. The equality is a statement about the repair, not about everything after it |
 | The literal | **absent from all nine outgoing commits**, by per-commit tree scan *and* by scanning every added line in the range |
 | Secret audit | no full `sb_secret_`-shaped literal; the only prefix matches are prose naming the prefixes and one runtime-constructed negative test input. The 57 64-hex runs are the SHA-256 content pins the staging guard compares against. The project ref already appears in **28 tracked files on `origin/main`**, so the range introduces nothing new |
 | Preserved | the four inherited dirty paths, all three sealed pins, the 35-migration chain, `audit-artifacts/**` absent from the range, Preview worktree still detached at `bd0fa4d` |
@@ -305,10 +334,9 @@ and independently verified.** Nothing about Option B changes what publishes.
 | `d87815e` — the staging-gate test and the pre-execution guard | **no** |
 | `d6f6f8f` — Option B | **no** |
 
-So four of the nine outgoing commits carry code no independent reviewer has
-seen. The founder's own protocol is explicit that neither agent may accept code
-it authored without the other's subsequent review, and **the earlier FINAL
-ACCEPT does not cover any of this.**
+Round 10 reviewed `72729ca` and returned **REVISE** with 2 HIGH and 2 MEDIUM.
+It also corrected the wording here: "four of nine" was imprecise. The accurate
+statement is in §5.9, which records that round and what it changed.
 
 ### 5.4 Pushed and CI-verified changes — **NONE since `87ec9dc`**
 
@@ -342,6 +370,52 @@ build at the current revision and two devices. Plan: hosted gate document §3.
 
 Covered in §5.2. The dependency is resolved; the work is not done; suppression
 stays.
+
+### 5.9 Round 10 — the independent review, and what it changed
+
+**`ROUND 10: REVISE` on `72729ca`.** Two HIGH, two MEDIUM, and the reviewer was
+right on all four. Every finding was in work I had written since the last
+review, and two of them were in claims I had made *about* that work.
+
+| # | Severity | Finding | What I did |
+|---|---|---|---|
+| 1 | **HIGH** | **A rehash loop cannot close a same-owner write window.** Each rehash releases the file again, so the launcher can be replaced after its own digest is taken and while later files are still being checked. The DACL permits that owner by design | The bytes are now **pinned, not re-measured.** Each staged file is opened with `FileShare.Read` — withholding write *and* delete, so replace-by-rename fails too — before it is hashed, and the handle is held until the child exits. The digest is computed **from the held handle**, so the bytes measured are provably the bytes protected |
+| 2 | **HIGH** | **Option B left three constraints standing**, and my probe had never run `h9-cron-cleanup.pgtest.ts` | All three resolved; see §2. **My measurement was incomplete and I had presented it as the blast radius** |
+| 3 | MEDIUM | **My non-vacuity guard was defeatable.** One unconditional throw naming every candidate satisfied all eight cases | The refusal must now be **specific**: it must name the substituted file **and no other**. The reviewer's exact mutation is now part of the mutation set and is caught |
+| 3b | MEDIUM | **My "cannot be tested" claim was too strong.** A caller-scoped `Get-FileHash` wrapper can do it with no race and no production bypass | Accepted and corrected in the test's own header. It is still not run here, for a narrower and honest reason: the technique needs the installer dot-sourced, and its destination is pinned to the real protected staging directory, so running it would write to sealed custody |
+| 4 | MEDIUM | **Duplicate migration versions were accepted.** `20261023000000_z_duplicate_version.sql` sorts after migration 35's filename while repeating its version, and Postgres keys the chain by version | The chain is now checked **by version** — unique and strictly increasing across the whole of it. The reviewer's exact filename is a test case |
+
+**Mutation-checked, 6 of 6 caught**, including round 10's own defeating
+mutation, plus: handles permitting write, hashing by path instead of from the
+held stream, dropping the dispose, recording the source hash, and dropping the
+test from the pinned set.
+
+**What round 10 confirmed rather than faulted:** the sealed pins, counts and
+chain are unchanged and exactly three manifest hashes moved; keeping post-E4
+evidence separate is reasonable; the logout direction in §6p is correct against
+the code; the billing report reads `orders` and `reportReadsRefunds` is false;
+**no suppression is relaxed anywhere in the range**, and the application code is
+unchanged.
+
+**The reviewer's execution limits, recorded because they bound the evidence.**
+Vitest failed to start in its sandbox with `spawn EPERM`, as in every previous
+round, so **there are still not two independently executed test suites.** Its
+run of the installer regression test stopped where temp-directory creation was
+denied, so **my eight behavioural cases and my mutation runs were not
+reproduced** — that evidence rests on my execution alone. It did complete 100
+focused Node tests, the manifest check, PGlite history probes and in-memory
+successor and cutoff checks.
+
+**On exceeding the authorized reset depth.** The reviewer judged the deeper base
+"technically necessary" but added that if the directive required stopping on a
+failed premise, the right move was to report before exceeding its depth. **That
+is a fair criticism and I accept it.** The repair is recoverable and verified,
+but the decision to proceed one commit deeper was mine to flag, not mine to
+take.
+
+**Still not reviewed:** everything after `72729ca` — the round 10 remediation
+itself. A further round is required before the push gate is met, on the exact
+final revision.
 
 ---
 

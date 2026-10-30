@@ -140,11 +140,42 @@ if ($stagedTest -cne $REVIEWED['scripts/h9/h9-a5.test.mjs']) { throw 'Refused st
 # so recording an eighth entry would make the staged runtime refuse itself.
 $verified = $mapping.Clone()
 $verified['h9-a5.test.mjs'] = 'scripts/h9/h9-a5.test.mjs'
-foreach ($name in $verified.Keys | Sort-Object) {
-    $path = Join-Path $Destination $name
-    if (-not [IO.File]::Exists($path)) { throw "Refused missing staged file: $name" }
-    if (([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Refused staged reparse: $name" }
-    if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $REVIEWED[$verified[$name]]) { throw "Refused staged bytes at execution: $name" }
+# ROUND 10 HIGH. My previous answer to this was another hash loop, and the
+# reviewer was right that a hash loop CANNOT close a same-owner window: every
+# rehash releases the file again, so the launcher can be replaced after its own
+# digest is taken and while the later files are still being checked. The DACL
+# permits that owner by design, so the guarantee had to stop depending on
+# timing.
+#
+# So the bytes are PINNED rather than re-measured. Each staged file is opened
+# with FileShare.Read before it is hashed and stays open until the child has
+# exited: other readers are unaffected, and nobody can write, rename or delete
+# it in between -- FileShare.Read withholds FILE_SHARE_WRITE and
+# FILE_SHARE_DELETE, so replace-by-rename fails too. The digest is then computed
+# FROM the held handle, so the bytes measured are provably the bytes the handle
+# protects, not whatever a path lookup resolves to a moment later.
+$handles = [Collections.Generic.List[IO.FileStream]]::new()
+try {
+    $names = @($verified.Keys | Sort-Object)
+    foreach ($name in $names) {
+        $path = Join-Path $Destination $name
+        if (-not [IO.File]::Exists($path)) { throw "Refused missing staged file: $name" }
+        if (([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Refused staged reparse: $name" }
+        $handles.Add([IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read))
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        for ($i = 0; $i -lt $names.Count; $i++) {
+            $stream = $handles[$i]
+            $stream.Position = 0
+            $digest = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','').ToLowerInvariant()
+            if ($digest -cne $REVIEWED[$verified[$names[$i]]]) { throw ("Refused staged bytes at execution: " + $names[$i]) }
+        }
+    } finally { $sha.Dispose() }
+    # The handles are still open here and stay open until the finally below, so
+    # what executes is what was hashed.
+    & 'C:\Program Files\PowerShell\7\pwsh.exe' -NoProfile -File (Join-Path $Destination 'a5-with-token.ps1') -VerifyOnly
+    if ($LASTEXITCODE -ne 0) { throw 'Installed runtime refused verification; no credentials accessed.' }
+} finally {
+    foreach ($handle in $handles) { $handle.Dispose() }
 }
-& 'C:\Program Files\PowerShell\7\pwsh.exe' -NoProfile -File (Join-Path $Destination 'a5-with-token.ps1') -VerifyOnly
-if ($LASTEXITCODE -ne 0) { throw 'Installed runtime refused verification; no credentials accessed.' }

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { migrationFiles } from './harness';
@@ -35,6 +35,9 @@ import { EXPECTED_CHAIN } from '../../../scripts/h9-prod-preflight.mjs';
 
 const H9_TRIO = ['20261008000000', '20261008000100', '20261015000000'] as const;
 const CLASSIFICATION = 'backend/supabase/migrations/rollback-classification.json';
+const E4_MANIFEST = 'backend/supabase/migrations/e4-source-hashes.json';
+/** Where a post-E4 byte-pin would live. Nothing creates it yet, deliberately. */
+const SUCCESSOR_MANIFEST = 'backend/supabase/migrations/post-e4-source-hashes.json';
 
 /** Exact set membership in both directions, naming every offender. */
 export function membershipDrift(
@@ -61,6 +64,41 @@ export function h9BlockDrift(chain: readonly string[]): string | null {
   if (at[1] !== at[0] + 1) return chain[at[0] + 1]!.slice(0, 14);
   if (at[2] !== at[1] + 1) return chain[at[1] + 1]!.slice(0, 14);
   return null;
+}
+
+/** The 14-digit version prefix, which is what the chain is actually keyed by. */
+export function versionOf(name: string): string {
+  return name.slice(0, 14);
+}
+
+/**
+ * ROUND 10 FINDING 4. Comparing FILENAMES let a duplicate version through:
+ * `20261023000000_z_duplicate_version.sql` sorts after migration 35's filename
+ * while repeating its version, and Postgres keys `schema_migrations` by the
+ * version alone. So the chain is checked by version, strictly increasing and
+ * unique, across the whole of it.
+ */
+export function versionOrderDrift(chain: readonly string[]): string | null {
+  const versions = chain.map(versionOf);
+  for (let i = 1; i < versions.length; i++) {
+    if (versions[i]! <= versions[i - 1]!) return versions[i]!;
+  }
+  return null;
+}
+
+/**
+ * Does this declared set still need a byte-pin? True when migrations are
+ * declared and no successor manifest records them.
+ *
+ * A predicate rather than an inline check, because the real list is empty today
+ * and an inline check would be vacuous — and asserting the real list STAYS
+ * empty would block the very path Option B exists to open.
+ */
+export function needsSuccessorPin(
+  declared: readonly string[],
+  successorManifestExists: boolean,
+): boolean {
+  return declared.length > 0 && !successorManifestExists;
 }
 
 function classifiedMigrations(): Record<string, string> {
@@ -101,6 +139,39 @@ describe('the live migration chain is exactly the approved chain', () => {
     expect([...EXPECTED_CHAIN]).toEqual(expectedLiveMigrationFiles());
   });
 
+  it('keeps the E4 evidence manifest scoped to the chain it is evidence about', () => {
+    // ROUND 10 FINDING 2's third constraint. The manifest read the whole
+    // directory, so a later migration pushed its counts to 36/49 while
+    // e4-evidence-manifest.test.ts asserts 35/48 -- statements about what was
+    // ACCEPTED, which regeneration cannot satisfy. It is now bounded to the E4
+    // chain, and this stops that bound drifting back open.
+    const manifest = JSON.parse(readFileSync(resolve(E4_MANIFEST), 'utf8'));
+    expect(manifest.expectedChain).toEqual(e4ChainMigrationFiles().map(versionOf));
+    expect(manifest.counts.migrations).toBe(e4ChainMigrationFiles().length);
+    for (const name of POST_E4_MIGRATIONS) {
+      expect(Object.keys(manifest.files), name).not.toContain(
+        `backend/supabase/migrations/${name}`,
+      );
+    }
+  });
+
+  it('refuses a post-E4 migration whose BYTES are pinned nowhere', () => {
+    // The gap Option B leaves, made blocking instead of silent. A post-E4
+    // migration's chain MEMBERSHIP is covered three ways -- declaration,
+    // rollback class, and the preflight's EXPECTED_CHAIN -- but the E4 manifest
+    // is correctly not evidence about it, so nothing pins its bytes.
+    //
+    // This fails the moment one is declared without a successor byte-pin, and
+    // the message says what to build. It is dormant while the list is empty,
+    // which is why the two assertions below also exercise it directly.
+    expect(
+      needsSuccessorPin(POST_E4_MIGRATIONS, existsSync(resolve(SUCCESSOR_MANIFEST))),
+      `${POST_E4_MIGRATIONS.length} post-E4 migration(s) are declared but their bytes are pinned nowhere. ` +
+        `Create ${SUCCESSOR_MANIFEST} recording a SHA-256 per post-E4 migration, on the E4 manifest's pattern, ` +
+        `before any of them is applied to a hosted project.`,
+    ).toBe(false);
+  });
+
   it('classifies every post-E4 migration for rollback before it may ship', () => {
     const classified = classifiedMigrations();
     for (const name of POST_E4_MIGRATIONS) {
@@ -109,12 +180,18 @@ describe('the live migration chain is exactly the approved chain', () => {
     }
   });
 
-  it('requires every post-E4 migration to sort after migration 35 with a 14-digit version', () => {
+  it('requires every post-E4 migration to have a 14-digit version AFTER migration 35', () => {
     for (const name of POST_E4_MIGRATIONS) {
-      expect(name > M35_FILE, name).toBe(true);
       expect(name, name).toMatch(/^\d{14}_[a-z0-9_]+\.sql$/);
+      // By VERSION, not by filename -- round 10 finding 4.
+      expect(versionOf(name) > versionOf(M35_FILE), name).toBe(true);
     }
     expect(new Set(POST_E4_MIGRATIONS).size).toBe(POST_E4_MIGRATIONS.length);
+  });
+
+  it('keeps every version in the live chain unique and strictly increasing', () => {
+    expect(versionOrderDrift(migrationFiles())).toBeNull();
+    expect(new Set(migrationFiles().map(versionOf)).size).toBe(migrationFiles().length);
   });
 });
 
@@ -172,6 +249,33 @@ describe('the live chain gate, against histories where the answer is known', () 
       '20260901000000_filler.sql',
     ].sort();
     expect(h9BlockDrift(withoutMiddle)).toBe('20261008000100');
+  });
+
+  it('catches a duplicate version hiding behind a later-sorting filename', () => {
+    // The reviewer's exact case. It sorts after migration 35 and repeats its
+    // version, so a filename comparison admits it and Postgres would collide.
+    const duplicate = '20261023000000_z_duplicate_version.sql';
+    expect(duplicate > M35_FILE).toBe(true);
+    expect(versionOf(duplicate)).toBe(versionOf(M35_FILE));
+    expect(versionOf(duplicate) > versionOf(M35_FILE)).toBe(false);
+    expect(versionOrderDrift([...chain(), duplicate])).toBe('20261023000000');
+  });
+
+  it('catches an out-of-order version even when every name is distinct', () => {
+    expect(versionOrderDrift(['20261023000000_a.sql', '20261001000000_b.sql']))
+      .toBe('20261001000000');
+  });
+
+  it('accepts a genuine successor by version', () => {
+    expect(versionOrderDrift([...chain(), '20261231000001_real_successor.sql'])).toBeNull();
+  });
+
+  it('demands a byte-pin for a declared migration, and is satisfied by one', () => {
+    expect(needsSuccessorPin(['20261231000001_real.sql'], false)).toBe(true);
+    expect(needsSuccessorPin(['20261231000001_real.sql'], true)).toBe(false);
+    // And an empty declaration needs nothing, with or without the manifest.
+    expect(needsSuccessorPin([], false)).toBe(false);
+    expect(needsSuccessorPin([], true)).toBe(false);
   });
 
   it('does not mistake an appended migration for a wedge', () => {

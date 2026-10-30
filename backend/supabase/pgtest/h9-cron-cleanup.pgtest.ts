@@ -15,6 +15,7 @@ import {
   E4_CHECK_FILE,
   H9_CHECK_FILE,
   checkSectionFrom,
+  e4ChainMigrationFiles,
   h9BaselineMigrationFiles,
   readOnlyDetailFrom,
   readOnlySectionFrom,
@@ -437,7 +438,9 @@ describe('the read-only migration-history checks', () => {
   // section fails on the live chain, on EXACTLY two assertions and no others,
   // and the successor passes on the same history.
   it('shows exactly how the H-9 section drifts once the chain is extended', async () => {
-    await record(migrationFiles());
+    // FOUNDER OPTION B: the E4 chain, not the live directory. "Extended" here
+    // means extended by E4, which is the drift this test describes.
+    await record(e4ChainMigrationFiles());
     expect(await readOnlyChecks(h, 'history_post_h9')).toEqual({
       // The count moved, and there is now something after migration 34.
       history_has_34_versions: false,
@@ -447,8 +450,13 @@ describe('the read-only migration-history checks', () => {
     });
   });
 
-  it('hands the live chain to the E4 successor, which accepts it', async () => {
-    await record(migrationFiles());
+  it('hands the E4 chain to the E4 successor, which accepts it', async () => {
+    // ROUND 10 FINDING 2 named this line. It gave the LIVE directory to the E4
+    // check, whose expected list is hash-pinned at 35 versions -- so a 36th
+    // migration made the successor correctly refuse, and this test fail. The
+    // E4 check accepts the chain it describes; whether the LIVE chain is the
+    // approved one is live-chain-succession.pgtest.ts's claim, not this one's.
+    await record(e4ChainMigrationFiles());
     const live = await readOnlySectionFrom(h, E4_CHECK_FILE, 'history_e4');
     expect(Object.values(live).every(Boolean), JSON.stringify(live)).toBe(true);
   });
@@ -459,7 +467,7 @@ describe('the read-only migration-history checks', () => {
   // is demonstrably not the chain it claims to be. The successor fails in both
   // directions and names both versions.
   it('catches a same-count substitution that the H-9 section cannot', async () => {
-    const substituted = migrationFiles()
+    const substituted = e4ChainMigrationFiles()
       .filter((name) => !name.startsWith('20260817000100'))
       .concat(['20260817000199_impostor.sql']);
     await record(substituted);

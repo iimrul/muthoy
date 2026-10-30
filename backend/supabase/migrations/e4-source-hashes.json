@@ -85,7 +85,7 @@
     "backend/supabase/checks/e4_postmigration_checks.sql": "d433d7426b278d402dc73884d1f78d4acd544e19a2aaa7c6328e6407b9454948",
     "scripts/h9-prod-preflight.mjs": "bac816d16d670af8ed464e75cafeb2a85455610f733afcd8aabcb5e5c44ad41d",
     "apps/mobile/tests/h9-prod-preflight.test.ts": "6533208977871917d430c1446a1223890adcb70fe090cd4f7d9e7155cb2f5db7",
-    "backend/supabase/pgtest/h9-cron-cleanup.pgtest.ts": "a2ab108a84a051bcf32dd42d7da4c26055dc5f6bdd1a70d43b6ab5ad29c61b93",
+    "backend/supabase/pgtest/h9-cron-cleanup.pgtest.ts": "437bb267305372dceec55295b4a2b8e5a9990fc9f9ccb7e93fd44e10902ba1f8",
     "backend/supabase/pgtest/h9-environment-parity.pgtest.ts": "6825cf443d53f5325f9ecf7f143b96ae455e4ff4a64b26d4392ccd5c5dea6d42",
     "backend/supabase/migrations/rollback-classification.json": "08c50fd579a5d6e0a24ffdefade12d8ac126503c15765b081e286b7d5f010d75",
     "backend/supabase/migrations/ROLLBACK.md": "9b61681b89bee9394b9093b4932d39a70cac31f699931419f1619f084f9f5d0a",

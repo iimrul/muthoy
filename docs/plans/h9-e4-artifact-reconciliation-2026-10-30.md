@@ -227,7 +227,7 @@ revocation or rotation action is required.**
 | Recovery reference | tag `recovery/pre-history-repair-20261030` **and** ref `refs/recovery/pre-repair-head`, both at `5c8d691` |
 | Operation | `git reset --soft d457306` only. No `--hard`, no `--mixed`, no force push, no clean, no stash, no broad staging |
 | Rebuild | three commits, each by explicit path |
-| Resulting tree | **byte-identical** to the reviewed `5c8d691` — `1f635d4d…`; the diff against the recovery ref is empty |
+| Resulting tree | **byte-identical** to the reviewed `5c8d691` — `1f635d4d…` — **at `f2550cc`, which is the endpoint this claim refers to.** Round 10 corrected a looseness here: later commits changed 12 files, so the comparison against the recovery ref is not empty at HEAD and was never meant to be |
 | The literal | **absent from every one of the nine outgoing commits**, by per-commit tree scan and by scanning every added line in the range |
 | Migration 34 pin `0b949fa9…` | **unchanged** |
 | `h9_postmigration_checks.sql` pin `361a400a…` | **unchanged** |

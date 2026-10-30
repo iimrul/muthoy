@@ -86,8 +86,32 @@ export function hashFile(path) {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
+/**
+ * The migrations this manifest is evidence ABOUT: the E4 chain, up to and
+ * including migration 35.
+ *
+ * FOUNDER OPTION B, 2026-10-30, after ROUND 10 finding 2. This read the whole
+ * directory, so a later migration pushed `counts.migrations` to 36 and the file
+ * total to 49 — and `e4-evidence-manifest.test.ts` asserts 35 and 48, which are
+ * statements about what was ACCEPTED. Regenerating cannot satisfy them, so the
+ * manifest had to stop tracking a chain it is not evidence about.
+ *
+ * Bounding it here changes nothing today, because the live chain IS the E4
+ * chain today — verified by regenerating and finding no drift. It makes the
+ * accepted counts permanently true instead of true until the next migration.
+ *
+ * THE GAP THIS LEAVES, stated rather than hidden: a post-E4 migration gets no
+ * hash record from this manifest. Its chain membership is covered three ways
+ * (POST_E4_MIGRATIONS, rollback-classification.json, the preflight's
+ * EXPECTED_CHAIN, cross-checked by live-chain-succession.pgtest.ts), but its
+ * BYTES are not pinned anywhere until a successor manifest exists. That
+ * successor is required work before any post-E4 migration is applied to a
+ * hosted project, and it is recorded as such in Report B.
+ */
 export function migrationFileNames() {
-  return readdirSync(resolve(MIGRATIONS_DIR)).filter((name) => name.endsWith('.sql')).sort();
+  return readdirSync(resolve(MIGRATIONS_DIR))
+    .filter((name) => name.endsWith('.sql') && name <= E4_MIGRATION)
+    .sort();
 }
 
 /** The manifest the tree currently implies. */

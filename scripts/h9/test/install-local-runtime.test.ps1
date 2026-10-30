@@ -8,14 +8,28 @@
 # destination, so the real protected staging directory is never written. The
 # fixture lives under the OS temp path, never under audit-artifacts.
 #
-# Source substitution is covered behaviourally, per file. Destination
-# substitution is reachable only through a genuine race between the copy and
-# the hash -- a faithful copy cannot make destination differ from source -- so a
-# deterministic behavioural case would need either a flaky race or a test-only
-# bypass seam in a security script. It is covered instead by assertions on the
-# code shape that makes the race non-exploitable: the destination digest check
-# exists for every staged name, and nothing runs between the final
-# all-or-nothing re-verification and the invocation.
+# Source substitution is covered behaviourally, per file, and the refusal must
+# be SPECIFIC to the file that was substituted -- see the loop below.
+#
+# Destination substitution. I first wrote that this was reachable only through a
+# genuine race, and ROUND 10 corrected me: it is not. A caller-scoped
+# `Get-FileHash` wrapper can return the real digest and then mutate the fixture
+# source immediately after the last source hash, so the unchanged installer
+# copies the changed bytes and reaches its destination-mismatch branch with no
+# race and no production-code bypass. That correction is accepted.
+#
+# It is still not executed HERE, for a different and narrower reason: the
+# technique needs the installer dot-sourced into the test's own session, and the
+# installer's destination is pinned to the real protected H-9 staging directory,
+# so running it would write to sealed custody. Exercising it safely needs a
+# fixture copy whose destination constant is changed, which is a transformation
+# of the file under test. That is recorded as the honest limitation instead of
+# the false claim it replaces.
+#
+# So the destination branch is pinned here by assertions on the code shape that
+# makes it reachable at all: the digest check exists for every staged name, the
+# recorded manifest uses the destination hash and not the source hash, and the
+# bytes are held open against write and delete through execution.
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))
@@ -54,19 +68,33 @@ if($text -notmatch 'if\s*\(\$files\[\$name\]\s*-cne\s*\$REVIEWED\[\$mapping\[\$n
 if($text -notmatch 'if\s*\(\$stagedTest\s*-cne\s*\$REVIEWED\['){Fail 'no destination comparison for the separately copied test'}
 $checks++
 
-# ---- nothing runs between the final re-verification and the invocation -----
-$statements=@($ast.EndBlock.Statements)
-$invoke=-1
-for($i=0;$i -lt $statements.Count;$i++){if($statements[$i].Extent.Text -match "^&\s*'C:\\Program Files\\PowerShell"){$invoke=$i;break}}
-if($invoke -lt 1){Fail 'could not locate the runtime invocation'}
-$guard=$statements[$invoke-1]
-if($guard -isnot [System.Management.Automation.Language.ForEachStatementAst]){Fail 'the statement before execution is not the all-or-nothing loop'}
-if($guard.Extent.Text -notmatch 'Get-FileHash' -or $guard.Extent.Text -notmatch '\$REVIEWED'){Fail 'the pre-execution loop does not compare against the reviewed digests'}
+# ---- the executed bytes are PINNED, not re-measured ------------------------
+# ROUND 10 FINDING 1. A rehash loop before the invocation cannot close a
+# same-owner window: each rehash releases the file again, so the launcher can be
+# replaced after its own digest is taken. The guarantee therefore rests on held
+# handles, and these assertions pin that rather than the old loop shape.
+
+# 1. Every staged file is opened denying write AND delete before it is hashed.
+if($text -notmatch '\[IO\.File\]::Open\(\$path,\[IO\.FileMode\]::Open,\[IO\.FileAccess\]::Read,\[IO\.FileShare\]::Read\)'){Fail 'staged files are not opened with FileShare.Read before hashing'}
+if($text -match '\[IO\.FileShare\]::(ReadWrite|Write|Delete)'){Fail 'a staged handle permits write or delete'}
 $checks++
 
-# the loop must cover every staged name, test included
-if($guard.Extent.Text -notmatch '\$verified\.Keys'){Fail 'the pre-execution loop does not iterate the full staged set'}
-if($text -notmatch '\$verified\[''h9-a5\.test\.mjs''\]\s*='){Fail 'the pre-execution set omits the test file'}
+# 2. The pre-execution digest is computed FROM the held stream, so the bytes
+#    measured are provably the bytes the handle protects.
+if($text -notmatch 'ComputeHash\(\$stream\)'){Fail 'the pre-execution digest is not computed from the held handle'}
+$checks++
+
+# 3. The invocation sits inside the try that holds the handles, and the dispose
+#    is in that try's finally -- so the handles outlive the child.
+$tryAst=$ast.Find({param($node) $node -is [System.Management.Automation.Language.TryStatementAst] -and $node.Body.Extent.Text -match 'pwsh\.exe'},$true)
+if(-not $tryAst){Fail 'the invocation is not inside a try that holds the staged handles'}
+if($tryAst.Body.Extent.Text -notmatch '\$handles\.Add\('){Fail 'the handle-holding try does not open the handles'}
+if(-not $tryAst.Finally -or $tryAst.Finally.Extent.Text -notmatch '\$handle\.Dispose\(\)'){Fail 'the handles are not disposed in the finally'}
+$checks++
+
+# 4. The held set covers every staged file, the separately copied test included.
+if($text -notmatch '\$names\s*=\s*@\(\$verified\.Keys'){Fail 'the pinned set does not iterate the full staged set'}
+if($text -notmatch '\$verified\[''h9-a5\.test\.mjs''\]\s*='){Fail 'the pinned set omits the test file'}
 $checks++
 
 # ---- behavioural: source substitution, per reviewed file -------------------
@@ -109,9 +137,17 @@ try{
     [IO.File]::WriteAllBytes($path,$original)
     if($result.Code -eq 0){Fail ('substituted source admitted: '+$relative)}
     if($result.Text -notmatch 'Refused unreviewed bytes'){Fail ('wrong refusal for '+$relative+': '+$result.Text)}
-    # Non-vacuity, part two: the refusal must NAME the file that was mutated.
-    # An unconditional throw would always name the first key instead.
+    # Non-vacuity, part two: the refusal must name the file that was mutated...
     if($result.Text -notmatch [regex]::Escape($relative)){Fail ('refusal does not name the substituted file: '+$relative)}
+    # ...AND NAME NO OTHER. ROUND 10 FINDING 3: naming the mutated file alone
+    # was not enough. The reviewer defeated it with one unconditional throw that
+    # names every candidate -- `throw ('Refused unreviewed bytes: ' +
+    # ($REVIEWED.Keys -join ', '))` satisfied all eight cases at once. A gate
+    # that refuses everything is not a gate, so the refusal must be SPECIFIC.
+    foreach($other in $reviewed.Keys){
+      if($other -ceq $relative){continue}
+      if($result.Text -match [regex]::Escape($other)){Fail ('refusal names a file that was NOT substituted: '+$other+' while testing '+$relative)}
+    }
     $checks++
   }
 
