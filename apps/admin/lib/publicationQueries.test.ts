@@ -25,12 +25,16 @@ const { resolveMonthlyMoney, periodEligibility, publishedAmount, publicationsByM
 interface SelectCall {
   table: string;
   columns: string;
+  countRequested?: string;
   filters: { method: string; args: unknown[] }[];
 }
 
 interface ClientOptions {
   rows?: unknown[];
   error?: string;
+  /** The EXACT count the server reports; omit to match the rows returned. */
+  count?: number;
+  auditCount?: number;
   /** Rows for `admin_audit_log`, as `{ target }`. */
   auditTargets?: (string | null)[];
   auditError?: string;
@@ -51,17 +55,22 @@ function createClient(options: ClientOptions = {}) {
       const call: SelectCall = { table, columns: '', filters: [] };
       const result = () => {
         if (table === 'admin_audit_log') {
-          return options.auditError === undefined
-            ? { data: (options.auditTargets ?? []).map((target) => ({ target })), error: null }
-            : { data: null, error: { message: options.auditError } };
+          if (options.auditError !== undefined) {
+            return { data: null, error: { message: options.auditError }, count: null };
+          }
+          const audit = (options.auditTargets ?? []).map((target) => ({ target }));
+          return { data: audit, error: null, count: options.auditCount ?? audit.length };
         }
-        return options.error === undefined
-          ? { data: options.rows ?? [], error: null }
-          : { data: null, error: { message: options.error } };
+        if (options.error !== undefined) {
+          return { data: null, error: { message: options.error }, count: null };
+        }
+        const pubs = options.rows ?? [];
+        return { data: pubs, error: null, count: options.count ?? pubs.length };
       };
       const builder: Record<string, unknown> = {
-        select(columns: string) {
+        select(columns: string, opts?: { count?: string }) {
           call.columns = columns;
+          call.countRequested = opts?.count;
           calls.push(call);
           return builder;
         },
@@ -193,6 +202,60 @@ describe('reading the published set', () => {
     // The unique constraint makes this unreachable through the RPC. Asserted
     // anyway, because determinism should not depend on a claim about another
     // layer.
+    expect(publicationsByMonth(set)?.get('2026-10')?.valuePaisa).toBe(400_000);
+  });
+});
+
+describe('a truncated read is refused, not answered', () => {
+  // ROUND 21 FINDING 1. PostgREST caps a response at 1,000 rows by default and
+  // neither query paginated, so above the cap the audit cross-check compared
+  // two independently truncated sets. 1,001 audited months against a serving
+  // table holding the first 1,000: the omitted month read as "never published",
+  // and recomputed money was released against a figure already disclosed. The
+  // same truncation in the other order yields a false `'unavailable'`.
+  //
+  // Detection rather than pagination, deliberately — one publication per month
+  // means 1,000 rows is 83 years, so pagination would be machinery guarding a
+  // cliff nobody reaches. A truncated read fails CLOSED instead.
+
+  test('asks for an exact count on both reads', () => {
+    // Without this the detection below cannot work, so it is asserted first.
+    const { client, calls } = createClient({ rows: [] });
+    return readPublishedMonths({ client: client as never }).then(() => {
+      expect(calls).toHaveLength(2);
+      for (const call of calls) {
+        expect(call.countRequested, call.table).toBe('exact');
+      }
+    });
+  });
+
+  test('a truncated PUBLICATIONS read yields unavailable', async () => {
+    const { client } = createClient({ rows: [dbRow()], count: 1001 });
+    expect(await readPublishedMonths({ client: client as never })).toBe('unavailable');
+  });
+
+  test('a truncated AUDIT read yields unavailable, which is the dangerous direction', async () => {
+    // This is the side truncation makes look SHORTER, and short audit history
+    // is what releases money rather than withholding it.
+    const { client } = createClient({
+      rows: [dbRow()],
+      auditTargets: [AUDITED_OCTOBER],
+      auditCount: 1001,
+    });
+    expect(await readPublishedMonths({ client: client as never })).toBe('unavailable');
+  });
+
+  test('a COMPLETE read is served, so the rule is truncation and not size', async () => {
+    // Non-vacuity: refusing whenever a count is present would pass both tests
+    // above and break every read.
+    const { client } = createClient({
+      rows: [dbRow()],
+      count: 1,
+      auditTargets: [AUDITED_OCTOBER],
+      auditCount: 1,
+    });
+    const set = await readPublishedMonths({ client: client as never });
+    expect(set).not.toBe('unavailable');
     expect(publicationsByMonth(set)?.get('2026-10')?.valuePaisa).toBe(400_000);
   });
 });

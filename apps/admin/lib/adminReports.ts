@@ -72,6 +72,8 @@ import {
   resolveMonthlyMoney,
   publicationsByMonth,
   publishedMonths,
+  recordIsServable,
+  setHasUnservableRecord,
   type PublicationSet,
   type PublishedMoney,
 } from './publication';
@@ -1035,7 +1037,14 @@ function suppressRows(
   // is what my round-19 fix left after removing the count for the same reason.
   // The published set either could be read or could not, and that is a property
   // of the request, not of the data.
-  const publicationReadFailed = netIndexes.length > 0 && publicationSet === 'unavailable';
+  // ROUND 21 FINDING 2: a malformed RECORD also has to be visible. Round 20
+  // moved this off the rows to stop it leaking bucket existence, and in doing
+  // so it stopped noticing a record that resolves to `failed` -- which then got
+  // the policy caption. Both conditions are properties of the SET, so neither
+  // reveals which private buckets exist.
+  const publicationReadFailed =
+    netIndexes.length > 0
+    && (publicationSet === 'unavailable' || setHasUnservableRecord(publicationSet));
 
 
   for (const row of rows) {
@@ -1512,6 +1521,14 @@ function withPublishedMonths(
     if (present.has(month) || !monthInRange(month, query)) continue;
     const record = byMonth.get(month);
     if (record === undefined) continue;
+    // VALIDATED AT ENUMERATION, not only at serving.
+    //
+    // ROUND 21 FINDING 3's remaining half, which my first fix missed: refusing
+    // the record in `recordIsServable` blanked its VALUE and left its KEY, so
+    // the report still carried a row labelled `2026-13`. A month that cannot be
+    // served must not become a row at all — the key is as much a published
+    // claim as the figure.
+    if (recordIsServable(record, month) !== null) continue;
     added.push({
       key: month,
       // Built from the record's two published sides through the shared

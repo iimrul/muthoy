@@ -450,6 +450,53 @@ describe('what cannot be inferred from a publication', () => {
     ).toBe('failed');
   });
 
+  test('a record claiming month 13 is refused, not normalised into existence', () => {
+    // ROUND 21 FINDING 3, and it is a good demonstration of why a boundary
+    // must not derive its expectation from its input. `periodEndOf` builds its
+    // answer with `Date.UTC`, which NORMALISES an out-of-range month:
+    // `Date.UTC(2026, 13, 0)` is 2027-01-31. So a record claiming
+    // `periodStart: '2026-13-01'` with `periodEnd: '2027-01-31'` validated
+    // against itself perfectly, and the report rendered `2026-13,4000.00`
+    // labelled as published.
+    const impossible = record({ periodStart: '2026-13-01', periodEnd: '2027-01-31' });
+    expect(recordIsServable(impossible, '2026-13')).toContain('not the first of a real month');
+
+    // And it does not reach a report row.
+    const table = buildReportTable(
+      REPORT,
+      data({ sales: [], refunds: [], tallies: COMPLETE }),
+      query({ reportId: REPORT, format: 'csv' }),
+      { publications: [impossible] },
+    );
+    expect(reportTextRows(table).flat().join(' ')).not.toContain('2026-13');
+    expect(reportToCsv(table)).not.toContain('4000.00');
+  });
+
+  test('a record whose period end is not a real date is refused', () => {
+    expect(
+      recordIsServable(record({ periodEnd: '2026-10-32' }), '2026-10'),
+    ).toContain('not a real calendar date');
+  });
+
+  test('a MALFORMED record is captioned as unreadable, not as policy', () => {
+    // ROUND 21 FINDING 2, and a regression I introduced in round 20: moving the
+    // caption off the rows to stop it leaking bucket existence also stopped it
+    // noticing a record that resolves to `failed`. A publication whose
+    // `periodEnd` is not the month end withheld correctly and then got the
+    // POLICY caption — byte-identical output to "nothing is published".
+    //
+    // Servability is a property of the SET, which is the same category as the
+    // option itself, so reporting it reveals nothing private.
+    const malformed = record({ periodEnd: '2026-10-30' });
+    const table = octoberTable(eligibleMonth(['2026-10-01']), [malformed]);
+    const policy = octoberTable(eligibleMonth(['2026-10-01']));
+
+    expect(netCellText(table)).toBe(WITHHELD_TEXT);
+    expect(table.subtitle).toContain('could NOT be read');
+    expect(policy.subtitle).not.toContain('could NOT be read');
+    expect(table.subtitle).not.toBe(policy.subtitle);
+  });
+
   test('a record carrying another metric family is refused, not served', () => {
     const otherMetric = record({ metricFamily: 'subscription_revenue_and_renewals' });
     expect(recordIsServable(otherMetric, '2026-10')).toContain('unexpected metric');

@@ -126,9 +126,26 @@ export async function readPublishedMonths(
   deps: PublicationReadDeps = {},
 ): Promise<PublicationSet> {
   const client = deps.client ?? getSupabaseAdmin();
-  const { data, error } = await client
+  // EXACT COUNT, because a TRUNCATED read is worse than a failed one.
+  //
+  // ROUND 21 FINDING 1. PostgREST caps a response at 1,000 rows by default, and
+  // neither of these two queries paginated — so above that cap the audit
+  // cross-check compared two independently truncated sets. The reviewer built
+  // 1,001 audited months against a serving table holding the first 1,000: the
+  // omitted month read as "never published", and recomputed money was released
+  // against a figure already disclosed. The same truncation in the other order
+  // produces a false `'unavailable'`.
+  //
+  // DETECTION RATHER THAN PAGINATION, and the reason is a judgement worth
+  // stating. One publication per month per cohort means 1,000 rows is 83 years;
+  // pagination here would be machinery guarding a cliff nobody reaches, and
+  // machinery has its own defects. A truncated read is refused instead, which
+  // fails closed: everything withholds and the caption says the record could
+  // not be read. If this ever fires, the fix is pagination, and it will fire
+  // loudly rather than answer wrongly.
+  const { data, error, count } = await client
     .from('financial_publications')
-    .select(COLUMNS)
+    .select(COLUMNS, { count: 'exact' })
     .eq('metric_family', PUBLICATION_METRIC)
     .eq('cohort_key', PUBLICATION_COHORT)
     .eq('period_grain', PUBLICATION_GRAIN)
@@ -141,8 +158,17 @@ export async function readPublishedMonths(
     return 'unavailable';
   }
 
+  const rows = (data ?? []) as unknown as PublicationRow[];
+  if (count !== null && count !== undefined && rows.length < count) {
+    console.error(
+      '[admin] the financial_publications read was truncated:',
+      rows.length + ' of ' + count + ' rows',
+    );
+    return 'unavailable';
+  }
+
   const records: PublicationRecord[] = [];
-  for (const row of (data ?? []) as unknown as PublicationRow[]) {
+  for (const row of rows) {
     try {
       records.push(toRecord(row));
     } catch (conversionError: unknown) {
@@ -203,17 +229,28 @@ export async function readPublishedMonths(
 async function readAuditedMonths(
   client: Pick<ReturnType<typeof getSupabaseAdmin>, 'from'>,
 ): Promise<Set<string> | 'unavailable'> {
-  const { data, error } = await client
+  const { data, error, count } = await client
     .from('admin_audit_log')
-    .select('target')
+    .select('target', { count: 'exact' })
     .eq('action', 'publication.published')
     .eq('outcome', 'success');
   if (error) {
     console.error('[admin] reading publication audit history failed:', error.message);
     return 'unavailable';
   }
+  const rows = (data ?? []) as unknown as { target: string | null }[];
+  // Same refusal as the publications read, and more load-bearing here: this is
+  // the side a truncated read makes look SHORTER, which is the direction that
+  // releases money rather than withholding it.
+  if (count !== null && count !== undefined && rows.length < count) {
+    console.error(
+      '[admin] the publication audit read was truncated:',
+      rows.length + ' of ' + count + ' rows',
+    );
+    return 'unavailable';
+  }
   const months = new Set<string>();
-  for (const row of (data ?? []) as unknown as { target: string | null }[]) {
+  for (const row of rows) {
     // `<metric>:<cohort>:<YYYY-MM>`, written by the RPC. A target that does not
     // parse is ignored rather than guessed at: the prefix is what identifies it
     // as one of ours, and anything else in this column is another action's.

@@ -355,6 +355,25 @@ export function publishedMonths(set: PublicationSet): readonly string[] {
   return byMonth === null ? [] : [...byMonth.keys()].sort();
 }
 
+/**
+ * Whether anything in the SET is unservable, independent of which report rows
+ * happen to exist.
+ *
+ * ROUND 21 FINDING 2. Round 20 made the outage caption derive from the option
+ * rather than from the rows, which closed a bucket-existence leak and silently
+ * dropped visibility for a malformed RECORD: a publication whose `periodEnd`
+ * was not a month end resolved to `failed`, withheld correctly, and then got
+ * the POLICY caption — byte-identical output to "nothing is published".
+ *
+ * Asking the SET is the way to have both. A record's servability is a property
+ * of the published set, which is the same category of information as the option
+ * itself, so reporting it reveals nothing about which private buckets exist.
+ */
+export function setHasUnservableRecord(set: PublicationSet): boolean {
+  if (set === 'unavailable') return false;
+  return set.some((record) => recordIsServable(record, monthOf(record)) !== null);
+}
+
 /** `YYYY-MM` → the first day of that month. */
 export function periodStartOf(month: string): string {
   return month + '-01';
@@ -382,6 +401,22 @@ export function monthOf(record: PublicationRecord): string {
  * that is to refuse rather than to display whatever was found.
  */
 export function recordIsServable(record: PublicationRecord, month: string): string | null {
+  // THE CALENDAR FIRST, because every check below compares the record against
+  // something derived FROM the record.
+  //
+  // ROUND 21 FINDING 3. `periodEndOf` builds its answer with `Date.UTC`, which
+  // NORMALISES an out-of-range month: `Date.UTC(2026, 13, 0)` is 2027-01-31. So
+  // a record claiming `periodStart: '2026-13-01'` and `periodEnd: '2027-01-31'`
+  // validated against itself perfectly, and the report rendered a row labelled
+  // `2026-13` carrying a published figure. The database's `date` type makes
+  // that unreachable through the RPC, but this function is the typed boundary
+  // and a boundary that trusts its input is not a boundary.
+  if (!/^\d{4}-(0[1-9]|1[0-2])-01$/.test(record.periodStart)) {
+    return 'publication period start is not the first of a real month: ' + record.periodStart;
+  }
+  if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(record.periodEnd)) {
+    return 'publication period end is not a real calendar date: ' + record.periodEnd;
+  }
   if (record.metricFamily !== PUBLICATION_METRIC) {
     return 'publication has an unexpected metric family: ' + record.metricFamily;
   }
