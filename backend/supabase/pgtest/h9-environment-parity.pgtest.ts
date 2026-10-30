@@ -12,6 +12,7 @@ import {
   seedShops,
   type Harness,
 } from './harness';
+import { e4ChainMigrationFiles } from './checkFile';
 import { findPostgresBin, startServerPostgres, type ServerPostgres } from './serverPostgres';
 
 // H-9 §8.3 — forward migration 32, executed.
@@ -165,8 +166,15 @@ describe('the H-9 forward migrations sit after every historical migration', () =
   // plan's inventory of four missed: it never mentions the number 34, so a
   // search for that literal does not find it. Recorded here so the next
   // extension finds all five.
+  //
+  // FOUNDER OPTION B, 2026-10-30: `files` is now the E4 chain rather than the
+  // live directory. The invariant this test owns is about the H-9 block's
+  // position inside the chain E4 signed off, and that invariant is permanent.
+  // Reading the live directory additionally asserted "nothing has been approved
+  // since", which is a different claim with a different owner —
+  // live-chain-succession.pgtest.ts.
   it('keeps 32, 33 and 34 contiguous after every historical migration, with only E4 after them', () => {
-    const files = migrationFiles();
+    const files = e4ChainMigrationFiles();
     const start = files.indexOf(M32);
     expect(start).toBeGreaterThan(0);
     // Contiguous, and in order.

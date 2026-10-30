@@ -47,6 +47,49 @@ export function h9BaselineMigrationFiles(): string[] {
   return migrationFiles().filter((name) => name <= M34_FILE);
 }
 
+/** Migration 35 — the last file of the E4 chain. */
+export const M35_FILE = '20261023000000_e4_batch3_admin_platform.sql';
+
+/**
+ * Migrations approved AFTER E4, in chain order. Empty until one is approved.
+ *
+ * OPTION B, approved by the founder on 2026-10-30. The problem it solves: four
+ * gates described the live chain by reading the migrations directory and
+ * asserting nothing followed migration 35, so adding migration 36 broke 13
+ * tests in four files — measured, not argued. Three of those files are E4
+ * acceptance evidence, which must not be weakened to accommodate a later
+ * migration.
+ *
+ * So the E4 and H-9 fixtures are re-scoped to the histories they actually
+ * describe, exactly as `h9BaselineMigrationFiles` already did for H-9 when E4
+ * extended the chain, and live-chain-succession.pgtest.ts gates the live
+ * directory against this declaration.
+ *
+ * This is the ONE place a later migration joins the chain for gate purposes.
+ * It must also be classified in rollback-classification.json and recorded in
+ * the evidence manifest; the successor gate asserts the first of those, and a
+ * missing manifest entry is drift.
+ */
+export const POST_E4_MIGRATIONS: readonly string[] = Object.freeze([]);
+
+/**
+ * The chain as it stood when E4 was signed off: everything up to and including
+ * migration 35.
+ *
+ * e4_postmigration_checks.sql's `history_e4` section hard-codes those 35
+ * versions and asserts nothing else is present. That is a correct description
+ * of THIS set and of nothing else, so a test exercising it has to record THIS
+ * set — and that file is hash-pinned, so it cannot be restated.
+ */
+export function e4ChainMigrationFiles(): string[] {
+  return migrationFiles().filter((name) => name <= M35_FILE);
+}
+
+/** The live chain as it must be: the E4 chain, then exactly what was approved after it. */
+export function expectedLiveMigrationFiles(): string[] {
+  return [...e4ChainMigrationFiles(), ...POST_E4_MIGRATIONS];
+}
+
 /** One section's SQL, by file and section name. */
 export function checkSectionFrom(file: string, section: string): string {
   const text = readFileSync(resolve(file), 'utf8');

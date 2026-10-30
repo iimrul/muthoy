@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createBareHarness, migrationFiles, type Harness } from './harness';
+import { createBareHarness, type Harness } from './harness';
 import {
   E4_CHECK_FILE,
   H9_CHECK_FILE,
+  e4ChainMigrationFiles,
   h9BaselineMigrationFiles,
   readOnlyDetailFrom,
   readOnlySectionFrom,
@@ -21,6 +22,15 @@ import {
 //   * on the LIVE history, E4's passes and H-9's fails on exactly the two
 //     assertions that moved;
 //   * on every adverse history, E4's fails and NAMES the offending version.
+//
+// SCOPE, after founder Option B of 2026-10-30: every history recorded here is
+// built from e4ChainMigrationFiles(), which is the chain up to and including
+// migration 35 — NOT the live directory. The E4 check file hard-codes those 35
+// versions and is hash-pinned, so it describes that set and no other; reading
+// the live directory meant this file stopped describing E4 the moment a later
+// migration was approved, which is the same trap h9BaselineMigrationFiles was
+// introduced to escape. The live chain is gated by
+// live-chain-succession.pgtest.ts instead.
 //
 // The last point is the reason the successor exists. h9's section bounds the
 // chain with a COUNT plus "nothing after migration 34". That pair cannot see a
@@ -50,7 +60,7 @@ describe('E4 chain succession', () => {
   const baseline = () => readOnlySectionFrom(h, H9_CHECK_FILE, 'history_post_h9');
 
   it('accepts the live 35-version chain', async () => {
-    await record(migrationFiles());
+    await record(e4ChainMigrationFiles());
     const checks = await live();
     expect(Object.entries(checks).filter(([, pass]) => pass !== true).map(([n]) => n)).toEqual([]);
     expect(Object.keys(checks)).toHaveLength(5);
@@ -77,7 +87,7 @@ describe('E4 chain succession', () => {
   });
 
   it('catches a same-count substitution, which the H-9 check cannot', async () => {
-    const substituted = migrationFiles()
+    const substituted = e4ChainMigrationFiles()
       .filter((name) => !name.startsWith('20260817000100'))
       .concat(['20260817000199_impostor.sql']);
     await record(substituted);
@@ -97,7 +107,7 @@ describe('E4 chain succession', () => {
   });
 
   it('catches anything appended after E4', async () => {
-    await record(migrationFiles().concat(['20261231000000_unapproved.sql']));
+    await record(e4ChainMigrationFiles().concat(['20261231000000_unapproved.sql']));
     const checks = await live();
     expect(checks.history_has_no_extra_version).toBe(false);
     expect(checks.history_e4_immediately_follows_h9).toBe(false);
@@ -106,7 +116,7 @@ describe('E4 chain succession', () => {
 
   it('catches a migration inserted INSIDE the signed-off H-9 block', async () => {
     // The shape that would mean the block was reopened rather than extended.
-    await record(migrationFiles().concat(['20261009000000_wedged.sql']));
+    await record(e4ChainMigrationFiles().concat(['20261009000000_wedged.sql']));
     const checks = await live();
     expect(checks.history_h9_block_is_contiguous).toBe(false);
     expect(checks.history_has_no_extra_version).toBe(false);
@@ -114,7 +124,7 @@ describe('E4 chain succession', () => {
   });
 
   it('catches a missing H-9 version even when the count is restored', async () => {
-    const withoutH9Middle = migrationFiles()
+    const withoutH9Middle = e4ChainMigrationFiles()
       .filter((name) => !name.startsWith('20261008000100'))
       .concat(['20260901000000_filler.sql']);
     await record(withoutH9Middle);

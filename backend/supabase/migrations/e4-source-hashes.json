@@ -86,14 +86,14 @@
     "scripts/h9-prod-preflight.mjs": "bac816d16d670af8ed464e75cafeb2a85455610f733afcd8aabcb5e5c44ad41d",
     "apps/mobile/tests/h9-prod-preflight.test.ts": "6533208977871917d430c1446a1223890adcb70fe090cd4f7d9e7155cb2f5db7",
     "backend/supabase/pgtest/h9-cron-cleanup.pgtest.ts": "a2ab108a84a051bcf32dd42d7da4c26055dc5f6bdd1a70d43b6ab5ad29c61b93",
-    "backend/supabase/pgtest/h9-environment-parity.pgtest.ts": "92e2a0b784d469ec451cf6a07b1d01ff9e96914d13d08830ae52acbe8751ebdc",
+    "backend/supabase/pgtest/h9-environment-parity.pgtest.ts": "6825cf443d53f5325f9ecf7f143b96ae455e4ff4a64b26d4392ccd5c5dea6d42",
     "backend/supabase/migrations/rollback-classification.json": "08c50fd579a5d6e0a24ffdefade12d8ac126503c15765b081e286b7d5f010d75",
     "backend/supabase/migrations/ROLLBACK.md": "9b61681b89bee9394b9093b4932d39a70cac31f699931419f1619f084f9f5d0a",
     "backend/supabase/migrations/README.md": "9114aafed4be01c0abe3ff4f4e0388d868ebb7fcabd9221278ec528d0c80f51f",
     "apps/mobile/tests/migration-rollback-classification.test.ts": "17db87a58ea6242d4f8fbbcb60651fbc3f8ba7244bdeed83b470debda7c5c9ce",
-    "backend/supabase/pgtest/checkFile.ts": "7318a1baabe1b8ce6503669c5f9721936ab1d7a04b08bca2db68ad63bc39d0a0",
+    "backend/supabase/pgtest/checkFile.ts": "4157698d9275e4e77003f879bffdb39a27b7dad81094b37de43ac8523f4deff4",
     "backend/supabase/pgtest/e4-admin-platform.pgtest.ts": "fe8ab794b63cba7ad898aa64285258ff7d55ea757175561481cd2557585c9ed9",
-    "backend/supabase/pgtest/e4-chain-succession.pgtest.ts": "177c5a56f2d679c7f6cfab2184d71b83987c8a05cc6f789687ce48eed0cd4329",
+    "backend/supabase/pgtest/e4-chain-succession.pgtest.ts": "518403cb6c3635e56b74bb5e6b6ad4d5f30d096a5cfd2d1dfaaebfc8dd6073d7",
     ".gitattributes": "1fb9331e11aaebe9786d9364b874985a3a274f7b2afb67050e51adcf2dc331a4"
   }
 }

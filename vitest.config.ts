@@ -417,6 +417,12 @@ export default defineConfig({
       // correct about which history, and the substitution the older count-plus-
       // bounds check cannot see.
       "backend/supabase/pgtest/e4-chain-succession.pgtest.ts",
+      // FOUNDER OPTION B, 2026-10-30. The live chain's own gate. The file above
+      // describes the chain E4 signed off and is deliberately blind to anything
+      // approved later; this one owns the claim that what is on disk is exactly
+      // what was approved, and fails until a new migration is declared and
+      // classified.
+      "backend/supabase/pgtest/live-chain-succession.pgtest.ts",
       // W4-05. Both barriers proven INDEPENDENTLY — the owner gate with the pin
       // bypassed, the pin with the gate bypassed — plus the seven working paths.
       "backend/supabase/pgtest/w405-shop-identity.pgtest.ts",
