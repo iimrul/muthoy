@@ -39,7 +39,8 @@ import {
   SUPPRESSION_K,
   dayReleasable,
   daysReleasable,
-  withheldSide,
+  refundSideClears,
+  saleSideClears,
   type DaySides,
 } from './adminSuppression';
 
@@ -223,10 +224,21 @@ export function periodEligibility(
     // So each side is counted separately and only the sides that actually
     // failed are named. `withheldSide` is the shared answer the Dashboard and
     // the report already use, so there is one rule and one explanation of it.
-    const saleShort = failing.filter((day) => withheldSide(day, k) === 'sale').length;
-    const refundShort = failing.length - saleShort;
+    // ROUND 20 FINDING 5. My round-19 fix counted sale failures with
+    // `withheldSide` and then derived refund failures by SUBTRACTION, and
+    // `withheldSide` reports only the side that failed FIRST — so a day short
+    // on both sides counted as a sale failure and vanished from the refund
+    // total. One seller and one refunder on day 1, six sellers and one refunder
+    // on day 2: one selling day and TWO refunding days, reported as one each.
+    //
+    // The two counts OVERLAP and that is correct, because a single day can fail
+    // both. So they are asked independently, through the exported predicates,
+    // and the sentence never implies they sum to the total.
+    const saleShort = failing.filter((day) => !saleSideClears(day, k)).length;
+    const refundShort = failing.filter((day) => !refundSideClears(day, k)).length;
     const clause = (count: number, noun: string): string =>
-      count + ' with fewer than ' + k + ' distinct ' + noun + ' pharmacies';
+      count + (count === 1 ? ' had' : ' had') + ' fewer than ' + k + ' distinct '
+      + noun + ' pharmacies';
     const clauses: string[] = [];
     if (saleShort > 0) clauses.push(clause(saleShort, 'selling'));
     if (refundShort > 0) clauses.push(clause(refundShort, 'refunding'));
@@ -238,7 +250,8 @@ export function periodEligibility(
       reason:
         'Withheld: ' + failing.length + ' of ' + daysRequiringFloor + ' trading '
         + (daysRequiringFloor === 1 ? 'day' : 'days') + ' in this period cannot be '
-        + 'published — ' + clauses.join(', and ') + '. Publishing the period would '
+        + 'published. ' + clauses.join('; ') + '. A day can fall short on both '
+        + 'sides, so those two counts may overlap. Publishing the period would '
         + 'disclose ' + (failing.length === 1 ? 'that day' : 'those days')
         + ' by subtraction.',
     };
@@ -296,13 +309,51 @@ export interface PublicationRecord {
 }
 
 /**
- * A publication lookup by `YYYY-MM`.
+ * THE PUBLISHED SET, or the fact that it could not be read.
  *
- * Injected rather than fetched, for the same reason `ReportSource` is: this
- * module stays pure and every test drives the real resolution logic instead of
- * a mock of it.
+ * ROUND 20 FINDINGS 2 AND 3, and this type replaced a
+ * `(month) => PublicationRecord | undefined` lookup because that SHAPE caused
+ * both of them. Three things were wrong with a function:
+ *
+ *   1. IT CANNOT BE ENUMERATED. So the report could only serve months its
+ *      SOURCE ROWS produced, and a published month whose last source row was
+ *      gone simply vanished from the report — the reviewer removed one refund
+ *      row and a published 4000.00 disappeared from CSV and PDF while the
+ *      lookup was never called.
+ *   2. FAILURE HAD TO BE SIGNALLED BY THROWING, per month. So whether an outage
+ *      was reported depended on which buckets existed, and the two reports for
+ *      "empty October" and "October with one refund, no sales" differed by one
+ *      bit — a one-bit existence leak, which is what my round-19 fix left
+ *      behind after I removed the count for the same reason.
+ *   3. It let a caller pass something that silently answered "nothing is
+ *      published" for a reason other than nothing being published.
+ *
+ * As a value, all three go away: the set can be enumerated, `'unavailable'` is
+ * a state rather than an exception, and the caption can be derived from the
+ * OPTION rather than from the rows.
  */
-export type PublicationLookup = (month: string) => PublicationRecord | undefined;
+export type PublicationSet = readonly PublicationRecord[] | 'unavailable';
+
+/** The published set as a map, or null when it could not be read. */
+export function publicationsByMonth(
+  set: PublicationSet,
+): ReadonlyMap<string, PublicationRecord> | null {
+  if (set === 'unavailable') return null;
+  const byMonth = new Map<string, PublicationRecord>();
+  for (const record of set) {
+    const month = monthOf(record);
+    // FIRST WINS, deterministically. The unique constraint makes a duplicate
+    // month unreachable through the RPC; this does not rely on that claim.
+    if (!byMonth.has(month)) byMonth.set(month, record);
+  }
+  return byMonth;
+}
+
+/** Every month the set publishes, sorted. Empty when it could not be read. */
+export function publishedMonths(set: PublicationSet): readonly string[] {
+  const byMonth = publicationsByMonth(set);
+  return byMonth === null ? [] : [...byMonth.keys()].sort();
+}
 
 /** `YYYY-MM` → the first day of that month. */
 export function periodStartOf(month: string): string {
@@ -365,19 +416,22 @@ export function recordIsServable(record: PublicationRecord, month: string): stri
 export function resolveMonthlyMoney(
   month: string,
   eligibility: PeriodEligibility,
-  lookup: PublicationLookup,
+  set: PublicationSet,
 ): PublishedMoney {
-  let record: PublicationRecord | undefined;
-  try {
-    record = lookup(month);
-  } catch (error: unknown) {
+  // UNAVAILABLE IS A STATE, not an exception. ROUND 20 FINDING 2: when this
+  // took a lookup, the only way to say "the read failed" was to throw, so
+  // whether the failure was visible depended on which months were asked about
+  // — and which months are asked about is private information.
+  if (set === 'unavailable') {
     return {
-      kind: 'failed',
+      kind: 'unavailable',
       reason:
-        'The publication record could not be read, so no figure is shown: '
-        + (error instanceof Error ? error.message : 'unknown error'),
+        'The published record could not be read, so no money figure is shown. This is '
+        + 'not a privacy withholding: the figure may exist and could not be fetched.',
     };
   }
+
+  const record = publicationsByMonth(set)?.get(month);
 
   if (record !== undefined) {
     const unservable = recordIsServable(record, month);

@@ -70,7 +70,9 @@ import {
 import {
   periodEligibility,
   resolveMonthlyMoney,
-  type PublicationLookup,
+  publicationsByMonth,
+  publishedMonths,
+  type PublicationSet,
   type PublishedMoney,
 } from './publication';
 import { formatCount, type PaymentOrderRow, type SubscriptionRow } from './adminViews';
@@ -882,7 +884,7 @@ function suppressRows(
   revisionSafe: boolean,
   publication: {
     /** Looks a published snapshot up by `YYYY-MM`. */
-    readonly lookup: PublicationLookup;
+    readonly set: PublicationSet;
     /** The report's own bucket. Publications exist for whole months only. */
     readonly grain: ReportDefinition['period'];
   },
@@ -1010,8 +1012,8 @@ function suppressRows(
   // a month. `assertAnswerablePeriod` already refuses a partial month before
   // any row is built, so a month key here covers the same window the
   // publication does.
-  const publicationLookup: PublicationLookup =
-    publication.grain === 'month' ? publication.lookup : () => undefined;
+  const publicationSet: PublicationSet =
+    publication.grain === 'month' ? publication.set : [];
   const moneyByRow = new Map<AggregateRow, PublishedMoney>();
   if (netIndexes.length > 0) {
     for (const row of rows) {
@@ -1020,14 +1022,20 @@ function suppressRows(
         resolveMonthlyMoney(
           row.key,
           periodEligibility(row.subPeriodDays ?? [], row.contributorIds),
-          publicationLookup,
+          publicationSet,
         ),
       );
     }
   }
   let publishedBuckets = 0;
-  // A FLAG, NOT A COUNT. See the caption, and ROUND 19 FINDING 4.
-  let publicationReadFailed = false;
+  // FROM THE OPTION, not from the rows. ROUND 20 FINDING 2: a flag set while
+  // walking buckets is still a function of WHICH buckets exist, so "empty
+  // October" and "October with one refund and no sales" produced different
+  // captions over identical zero-row tables -- a one-bit existence leak, which
+  // is what my round-19 fix left after removing the count for the same reason.
+  // The published set either could be read or could not, and that is a property
+  // of the request, not of the data.
+  const publicationReadFailed = netIndexes.length > 0 && publicationSet === 'unavailable';
 
 
   for (const row of rows) {
@@ -1065,13 +1073,19 @@ function suppressRows(
     // And it withholds even when `revisionSafe` is true: a failed lookup means
     // we do not know whether a publication exists, and serving a recomputation
     // against an unknown publication is the pair channel again.
-    if (money?.kind === 'failed') {
-      // SET BEFORE THE OMISSION, which ROUND 19 FINDING 4 required: a refund-only
-      // month is omitted entirely (round 3 finding 1), so incrementing after the
-      // omission meant an outage on exactly those periods was invisible -- and a
-      // refund-only period CAN legitimately be eligible. The flag is set here,
-      // before the row is dropped.
-      publicationReadFailed = true;
+    // BOTH non-answer kinds, and the pair is deliberate rather than defensive.
+    //
+    // I introduced a defect here while fixing ROUND 20 FINDING 2: moving the
+    // set-level read failure from `failed` to the `unavailable` state left this
+    // guard matching only `failed`, so an unreadable publication set fell
+    // through to the k-floor path and released 5400.00 under `revisionSafe`.
+    // The guard is about "we do not have an answer", and there are two ways not
+    // to have one — a record that cannot be served (`failed`) and a set that
+    // could not be read (`unavailable`).
+    if (money?.kind === 'failed' || money?.kind === 'unavailable') {
+      // NO FLAG SET HERE. ROUND 20 FINDING 2: setting it per row made the
+      // caption depend on which buckets exist. The flag is derived from the
+      // option above; this branch only has to withhold.
       if (row.existsWithoutRefunds === false) continue;
       suppressedBuckets += 1;
       out.push([
@@ -1450,6 +1464,68 @@ const BUILDERS: ReadonlyMap<
  * THE COMPLETENESS GATE RUNS FIRST. Building the table and then checking would
  * mean the rows existed, and a row that exists is a row something can return.
  */
+/** Whether a `YYYY-MM` falls inside a whole-month query range. */
+function monthInRange(month: string, query: AdminReportExportQuery): boolean {
+  if (query.from !== undefined && month < query.from.slice(0, 7)) return false;
+  if (query.to !== undefined && month > query.to.slice(0, 7)) return false;
+  return true;
+}
+
+/**
+ * Adds a row for every PUBLISHED month the source rows did not produce.
+ *
+ * ROUND 20 FINDING 3. The report's months came from `sales` and `refunds`
+ * alone, so a published month whose last source row was gone simply vanished:
+ * the reviewer supplied a valid October snapshot of 4000.00, removed the one
+ * remaining source row, and the figure disappeared from CSV and PDF while the
+ * publication was never even consulted.
+ *
+ * That is wrong in both directions. A published figure is a statement this
+ * product has already made, so it does not stop being true because the rows
+ * behind it moved — and the row's PRESENCE becoming conditional on current
+ * source data is the same existence channel round 18 finding 3 was about, with
+ * the condition inverted.
+ *
+ * So publication membership is unioned in. A synthetic row carries the
+ * published figure through the ordinary path rather than around it, which
+ * matters: it still passes the net-cell verifier, the serializers and the
+ * provenance checks that every other money row passes.
+ */
+function withPublishedMonths(
+  rows: readonly AggregateRow[],
+  entry: ReportDefinition,
+  query: AdminReportExportQuery,
+  publications: PublicationSet,
+): AggregateRow[] {
+  const netIndexes = netValueIndexes(entry);
+  // Money, month-grained, and a readable set. A `snapshot` or `day` report has
+  // no month to union, and `'unavailable'` has nothing to add.
+  if (netIndexes.length === 0 || entry.period !== 'month' || publications === 'unavailable') {
+    return [...rows];
+  }
+  const byMonth = publicationsByMonth(publications);
+  if (byMonth === null) return [...rows];
+
+  const present = new Set(rows.map((row) => row.key));
+  const added: AggregateRow[] = [];
+  for (const month of publishedMonths(publications)) {
+    if (present.has(month) || !monthInRange(month, query)) continue;
+    const record = byMonth.get(month);
+    if (record === undefined) continue;
+    added.push({
+      key: month,
+      // Built from the record's two published sides through the shared
+      // subtraction, exactly as the published branch of `suppressRows` does.
+      values: [netExportCell(netSalesPaisa(record.grossPaisa, record.refundsPaisa))],
+      contributorIds: [],
+      // Not omittable: the month exists because it was PUBLISHED, which is a
+      // disclosure already made, not one this row would be making.
+      existsWithoutRefunds: true,
+    });
+  }
+  return [...rows, ...added].sort((left, right) => (left.key < right.key ? -1 : 1));
+}
+
 export function buildReportTable(
   reportId: string,
   data: ReportData,
@@ -1476,7 +1552,7 @@ export function buildReportTable(
      * taught about publications cannot accidentally disclose anything. The
      * dangerous default would have been the other one.
      */
-    publications?: PublicationLookup;
+    publications?: PublicationSet;
   } = {},
 ): ReportTable {
   const revisionSafe = options.revisionSafe ?? PUBLICATION_IS_REVISION_SAFE;
@@ -1530,7 +1606,7 @@ export function buildReportTable(
     );
   }
 
-  const built = builder(data, query);
+  const built = withPublishedMonths(builder(data, query), entry, query, options.publications ?? []);
 
   // §6i round 11: the net columns are resolved — and verified — HERE, on the
   // rows that become the exported bytes.
@@ -1539,7 +1615,7 @@ export function buildReportTable(
     entry.kind === 'aggregate'
       ? (() => {
           const gated = suppressRows(built, netIndexes, entry.confidentiality, revisionSafe, {
-            lookup: options.publications ?? (() => undefined),
+            set: options.publications ?? [],
             grain: entry.period,
           });
           return {
@@ -1630,7 +1706,7 @@ export function buildReportTable(
 export async function buildReport(
   query: AdminReportExportQuery,
   source: ReportSource,
-  options: { publications?: PublicationLookup } = {},
+  options: { publications?: PublicationSet } = {},
 ): Promise<ReportTable> {
   // FORWARDED, not re-derived. CSV, PDF and the API routes all reach the table
   // through here, so threading the lookup at this one point is what makes

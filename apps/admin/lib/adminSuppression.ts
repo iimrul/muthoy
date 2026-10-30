@@ -174,6 +174,27 @@ function sideReleasable(ids: readonly string[], k: number): boolean {
 }
 
 /**
+ * Whether the SALE side of one day clears the floor, asked on its own.
+ *
+ * EXPORTED, and ROUND 20 FINDING 5 is why. `withheldSide` answers "which side
+ * failed FIRST", which is right for a caption about one day and wrong for
+ * counting days across a period: a day short on BOTH sides is reported as a
+ * sale failure, so counting refund failures by subtracting sale failures from
+ * the total undercounts them. The publication policy has to ask each side
+ * independently, and the only honest way to let it is to export the predicates
+ * rather than have it re-derive them — two copies of this rule is how rounds 13
+ * through 15 happened.
+ */
+export function saleSideClears(day: DaySides, k: number = SUPPRESSION_K): boolean {
+  return sideReleasable(day.saleShopIds, k);
+}
+
+/** Whether the REFUND side of one day clears the floor, asked on its own. */
+export function refundSideClears(day: DaySides, k: number = SUPPRESSION_K): boolean {
+  return refundSideReleasable(day, k);
+}
+
+/**
  * The REFUND side, where an EMPTY set is not a free pass.
  *
  * FOUNDER DECISION 3, 2026-10-30: "Treat zero-valued refund contributions as

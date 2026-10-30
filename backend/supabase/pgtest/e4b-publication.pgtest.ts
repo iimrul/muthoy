@@ -598,6 +598,40 @@ describe('E4-B publication snapshots', () => {
     expect(refusal?.message).toContain('source_digest');
   });
 
+  it('refuses money above the reader safe-integer range', async () => {
+    // ROUND 20 FINDING 4. `bigint` accepts values above 2^53-1, which
+    // JavaScript cannot represent exactly — so the RPC accepted a gross of
+    // 9007199254740993, the reader correctly refused to convert it, and because
+    // the conversion spans every fetched publication that ONE row broke every
+    // read. An immutable row that permanently breaks the reader is the worst
+    // possible interaction with a table whose whole premise is that nothing can
+    // be edited or deleted.
+    const refusal = await attempt(
+      'service_role',
+      publishCall({
+        start: '2026-04-01',
+        end: '2026-04-30',
+        gross: 9007199254740993,
+        refunds: 9007199254740992,
+        value: 1,
+      }),
+    );
+    expect(refusal?.code).toBe('23514');
+    expect(refusal?.message).toContain('gross_paisa');
+  });
+
+  it('ACCEPTS money at exactly the safe-integer boundary', async () => {
+    // Non-vacuity for the ceiling: a constraint set one too low would pass the
+    // test above while rejecting a figure the reader can serve perfectly well.
+    const accepted = await attemptAsOwner(
+      rawInsert(
+        `${quote(METRIC)}, ${quote(COHORT)}, 'month', '2026-03-01', '2026-03-31',
+         9007199254740991, 0, 9007199254740991, 1, 0, ${quote(DIGEST_A)}, 5, 6, 1, 1, 'x'`,
+      ),
+    );
+    expect(accepted).toBeNull();
+  });
+
   it('refuses a negative gross total', async () => {
     const refusal = await attemptAsOwner(
       rawInsert(`${quote(METRIC)}, ${quote(COHORT)}, 'month', '2026-04-01', '2026-04-30',

@@ -7,7 +7,7 @@
     "supersededEvidenceFiles": 7
   },
   "files": {
-    "20261030000000_e4b_publication_snapshots.sql": "45996922bbbbca54dd46545831056fc39584125f15517373b01d543529214071"
+    "20261030000000_e4b_publication_snapshots.sql": "a072d9d66dd8f0e356f6151cbe6dcfe95cddc3f0481c51ed1b2c49ae82840028"
   },
   "supersedes": {
     "scripts/h9-prod-preflight.mjs": {

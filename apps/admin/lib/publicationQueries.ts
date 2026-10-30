@@ -35,8 +35,8 @@ import {
   PUBLICATION_COHORT,
   PUBLICATION_GRAIN,
   PUBLICATION_METRIC,
-  type PublicationLookup,
   type PublicationRecord,
+  type PublicationSet,
 } from './publication';
 import { getSupabaseAdmin } from './supabaseAdmin';
 
@@ -124,7 +124,7 @@ export interface PublicationReadDeps {
  */
 export async function readPublishedMonths(
   deps: PublicationReadDeps = {},
-): Promise<PublicationLookup> {
+): Promise<PublicationSet> {
   const client = deps.client ?? getSupabaseAdmin();
   const { data, error } = await client
     .from('financial_publications')
@@ -135,24 +135,93 @@ export async function readPublishedMonths(
     .order('period_start', { ascending: false });
 
   if (error) {
-    // LOUD, then a throwing lookup. See the header: a swallowed error here
-    // reads to an operator as "nothing has been published".
+    // LOUD, then `'unavailable'`. A swallowed error here would read to an
+    // operator as "nothing has been published", which is a different fact.
     console.error('[admin] reading financial_publications failed:', error.message);
-    return () => {
-      throw new Error('published figures are currently unavailable');
-    };
+    return 'unavailable';
   }
 
-  const byMonth = new Map<string, PublicationRecord>();
+  const records: PublicationRecord[] = [];
   for (const row of (data ?? []) as unknown as PublicationRow[]) {
-    const record = toRecord(row);
-    const month = record.periodStart.slice(0, 7);
-    // FIRST WINS, and the order is period_start descending, so a duplicate
-    // month cannot be resolved by whichever row the driver happened to return
-    // last. The unique constraint makes this unreachable through the RPC; it is
-    // here because "unreachable" is a claim about the schema, and this function
-    // should not depend on that claim in order to be deterministic.
-    if (!byMonth.has(month)) byMonth.set(month, record);
+    try {
+      records.push(toRecord(row));
+    } catch (conversionError: unknown) {
+      // ONE BAD ROW DOES NOT ABORT THE READ — but it does make the whole set
+      // unavailable rather than silently short.
+      //
+      // ROUND 20 FINDING 4: the conversion used to throw out of this function,
+      // so a single publication carrying a value above 2^53-1 broke every
+      // read, permanently, on a table where nothing can be edited or deleted.
+      // Migration 36 now caps the columns at the reader's range so this is
+      // unreachable through the RPC. It is handled anyway, because "unreachable"
+      // is a claim about a constraint, and returning a set that is quietly
+      // missing a published month would be the worst of the three outcomes.
+      console.error(
+        '[admin] a financial_publications row could not be converted:',
+        conversionError instanceof Error ? conversionError.message : 'unknown error',
+      );
+      return 'unavailable';
+    }
   }
-  return (month) => byMonth.get(month);
+
+  // THE AUDIT CROSS-CHECK. ROUND 20 FINDING 1.
+  //
+  // The RPC refuses to republish a period it finds in `admin_audit_log`, so the
+  // WRITER treats the audit log as authoritative. The reader did not: it read
+  // an absent serving row as "never published". After the documented class-B
+  // rollback — drop the table and the function, re-apply — the audit history
+  // survives and the serving rows do not, so the reader reported "nothing is
+  // published" for a period that certainly was, and a caller releasing
+  // recomputed money then released it against a figure already disclosed.
+  //
+  // Both sides read the same evidence now. A period the audit log says was
+  // published, with no serving row to serve, makes the set UNAVAILABLE: the
+  // store is in a state this reader cannot answer from, and the honest answer
+  // is to say so rather than to answer wrongly in either direction.
+  const audited = await readAuditedMonths(client);
+  if (audited === 'unavailable') return 'unavailable';
+  const served = new Set(records.map((record) => record.periodStart.slice(0, 7)));
+  const missing = [...audited].filter((month) => !served.has(month));
+  if (missing.length > 0) {
+    console.error(
+      '[admin] financial_publications is missing periods the audit log records as published:',
+      missing.join(', '),
+    );
+    return 'unavailable';
+  }
+
+  return records;
+}
+
+/**
+ * The `YYYY-MM` periods `admin_audit_log` records as having been published.
+ *
+ * Read through the same client, as a separate query rather than a join: the
+ * audit table is append-only with its own index on `(at desc, id)`, and a join
+ * would make the money read depend on that table's size.
+ */
+async function readAuditedMonths(
+  client: Pick<ReturnType<typeof getSupabaseAdmin>, 'from'>,
+): Promise<Set<string> | 'unavailable'> {
+  const { data, error } = await client
+    .from('admin_audit_log')
+    .select('target')
+    .eq('action', 'publication.published')
+    .eq('outcome', 'success');
+  if (error) {
+    console.error('[admin] reading publication audit history failed:', error.message);
+    return 'unavailable';
+  }
+  const months = new Set<string>();
+  for (const row of (data ?? []) as unknown as { target: string | null }[]) {
+    // `<metric>:<cohort>:<YYYY-MM>`, written by the RPC. A target that does not
+    // parse is ignored rather than guessed at: the prefix is what identifies it
+    // as one of ours, and anything else in this column is another action's.
+    const prefix = PUBLICATION_METRIC + ':' + PUBLICATION_COHORT + ':';
+    const target = row.target ?? '';
+    if (!target.startsWith(prefix)) continue;
+    const month = target.slice(prefix.length);
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) months.add(month);
+  }
+  return months;
 }

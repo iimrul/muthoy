@@ -112,9 +112,25 @@ create table if not exists public.financial_publications (
   -- the shared formula the panel and the device share ever stops agreeing with
   -- `gross - refunds`, this CHECK fails the insert instead of silently storing
   -- a figure no reader can reproduce (CLAUDE.md rule 4).
-  gross_paisa bigint not null check (gross_paisa >= 0),
-  refunds_paisa bigint not null check (refunds_paisa >= 0),
-  value_paisa bigint not null,
+  -- CAPPED AT THE READER'S RANGE, not at `bigint`'s.
+  --
+  -- ROUND 20 FINDING 4. `bigint` accepts values above 2^53-1, which JavaScript
+  -- cannot represent exactly — so the RPC accepted a gross of
+  -- 9007199254740993, `readPublishedMonths` correctly refused to convert it,
+  -- and because the conversion spans every fetched publication, that ONE row
+  -- aborted the whole lookup. An immutable row that permanently breaks the
+  -- reader is the worst possible interaction with a table whose entire premise
+  -- is that nothing can be edited or deleted.
+  --
+  -- 9007199254740991 paisa is about 90 trillion taka, so the ceiling costs
+  -- nothing real. It exists so the database cannot store a figure the reader
+  -- cannot serve.
+  gross_paisa bigint not null
+    check (gross_paisa >= 0 and gross_paisa <= 9007199254740991),
+  refunds_paisa bigint not null
+    check (refunds_paisa >= 0 and refunds_paisa <= 9007199254740991),
+  value_paisa bigint not null
+    check (value_paisa >= -9007199254740991 and value_paisa <= 9007199254740991),
 
   -- WHAT THE FIGURE WAS COMPUTED FROM. Row counts and a digest over the
   -- contributing source rows, so a later recomputation that disagrees can be

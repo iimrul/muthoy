@@ -36,8 +36,8 @@ import {
   publishedAmount,
   recordIsServable,
   resolveMonthlyMoney,
-  type PublicationLookup,
   type PublicationRecord,
+  type PublicationSet,
 } from './publication';
 
 const REPORT = 'refund_net_pharmacy_sales';
@@ -110,16 +110,14 @@ function record(overrides: Partial<PublicationRecord> = {}): PublicationRecord {
   };
 }
 
-const lookupFor = (...records: readonly PublicationRecord[]): PublicationLookup => {
-  const byMonth = new Map(records.map((entry) => [monthOf(entry), entry]));
-  return (month) => byMonth.get(month);
-};
+// The published SET is now a value, so this is just the records.
+const lookupFor = (...records: readonly PublicationRecord[]): PublicationSet => records;
 
 const WHOLE_OCTOBER = { reportId: REPORT, format: 'csv', from: '2026-10-01', to: '2026-10-31' };
 
 function octoberTable(
   source: { sales: ReportSaleTotalRow[]; refunds: ReportSaleTotalRow[] },
-  publications?: PublicationLookup,
+  publications?: PublicationSet,
 ) {
   return buildReportTable(
     REPORT,
@@ -295,12 +293,12 @@ describe('period eligibility', () => {
     expect(eligibility.daysClearingFloor).toBe(0);
     const reason = eligibility.reason ?? '';
     // Both sides named, each with ITS OWN count of one.
-    expect(reason).toContain('1 with fewer than 5 distinct selling pharmacies');
-    expect(reason).toContain('1 with fewer than 5 distinct refunding pharmacies');
+    expect(reason).toContain('1 had fewer than 5 distinct selling pharmacies');
+    expect(reason).toContain('1 had fewer than 5 distinct refunding pharmacies');
     // And the total is still right.
     expect(reason).toContain('2 of 2 trading days');
     // The old sentence would have claimed two days on one side.
-    expect(reason).not.toContain('2 with fewer than');
+    expect(reason).not.toContain('2 had fewer than');
   });
 
   test('names the REFUND side when the refund side is what failed', () => {
@@ -531,9 +529,7 @@ describe('every output path, and the boundary', () => {
     // the same policy caption, so an outage and a deliberate withholding
     // produced byte-identical output. The cell stays withheld — showing an
     // unverified figure would be worse — but the caption now tells them apart.
-    const exploding: PublicationLookup = () => {
-      throw new Error('connection reset');
-    };
+    const exploding: PublicationSet = 'unavailable';
     const failed = octoberTable(eligibleMonth(['2026-10-01']), exploding);
     const withheld = octoberTable(eligibleMonth(['2026-10-01']));
 
@@ -576,9 +572,70 @@ describe('every output path, and the boundary', () => {
       REPORT,
       data({ ...eligibleMonth(['2026-10-01']), tallies: COMPLETE }),
       query(WHOLE_OCTOBER),
-      { revisionSafe: true, publications: () => undefined },
+      { revisionSafe: true, publications: [] },
     );
     expect(netCellText(table)).toBe('5400.00');
+  });
+
+  test('the outage caption does NOT depend on which buckets exist', () => {
+    // ROUND 20 FINDING 2, and this is the second time I moved this leak rather
+    // than closing it. Round 18 reported failures as a COUNT, which announced
+    // an omitted bucket; I replaced the count with a BOOLEAN set while walking
+    // rows, and a boolean set per row is still a function of which rows exist.
+    // "Empty October" and "October with one refund and no sales" both render
+    // zero rows, and their captions differed by one bit.
+    //
+    // The signal now comes from the OPTION — the set either could be read or
+    // could not, which is a property of the request and not of the data. So
+    // these two captions must be identical.
+    const empty = { sales: [], refunds: [] };
+    const refundOnly = { sales: [], refunds: eligibleMonth(['2026-10-01']).refunds };
+
+    const emptyFailed = octoberTable(empty, 'unavailable');
+    const refundFailed = octoberTable(refundOnly, 'unavailable');
+
+    expect(reportTextRows(emptyFailed)).toHaveLength(0);
+    expect(reportTextRows(refundFailed)).toHaveLength(0);
+    // THE ASSERTION. Byte-identical captions over identical zero-row tables.
+    expect(refundFailed.subtitle).toBe(emptyFailed.subtitle);
+    // And an EMPTY report still reports the outage, which it previously missed
+    // entirely because no row existed to set the flag.
+    expect(emptyFailed.subtitle).toContain('could NOT be read');
+    expect(reportToCsv(emptyFailed)).toBe(reportToCsv(refundFailed));
+  });
+
+  test('a published month is served even when its source rows are GONE', () => {
+    // ROUND 20 FINDING 3. The report's months came from `sales` and `refunds`
+    // alone, so a published month whose last source row had gone simply
+    // vanished — the reviewer supplied a valid October snapshot, removed the
+    // one remaining source row, and 4000.00 disappeared from CSV and PDF while
+    // the publication was never consulted.
+    //
+    // Wrong in both directions: a published figure is a statement already
+    // made, so it does not stop being true because the rows behind it moved;
+    // and the row's PRESENCE becoming conditional on current source data is
+    // round 18 finding 3's existence channel with the condition inverted.
+    const table = octoberTable({ sales: [], refunds: [] }, lookupFor(record()));
+    const rows = reportTextRows(table);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.[0]).toBe('2026-10');
+    expect(rows[0]?.[1]).toBe('4000.00');
+    // Through the ordinary path, so it still satisfies the net-cell verifier
+    // and both serializers.
+    expect(reportToCsv(table)).toContain('4000.00');
+    expect(reportToPdf(table)).toContain('4000.00');
+  });
+
+  test('a published month OUTSIDE the requested range is not added', () => {
+    // Non-vacuity for the union above: adding every published month regardless
+    // of the range would make the range caption a lie.
+    const table = buildReportTable(
+      REPORT,
+      data({ sales: [], refunds: [], tallies: COMPLETE }),
+      query({ reportId: REPORT, format: 'csv', from: '2026-09-01', to: '2026-09-30' }),
+      { publications: lookupFor(record()) },
+    );
+    expect(reportTextRows(table)).toHaveLength(0);
   });
 
   test('a REFUND-ONLY month whose lookup failed still reports the outage', () => {
@@ -589,23 +646,23 @@ describe('every output path, and the boundary', () => {
     // produced byte-identical output to a policy withholding, with no sign
     // that anything had failed to read.
     //
-    // The signal is now a BOOLEAN set before the omission, not a count. A count
-    // would have announced that an omitted bucket exists, which is round 4
-    // finding 1 in a new place: the outage is reported, its extent is not.
+    // ROUND 20 FINDING 2 then showed that fix was ALSO incomplete: a boolean
+    // set while walking rows is still a function of which rows exist. The
+    // signal now comes from the option, and the test above
+    // ("the outage caption does NOT depend on which buckets exist") is the one
+    // that pins it. This one keeps the narrower claim: a refund-only period
+    // reports the outage at all.
     const refundOnly = { sales: [], refunds: eligibleMonth(['2026-10-01']).refunds };
-    const exploding: PublicationLookup = () => {
-      throw new Error('connection reset');
-    };
-    const failed = octoberTable(refundOnly, exploding);
+    const failed = octoberTable(refundOnly, 'unavailable');
     const withheld = octoberTable(refundOnly);
 
     // The row is omitted in BOTH, which is still correct.
     expect(reportTextRows(failed)).toHaveLength(0);
     expect(reportTextRows(withheld)).toHaveLength(0);
-    // But the captions differ, which is the fix.
+    // The outage is reported; the policy case is not.
     expect(failed.subtitle).toContain('could NOT be read');
     expect(withheld.subtitle).not.toContain('could NOT be read');
-    // And no number leaks the omitted bucket's existence.
+    // And NO NUMBER appears, because a count would announce the omitted bucket.
     expect(failed.subtitle).not.toMatch(/\d+ money figure/);
   });
 
@@ -613,9 +670,7 @@ describe('every output path, and the boundary', () => {
     // A failed lookup means we do not KNOW whether a publication exists, and
     // serving a recomputation against an unknown publication is the pair
     // channel again. So it withholds in both modes.
-    const exploding: PublicationLookup = () => {
-      throw new Error('connection reset');
-    };
+    const exploding: PublicationSet = 'unavailable';
     const table = buildReportTable(
       REPORT,
       data({ ...eligibleMonth(['2026-10-01']), tallies: COMPLETE }),
@@ -648,14 +703,12 @@ describe('every output path, and the boundary', () => {
     expect(published.subtitle).not.toContain('could change');
   });
 
-  test('a lookup that THROWS yields failed, not a figure and not a zero', () => {
-    const exploding: PublicationLookup = () => {
-      throw new Error('connection reset');
-    };
+  test('an UNREADABLE set yields unavailable, not a figure and not a zero', () => {
+    const exploding: PublicationSet = 'unavailable';
     const money = resolveMonthlyMoney('2026-10', periodEligibility([], []), exploding);
-    expect(money.kind).toBe('failed');
+    expect(money.kind).toBe('unavailable');
     expect(publishedAmount(money)).toBeNull();
-    if (money.kind === 'failed') expect(money.reason).toContain('connection reset');
+    if (money.kind === 'unavailable') expect(money.reason).toContain('could not be read');
   });
 });
 
@@ -684,7 +737,7 @@ describe('the five states stay distinguishable', () => {
       [{ day: '2026-10-01', saleShopIds: ['a', 'b', 'c', 'd', 'e'], refundShopIds: ['a'] }],
       ['a', 'b', 'c', 'd', 'e'],
     );
-    const money = resolveMonthlyMoney('2026-10', short, () => undefined);
+    const money = resolveMonthlyMoney('2026-10', short, []);
     expect(money.kind).toBe('withheld');
     if (money.kind === 'withheld') expect(money.reason).toContain('refunding pharmacies');
   });
@@ -694,7 +747,7 @@ describe('the five states stay distinguishable', () => {
     // more pharmacies, the other needs somebody to press publish. Telling an
     // operator "fewer than five pharmacies" about a period that cleared the
     // floor sends them after the wrong thing.
-    const money = resolveMonthlyMoney('2026-10', eligible, () => undefined);
+    const money = resolveMonthlyMoney('2026-10', eligible, []);
     expect(money.kind).toBe('withheld');
     if (money.kind === 'withheld') {
       expect(money.reason).toContain('has not been published');
@@ -707,7 +760,7 @@ describe('the five states stay distinguishable', () => {
       [{ day: '2026-10-01', saleShopIds: [], refundShopIds: [] }],
       [],
     );
-    expect(resolveMonthlyMoney('2026-10', quiet, () => undefined).kind).toBe('no_activity');
+    expect(resolveMonthlyMoney('2026-10', quiet, []).kind).toBe('no_activity');
   });
 
   test('failed, and it carries no amount', () => {
@@ -723,11 +776,11 @@ describe('the five states stay distinguishable', () => {
   test('every state is reachable, so none of the above is dead code', () => {
     const kinds = new Set([
       resolveMonthlyMoney('2026-10', eligible, lookupFor(record())).kind,
-      resolveMonthlyMoney('2026-10', eligible, () => undefined).kind,
+      resolveMonthlyMoney('2026-10', eligible, []).kind,
       resolveMonthlyMoney(
         '2026-10',
         periodEligibility([{ day: '2026-10-01', saleShopIds: [], refundShopIds: [] }], []),
-        () => undefined,
+        [],
       ).kind,
       resolveMonthlyMoney('2026-10', eligible, lookupFor(record({ cohortKey: 'x' }))).kind,
     ]);

@@ -1,16 +1,26 @@
 // Batch 3 E4-B — the publication reader, executed.
 //
-// The property that matters most is the FAILURE one: a read that cannot reach
-// the table must not look like "nothing is published". Those two produce the
-// same withheld cell on screen and mean completely different things, and only
-// one of them is an outage somebody should be paged about.
+// Two properties carry this file.
+//
+// THE FIRST is that a read which cannot reach the table must not look like
+// "nothing is published". Those two produce the same withheld cell and mean
+// completely different things, and only one of them is an outage.
+//
+// THE SECOND is the audit cross-check, and it is ROUND 20 FINDING 1. The RPC
+// refuses to republish a period it finds in `admin_audit_log`, so the WRITER
+// treats that log as authoritative. The reader did not — it read an absent
+// serving row as "never published" — so after the documented class-B rollback,
+// where the audit history survives and the serving rows do not, the reader
+// reported "nothing is published" for a period that certainly was. Both sides
+// read the same evidence now.
 
 import { describe, expect, test, vi } from 'vitest';
 
 vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => undefined }) }));
 
 const { readPublishedMonths } = await import('./publicationQueries');
-const { resolveMonthlyMoney, periodEligibility, publishedAmount } = await import('./publication');
+const { resolveMonthlyMoney, periodEligibility, publishedAmount, publicationsByMonth } =
+  await import('./publication');
 
 interface SelectCall {
   table: string;
@@ -18,11 +28,37 @@ interface SelectCall {
   filters: { method: string; args: unknown[] }[];
 }
 
-function createClient(options: { rows?: unknown[]; error?: string } = {}) {
+interface ClientOptions {
+  rows?: unknown[];
+  error?: string;
+  /** Rows for `admin_audit_log`, as `{ target }`. */
+  auditTargets?: (string | null)[];
+  auditError?: string;
+}
+
+/**
+ * A fake Supabase client for two tables.
+ *
+ * THENABLE at every stage, because the real builder is: the publications query
+ * resolves after `.order(...)` and the audit query resolves after its last
+ * `.eq(...)`, and a fake that only resolved at one of those shapes would force
+ * the production code to be written around the fake.
+ */
+function createClient(options: ClientOptions = {}) {
   const calls: SelectCall[] = [];
   const client = {
     from(table: string) {
       const call: SelectCall = { table, columns: '', filters: [] };
+      const result = () => {
+        if (table === 'admin_audit_log') {
+          return options.auditError === undefined
+            ? { data: (options.auditTargets ?? []).map((target) => ({ target })), error: null }
+            : { data: null, error: { message: options.auditError } };
+        }
+        return options.error === undefined
+          ? { data: options.rows ?? [], error: null }
+          : { data: null, error: { message: options.error } };
+      };
       const builder: Record<string, unknown> = {
         select(columns: string) {
           call.columns = columns;
@@ -35,11 +71,10 @@ function createClient(options: { rows?: unknown[]; error?: string } = {}) {
         },
         order(...args: unknown[]) {
           call.filters.push({ method: 'order', args });
-          return Promise.resolve(
-            options.error === undefined
-              ? { data: options.rows ?? [], error: null }
-              : { data: null, error: { message: options.error } },
-          );
+          return builder;
+        },
+        then(resolve: (value: unknown) => unknown) {
+          return Promise.resolve(result()).then(resolve);
         },
       };
       return builder;
@@ -69,25 +104,26 @@ function dbRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const AUDITED_OCTOBER = 'refund_net_pharmacy_sales:platform_all:2026-10';
 const NO_DAYS = periodEligibility([], []);
 
-describe('reading published months', () => {
-  test('returns a lookup keyed by YYYY-MM, with bigint strings converted', async () => {
-    const { client } = createClient({ rows: [dbRow()] });
-    const lookup = await readPublishedMonths({ client: client as never });
-    const record = lookup('2026-10');
+describe('reading the published set', () => {
+  test('returns the records, with bigint strings converted', async () => {
+    const { client } = createClient({ rows: [dbRow()], auditTargets: [AUDITED_OCTOBER] });
+    const set = await readPublishedMonths({ client: client as never });
+    const record = publicationsByMonth(set)?.get('2026-10');
     expect(record?.valuePaisa).toBe(400_000);
     expect(record?.grossPaisa).toBe(500_000);
     expect(record?.refundsPaisa).toBe(100_000);
-    expect(lookup('2026-09')).toBeUndefined();
+    expect(publicationsByMonth(set)?.get('2026-09')).toBeUndefined();
   });
 
   test('filters on the declared metric, cohort and grain rather than reading everything', async () => {
     const { client, calls } = createClient({ rows: [] });
     await readPublishedMonths({ client: client as never });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.table).toBe('financial_publications');
-    const eqs = calls[0]!.filters
+    const publications = calls.find((call) => call.table === 'financial_publications');
+    expect(publications).toBeDefined();
+    const eqs = (publications?.filters ?? [])
       .filter((entry) => entry.method === 'eq')
       .map((entry) => entry.args);
     expect(eqs).toEqual([
@@ -100,58 +136,134 @@ describe('reading published months', () => {
   test('names its columns instead of select(*)', async () => {
     const { client, calls } = createClient({ rows: [] });
     await readPublishedMonths({ client: client as never });
-    expect(calls[0]!.columns).not.toContain('*');
-    expect(calls[0]!.columns).toContain('value_paisa');
-    expect(calls[0]!.columns).toContain('source_digest');
+    const columns = calls.find((call) => call.table === 'financial_publications')?.columns ?? '';
+    expect(columns).not.toContain('*');
+    expect(columns).toContain('value_paisa');
+    expect(columns).toContain('source_digest');
   });
 
-  test('reads ONCE for a whole report, not once per bucket', async () => {
+  test('reads each table ONCE for a whole report, not once per bucket', async () => {
     const { client, calls } = createClient({
       rows: [dbRow(), dbRow({ period_start: '2026-09-01', period_end: '2026-09-30' })],
+      auditTargets: [AUDITED_OCTOBER, 'refund_net_pharmacy_sales:platform_all:2026-09'],
     });
-    const lookup = await readPublishedMonths({ client: client as never });
-    lookup('2026-10');
-    lookup('2026-09');
-    lookup('2026-08');
-    expect(calls).toHaveLength(1);
+    const set = await readPublishedMonths({ client: client as never });
+    const byMonth = publicationsByMonth(set);
+    byMonth?.get('2026-10');
+    byMonth?.get('2026-09');
+    byMonth?.get('2026-08');
+    expect(calls).toHaveLength(2);
   });
 
-  test('a read FAILURE yields a throwing lookup, which becomes the failed state', async () => {
-    // NOT an empty lookup. "Nothing is published" and "I could not find out"
-    // render the same withheld cell and mean different things.
+  test('a read FAILURE yields unavailable, which is not the same as empty', async () => {
     const { client } = createClient({ error: 'relation "financial_publications" does not exist' });
-    const lookup = await readPublishedMonths({ client: client as never });
-    expect(() => lookup('2026-10')).toThrow(/unavailable/);
+    const set = await readPublishedMonths({ client: client as never });
+    expect(set).toBe('unavailable');
 
-    const money = resolveMonthlyMoney('2026-10', NO_DAYS, lookup);
-    expect(money.kind).toBe('failed');
+    const money = resolveMonthlyMoney('2026-10', NO_DAYS, set);
+    expect(money.kind).toBe('unavailable');
     expect(publishedAmount(money)).toBeNull();
   });
 
-  test('an EMPTY table yields something other than failed, so the states stay apart', async () => {
+  test('an EMPTY table yields an empty set, a different state from unavailable', async () => {
     const { client } = createClient({ rows: [] });
-    const lookup = await readPublishedMonths({ client: client as never });
-    const money = resolveMonthlyMoney('2026-10', NO_DAYS, lookup);
-    // `no_activity` here, because this eligibility fixture has no trading days
-    // at all. The point is that it is NOT `failed` — the distinction survives.
-    expect(money.kind).not.toBe('failed');
+    const set = await readPublishedMonths({ client: client as never });
+    expect(set).toEqual([]);
+    expect(resolveMonthlyMoney('2026-10', NO_DAYS, set).kind).not.toBe('unavailable');
   });
 
-  test('refuses a money column that is not a safe integer rather than yielding NaN', async () => {
-    const { client } = createClient({ rows: [dbRow({ value_paisa: 'not-a-number' })] });
-    await expect(readPublishedMonths({ client: client as never })).rejects.toThrow(
-      /not a safe integer/,
-    );
+  test('a money column outside the safe integer range makes the set unavailable, not short', async () => {
+    // ROUND 20 FINDING 4. The conversion used to THROW out of this function, so
+    // one publication above 2^53-1 broke every read, permanently, on a table
+    // where nothing can be edited or deleted. Migration 36 now caps the columns
+    // at the reader's range, so this is unreachable through the RPC — and it is
+    // handled anyway, because a set quietly missing a published month is the
+    // worst of the three possible outcomes.
+    const { client } = createClient({ rows: [dbRow({ gross_paisa: '9007199254740993' })] });
+    const set = await readPublishedMonths({ client: client as never });
+    expect(set).toBe('unavailable');
   });
 
   test('a duplicate month resolves deterministically to the first row', async () => {
     const { client } = createClient({
       rows: [dbRow({ value_paisa: '400000' }), dbRow({ value_paisa: '111111' })],
+      auditTargets: [AUDITED_OCTOBER],
     });
-    const lookup = await readPublishedMonths({ client: client as never });
-    // The unique constraint makes this unreachable through the RPC. It is
-    // asserted anyway, because determinism should not depend on a claim about
-    // another layer.
-    expect(lookup('2026-10')?.valuePaisa).toBe(400_000);
+    const set = await readPublishedMonths({ client: client as never });
+    // The unique constraint makes this unreachable through the RPC. Asserted
+    // anyway, because determinism should not depend on a claim about another
+    // layer.
+    expect(publicationsByMonth(set)?.get('2026-10')?.valuePaisa).toBe(400_000);
+  });
+});
+
+describe('the audit cross-check', () => {
+  test('a period the audit log records as published, with no serving row, is UNAVAILABLE', async () => {
+    // ROUND 20 FINDING 1, and the exact state the documented class-B rollback
+    // leaves behind: drop the table and the function, re-apply, and the audit
+    // history survives while the serving rows do not. The reader used to say
+    // "nothing is published" here, so a caller releasing recomputed money
+    // released it against a figure that had already been disclosed.
+    const { client } = createClient({ rows: [], auditTargets: [AUDITED_OCTOBER] });
+    const set = await readPublishedMonths({ client: client as never });
+    expect(set).toBe('unavailable');
+    expect(resolveMonthlyMoney('2026-10', NO_DAYS, set).kind).toBe('unavailable');
+  });
+
+  test('audit history that MATCHES the serving rows is served normally', async () => {
+    // Non-vacuity: a cross-check that returned unavailable whenever any audit
+    // row existed would pass the test above and make the table useless.
+    const { client } = createClient({ rows: [dbRow()], auditTargets: [AUDITED_OCTOBER] });
+    const set = await readPublishedMonths({ client: client as never });
+    expect(set).not.toBe('unavailable');
+    expect(publicationsByMonth(set)?.get('2026-10')?.valuePaisa).toBe(400_000);
+  });
+
+  test('a serving row with no audit row is served — the check is one-directional', async () => {
+    // Deliberately asymmetric. A publication cannot exist without its audit
+    // row, because the RPC writes both in one transaction; but audit retention
+    // is an operator decision, so a MISSING audit row is not evidence of
+    // anything. Only the other direction — audited but unserved — indicates a
+    // store this reader cannot answer from.
+    const { client } = createClient({ rows: [dbRow()], auditTargets: [] });
+    const set = await readPublishedMonths({ client: client as never });
+    expect(publicationsByMonth(set)?.get('2026-10')?.valuePaisa).toBe(400_000);
+  });
+
+  test('an audit read failure makes the set unavailable rather than unchecked', async () => {
+    const { client } = createClient({ rows: [dbRow()], auditError: 'permission denied' });
+    const set = await readPublishedMonths({ client: client as never });
+    expect(set).toBe('unavailable');
+  });
+
+  test('ignores audit targets belonging to other actions, and malformed months', async () => {
+    const { client } = createClient({
+      rows: [],
+      auditTargets: [
+        null,
+        'subscription.reconcile_limits',
+        'some-account-id',
+        'refund_net_pharmacy_sales:platform_all:not-a-month',
+        'refund_net_pharmacy_sales:platform_all:2026-13',
+        'other_metric:platform_all:2026-10',
+      ],
+    });
+    // None of these names a published period of ours, so an empty serving table
+    // is consistent and the set is empty rather than unavailable.
+    expect(await readPublishedMonths({ client: client as never })).toEqual([]);
+  });
+
+  test('filters the audit query to published successes, not every audit row', async () => {
+    const { client, calls } = createClient({ rows: [] });
+    await readPublishedMonths({ client: client as never });
+    const audit = calls.find((call) => call.table === 'admin_audit_log');
+    expect(audit).toBeDefined();
+    const eqs = (audit?.filters ?? [])
+      .filter((entry) => entry.method === 'eq')
+      .map((entry) => entry.args);
+    expect(eqs).toEqual([
+      ['action', 'publication.published'],
+      ['outcome', 'success'],
+    ]);
   });
 });

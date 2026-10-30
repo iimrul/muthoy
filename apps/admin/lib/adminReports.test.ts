@@ -21,6 +21,7 @@ import { parseCsv } from '@muthoy/utils';
 import { ADMIN_REPORT_IDS, adminReportExportQuerySchema } from '@muthoy/validation';
 import { requireMetric } from './adminMetrics';
 import { SUPPRESSED_DISPLAY, SUPPRESSION_K } from './adminSuppression';
+import type { PublicationSet } from './publication';
 import type { PaymentOrderRow, SubscriptionRow } from './adminViews';
 import {
   ADMIN_REPORT_DEFINITIONS,
@@ -132,7 +133,7 @@ function saleTotal(
  * passing this constant is the explicit — and in these tests truthful —
  * statement that the record was consulted and held nothing.
  */
-const NO_PUBLICATIONS = () => undefined;
+const NO_PUBLICATIONS: PublicationSet = [];
 
 function data(overrides: Partial<ReportData> = {}): ReportData {
   return {
