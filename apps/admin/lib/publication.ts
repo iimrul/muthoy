@@ -449,6 +449,19 @@ export function recordIsServable(record: PublicationRecord, month: string): stri
   if (!/^\d{4}-(0[1-9]|1[0-2])-01$/.test(record.periodStart)) {
     return 'publication period start is not the first of a real month: ' + record.periodStart;
   }
+  // YEAR ZERO DOES NOT EXIST IN POSTGRESQL.
+  //
+  // ROUND 23 FINDING 2. The arithmetic above is correct about the proleptic
+  // Gregorian calendar, in which year 0 is a leap year — so
+  // `0000-02-01`..`0000-02-29` validated, and an unbounded report exported
+  // `0000-02,4000.00`. PostgreSQL rejects those dates with 22008, which means
+  // such a record cannot have come from the store this function exists to
+  // serve. Being right about the calendar is not the same as being right about
+  // the database.
+  if (record.periodStart.startsWith('0000-')) {
+    return 'publication period start is in year zero, which no date column can hold: '
+      + record.periodStart;
+  }
   if (!/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(record.periodEnd)) {
     return 'publication period end is not a real calendar date: ' + record.periodEnd;
   }

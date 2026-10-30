@@ -125,10 +125,27 @@ function toRecord(row: PublicationRow): PublicationRecord {
  * happened in this project.
  */
 export function readIsIncomplete(rowCount: number, count: unknown): string | null {
-  if (typeof count !== 'number' || !Number.isFinite(count)) {
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
     return 'the server did not report an exact row count (' + String(count) + ')';
   }
-  if (rowCount < count) return rowCount + ' of ' + count + ' rows were returned';
+  // EQUALITY, NOT `<`. ROUND 23 FINDING 1, and the reviewer put it better than
+  // I could: "the new (6, 5) test explicitly preserves this defect."
+  //
+  // My round-22 version checked only `rowCount < count`, so a response that
+  // contradicted ITSELF passed — `Content-Range: 0-0/0` with one row returned
+  // gives count 0 against one row, and the reviewer used exactly that to hide
+  // an October publication from the audit cross-check. And I had written a test
+  // asserting `readIsIncomplete(6, 5)` was fine, rationalising it in a comment
+  // as "a server disagreeing with itself is not truncation". A server
+  // disagreeing with itself is precisely what this function must refuse: it
+  // answers "can I prove I saw everything", and a count that does not match
+  // what arrived proves nothing in either direction.
+  //
+  // That makes three times in this batch that a test I wrote to be careful
+  // locked in the defect it should have caught.
+  if (rowCount !== count) {
+    return 'the server reported ' + count + ' rows and returned ' + rowCount;
+  }
   return null;
 }
 

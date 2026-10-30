@@ -271,7 +271,19 @@ export function dhakaDayLabel(isoTimestamp: string): string | null {
   if (!Number.isFinite(parsed)) return null;
   const shifted = new Date(parsed + DHAKA_OFFSET_MS);
   return (
-    shifted.getUTCFullYear()
+    // PADDED TO FOUR DIGITS. ROUND 23 FINDING 3, pre-existing: this
+    // concatenated `getUTCFullYear()` directly, so year 100 produced
+    // `100-01-01`. Every consumer slices this label by fixed offsets —
+    // `dhakaMonthLabel` takes the first seven characters, and
+    // `collectedPaymentsByMonth` matches a `YYYY-MM` key — so a three-character
+    // year shifted all of them, and a verified payment DISAPPEARED from the
+    // report rather than being visibly mislabelled.
+    //
+    // Unreachable through this product's data, which begins in 2026. Fixed
+    // because a date helper that is wrong for some inputs is a helper whose
+    // output cannot safely be sliced, and three findings in this batch came
+    // from exactly that assumption.
+    String(shifted.getUTCFullYear()).padStart(4, '0')
     + '-'
     + padTwo(shifted.getUTCMonth() + 1)
     + '-'

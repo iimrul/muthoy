@@ -69,6 +69,7 @@ import {
 } from './adminSuppression';
 import {
   periodEligibility,
+  periodEndOf,
   resolveMonthlyMoney,
   publicationsByMonth,
   publishedMonths,
@@ -308,14 +309,26 @@ function definition(entry: ReportDefinition): ReportDefinition {
   return Object.freeze(entry);
 }
 
-/** The last Dhaka day of the month a `YYYY-MM-DD` day falls in. */
+/**
+ * The last Dhaka day of the month a `YYYY-MM-DD` day falls in.
+ *
+ * DELEGATES to `periodEndOf`, which is arithmetic. ROUND 23 FINDING 3, found
+ * during an audit I had asked for and PRE-EXISTING — this used
+ * `new Date(Date.UTC(year, month, 0))`, and `Date.UTC` maps a year of 0–99 into
+ * 1900–1999, so `monthEnd('0026-10-01')` returned `1926-10-31`.
+ *
+ * That matters more than the absurd input suggests: this function backs
+ * `assertWholeMonthRange`, which is the control that stops a caller choosing a
+ * window INSIDE a month and differencing two overlapping ranges. A privacy
+ * control whose boundary arithmetic is wrong for some inputs is a privacy
+ * control that accepts the wrong ranges.
+ *
+ * One implementation now, shared with the publication policy, because the
+ * `Date` normalisation has produced three findings here and the fix is not to
+ * get `Date` right in two places.
+ */
 export function monthEnd(day: string): string {
-  const year = Number(day.slice(0, 4));
-  const month = Number(day.slice(5, 7));
-  // Day 0 of the NEXT month is the last day of this one, which also gets
-  // February and leap years right without a table.
-  const last = new Date(Date.UTC(year, month, 0));
-  return last.toISOString().slice(0, 10);
+  return periodEndOf(day.slice(0, 7));
 }
 
 /**

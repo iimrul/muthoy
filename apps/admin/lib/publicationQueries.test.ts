@@ -281,15 +281,33 @@ describe('a truncated read is refused, not answered', () => {
     // client cannot all produce.
     expect(readIsIncomplete(0, 0)).toBeNull();
     expect(readIsIncomplete(5, 5)).toBeNull();
-    expect(readIsIncomplete(4, 5)).toContain('4 of 5');
+    expect(readIsIncomplete(4, 5)).toContain('reported 5 rows and returned 4');
     expect(readIsIncomplete(5, null)).toContain('did not report an exact row count');
     expect(readIsIncomplete(5, undefined)).toContain('did not report an exact row count');
     expect(readIsIncomplete(5, Number.NaN)).toContain('did not report an exact row count');
     expect(readIsIncomplete(5, '5')).toContain('did not report an exact row count');
     expect(readIsIncomplete(5, Number.POSITIVE_INFINITY)).toContain('exact row count');
-    // A row count ABOVE the reported count is not truncation; it is a server
-    // disagreeing with itself, and refusing it would break a legitimate read.
-    expect(readIsIncomplete(6, 5)).toBeNull();
+
+    // ROUND 23 FINDING 1, AND THE REVIEWER NAMED THIS TEST AS THE PROBLEM:
+    // "the new (6, 5) test explicitly preserves this defect."
+    //
+    // It used to read `expect(readIsIncomplete(6, 5)).toBeNull()`, with a
+    // comment rationalising it as "a server disagreeing with itself is not
+    // truncation, and refusing it would break a legitimate read". Both clauses
+    // were wrong. A server disagreeing with itself is exactly what this
+    // predicate must refuse — `Content-Range: 0-0/0` with one row returned
+    // gives count 0 against one row, and the reviewer used that to hide a
+    // publication from the audit cross-check. Nothing legitimate produces it.
+    //
+    // That makes three times in this batch that a test I wrote to be careful
+    // locked in the defect it should have caught.
+    expect(readIsIncomplete(6, 5)).toContain('reported 5 rows and returned 6');
+    expect(readIsIncomplete(1, 0)).toContain('reported 0 rows and returned 1');
+    expect(readIsIncomplete(1, -1)).toContain('did not report an exact row count');
+    expect(readIsIncomplete(2, 1.5)).toContain('did not report an exact row count');
+    // `-0` is an integer and is not negative, so it must behave as 0 does.
+    expect(readIsIncomplete(1, -0)).toContain('returned 1');
+    expect(readIsIncomplete(0, -0)).toBeNull();
   });
 
   test('a COMPLETE read is served, so the rule is truncation and not size', async () => {

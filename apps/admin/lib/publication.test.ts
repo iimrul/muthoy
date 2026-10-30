@@ -494,6 +494,25 @@ describe('what cannot be inferred from a publication', () => {
     expect(reportTextRows(table).flat().join(' ')).not.toContain('0026-10');
   });
 
+  test('a YEAR-ZERO record is refused, because no date column can hold it', () => {
+    // ROUND 23 FINDING 2. The arithmetic is correct about the proleptic
+    // Gregorian calendar — year 0 IS a leap year — so `0000-02-01` to
+    // `0000-02-29` validated and an unbounded report exported
+    // `0000-02,4000.00`. PostgreSQL rejects those dates with 22008, so such a
+    // record cannot have come from the store this guard exists to serve.
+    // Being right about the calendar is not being right about the database.
+    expect(periodEndOf('0000-02')).toBe('0000-02-29');
+    const yearZero = record({ periodStart: '0000-02-01', periodEnd: '0000-02-29' });
+    expect(recordIsServable(yearZero, '0000-02')).toContain('year zero');
+    const table = buildReportTable(
+      REPORT,
+      data({ sales: [], refunds: [], tallies: COMPLETE }),
+      query({ reportId: REPORT, format: 'csv' }),
+      { publications: [yearZero] },
+    );
+    expect(reportTextRows(table).flat().join(' ')).not.toContain('0000-02');
+  });
+
   test('month ends are arithmetic in every century, including leap rules', () => {
     // 1900 is not a leap year, 2000 is, 2024 is, 2100 is not. A `Date`-based
     // implementation gets these right and gets early years wrong; arithmetic

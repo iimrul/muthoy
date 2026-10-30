@@ -423,3 +423,31 @@ describe('the Dhaka day axis', () => {
     expect(distinctShopCount({ day: '2026-10-25', shopIds: [] })).toBe(0);
   });
 });
+
+describe('Dhaka labels are four-digit padded', () => {
+  // ROUND 23 FINDING 3, pre-existing and found during an audit I had asked
+  // for. `dhakaDayLabel` concatenated `getUTCFullYear()` directly, so year 100
+  // produced `100-01-01`. Every consumer slices this label by fixed offsets —
+  // `dhakaMonthLabel` takes the first seven characters, and
+  // `collectedPaymentsByMonth` matches a `YYYY-MM` key — so a three-character
+  // year shifted all of them and a verified payment DISAPPEARED from the
+  // report rather than being visibly mislabelled.
+  //
+  // Unreachable through this product's data, which begins in 2026. Asserted
+  // because a date helper that is wrong for some inputs is a helper whose
+  // output cannot safely be sliced, and three findings in this batch came from
+  // exactly that assumption.
+  test('pads a three-digit year, so a sliced month key stays YYYY-MM', () => {
+    const label = dhakaDayLabel('0100-01-01T00:00:00.000Z');
+    expect(label).toBe('0100-01-01');
+    expect(label?.slice(0, 7)).toBe('0100-01');
+  });
+
+  test('pads year one, and leaves every modern year byte-identical', () => {
+    expect(dhakaDayLabel('0001-03-05T06:00:00.000Z')).toBe('0001-03-05');
+    // The product's own range, unchanged. Dhaka is UTC+6, so 20:00Z is already
+    // the next day there — the padding must not have disturbed that.
+    expect(dhakaDayLabel('2026-10-25T20:00:00.000Z')).toBe('2026-10-26');
+    expect(dhakaDayLabel('2026-10-25T06:00:00.000Z')).toBe('2026-10-25');
+  });
+});
