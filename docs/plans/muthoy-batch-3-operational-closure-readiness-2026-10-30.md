@@ -152,10 +152,13 @@ reviewer named three remaining constraints and was right about all of them:
 | `h9-prod-preflight.mjs:290` | its independent 35-file chain | the cross-check above forces it to move; it is a registry update, not a blocker |
 | `e4-evidence-manifest.test.ts:41` | asserts 35 migrations and 48 entries — statements about what was **accepted**, which regeneration cannot satisfy | the manifest is now scoped to the chain it is evidence *about*, so those numbers are permanently true instead of true until the next migration. **Verified to change nothing today:** regenerating after the scoping produced no drift at all |
 
-**So a migration joining the chain must move four things together:**
+**So a migration joining the chain must move these together:**
 `POST_E4_MIGRATIONS`, `rollback-classification.json`, the preflight's
-`EXPECTED_CHAIN`, and a successor byte-pin. The live-chain gate fails until all
-four are done, and each failure names what to do.
+`EXPECTED_CHAIN` **and** its `E4_MIGRATIONS` tail, a successor byte-pin, and --
+round 12's addition -- the rollback suite's own count and class expectations
+plus its three generated documents, which keep independent expectations of their
+own. The live-chain gate fails until the first five agree; the rollback
+documents are enforced by their own suite.
 
 **The gap Option B leaves, stated rather than hidden.** The E4 manifest is
 correctly not evidence about a post-E4 migration, so **nothing pins a new
@@ -247,6 +250,7 @@ What was done, and what was checked:
 | Content preserved | the rebuilt tree was **byte-identical** to the reviewed `5c8d691` (`1f635d4d…`) **at `f2550cc`**, which is the endpoint that claim refers to. **Round 10 corrected me here:** later commits changed 12 files, so the diff against the recovery ref is *not* empty at HEAD and was never meant to be. The equality is a statement about the repair, not about everything after it |
 | The literal | **absent from all nine outgoing commits**, by per-commit tree scan *and* by scanning every added line in the range |
 | Secret audit | no full `sb_secret_`-shaped literal; the only prefix matches are prose naming the prefixes and one runtime-constructed negative test input. The 57 64-hex runs are the SHA-256 content pins the staging guard compares against. The project ref already appears in **28 tracked files on `origin/main`**, so the range introduces nothing new |
+| Scope of that claim, corrected by round 12 | I had written "no credential-shaped string", and **that is not literally true.** `scripts/h9/test/n0-a2a3.test.mjs` deliberately plants dummy credential material -- a password-bearing `postgresql://` URL and a `jwt_secret` -- because the test's whole purpose is to assert that none of it reaches the N0 projection. The accurate claim is narrower: **no token-pattern and no private-key-pattern match anywhere in the range** |
 | Preserved | the four inherited dirty paths, all three sealed pins, the 35-migration chain, `audit-artifacts/**` absent from the range, Preview worktree still detached at `bd0fa4d` |
 
 **Was the literal a real credential?** No. Structurally verified without
@@ -477,6 +481,56 @@ byte-pin gap rather than implying the work was finished.
 
 **Still not reviewed:** the round 11 remediation itself. A further round is
 required on the exact final revision before the push gate is met.
+
+### 5.11 Round 12 -- convergence, and a defect in my own evidence
+
+**`ROUND 12: REVISE` on `864be73`. One MEDIUM, one LOW, and no HIGH** -- the
+first round in this sequence without one.
+
+**First, a process failure worth recording.** Round 12's initial attempt
+produced **no verdict at all**: the reviewer's provider refused the brief twice
+as a possible cybersecurity risk. The brief was mine and it was written in
+attack terms, because that is how the previous rounds' findings were phrased.
+Reframed as what the work actually is -- a correctness review of this
+repository's own maintenance tooling -- the same review ran and returned a
+verdict. **No review was skipped and no verdict was assumed in between.**
+
+| # | Severity | Finding | What I did |
+|---|---|---|---|
+| 1 | MEDIUM | **My own probe could report success while skipping its most important check.** If the environment cannot create a junction, the probe stored a *string*, and only a boolean false counted as a failure -- so it printed "10/10 checks, failures=0" with the redirection case unrun. **And I quoted that number in this report** | The summary now counts passes, skips and failures separately, says INCOMPLETE when anything is skipped, and exits non-zero. Proven by forcing the skip: it reports "12 passed, 1 skipped" and exits 1, where before it claimed 13/13 |
+| 2 | LOW | **The non-vacuity coverage missed the real disk adapter.** With no successor declared, `pinSourceOnDisk` was never called, so replacing its `read()` with a constant left all assertions green -- and removing both rollback-classification assertions did too | The classification rule is now a predicate exercised against a non-empty set, and a new case drives the **real** adapter against real files: a missing path, a directory, garbage contents, a wrong digest, then a correct one |
+
+**On my own machine the junction case did run and did pass**, so the 10/10 and
+13/13 I reported were accurate measurements. The defect was that the probe
+*could* have reported them without measuring, which makes the number
+untrustworthy as evidence regardless of what it said that day.
+
+**Mutations: 5 of 5 caught**, including both of the reviewer's exact mutations --
+the constant `read()` and the removed classification check -- plus `exists()`
+forced true, `isFile()` forced true, and the digest comparison removed.
+
+**And the probe answered the operational question I could not reason out.**
+Pinning a directory blocks rename and delete of the directory itself but still
+permits creating files and subdirectories inside it, measured at 13/13. So the
+staged runtime's evidence writes are unaffected: **the fix does not break the
+runtime it protects.**
+
+**What round 12 confirmed:** no lifetime, scope, strict-mode, cast or
+`ToString` defect in the PowerShell rewrite; handles released on every throw
+path; the P/Invoke signature, buffer sizing and path-prefix comparison correct;
+`Protect` and the manifest write both happen before any handle is taken, so
+there is no sharing conflict; 14 malformed or stale pin shapes rejected in
+independent probes; the version check sufficient with no further bypass found;
+and -- the question I most wanted answered -- **the preflight's third predicate
+is H-9 contiguity, which was already cross-checked. No fourth gap.**
+
+**Its execution limits are unchanged and still bound the evidence:** vitest
+`spawn EPERM`, the installer regression and the full probe stopped at denied
+temp-directory creation, and dynamic native probing hit `ConstrainedLanguage`.
+**There are still not two independently executed test suites.** It did complete
+100 Node tests and independent PGlite checks across five histories.
+
+**Still not reviewed:** the round 12 remediation itself.
 
 ---
 

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { migrationFiles } from './harness';
 import {
@@ -171,6 +172,26 @@ function classifiedMigrations(): Record<string, string> {
   return JSON.parse(readFileSync(resolve(CLASSIFICATION), 'utf8')).postgres;
 }
 
+/**
+ * What is wrong with the rollback classification of this declared set, or null.
+ *
+ * ROUND 12 FINDING 2. This was two inline assertions inside a loop over a list
+ * that is empty today, so removing BOTH of them left every test passing. A
+ * predicate can be exercised with a non-empty set, which is the only way the
+ * rule is not dormant.
+ */
+export function classificationDrift(
+  declared: readonly string[],
+  classified: Record<string, string>,
+): string | null {
+  for (const name of declared) {
+    const grade = classified[name];
+    if (grade === undefined) return `${name} is not classified for rollback`;
+    if (!/^[ABC]$/.test(grade)) return `${name} has an invalid rollback class: ${grade}`;
+  }
+  return null;
+}
+
 describe('the live migration chain is exactly the approved chain', () => {
   it('is the E4 chain plus exactly what was approved after it', () => {
     expect(membershipDrift(migrationFiles(), expectedLiveMigrationFiles())).toEqual({
@@ -253,11 +274,7 @@ describe('the live migration chain is exactly the approved chain', () => {
   });
 
   it('classifies every post-E4 migration for rollback before it may ship', () => {
-    const classified = classifiedMigrations();
-    for (const name of POST_E4_MIGRATIONS) {
-      expect(Object.keys(classified), name).toContain(name);
-      expect(classified[name], name).toMatch(/^[ABC]$/);
-    }
+    expect(classificationDrift(POST_E4_MIGRATIONS, classifiedMigrations())).toBeNull();
   });
 
   it('requires every post-E4 migration to have a 14-digit version AFTER migration 35', () => {
@@ -398,6 +415,62 @@ describe('the live chain gate, against histories where the answer is known', () 
 
     // And the one shape that is correct.
     expect(successorPinDrift([NAME], pin(`{"${NAME}":"${DIGEST}"}`), bytes)).toBeNull();
+  });
+
+  it('demands a rollback class for a declared migration, with a valid grade', () => {
+    // ROUND 12 FINDING 2: the real assertions are dormant while the declared
+    // list is empty, so the rule is exercised here against a non-empty one.
+    const NAME = '20261231000001_real.sql';
+    expect(classificationDrift([], {})).toBeNull();
+    expect(classificationDrift([NAME], {})).toMatch(/not classified for rollback/);
+    expect(classificationDrift([NAME], { [NAME]: 'D' })).toMatch(/invalid rollback class/);
+    expect(classificationDrift([NAME], { [NAME]: '' })).toMatch(/invalid rollback class/);
+    for (const grade of ['A', 'B', 'C']) {
+      expect(classificationDrift([NAME], { [NAME]: grade })).toBeNull();
+    }
+    // And the live chain's own migrations really are all classified.
+    expect(classificationDrift(e4ChainMigrationFiles(), classifiedMigrations())).toBeNull();
+  });
+
+  it('exercises the REAL disk adapter, not only injected doubles', () => {
+    // ROUND 12 FINDING 2: every negative pin case above injects a double, and
+    // with no successor declared `pinSourceOnDisk` was never called at all --
+    // replacing its read() with a constant left everything green. These cases
+    // drive the real adapter against real files.
+    const NAME = '20261231000001_real.sql';
+    const BYTES = Buffer.from('-- successor\nselect 1;\n');
+    const DIGEST = createHash('sha256').update(BYTES).digest('hex');
+    const bytes = (n: string) => (n === NAME ? BYTES : null);
+
+    const dir = mkdtempSync(join(tmpdir(), 'post-e4-pin-'));
+    try {
+      // A path that does not exist: the real adapter must say so.
+      const absent = pinSourceOnDisk(join(dir, 'absent.json'));
+      expect(absent.exists()).toBe(false);
+      expect(successorPinDrift([NAME], absent, bytes)).toMatch(/no successor byte-pin/);
+
+      // A directory, through the real adapter.
+      const asDirectory = pinSourceOnDisk(dir);
+      expect(asDirectory.exists()).toBe(true);
+      expect(asDirectory.isFile()).toBe(false);
+      expect(successorPinDrift([NAME], asDirectory, bytes)).toMatch(/is not a file/);
+
+      // A real file holding garbage, then a wrong digest, then the right one.
+      const path = join(dir, 'post-e4-source-hashes.json');
+      writeFileSync(path, 'garbage');
+      const real = pinSourceOnDisk(path);
+      expect(real.read()).toBe('garbage');
+      expect(successorPinDrift([NAME], real, bytes)).toMatch(/not valid JSON/);
+
+      writeFileSync(path, JSON.stringify({ files: { [NAME]: 'b'.repeat(64) } }));
+      expect(successorPinDrift([NAME], pinSourceOnDisk(path), bytes))
+        .toMatch(/does not match its recorded digest/);
+
+      writeFileSync(path, JSON.stringify({ files: { [NAME]: DIGEST } }));
+      expect(successorPinDrift([NAME], pinSourceOnDisk(path), bytes)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('does not mistake an appended migration for a wedge', () => {

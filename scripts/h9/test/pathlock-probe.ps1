@@ -81,6 +81,21 @@ try {
     $results['pinned dir still present'] = [IO.Directory]::Exists($spare)
     if ($spareHandle -ne $INVALID) { [void][H9PathLockProbe]::CloseHandle($spareHandle) }
 
+    # 5c. OPERATIONAL RISK, and the one that would make this fix a regression:
+    #     the staged runtime creates an evidence directory and two files INSIDE
+    #     the destination. If pinning a directory denied write sharing on it,
+    #     those creates would fail and the fix would break the runtime it
+    #     protects. Measured rather than assumed.
+    $madeFile = $false
+    try { [IO.File]::WriteAllText((Join-Path $inner 'evidence.json'),'{}'); $madeFile = $true } catch { $madeFile = $false }
+    $results['create FILE inside pinned dir ALLOWED'] = $madeFile
+    $madeDir = $false
+    try { [IO.Directory]::CreateDirectory((Join-Path $inner 'evidence')) | Out-Null; $madeDir = $true } catch { $madeDir = $false }
+    $results['create SUBDIR inside pinned dir ALLOWED'] = $madeDir
+    $madeNested = $false
+    try { [IO.File]::WriteAllText((Join-Path (Join-Path $inner 'evidence') 'SHA256SUMS'),'x'); $madeNested = $true } catch { $madeNested = $false }
+    $results['create file in that SUBDIR ALLOWED'] = $madeNested
+
     # 6. And a junction's handle must resolve somewhere ELSE, which is the
     #    redirection this check is meant to catch.
     $elsewhere = Join-Path $root 'elsewhere'
@@ -109,17 +124,28 @@ try {
     try { [IO.Directory]::Delete($root,$true) } catch {}
 }
 
+# ROUND 12 FINDING 1. This summary used to count anything that was not boolean
+# false as a pass, so a SKIPPED check -- recorded as a string when the
+# environment cannot create a junction -- was reported inside "10/10 checks,
+# failures=0". The most important check could be the one that did not run and
+# the probe would still claim success. A skip is now counted and reported as a
+# skip, and it makes the exit code non-zero: a probe that could not exercise the
+# mechanism has not verified it.
 Write-Output ''
+$passed = 0
 $failed = 0
+$skipped = 0
 foreach ($key in $results.Keys) {
     $value = $results[$key]
     if ($value -is [bool]) {
-        if (-not $value) { $failed++ }
+        if ($value) { $passed++ } else { $failed++ }
         Write-Output (("{0,-45} {1}") -f $key, $(if ($value) { 'PASS' } else { 'FAIL' }))
     } else {
-        Write-Output (("{0,-45} {1}") -f $key, $value)
+        $skipped++
+        Write-Output (("{0,-45} {1}") -f $key, ('SKIP  ' + $value))
     }
 }
 Write-Output ''
-Write-Output ("PATHLOCK PROBE: " + ($results.Count - $failed) + "/" + $results.Count + " checks, failures=" + $failed)
-exit $failed
+Write-Output ("PATHLOCK PROBE: " + $passed + " passed, " + $skipped + " skipped, " + $failed + " failed, of " + $results.Count)
+if ($skipped -gt 0) { Write-Output 'INCOMPLETE: a skipped check means the mechanism was NOT fully verified here.' }
+exit ($failed + $skipped)
