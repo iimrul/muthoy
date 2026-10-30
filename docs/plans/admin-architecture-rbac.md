@@ -1383,3 +1383,92 @@ finding 9's defect in the other direction.
 
 Until each is met, this document states the page as CODE-COMPLETE and says
 plainly that the hosted half is not done.
+
+---
+
+## 6o. The founder-approved billing disclosure policy, 2026-10-30
+
+**The decision, as given:** a **one-pharmacy cohort is ACCEPTED** for
+Muthoy-owned subscription revenue inside the appropriately authorized internal
+administration system. Decision 4 is unchanged — pharmacy-operational k=5
+confidentiality does not automatically extend to Muthoy's own billing revenue.
+This closes blocker 3 of the Gate 7 register as a **decision, not a defect**.
+
+This is recorded here because it is a disclosure policy, not an implementation
+detail. The reason a one-pharmacy cohort is acceptable here and nowhere else:
+the subject of a pharmacy-operational figure is the pharmacy, and k protects
+the pharmacy; the subject of a subscription payment is **Muthoy**, and the
+pharmacy appears as the counterparty to Muthoy's own billing record. Flooring
+it would conceal an identity that `/payments` already publishes under accepted
+B4 scope and RBAC, so the floor would cost disclosure without buying privacy.
+
+**What the acceptance does not permit, and where each limit is enforced:**
+
+| Required limit | Where it holds | What pins it |
+|---|---|---|
+| Strict admin RBAC and audit | `platform_billing` changes the money floor only; the RBAC and audit path in front of the report are untouched | `adminReports.ts:227`, `:922` state it; the role gate tests are unchanged |
+| Not exposed publicly | the report is reachable only through the authenticated Admin panel; no public route serves it | route-level role tests |
+| No pharmacy sales or refund information revealed | the report's only source is `orders`, never `sales` or `refunds` | `adminPlatformQueries.ts:1126` declares the source; `reportReadsRefunds('subscription_revenue_and_renewals')` is pinned **false** |
+| No unauthorized export or API access | export runs the same definition through the same RBAC and audit as the on-screen report | the CSV/PDF tests exercise the same gate |
+| The exemption reaches exactly ONE report | `confidentiality: 'platform_billing'` appears once | pinned **by count as well as by name**, so a new report defaulting into the exemption fails the test |
+
+**No new k=5 suppression was introduced for Muthoy-owned billing money**, as the
+decision requires.
+
+**The condition to re-apply the floor, stated so it is checkable rather than
+remembered:** the exemption rests on the amount coming from the
+operator-maintained price list and **not being derived from any pharmacy's
+sales**. If a billing report ever joins to `sales` or `sale_refunds`, that
+premise is void and the pharmacy floor applies again. The source declaration is
+the place that would change, and the test asserting the billing report reads no
+refunds is the one that would fail.
+
+Two reports I originally classified as billing are **not** exempt and must not
+become so: `subscriptions` and `plan_distribution` count **pharmacies** per
+tier and per plan. The money is Muthoy's; the subjects are pharmacies, and a
+filtered count plus its complement identifies a small group of them.
+
+---
+
+## 6p. Cross-device logout — the record, stated correctly
+
+This corrects an operational note I had **backwards**, and it is a product
+change that was not in the accepted plan, so it is flagged for release
+acceptance rather than presented as settled.
+
+**What the code does.** Logout moves that admin's revocation cutoff forward to
+the **iat of the session being used**. Verification then rejects any cookie
+whose iat is at or before the cutoff, and accepts one whose iat is **strictly
+later**.
+
+**What that means on two devices, stated the right way round:**
+
+| The admin logs out of… | That session | The other session |
+|---|---|---|
+| the **NEWER** session | ends | **also ends** — its iat is earlier, so it is at or before the new cutoff |
+| the **OLDER** session | ends | **survives** — its iat is strictly later than the cutoff |
+
+So **logging out the newer session ends both.** The earlier note described this
+as logging out an older session, which is the opposite of the behaviour and
+would have misled anyone reasoning about it.
+
+**Security impact — this is why the behaviour is right for this panel.** It
+closes a HIGH: a copied or stolen cookie no longer survives the victim's
+logout. An idle browser copy may have a recently refreshed stolen sibling, and
+the authenticated iat of either can revoke both; the cutoff is forward-only, so
+revocation cannot be walked backwards. An independent review confirmed the
+implementation verifies signed identity and iat, preserves disabled and narrowed
+assignments, clears the cookie even when revocation fails, and distinguishes an
+unconfirmed revocation from a successful one.
+
+**User-experience impact — this is the cost, and it is the founder's to accept.**
+An admin signed in on a phone and a laptop who signs in again on the phone and
+then logs out of the phone is also signed out on the laptop, with no warning at
+the moment of logout. The login page explains the rule, but the explanation is
+not at the point of action. For a panel that moves money this is the right
+trade; for a panel that did not, it would be an irritation.
+
+**Release acceptance:** confirm this behaviour, or reverse it. Reversing it is a
+one-line change and it **reopens the HIGH it closed** — a copied cookie
+surviving logout. It is listed in Report B as an open item for exactly that
+reason.

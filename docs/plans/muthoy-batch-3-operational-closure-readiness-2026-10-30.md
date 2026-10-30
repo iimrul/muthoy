@@ -1,10 +1,17 @@
 # Report B — Batch 3 operational closure readiness
 
-**Date:** 2026-10-30
+**Date:** 2026-10-30, revised the same day after the founder's Round 9 decisions
 **Accepted application code:** `ef08537` (unchanged by this work)
 **Delivered:** `origin/main` at `87ec9dc`, CI run `41022095283` success
-**Local tip:** `f46035a` — five reconciliation commits, **not yet pushed**
-**Classification:** **CODE-COMPLETE AND DUAL-REVIEWED, NOT CLOSED**
+**Local tip:** `d6f6f8f` — **nine** commits, **not yet pushed**
+**Classification:** **CODE-COMPLETE, NOT CLOSED.** The nine outgoing commits
+include four written after the last dual review, so they are **NOT yet
+dual-reviewed** — see §5.4.
+
+> **Revision note.** This report is revised, not rewritten. The corrections
+> round 9 forced on me are left visible in §2 and §3.5 rather than tidied away:
+> I understated Option A's cost, called Option C's withholding "permanent" when
+> it was not, and described the cross-device logout backwards.
 
 ---
 
@@ -16,83 +23,105 @@ argument.
 
 | # | Item | Status | Evidence, or what is missing |
 |---|---|---|---|
-| 1 | Publication-snapshot implementation and reader integration | **BLOCKED by an unresolved dependency** | Cannot be built without item 2. See §2 — the blocker is a constraint in this directive itself, proven by execution |
-| 2 | Required additive successor migration | **BLOCKED — needs a founder decision** | Adding **any** migration breaks three tests in `backend/supabase/pgtest/e4-chain-succession.pgtest.ts`, which is one of the 48 artifacts this directive orders preserved. Proven, not argued: §2 |
+| 1 | Publication-snapshot implementation and reader integration | **UNBLOCKED, NOT BUILT** | Its dependency (item 2) is resolved. The mechanism, its reader integration and its local privacy verification remain to be written, and all suppression is retained until they are. §5.2 |
+| 2 | Required additive successor migration | **RESOLVED — Option B approved and implemented locally** | A migration may now be added without weakening any sealed fixture. Proven by execution both ways: §2 and §5.1. **This is not hosted apply** — item 4 is still open |
 | 3 | Historical financial disclosure protection | **COMPLETED AND VERIFIED** | Every pharmacy-operational money figure is withheld; no previously suppressed period released; no suppression rule relaxed. Full suite 6 780 tests exit 0 on `ef08537`; 8 Codex rounds; mutation-checked gates |
 | 4 | E4-H — hosted migration 35 acceptance | **REQUIRES HOSTED INFRASTRUCTURE + FOUNDER AUTHORIZATION** | Migration 35 exists, is chain-verified locally and is hash-recorded. Never applied to a hosted project. Plan: §3.1 |
 | 5 | E15 — real deployed-browser verification | **REQUIRES HOSTED INFRASTRUCTURE + FOUNDER AUTHORIZATION** | Needs a deployment that does not exist. `next build` compiles and no client component imports a server-only module, but that is a build fact, not a browser fact. Plan: §3.2 |
 | 6 | E10–E14 remaining holds | **REQUIRES FOUNDER AUTHORIZATION — separate approved plans** | Unchanged by Batch 3 and by this work. Each needs its own plan: E10 audited override API, E11 entitlement derivation, E12 immutable lifecycle events, E13 location consent, E14 map tile provider |
 | 7 | Mobile sync testing on real devices | **REQUIRES PHYSICAL DEVICE** | The owner-handover and tenant-isolation fixes are covered by 3 127 mobile tests, all passing. No device has run them. This was already true of all nine Batch 1 tasks |
-| 8 | One-pharmacy billing-cohort policy acceptance | **REQUIRES FOUNDER AUTHORIZATION** | A decision, not a defect. Codex confirms no pharmacy-operational inference. Re-flooring the report would revert Decision 4 |
+| 8 | One-pharmacy billing-cohort policy acceptance | **ACCEPTED AND RECORDED** | Founder accepted a one-pharmacy cohort on 2026-10-30. Recorded as an explicit billing disclosure policy in `admin-architecture-rbac.md` §6o, with each required limit and the test that pins it. No new k=5 suppression introduced for Muthoy's own billing money |
 | 9 | `ADMIN_ROLES` configuration preflight | **LOCALLY EXECUTABLE — DONE, and it needs a founder check** | The policy and its boot-time refusal are implemented and tested. **What cannot be verified locally is your deployed value.** §3.4 gives the one-line check |
-| 10 | Cross-device logout behaviour change | **COMPLETED AND VERIFIED, and it is a product change you should confirm** | Logout bumps the per-user cutoff to the session's own `iat`: this cookie and every older one die, a newer sign-in survives. Tested. It was not in the accepted plan — §3.5 |
+| 10 | Cross-device logout behaviour change | **RECORDED CORRECTLY, still awaiting release acceptance** | The note is fixed: logging out the **newer** session ends **both**. Security and UX impact written up in `admin-architecture-rbac.md` §6p and flagged for release acceptance. §3.5 |
 
 Plus, from this session's reconciliation:
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
 | 11 | H-9/E4 inherited artifact reconciliation | **COMPLETED AND VERIFIED** | Report A. 41 of 45 reconciled into five commits; 101 H-9 tests executed, 0 failures; E4 manifest no drift; nothing rewritten |
-| 12 | Push of the reconciliation commits | **REQUIRES FOUNDER AUTHORIZATION** | New executable artifacts need dual review before push per this directive; and `f46035a` carries a push-protection hazard. §3.3 |
+| 12 | Push of the outgoing commits | **BLOCKED ON DUAL REVIEW, then conditionally authorized** | The push-protection hazard is **gone**: history was repaired under founder authorization and the scanner-shaped literal is absent from all nine commits, verified by tree scan and added-line scan. What remains is independent review of the four new commits. §3.3, §5.4 |
 
 ---
 
-## 2. Task 3 — what I completed, and the one thing I could not
+## 2. The migration blocker — measured, decided, and resolved
 
-**Completed locally, already authorized:** the artifact reconciliation in
-Report A. Five focused commits, 101 H-9 tests executed.
-
-**Not completed: the publication-snapshot mechanism.** Not deferred for
-convenience — it is blocked by a constraint this directive imposes, and I
-established that by running it rather than reasoning about it.
-
-The chain-succession test reads the migrations directory **dynamically**
-(`await record(migrationFiles())`) and then asserts that the E4 checks find no
-migration outside their expected list, which ends at `20261023000000`. So I
-staged a throwaway migration and ran the test:
+**What the blocker was.** Four gates described the live chain by reading the
+migrations directory and asserting nothing followed migration 35. I established
+this by running it, not by reasoning about it: I staged one throwaway migration
+and measured the damage.
 
 ```
-backend/supabase/migrations/20261231000001_probe_delete_me.sql   (staged, then deleted)
-npx vitest run backend/supabase/pgtest/e4-chain-succession.pgtest.ts
-  × accepts the live 35-version chain
-  × catches a same-count substitution, which the H-9 check cannot
-  × catches anything appended after E4
+backend/supabase/migrations/20261231000001_chain_probe_delete_me.sql  (staged, then deleted)
+=> 13 tests failed across 4 files
 ```
 
-Three failures. The probe was removed and the migrations directory verified
-clean.
-
-So adding migration 36 requires **modifying
-`backend/supabase/pgtest/e4-chain-succession.pgtest.ts`** — and that file is one
-of the 48 E4 hash-recorded artifacts this directive tells me to preserve, in the
-same breath as it authorizes the migration. The H-9 → E4 successor pattern does
-not rescue it: that worked because H-9's checks are static SQL with no
-directory-reading test asserting "nothing extra". E4's chain test is wired
-exactly that way, and its own suite contains a test whose *purpose* is to fail
-when an unapproved migration appears.
-
-**The decision you need to make is one of these three:**
-
-| Option | What it means | Cost |
+| File | Failures | Kind |
 |---|---|---|
-| **A** | Release the fixed-chain artifacts from the preservation list, so a successor migration may update their expected tails and the manifest is regenerated | **MORE THAN ONE ARTIFACT — I understated this and round 9 corrected me.** The chain is also pinned by `e4_postmigration_checks.sql`, `scripts/h9-prod-preflight.mjs`, the environment-parity tests, the rollback classification and the evidence-manifest assertions. The H-9 pins (`361a400a…`, `0b949fa9…`) and migrations 34 and 35 would still stay byte-identical, but the authorization has to be **expanded**, not single-file |
-| **B** | Add a *successor* chain test and successor checks file, with the E4 fixtures kept as **historical** inputs and a live successor gate added beside them | Nothing sealed is edited. **Round 9's correction: this does NOT require accepting permanently failing tests** — the E4 tests can keep passing against the historical fixtures they describe while the successor gate covers the live chain. This is more work than A and costs no authorization |
-| **C** | Add no migration | Publication snapshots stay unavailable and pharmacy money stays withheld **while that remains true**. I wrote "permanently" here and round 9 was right to call it unsupported: it is withheld until A or B is taken, not forever |
+| `backend/supabase/pgtest/e4-chain-succession.pgtest.ts` | 3 | sealed E4 evidence describing the live directory |
+| `backend/supabase/pgtest/h9-environment-parity.pgtest.ts` | 1 | sealed E4 evidence, the gate that never mentions the number 34 |
+| `apps/mobile/tests/e4-evidence-manifest.test.ts` | 1 | live inventory |
+| `apps/mobile/tests/migration-rollback-classification.test.ts` | 8 | live inventory |
 
-I have not chosen, and my recommendation changed once round 9 corrected the
-costs. **Option B is now what I would recommend**: it edits nothing sealed,
-needs no expanded authorization, and — the part I had wrong — does not leave a
-permanently failing test behind, because the E4 pair keeps passing against the
-historical fixtures it describes while a successor gate covers the live chain.
-Option A is smaller in code but larger in authorization than I first wrote,
-since the chain is pinned in at least five more places than the one file I
-named.
+**The distinction my first version of this report did not draw, and it matters.**
+Those 13 are two different things. Four were fixtures that stop being true the
+moment a later migration is approved — that is the blocker. **Nine were
+registries that are supposed to fail until a new migration is classified and
+recorded** — that is the gate working exactly as intended, and it is a
+requirement, not an obstacle.
 
-**I deliberately did not build speculative scaffolding** — a reader/writer pair
-against storage that cannot exist would be a half-mechanism verifiable only
-against itself, and suppression must be retained regardless. All suppression is
-retained.
+### What was decided, and what I had wrong
 
----
+The founder approved **Option B** on 2026-10-30: preserve the historical E4
+fixtures and give the live chain a separate successor gate.
+
+**The corrections round 9 forced on me, left here on the record:**
+
+| What I wrote | What was true |
+|---|---|
+| Option A touches one artifact | **More than one.** The chain is also pinned by `e4_postmigration_checks.sql`, `scripts/h9-prod-preflight.mjs`, the environment-parity test, the rollback classification and the evidence-manifest assertions |
+| Option B would leave a permanently failing test | **It does not.** The E4 fixtures keep passing against the histories they describe |
+| Option C withholds money "permanently" | **Unsupported.** It withholds until A or B is taken |
+
+My recommendation moved from A to B once those costs were corrected, and B is
+what the founder approved.
+
+### What was implemented, and how it was proven
+
+The fixtures are re-scoped to the histories they actually describe — the same
+move `h9BaselineMigrationFiles` already made for H-9 when E4 extended the chain
+— and the live chain gets `backend/supabase/pgtest/live-chain-succession.pgtest.ts`.
+
+**Proven by execution, both directions, with the probe re-staged:**
+
+| With a probe migration present | Before | After |
+|---|---|---|
+| `e4-chain-succession.pgtest.ts` | 3 failed | **8/8 pass** |
+| `h9-environment-parity.pgtest.ts` | 1 failed | **29/29 pass** |
+| the live-chain gate | did not exist | **fails, naming the undeclared migration** |
+| once the migration is declared | — | **passes, then demands rollback classification before it may ship** |
+
+The probe was removed and the chain verified at 35, tail `20261023000000`.
+
+**Nothing sealed was edited.** `e4_postmigration_checks.sql`,
+`h9_postmigration_checks.sql`, migration 34 and migration 35 are byte-identical.
+Both signed H-9 pins in the evidence manifest are unchanged — `361a400a…` and
+`0b949fa9…`. The manifest moved exactly three file hashes, the three files
+changed, with its accepted counts (35 migrations, 13 evidence files), its file
+total of 48 and its 35-version chain all unchanged, nothing added and nothing
+removed.
+
+**One judgement I made and should state plainly:** the new successor gate is
+deliberately **not** added to the E4 evidence manifest. Adding a fourteenth
+evidence file would change E4's accepted counts, and rewriting what was accepted
+is a different act from updating its checks. The successor gate is post-E4 work
+under its own review.
+
+**Still retained:** all suppression. Option B removes the blocker to building
+the publication mechanism; it publishes nothing and relaxes nothing.
+
+**Option B approval is not hosted migration completion.** No migration was
+added, and none was applied anywhere. §3.1 and the hosted gate package are the
+route to that, and both need an authorization naming a target.
 
 ## 3. Task 4 — execution plans for the external gates
 
@@ -120,7 +149,9 @@ migration 35 specifies.
 classification; `rollback-classification.json` records whether 35 is reversible.
 Both are hash-recorded and must be read, not guessed, before applying.
 
-**Authorization needed:** yes — hosted mutation.
+**Authorization needed:** yes — hosted mutation. **The full package, with the
+target, credentials, backup position and post-apply assertions, is in
+[the hosted and device gate packages](muthoy-batch-3-hosted-and-device-gate-packages-2026-10-30.md) §1.**
 
 ### 3.2 E15 — deployed-panel browser verification
 
@@ -134,23 +165,37 @@ withholding with its reason and never as `0.00`.
 
 **Evidence required:** screenshots or a HAR of the network tab per role.
 
-**Authorization needed:** yes — deployment.
+**Authorization needed:** yes — deployment. **Full package: [the hosted and
+device gate packages](muthoy-batch-3-hosted-and-device-gate-packages-2026-10-30.md) §2.**
 
-### 3.3 Push of the reconciliation commits
+### 3.3 Push of the outgoing commits
 
-**Two steps, deliberately separable:**
+**The push-protection hazard is gone.** Under the founder's authorization of
+2026-10-30 the two literal-bearing commits were rebuilt, and the earlier plan of
+pushing in two separable steps is obsolete — there is no longer a commit that
+needs holding back.
 
-1. `git push origin d457306:main` — delivers the four safe commits
-   (`a1b36a0`, `c5c2d3a`, `8a168b0`, `d457306`). No push-protection hazard.
-2. `git push origin f46035a:main` — delivers the N0 credential-projection test.
-   **May be rejected by push protection.** If it is, nothing is lost: the
-   commit stays local, no history is rewritten, and the options are to
-   authorize a push-protection bypass for that one file or leave the test
-   local.
+What was done, and what was checked:
 
-**Authorization needed:** yes for both, per this directive's "CI validation
-following an authorized push". Step 1 also wants Codex review first, since the
-25 tooling files are executable historical artifacts.
+| Step | Result |
+|---|---|
+| Remote state confirmed | `origin/main` at `87ec9dc`, 0 behind, fast-forward |
+| The directive's precondition | **failed, and I stopped rather than proceeding.** The two commits named were not the final two and not adjacent; the named `5c8d691` was the commit that *removed* the literal, and the second literal-bearing commit was `b165320` |
+| Recovery reference | tag `recovery/pre-history-repair-20261030` and ref `refs/recovery/pre-repair-head`, both at `5c8d691` |
+| Reset | `--soft` to `d457306`, the verified `HEAD~3`. Never `--hard`, never `--mixed`, no force, no clean, no stash, no broad staging |
+| Rebuild | three commits by explicit path |
+| Content preserved | the resulting tree is **byte-identical** to the reviewed `5c8d691` (`1f635d4d…`), and the diff against the recovery ref is empty |
+| The literal | **absent from all nine outgoing commits**, by per-commit tree scan *and* by scanning every added line in the range |
+| Secret audit | no full `sb_secret_`-shaped literal; the only prefix matches are prose naming the prefixes and one runtime-constructed negative test input. The 57 64-hex runs are the SHA-256 content pins the staging guard compares against. The project ref already appears in **28 tracked files on `origin/main`**, so the range introduces nothing new |
+| Preserved | the four inherited dirty paths, all three sealed pins, the 35-migration chain, `audit-artifacts/**` absent from the range, Preview worktree still detached at `bd0fa4d` |
+
+**Was the literal a real credential?** No. Structurally verified without
+reproducing it: 36 characters, a 32-character body, the English words "leaked"
+and "secret", twelve trailing zeros, zero entropy. **No revocation or rotation
+is required.**
+
+**What still blocks the push:** independent review of the four commits written
+after the last dual review. See §5.4.
 
 ### 3.4 `ADMIN_ROLES` configuration preflight — the part only you can do
 
@@ -190,3 +235,99 @@ The full suite, typecheck, lint and build results on `ef08537` stand.
 Items 4, 5, 6, 7, 8 and 12 are open, and six of those need you.
 
 **Batch 3 is not closed, and this report does not close it.**
+
+---
+
+## 5. The operational closure classification, 2026-10-30
+
+The founder's section 10 asks for eight states kept apart rather than blended
+into one verdict. They are kept apart here, and three of them are empty.
+
+### 5.1 Historical artifacts reconciled — **DONE**
+
+41 of 45 inherited paths reconciled into focused commits (Report A). The four
+left alone are `apps/prototype-web/` paths, which are reference-only under
+CLAUDE.md rule 15 and are still untouched in the working tree. The H-9 history
+repair of 2026-10-30 is complete and verified (§3.3). Nothing was rewritten that
+was already pushed.
+
+### 5.2 Local implementation complete — **DONE for Option B, NOT STARTED for the snapshot**
+
+| Item | State |
+|---|---|
+| Round 9 HIGH, the staging TOCTOU | fixed, and the destination is now what is verified |
+| The three remaining section-2 requirements | the write window before execution is closed; the installer has the regression test it never had, mutation-checked 5/5; the manifest question resolved by *not* changing it |
+| Option B, the live-chain successor gate | implemented and proven by execution both ways |
+| **The publication-snapshot mechanism** | **NOT STARTED.** Unblocked, not built |
+
+The snapshot still needs: a migration using the actual next chain identity, the
+writer, the reader integration, and local privacy verification — then a hosted
+authorization. **All suppression is retained until every one of those is done
+and independently verified.** Nothing about Option B changes what publishes.
+
+### 5.3 Dual-reviewed implementation — **PARTIAL, and this is the honest gap**
+
+| Revision | Reviewed |
+|---|---|
+| `ef08537` — the accepted application code | **yes**, both agents, no material finding |
+| `5c8d691`'s content — the TOCTOU fix and the report corrections | **by neither agent.** It was *written in response to* round 9 and never reviewed afterwards |
+| `d87815e` — the staging-gate test and the pre-execution guard | **no** |
+| `d6f6f8f` — Option B | **no** |
+
+So four of the nine outgoing commits carry code no independent reviewer has
+seen. The founder's own protocol is explicit that neither agent may accept code
+it authored without the other's subsequent review, and **the earlier FINAL
+ACCEPT does not cover any of this.**
+
+### 5.4 Pushed and CI-verified changes — **NONE since `87ec9dc`**
+
+`origin/main` is still `87ec9dc` with CI run `41022095283` success. **Nine
+commits are local and unpushed.** No CI has run on any of them. The push is
+conditionally authorized by the founder *after* the acceptance and safety gates
+pass, and §5.3 is the gate that has not.
+
+### 5.5 Hosted approvals pending — **ALL OF THEM**
+
+| Gate | Needs |
+|---|---|
+| E4-H, migration 35 | a target project ref, and a decision about the untested restore path. Package: the hosted gate document §1 |
+| A publication-snapshot migration | the mechanism to exist first |
+| E10–E14 | separate approved plans, unchanged by this work |
+
+**Option B approval is not hosted migration completion.** Nothing was applied
+anywhere, and no migration was even added.
+
+### 5.6 Browser acceptance pending — **CANNOT START**
+
+No deployment exists, and the browser-automation tool failed to connect in this
+session. Both facts are in the hosted gate document §2. E15 needs a staging URL.
+
+### 5.7 Physical-device acceptance pending — **CANNOT START**
+
+`bd0fa4d` does not certify current Batch 3 code. Needs an authorized Preview
+build at the current revision and two devices. Plan: hosted gate document §3.
+
+### 5.8 Remaining publication-snapshot implementation and acceptance — **OPEN**
+
+Covered in §5.2. The dependency is resolved; the work is not done; suppression
+stays.
+
+---
+
+## 6. Is Batch 3 operationally closed?
+
+**No, and this report does not close it.**
+
+Mandatory gates that remain open: independent review of four commits (§5.3), a
+push and its CI (§5.4), E4-H (§5.5), E15 (§5.6), device acceptance (§5.7), and
+the publication snapshot (§5.8). Two further items are founder confirmations
+rather than work: the deployed `ADMIN_ROLES` value (§3.4) and the cross-device
+logout behaviour (§3.5, recorded in `admin-architecture-rbac.md` §6p).
+
+**Two of the ten Gate 7 blockers did close today**, by decision rather than by
+code: the billing cohort is accepted and recorded, and the migration question is
+decided and implemented.
+
+**Batch 4 entry recommendation:** not yet offered. It is due once Batch 3 is
+genuinely closed, and the directive is explicit that no Batch 4 implementation
+begins without a founder GO.
