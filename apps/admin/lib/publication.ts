@@ -39,6 +39,7 @@ import {
   SUPPRESSION_K,
   dayReleasable,
   daysReleasable,
+  withheldSide,
   type DaySides,
 } from './adminSuppression';
 
@@ -162,11 +163,61 @@ export function periodEligibility(
     (day) => day.saleShopIds.length > 0 || day.refundShopIds.length > 0,
   );
   const daysRequiringFloor = trading.length;
-  const daysClearingFloor = trading.filter((day) => dayReleasable(day, k)).length;
+  const failing = trading.filter((day) => !dayReleasable(day, k));
+  const daysClearingFloor = daysRequiringFloor - failing.length;
   const contributorCount = distinctCount(contributorIds);
 
-  if (daysClearingFloor !== daysRequiringFloor) {
-    const short = daysRequiringFloor - daysClearingFloor;
+  // AN EMPTY PERIOD IS NOT PUBLISHABLE.
+  //
+  // ROUND 18 FINDING 3, and this function used to return `eligible: true` here
+  // — I reasoned that an empty month discloses nothing about anybody, which is
+  // true about PRIVACY and misses two other things entirely:
+  //
+  //   1. FINALITY. A month can look empty because no device has SYNCED, which
+  //      is the exact condition this mechanism exists to handle. Publishing
+  //      0.00 freezes a figure that was never the figure, and the database
+  //      refuses every correction by design.
+  //   2. EXISTENCE. Publish an inactive month as zero and the report shows no
+  //      row while the sources are empty. One late refund arrives and the
+  //      report GAINS a published `0.00` row. The amount never moved; the row
+  //      appearing is the disclosure.
+  //
+  // Nothing is lost by refusing: `resolveMonthlyMoney` already reports
+  // `no_activity` for such a period, accurately, with no snapshot at all.
+  //
+  // MY OWN TEST ASSERTED THE DEFECT. `it('ALLOWS a period with no trade at all
+  // and no contributors')` existed as a non-vacuity control — to prove the
+  // refusal tests were not passing against a function that refuses everything
+  // — so the test written to stop me fooling myself is the one that locked the
+  // bug in. The non-vacuity control is now an eligible month, which is a
+  // better control anyway because it exercises the path that matters.
+  if (daysRequiringFloor === 0) {
+    return {
+      eligible: false,
+      daysRequiringFloor,
+      daysClearingFloor,
+      contributorCount,
+      reason:
+        'Not published: this period records no trading activity. There is no figure to '
+        + 'fix, and a period can look empty simply because no pharmacy has synced yet — '
+        + 'publishing a zero would freeze that permanently.',
+    };
+  }
+
+  if (failing.length > 0) {
+    // WHICH SIDE ACTUALLY FAILED.
+    //
+    // ROUND 18 FINDING 8. This said "fewer than k distinct refunding
+    // pharmacies" whatever the cause, and `dayReleasable` fails when EITHER
+    // side is short — so a day with one seller and five refunders was refused
+    // with a sentence blaming the refunders. That is the defect round 1B
+    // finding 7 was about: withholding for one reason and stating another.
+    //
+    // `withheldSide` is the shared answer the Dashboard and the report already
+    // use, so there is one rule and one explanation of it.
+    const side = withheldSide(failing[0]!, k);
+    const short = failing.length;
+    const noun = side === 'sale' ? 'selling' : 'refunding';
     return {
       eligible: false,
       daysRequiringFloor,
@@ -175,8 +226,8 @@ export function periodEligibility(
       reason:
         'Withheld: ' + short + ' of ' + daysRequiringFloor + ' trading '
         + (daysRequiringFloor === 1 ? 'day' : 'days') + ' in this period had fewer than '
-        + k + ' distinct refunding pharmacies. Publishing the period would disclose '
-        + 'those days by subtraction.',
+        + k + ' distinct ' + noun + ' pharmacies. Publishing the period would disclose '
+        + (short === 1 ? 'that day' : 'those days') + ' by subtraction.',
     };
   }
   if (daysRequiringFloor > 0 && contributorCount < k) {

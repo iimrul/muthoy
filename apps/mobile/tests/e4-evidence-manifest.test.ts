@@ -9,7 +9,10 @@ import {
   buildManifest,
   checkOrWrite,
   hashFile,
+  SUPERSEDABLE_EVIDENCE_FILES,
+  supersededBy,
 } from '../../../scripts/e4-evidence-manifest.mjs';
+import { currentSupersessions } from '../../../scripts/post-e4-evidence-manifest.mjs';
 
 // E4's evidence manifest, verified rather than trusted.
 //
@@ -93,5 +96,88 @@ describe('E4 evidence manifest', () => {
       .filter(([path, hash]) => tampered[path] !== hash)
       .map(([path]) => path);
     expect(drift).toEqual([target]);
+  });
+});
+
+// ───────────────────────────────── the successor supersession guard, round 18
+
+describe('declared supersession cannot bless a sealed artifact', () => {
+  // ROUND 18 FINDING 7, and it was the worst defect in the E4-B work. The
+  // successor mechanism was built so that declaring migration 36 — which
+  // necessarily moves seven chain-declaration files — would not require
+  // rewriting the signed E4 manifest. It iterated EVERY entry in
+  // E4_EVIDENCE_FILES, which includes the sealed acceptance SQL. The reviewer
+  // changed `e4_postmigration_checks.sql`, regenerated the successor manifest,
+  // and BOTH drift checks reported no drift.
+  //
+  // So the thing built to protect the chain declarations had become a way to
+  // launder the sealed SQL those declarations are checked against.
+
+  const SEALED = 'backend/supabase/checks/e4_postmigration_checks.sql';
+
+  it('the sealed acceptance SQL is pinned by the E4 manifest', () => {
+    // Non-vacuity for everything below: if this path were not pinned at all,
+    // the assertions about refusing to supersede it would prove nothing.
+    expect(Object.keys(RECORDED.files)).toContain(SEALED);
+    expect(E4_EVIDENCE_FILES).toContain(SEALED);
+  });
+
+  it('the allowlist is exactly the seven files a chain declaration must touch', () => {
+    // Hardcoded on purpose, and transcribed independently of the constant.
+    // Widening this list is a privacy-and-evidence decision, and the point of
+    // asserting it here is that the decision shows up as a failing test rather
+    // than as a side effect of running `--write`.
+    expect([...SUPERSEDABLE_EVIDENCE_FILES].sort()).toEqual([
+      '.gitattributes',
+      'apps/mobile/tests/migration-rollback-classification.test.ts',
+      'backend/supabase/migrations/README.md',
+      'backend/supabase/migrations/ROLLBACK.md',
+      'backend/supabase/migrations/rollback-classification.json',
+      'backend/supabase/pgtest/checkFile.ts',
+      'scripts/h9-prod-preflight.mjs',
+    ]);
+  });
+
+  it('refuses to supersede the sealed SQL, the sealed migrations, or the acceptance pgtests', () => {
+    const neverSupersedable = E4_EVIDENCE_FILES.filter(
+      (path: string) => !SUPERSEDABLE_EVIDENCE_FILES.includes(path),
+    );
+    // There is something to check, and it includes the sealed SQL.
+    expect(neverSupersedable.length).toBeGreaterThan(0);
+    expect(neverSupersedable).toContain(SEALED);
+    for (const path of neverSupersedable) {
+      expect(SUPERSEDABLE_EVIDENCE_FILES, path + ' must never be supersedable').not.toContain(path);
+    }
+  });
+
+  it('the generator never emits a supersession outside the allowlist', () => {
+    for (const path of Object.keys(currentSupersessions())) {
+      expect(SUPERSEDABLE_EVIDENCE_FILES, path).toContain(path);
+    }
+  });
+
+  it('a HAND-EDITED manifest declaring the sealed SQL is ignored, not honoured', () => {
+    // THE ASSERTION THAT ACTUALLY CLOSES THE FINDING. Restricting the
+    // GENERATOR is not enough — `supersededBy()` reads the JSON, so a manifest
+    // edited by hand would be obeyed however careful the generator was. The
+    // allowlist therefore lives with the CONSUMER, and this exercises that.
+    const declared = supersededBy() as Record<string, { e4?: string; now?: string }>;
+    expect(declared[SEALED]).toBeUndefined();
+    // And the filter is on the path, so the shape of the entry is irrelevant.
+    expect(Object.keys(declared).every((path) => SUPERSEDABLE_EVIDENCE_FILES.includes(path))).toBe(
+      true,
+    );
+  });
+
+  it('every declared supersession names BOTH ends, and the e4 end matches what was signed', () => {
+    // A declaration whose `e4` side did not match the signed manifest would let
+    // a file be laundered through two undeclared changes.
+    const declared = supersededBy() as Record<string, { e4?: string; now?: string }>;
+    for (const [path, ends] of Object.entries(declared)) {
+      expect(typeof (ends as { e4?: unknown }).e4, path).toBe('string');
+      expect(typeof (ends as { now?: unknown }).now, path).toBe('string');
+      expect((ends as { e4: string }).e4, path).toBe(RECORDED.files[path]);
+      expect((ends as { now: string }).now, path).toBe(hashFile(path));
+    }
   });
 });

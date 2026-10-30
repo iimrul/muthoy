@@ -130,7 +130,13 @@ create table if not exists public.financial_publications (
   -- Recorded rather than recomputed, because the population changes and the
   -- question "was this publishable when it was published" has to stay
   -- answerable afterwards.
-  k_floor integer not null check (k_floor >= 1),
+  -- ROUND 18 FINDING 5. This was `>= 1`, which made the k=5 floor
+  -- caller-selectable: the reviewer reached the RPC with one selling and one
+  -- refunding pharmacy by passing k=1, and SQL stored it. The floor is 5 by
+  -- founder decision §8.5, so 5 is what the column accepts. A test that wants
+  -- to exercise the PREDICATE at another k still can — `periodEligibility`
+  -- takes k — but nothing can STORE a publication made under a weaker floor.
+  k_floor integer not null check (k_floor >= 5),
   contributor_count integer not null check (contributor_count >= 0),
   -- Days inside the period that CARRY TRADE and therefore need the refund-side
   -- floor, and how many of them cleared it. The application owns the rule
@@ -163,11 +169,29 @@ create table if not exists public.financial_publications (
   constraint financial_publications_days_eligible
     check (days_clearing_floor = days_requiring_floor),
 
-  -- A period with trade in it must itself clear the floor. A period with NO
-  -- trade (days_requiring_floor = 0) discloses nothing about anybody and may be
-  -- published with no contributors at all.
+  -- A PERIOD MUST HAVE TRADED, AND MUST CLEAR THE FLOOR.
+  --
+  -- ROUND 18 FINDING 3, and this constraint used to say the opposite:
+  -- `days_requiring_floor = 0 or contributor_count >= k_floor`, which let an
+  -- EMPTY period be published with zero contributors. I justified that on
+  -- privacy grounds — an empty month discloses nothing about anybody — and the
+  -- privacy reasoning was right while the rest was wrong twice over:
+  --
+  --   1. FINALITY. A month can look empty because no device has SYNCED, which
+  --      is the exact condition this whole mechanism exists to handle.
+  --      Publishing 0.00 freezes a figure that was never the figure, and the
+  --      database refuses every correction by design.
+  --   2. EXISTENCE. The reviewer's repro: publish an inactive month as zero,
+  --      and with empty sources the report shows no row. Add ONE late refund
+  --      and the report gains a published `0.00` row. The amount never moved,
+  --      but the ROW APPEARING discloses that a refund arrived. Round 3
+  --      finding 1 exists because a month with no sales appearing at all
+  --      announces the refund; publishing zero re-opened that by another door.
+  --
+  -- There is nothing to gain from publishing an empty period: the reader
+  -- already reports `no_activity` for it, accurately, with no snapshot.
   constraint financial_publications_cohort_eligible check (
-    days_requiring_floor = 0 or contributor_count >= k_floor
+    days_requiring_floor > 0 and contributor_count >= k_floor
   )
 );
 
@@ -291,6 +315,63 @@ begin
       using errcode = 'restrict_violation';
   end if;
 
+  -- ROUND 18 FINDING 3. An EMPTY period is not publishable. See the
+  -- `financial_publications_cohort_eligible` comment for both reasons; the
+  -- short one is that "empty" and "not synced yet" are indistinguishable here.
+  if p_days_requiring_floor = 0 then
+    raise exception
+      'refused: % records no trading activity. There is no figure to fix, and a period can look empty simply because no device has synced yet.',
+      to_char(p_period_start, 'YYYY-MM')
+      using errcode = 'restrict_violation';
+  end if;
+
+  -- A PERIOD STILL IN PROGRESS IS GUARANTEED TO CHANGE.
+  --
+  -- Not a reviewer finding — this one I went looking for after finding 3,
+  -- because refusing empty periods alone does not stop the sharper version of
+  -- the same act: publish December on December the 1st, after one trading day
+  -- that happens to clear the floor, and the month is frozen at a day's worth
+  -- of trade, irreversibly, by one click. A CHECK cannot express this because
+  -- `current_date` is not immutable, and the function is the only writer, so
+  -- here is where it belongs.
+  if p_period_end >= current_date then
+    raise exception
+      'refused: % has not ended (period_end %). A period still in progress is certain to change, and a published figure is never revised.',
+      to_char(p_period_start, 'YYYY-MM'), p_period_end
+      using errcode = 'restrict_violation';
+  end if;
+
+  -- REPUBLICATION AFTER A ROLLBACK.
+  --
+  -- ROUND 18 FINDING 4. The documented class-B reversal is `drop function` then
+  -- `drop table`, and the reviewer walked straight through it: drop both,
+  -- re-apply the migration, publish the same period at a DIFFERENT value, and
+  -- both calls report a first publication. My class-B justification claimed a
+  -- second value "would contradict the audit log and be detectable" — and
+  -- detectable is not prevented when nothing reads the log.
+  --
+  -- So this reads it. admin_audit_log is the class-C store that SURVIVES the
+  -- reversal, which is the whole reason the evidence was put there, and it is
+  -- now authoritative rather than merely informative: a period that was
+  -- published before cannot be published again at any value, even with the
+  -- serving table freshly empty.
+  if not exists (
+        select 1 from public.financial_publications fp
+         where fp.metric_family = p_metric_family
+           and fp.cohort_key = p_cohort_key
+           and fp.period_grain = 'month'
+           and fp.period_start = p_period_start)
+     and exists (
+        select 1 from public.admin_audit_log al
+         where al.action = 'publication.published'
+           and al.target = p_metric_family || ':' || p_cohort_key || ':'
+                           || to_char(p_period_start, 'YYYY-MM')) then
+    raise exception
+      'refused: % was published before and its serving row is absent. Restore it rather than publishing a new value -- republishing would create a second value for one period, which is the difference this table exists to prevent.',
+      to_char(p_period_start, 'YYYY-MM')
+      using errcode = 'restrict_violation';
+  end if;
+
   insert into public.financial_publications as fp (
     metric_family, cohort_key, period_grain, period_start, period_end,
     gross_paisa, refunds_paisa, value_paisa,
@@ -323,23 +404,52 @@ begin
 
   -- THE AUDIT ROW, in this transaction. A publication with no audit row cannot
   -- happen, because there is no path that writes one without the other.
-  -- Recorded on the repeat attempt too: who tried to publish an
-  -- already-published period is exactly the kind of thing an auditor asks.
+  --
+  -- ───────────────────────────── THE METADATA IS SPLIT, AND THAT IS A FIX
+  --
+  -- ROUND 18 FINDING 1 — I closed the report channel and opened an AUDIT
+  -- channel. This insert used to record the caller's freshly computed
+  -- `p_gross_paisa`, `p_refunds_paisa` and `p_source_digest` on EVERY attempt,
+  -- including the repeat. So:
+  --
+  --   publish with refunds 10000            -> audit row says refunds 10000
+  --   retry after a late refund, 10700      -> audit row says refunds 10700
+  --
+  -- The snapshot never moved. The two audit rows differ by exactly the 700
+  -- paisa, the audit page and its CSV display `meta`, and that is the round-1B
+  -- oracle rebuilt one table over. My own comment defended recording the
+  -- repeat and then put the figures in it.
+  --
+  -- A FIRST publication records full provenance, because those numbers ARE the
+  -- published figure and the audit row is its evidence. A REPEAT records who
+  -- tried, which period, and the value that was ALREADY published -- all three
+  -- already disclosed -- and nothing the caller computed. The attempt stays
+  -- auditable; the recomputation does not leak.
   insert into public.admin_audit_log (at, actor, actor_verified, role, action, target, outcome, meta)
   values (
     now(), p_published_by, true, 'super_admin',
     case when v_new then 'publication.published' else 'publication.already_published' end,
     p_metric_family || ':' || p_cohort_key || ':' || to_char(p_period_start, 'YYYY-MM'),
     'success',
-    jsonb_build_object(
-      'value_paisa', v_value,
-      'gross_paisa', p_gross_paisa,
-      'refunds_paisa', p_refunds_paisa,
-      'contributor_count', p_contributor_count,
-      'k_floor', p_k_floor,
-      'days_requiring_floor', p_days_requiring_floor,
-      'source_digest', p_source_digest
-    )
+    case when v_new then
+      jsonb_build_object(
+        'value_paisa', v_value,
+        'gross_paisa', p_gross_paisa,
+        'refunds_paisa', p_refunds_paisa,
+        'contributor_count', p_contributor_count,
+        'k_floor', p_k_floor,
+        'days_requiring_floor', p_days_requiring_floor,
+        'source_digest', p_source_digest
+      )
+    else
+      -- The STORED value, read back above, not the caller's. No gross, no
+      -- refunds, no digest, no contributor count: every one of those is a
+      -- recomputation, and a pair of recomputations is the disclosure.
+      jsonb_build_object(
+        'value_paisa', v_value,
+        'already_published', true
+      )
+    end
   );
 
   return query select v_id, v_new, v_value;

@@ -148,6 +148,30 @@ function stringify(manifest) {
 export const SUCCESSOR_MANIFEST_PATH = 'backend/supabase/migrations/post-e4-source-hashes.json';
 
 /**
+ * The ONLY paths a successor declaration may ever move.
+ *
+ * ROUND 18 FINDING 7. The allowlist lives HERE, with the consumer, and not in
+ * the generator that writes the manifest — because the generator obeying a rule
+ * is not the same as the rule being enforced. A hand-edited
+ * `post-e4-source-hashes.json` declaring a transition for
+ * `e4_postmigration_checks.sql` would otherwise be honoured by `supersededBy()`
+ * no matter how careful the generator was.
+ *
+ * These seven are exactly what declaring a post-E4 migration cannot avoid
+ * touching. Everything else in `E4_EVIDENCE_FILES` — the sealed acceptance SQL
+ * above all — can never be superseded, and a drift in one fails always.
+ */
+export const SUPERSEDABLE_EVIDENCE_FILES = Object.freeze([
+  'backend/supabase/pgtest/checkFile.ts',
+  'scripts/h9-prod-preflight.mjs',
+  'backend/supabase/migrations/rollback-classification.json',
+  'backend/supabase/migrations/ROLLBACK.md',
+  'backend/supabase/migrations/README.md',
+  'apps/mobile/tests/migration-rollback-classification.test.ts',
+  '.gitattributes',
+]);
+
+/**
  * The declared `{path: {e4, now}}` supersessions, or {} when there are none.
  *
  * READ AS JSON rather than imported from scripts/post-e4-evidence-manifest.mjs,
@@ -171,7 +195,15 @@ export function supersededBy() {
   }
   const declared = parsed?.supersedes;
   if (declared === null || typeof declared !== 'object' || Array.isArray(declared)) return {};
-  return declared;
+  // FILTERED AGAINST THE ALLOWLIST, here at the point of use. A manifest that
+  // declares a transition for a path outside it is not an error to report —
+  // it is simply ignored, so the drift it was trying to excuse is reported
+  // instead, which is the correct outcome and the one a tamperer least wants.
+  const allowed = {};
+  for (const [path, ends] of Object.entries(declared)) {
+    if (SUPERSEDABLE_EVIDENCE_FILES.includes(path)) allowed[path] = ends;
+  }
+  return allowed;
 }
 
 /**

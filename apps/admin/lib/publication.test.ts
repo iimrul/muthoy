@@ -250,10 +250,42 @@ describe('period eligibility', () => {
     expect(eligibility.reason).toContain('below the k=5 floor');
   });
 
-  test('a month with NO trade is eligible with zero contributors', () => {
+  test('a month with NO trade is NOT eligible, which this test used to assert the opposite of', () => {
+    // ROUND 18 FINDING 3. This read `expect(eligibility.eligible).toBe(true)`,
+    // and the reasoning behind it — an empty month discloses nothing about
+    // anybody — was right about privacy and silent about everything else. A
+    // month can look empty because nobody has SYNCED, and publishing 0.00
+    // freezes a figure that was never the figure. Worse: publishing an
+    // inactive month as zero means a later refund makes the report GAIN a
+    // `0.00` row, so the row's existence discloses the refund.
     const eligibility = periodEligibility([day('2026-10-01', 0, 0)], []);
-    expect(eligibility.eligible).toBe(true);
+    expect(eligibility.eligible).toBe(false);
     expect(eligibility.contributorCount).toBe(0);
+    expect(eligibility.daysRequiringFloor).toBe(0);
+    expect(eligibility.reason).toContain('no trading activity');
+  });
+
+  test('names the SALE side when the sale side is what failed', () => {
+    // ROUND 18 FINDING 8. `dayReleasable` fails when EITHER side is short, and
+    // the reason always said "refunding pharmacies" — so one seller and five
+    // refunders was refused with a sentence blaming the refunders. That is
+    // round 1B finding 7's defect: withholding for one reason, stating another.
+    const eligibility = periodEligibility(
+      [day('2026-10-01', 1, 6)],
+      ['a', 'b', 'c', 'd', 'e', 'f'],
+    );
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.reason).toContain('selling pharmacies');
+    expect(eligibility.reason).not.toContain('refunding');
+  });
+
+  test('names the REFUND side when the refund side is what failed', () => {
+    const eligibility = periodEligibility(
+      [day('2026-10-01', 6, 1)],
+      ['a', 'b', 'c', 'd', 'e', 'f'],
+    );
+    expect(eligibility.reason).toContain('refunding pharmacies');
+    expect(eligibility.reason).not.toContain('selling');
   });
 
   test('the day axis agrees with daysReleasable, which is the one shared rule', () => {
@@ -440,9 +472,71 @@ describe('every output path, and the boundary', () => {
     expect(csvDataRow(csv)[1]).toBe('4000.00');
     expect(pdf).toContain('4000.00');
     expect(netCellText(table)).toBe('4000.00');
-    // And the recomputation appears in none of them.
-    expect(csv).not.toContain('10800.00');
-    expect(pdf).not.toContain('10800.00');
+    // AND THE RECOMPUTATION APPEARS IN NONE OF THEM.
+    //
+    // ROUND 18 FINDING 9: these two lines excluded `10800.00`, which is the
+    // TWO-day fixture's recomputation. This test uses the one-day fixture,
+    // which recomputes to 5400.00 — so the assertions excluded a number the
+    // code could never have produced here, and would have tolerated the actual
+    // disclosure. A negative assertion aimed at the wrong number is the exact
+    // vacuity this file claims to guard against, in the test whose whole
+    // subject is which figure got out.
+    expect(csv).not.toContain('5400.00');
+    expect(pdf).not.toContain('5400.00');
+  });
+
+  test('a published month wins even when revisionSafe is true', () => {
+    // ROUND 18 FINDING 2. Snapshot resolution lived only inside the
+    // `!revisionSafe` branch, so this combination served 5400.00 — the
+    // recomputation — against a published 4000.00. Not reachable in production
+    // (the constant is false), and still wrong in the direction that matters:
+    // a published figure and a recomputation of the same period, both
+    // reachable, ARE the pair of answers the snapshot exists to eliminate.
+    const table = buildReportTable(
+      REPORT,
+      data({ ...eligibleMonth(['2026-10-01']), tallies: COMPLETE }),
+      query(WHOLE_OCTOBER),
+      { publications: lookupFor(record()), revisionSafe: true },
+    );
+    expect(netCellText(table)).toBe('4000.00');
+    expect(reportTextRows(table).flat().join(' ')).not.toContain('5400.00');
+  });
+
+  test('a FAILED lookup is captioned as an outage, not as policy', () => {
+    // ROUND 18 FINDING 6. `failed` collapsed into the same withheld cell with
+    // the same policy caption, so an outage and a deliberate withholding
+    // produced byte-identical output. The cell stays withheld — showing an
+    // unverified figure would be worse — but the caption now tells them apart.
+    const exploding: PublicationLookup = () => {
+      throw new Error('connection reset');
+    };
+    const failed = octoberTable(eligibleMonth(['2026-10-01']), exploding);
+    const withheld = octoberTable(eligibleMonth(['2026-10-01']));
+
+    expect(netCellText(failed)).toBe(WITHHELD_TEXT);
+    expect(netCellText(withheld)).toBe(WITHHELD_TEXT);
+    // Same cell, different caption. That is the whole fix.
+    expect(failed.subtitle).toContain('could NOT be read');
+    expect(failed.subtitle).toContain('not because policy withheld them');
+    expect(withheld.subtitle).not.toContain('could NOT be read');
+    expect(failed.subtitle).not.toBe(withheld.subtitle);
+  });
+
+  test('a failed lookup withholds even when revisionSafe is true', () => {
+    // A failed lookup means we do not KNOW whether a publication exists, and
+    // serving a recomputation against an unknown publication is the pair
+    // channel again. So it withholds in both modes.
+    const exploding: PublicationLookup = () => {
+      throw new Error('connection reset');
+    };
+    const table = buildReportTable(
+      REPORT,
+      data({ ...eligibleMonth(['2026-10-01']), tallies: COMPLETE }),
+      query(WHOLE_OCTOBER),
+      { publications: exploding, revisionSafe: true },
+    );
+    expect(netCellText(table)).toBe(WITHHELD_TEXT);
+    expect(reportTextRows(table).flat().join(' ')).not.toContain('5400.00');
   });
 
   test('CSV writes an EMPTY cell for a withheld month, never a placeholder', () => {

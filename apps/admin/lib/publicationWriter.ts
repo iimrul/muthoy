@@ -81,7 +81,21 @@ export interface PublicationWriterDeps extends AdminAuthzDeps {
    */
   readSource?: (month: string) => Promise<PublicationSource>;
   sinks?: readonly AdminAuditSink[];
-  k?: number;
+  /**
+   * Today, for the period-has-ended check. Injected so a test can drive it;
+   * it cannot weaken anything, because the RPC re-checks against the
+   * database's own `current_date` and that is the authority.
+   */
+  now?: () => Date;
+  // `k` IS DELIBERATELY ABSENT. It used to be here, defaulting to
+  // SUPPRESSION_K, "for tests" — and ROUND 18 FINDING 5 is that a test seam on
+  // a privacy floor is a production hole: a super_admin calling with
+  // `deps.k = 1` reached the RPC with one selling and one refunding pharmacy,
+  // and the database stored it because the column only required `k_floor >= 1`.
+  // The floor is 5 by founder decision §8.5, the column now requires 5, and
+  // there is no argument here that can lower it. A test that wants another k
+  // can still call `periodEligibility` directly — the predicate takes one —
+  // but nothing can publish under it.
 }
 
 /**
@@ -199,7 +213,32 @@ export async function publishMonthlySnapshot(
   // five times by fabrication forms it did not model, so a third derivation
   // site declares itself to the guard rather than being exempted from it.
   const pharmacyNetSales = netSalesPaisa(gross, refunds);
-  const k = deps.k ?? SUPPRESSION_K;
+  // THE FLOOR, not a parameter. See `PublicationWriterDeps`.
+  const k = SUPPRESSION_K;
+
+  // A PERIOD STILL IN PROGRESS IS CERTAIN TO CHANGE.
+  //
+  // Not a reviewer finding — I went looking for this after finding 3, because
+  // refusing an EMPTY period does not stop the sharper version of the same
+  // act: publish December on the 1st, after one trading day that happens to
+  // clear the floor, and the month is frozen at a day's worth of trade,
+  // irreversibly, by one click.
+  //
+  // The RPC refuses this too, against the database's own `current_date`, and
+  // that is the authority. This check exists so the operator gets a sentence
+  // instead of a SQLSTATE.
+  const today = (deps.now ?? (() => new Date()))().toISOString().slice(0, 10);
+  if (periodEndOf(month) >= today) {
+    await audit('publication.refused', 'denied', month, 'period_not_ended');
+    return {
+      ok: false,
+      message:
+        month + ' has not ended yet. A period still in progress is certain to change, '
+        + 'and a published figure is never revised — publish it after '
+        + periodEndOf(month) + '.',
+    };
+  }
+
   const eligibility = periodEligibility(
     daysOf(source),
     [...source.sales.map((row) => row.shopId), ...source.refunds.map((row) => row.shopId)],

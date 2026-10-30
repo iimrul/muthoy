@@ -50,7 +50,12 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { E4_EVIDENCE_FILES, MANIFEST_PATH, hashFile } from './e4-evidence-manifest.mjs';
+import {
+  E4_EVIDENCE_FILES,
+  MANIFEST_PATH,
+  SUPERSEDABLE_EVIDENCE_FILES,
+  hashFile,
+} from './e4-evidence-manifest.mjs';
 
 export const SUCCESSOR_MANIFEST_PATH = 'backend/supabase/migrations/post-e4-source-hashes.json';
 const MIGRATIONS_DIR = 'backend/supabase/migrations';
@@ -82,15 +87,48 @@ function e4Recorded() {
 }
 
 /**
- * Every E4-pinned evidence file whose bytes have moved, with both ends.
+ * The ONLY files a successor declaration is allowed to move.
+ *
+ * ROUND 18 FINDING 7, and it was the worst thing in this file. `currentSupersessions`
+ * iterated **every** entry in `E4_EVIDENCE_FILES`, which includes
+ * `backend/supabase/checks/e4_postmigration_checks.sql` — a sealed, hash-pinned
+ * acceptance artifact. The reviewer changed that file, regenerated this
+ * manifest, and **both** drift checks reported no drift, without touching
+ * `e4-source-hashes.json` at all. So the mechanism built to protect the chain
+ * declarations had quietly become a way to launder the sealed SQL they are
+ * checked against. The reviewed commit preserved the sealed bytes; the guard
+ * weakened their future protection, which is worse than not having built it.
+ *
+ * This list is therefore an ALLOWLIST, not a filter, and it contains exactly
+ * the seven files that declaring a post-E4 migration cannot avoid touching:
+ * the successor list, the preflight's chain tail, the rollback class, the two
+ * documents generated from it, the registry test that counts them, and the eol
+ * pin for the new hash-recorded paths.
+ *
+ * EVERYTHING ELSE IN `E4_EVIDENCE_FILES` CAN NEVER BE SUPERSEDED — notably
+ * `e4_postmigration_checks.sql`, `e4-admin-platform.pgtest.ts`,
+ * `e4-chain-succession.pgtest.ts`, `h9-cron-cleanup.pgtest.ts`,
+ * `h9-environment-parity.pgtest.ts` and `h9-prod-preflight.test.ts`. A drift in
+ * any of those fails, always, and no manifest regeneration can bless it.
+ *
+ * Adding a path here is a deliberate act that a reviewer will see as a diff on
+ * this constant, which is the point: the previous version let the same thing
+ * happen as a side effect of running `--write`.
+ */
+export const SUPERSEDABLE = SUPERSEDABLE_EVIDENCE_FILES;
+
+/**
+ * Every SUPERSEDABLE evidence file whose bytes have moved, with both ends.
  *
  * Computed from the tree, not declared by hand, so a path cannot be listed
- * with a `now` that is not actually on disk.
+ * with a `now` that is not actually on disk — and restricted to the allowlist,
+ * so a path outside it cannot be listed at all.
  */
 export function currentSupersessions() {
   const recorded = e4Recorded();
   const out = {};
   for (const path of E4_EVIDENCE_FILES) {
+    if (!SUPERSEDABLE_EVIDENCE_FILES.includes(path)) continue;
     const before = recorded[path];
     if (before === undefined) continue;
     const now = hashFile(path);

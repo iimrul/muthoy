@@ -58,8 +58,8 @@ function publishCall(args: PublishArgs = {}): string {
   const a = {
     metric: METRIC,
     cohort: COHORT,
-    start: '2026-09-01',
-    end: '2026-09-30',
+    start: '2026-08-01',
+    end: '2026-08-31',
     gross: 50_000,
     refunds: 10_000,
     value: 40_000,
@@ -216,7 +216,7 @@ describe('E4-B publication snapshots', () => {
     const row = await h.one<{ action: string; actor: string; outcome: string; value: string }>(`
       select action, actor, outcome, (meta->>'value_paisa') as value
         from public.admin_audit_log
-       where target = ${quote(`${METRIC}:${COHORT}:2026-09`)}
+       where target = ${quote(`${METRIC}:${COHORT}:2026-08`)}
          and action = 'publication.published'`);
     expect(row.action).toBe('publication.published');
     expect(row.actor).toBe(PUBLISHER);
@@ -232,7 +232,7 @@ describe('E4-B publication snapshots', () => {
              k_floor::text as k, contributor_count::text as contributors,
              days_requiring_floor::text as requiring, days_clearing_floor::text as clearing,
              period_end::text as period_end
-        from public.financial_publications where period_start = '2026-09-01'`);
+        from public.financial_publications where period_start = '2026-08-01'`);
     expect(Number(row.gross)).toBe(50_000);
     expect(Number(row.refunds)).toBe(10_000);
     expect(Number(row.value)).toBe(40_000);
@@ -243,7 +243,7 @@ describe('E4-B publication snapshots', () => {
     expect(Number(row.contributors)).toBe(6);
     expect(Number(row.requiring)).toBe(3);
     expect(Number(row.clearing)).toBe(3);
-    expect(row.period_end).toBe('2026-09-30');
+    expect(row.period_end).toBe('2026-08-31');
   });
 
   // ──────────────────────────────────── duplicate and concurrent publication
@@ -265,7 +265,7 @@ describe('E4-B publication snapshots', () => {
     expect(await publicationCount()).toBe(before);
     const stored = await h.one<{ value: string; digest: string }>(
       `select value_paisa::text as value, source_digest as digest
-         from public.financial_publications where period_start = '2026-09-01'`,
+         from public.financial_publications where period_start = '2026-08-01'`,
     );
     expect(Number(stored.value)).toBe(40_000);
     expect(stored.digest).toBe(DIGEST_A);
@@ -275,7 +275,7 @@ describe('E4-B publication snapshots', () => {
     const row = await h.one<{ n: string }>(`
       select count(*)::text as n from public.admin_audit_log
        where action = 'publication.already_published'
-         and target = ${quote(`${METRIC}:${COHORT}:2026-09`)}`);
+         and target = ${quote(`${METRIC}:${COHORT}:2026-08`)}`);
     // Who tried to publish an already-published period is exactly what an
     // auditor asks, so it is recorded rather than silently swallowed.
     expect(Number(row.n)).toBe(1);
@@ -291,7 +291,7 @@ describe('E4-B publication snapshots', () => {
     // transactions. The latter is a Postgres guarantee about unique indexes
     // rather than a property of this schema, and nothing here measures it.
     const refusal = await attemptAsOwner(
-      rawInsert(`${quote(METRIC)}, ${quote(COHORT)}, 'month', '2026-09-01', '2026-09-30',
+      rawInsert(`${quote(METRIC)}, ${quote(COHORT)}, 'month', '2026-08-01', '2026-08-31',
          1, 0, 1, 1, 0, ${quote(DIGEST_B)}, 5, 6, 1, 1, 'someone-else'`),
     );
     expect(refusal?.code).toBe('23505');
@@ -302,7 +302,7 @@ describe('E4-B publication snapshots', () => {
 
   it('refuses an UPDATE even from the table OWNER', async () => {
     const refusal = await attemptAsOwner(
-      "update public.financial_publications set value_paisa = 1 where period_start = '2026-09-01'",
+      "update public.financial_publications set value_paisa = 1 where period_start = '2026-08-01'",
     );
     // The owner has the privilege; the trigger is what refuses. This is the
     // case the REVOKE cannot cover — a later migration or an operator at a
@@ -311,7 +311,7 @@ describe('E4-B publication snapshots', () => {
     expect(refusal?.message).toContain('append-only');
     const row = await h.one<{ value: string }>(
       `select value_paisa::text as value from public.financial_publications
-        where period_start = '2026-09-01'`,
+        where period_start = '2026-08-01'`,
     );
     expect(Number(row.value)).toBe(40_000);
   });
@@ -319,7 +319,7 @@ describe('E4-B publication snapshots', () => {
   it('refuses a DELETE even from the table OWNER', async () => {
     const before = await publicationCount();
     const refusal = await attemptAsOwner(
-      "delete from public.financial_publications where period_start = '2026-09-01'",
+      "delete from public.financial_publications where period_start = '2026-08-01'",
     );
     expect(refusal?.code).toBe('23001');
     expect(await publicationCount()).toBe(before);
@@ -348,7 +348,7 @@ describe('E4-B publication snapshots', () => {
   it('refuses a period whose trading days did not all clear the floor', async () => {
     const refusal = await attempt(
       'service_role',
-      publishCall({ start: '2026-10-01', end: '2026-10-31', daysRequiring: 4, daysClearing: 2 }),
+      publishCall({ start: '2026-07-01', end: '2026-07-31', daysRequiring: 4, daysClearing: 2 }),
     );
     expect(refusal?.code).toBe('23001');
     // The reason has to be READABLE, or it is a refusal somebody works around.
@@ -359,34 +359,127 @@ describe('E4-B publication snapshots', () => {
   it('refuses a period with trade whose cohort is below the floor', async () => {
     const refusal = await attempt(
       'service_role',
-      publishCall({ start: '2026-10-01', end: '2026-10-31', contributors: 4 }),
+      publishCall({ start: '2026-07-01', end: '2026-07-31', contributors: 4 }),
     );
     expect(refusal?.code).toBe('23001');
     expect(refusal?.message).toContain('below the k=5 floor');
   });
 
-  it('ALLOWS a period with no trade at all and no contributors', async () => {
-    // NON-VACUITY FOR THE TWO RULES ABOVE. If every ineligible shape were
-    // refused and nothing were ever allowed, those tests would pass against a
-    // function that refuses everything. A month nobody traded in discloses
-    // nothing about anybody, so it publishes with zero contributors.
-    const rows = await h.as('service_role', null, async () =>
-      h.all<{ published_now: boolean }>(
-        publishCall({
-          start: '2026-08-01',
-          end: '2026-08-31',
-          gross: 0,
-          refunds: 0,
-          value: 0,
-          saleRows: 0,
-          refundRows: 0,
-          contributors: 0,
-          daysRequiring: 0,
-          daysClearing: 0,
-        }),
-      ),
+  it('refuses a period with NO TRADE, which this test used to assert the opposite of', async () => {
+    // ROUND 18 FINDING 3. This test was `it('ALLOWS a period with no trade at
+    // all and no contributors')`, and it existed as a NON-VACUITY CONTROL — to
+    // prove the refusal tests above were not passing against a function that
+    // refuses everything. So the test written to stop me fooling myself is the
+    // one that locked the defect in, and it did it while being the careful
+    // thing to do.
+    //
+    // Two reasons it was wrong. A month can look empty because nobody has
+    // SYNCED, so publishing 0.00 freezes a figure that was never the figure;
+    // and publishing an inactive month as zero means a later refund makes the
+    // report GAIN a `0.00` row, which discloses the refund by the row's
+    // existence even though the amount never moved.
+    //
+    // The non-vacuity control is now the eligible month in 'publishes an
+    // eligible month' above, which is a better control anyway: it exercises
+    // the path that matters rather than a degenerate one.
+    const refusal = await attempt(
+      'service_role',
+      publishCall({
+        start: '2026-06-01',
+        end: '2026-06-30',
+        gross: 0,
+        refunds: 0,
+        value: 0,
+        saleRows: 0,
+        refundRows: 0,
+        contributors: 0,
+        daysRequiring: 0,
+        daysClearing: 0,
+      }),
     );
-    expect(rows[0]!.published_now).toBe(true);
+    expect(refusal?.code).toBe('23001');
+    expect(refusal?.message).toContain('no trading activity');
+    const row = await h.one<{ n: string }>(
+      "select count(*)::text as n from public.financial_publications where period_start = '2026-06-01'",
+    );
+    expect(row.n).toBe('0');
+  });
+
+  it('refuses an all-zero row at the CONSTRAINT too, not only in the function', async () => {
+    const refusal = await attemptAsOwner(
+      rawInsert(`${quote(METRIC)}, ${quote(COHORT)}, 'month', '2026-06-01', '2026-06-30',
+         0, 0, 0, 0, 0, ${quote(DIGEST_A)}, 5, 0, 0, 0, 'x'`),
+    );
+    expect(refusal?.code).toBe('23514');
+    expect(refusal?.message).toContain('cohort_eligible');
+  });
+
+  it('refuses a period that has NOT ENDED, however eligible it looks', async () => {
+    // Not a reviewer finding. Refusing an EMPTY period does not stop the
+    // sharper version of the same act: publish a month on its first day, after
+    // one trading day that happens to clear the floor, and it is frozen at a
+    // day's worth of trade, irreversibly, by one click.
+    //
+    // A CHECK cannot express this -- `current_date` is not immutable -- so the
+    // function is where it lives, and the function is the only writer.
+    const refusal = await attempt(
+      'service_role',
+      publishCall({ start: '2099-01-01', end: '2099-01-31' }),
+    );
+    expect(refusal?.code).toBe('23001');
+    expect(refusal?.message).toContain('has not ended');
+  });
+
+  it('refuses a k_floor below the approved 5, so the floor is not caller-selectable', async () => {
+    // ROUND 18 FINDING 5. `k_floor >= 1` let a caller publish under a floor of
+    // their choosing: one selling and one refunding pharmacy, k=1, stored.
+    const refusal = await attempt(
+      'service_role',
+      publishCall({ start: '2026-05-01', end: '2026-05-31', k: 1, contributors: 1 }),
+    );
+    expect(refusal?.code).toBe('23514');
+    expect(refusal?.message).toContain('k_floor');
+  });
+
+  it('records NO recomputed money on a repeat attempt', async () => {
+    // ROUND 18 FINDING 1 — I closed the report channel and opened an audit
+    // channel. The repeat row used to carry the caller's FRESH
+    // `refunds_paisa`, so publishing at 10000 and retrying at 10700 put both
+    // numbers in a log the audit page and its CSV display, and their
+    // difference is the late refund. That is the round-1B oracle, one table
+    // over.
+    //
+    // The first publication (at the top of this file) recorded full provenance
+    // and should: those numbers ARE the published figure. The repeat must
+    // carry only what is already disclosed.
+    const repeat = await h.one<{ meta: Record<string, unknown> }>(`
+      select meta from public.admin_audit_log
+       where action = 'publication.already_published'
+         and target = ${quote(`${METRIC}:${COHORT}:2026-08`)}`);
+    const keys = Object.keys(repeat.meta).sort();
+    expect(keys).toEqual(['already_published', 'value_paisa']);
+    expect(Number(repeat.meta.value_paisa)).toBe(40_000);
+    // Named explicitly rather than inferred from the key list, because this is
+    // the assertion the finding was about.
+    expect(repeat.meta.refunds_paisa).toBeUndefined();
+    expect(repeat.meta.gross_paisa).toBeUndefined();
+    expect(repeat.meta.source_digest).toBeUndefined();
+  });
+
+  it('the FIRST publication still records full provenance, so the fix above is narrow', async () => {
+    const first = await h.one<{ meta: Record<string, unknown> }>(`
+      select meta from public.admin_audit_log
+       where action = 'publication.published'
+         and target = ${quote(`${METRIC}:${COHORT}:2026-08`)}`);
+    expect(Object.keys(first.meta).sort()).toEqual([
+      'contributor_count',
+      'days_requiring_floor',
+      'gross_paisa',
+      'k_floor',
+      'refunds_paisa',
+      'source_digest',
+      'value_paisa',
+    ]);
   });
 
   it('refuses a period that does not start on the first of a month', async () => {
@@ -417,7 +510,7 @@ describe('E4-B publication snapshots', () => {
 
   it('refuses a SECOND cohort, which is the complementary-release control', async () => {
     const refusal = await attemptAsOwner(
-      rawInsert(`${quote(METRIC)}, 'banani', 'month', '2026-09-01', '2026-09-30',
+      rawInsert(`${quote(METRIC)}, 'banani', 'month', '2026-08-01', '2026-08-31',
          1, 0, 1, 1, 0, ${quote(DIGEST_A)}, 5, 6, 1, 1, 'x'`),
     );
     // "all shops, September" minus "Banani, September" is "non-Banani,
@@ -430,7 +523,7 @@ describe('E4-B publication snapshots', () => {
   it('refuses a metric family that is not the declared one', async () => {
     const refusal = await attemptAsOwner(
       rawInsert(`'subscription_revenue_and_renewals', ${quote(COHORT)}, 'month',
-         '2026-09-01', '2026-09-30', 1, 0, 1, 1, 0, ${quote(DIGEST_A)}, 5, 6, 1, 1, 'x'`),
+         '2026-08-01', '2026-08-31', 1, 0, 1, 1, 0, ${quote(DIGEST_A)}, 5, 6, 1, 1, 'x'`),
     );
     // Muthoy's own billing is published without a pharmacy floor by founder
     // decision 4 and has no revision channel into protected data, so it has no
@@ -482,6 +575,29 @@ describe('E4-B rollback and reapplication', () => {
     await h?.close();
   });
 
+  /** Runs `sql` as `role` and reports the SQLSTATE rather than throwing. */
+  async function attemptHere(role: string, sql: string): Promise<{ code: string | null; message: string } | null> {
+    return h.as(role, null, async () => {
+      try {
+        await h.exec(sql);
+        return null;
+      } catch (error) {
+        const code =
+          error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+            ? (error as { code: string }).code
+            : null;
+        return { code, message: error instanceof Error ? error.message : String(error) };
+      }
+    });
+  }
+
+  it('publishes a period first, so the rollback below has something to lose', async () => {
+    const rows = await h.as('service_role', null, async () =>
+      h.all<{ published_now: boolean }>(publishCall()),
+    );
+    expect(rows[0]!.published_now).toBe(true);
+  });
+
   it('reverses by dropping the function and the table, which is what class B means', async () => {
     // ROLLBACK.md classifies migration 36 as B and states this exact pair, in
     // this order. A documented reversal nobody has executed is a claim; this
@@ -520,5 +636,40 @@ describe('E4-B rollback and reapplication', () => {
        where c.relname = 'financial_publications' and not t.tgisinternal`);
     // Two triggers, not four: a second apply must not stack them.
     expect(row.triggers).toBe('2');
+  });
+
+  it('REFUSES to republish a period at a new value after the rollback', async () => {
+    // ROUND 18 FINDING 4, and it broke my own class-B justification. I wrote
+    // that a republish at a different value "would contradict the audit log
+    // and be detectable" -- and the reviewer pointed out that detectable is
+    // not prevented when nothing reads the log. Drop, re-apply, publish the
+    // same period at 390.00, and both calls reported a first publication.
+    //
+    // So the function now reads it. `admin_audit_log` is the class-C store
+    // that SURVIVES this reversal, which is the whole reason the publication
+    // evidence was put there, and it is authoritative rather than merely
+    // informative: a period published once cannot be published again at any
+    // value, with the serving table freshly empty.
+    const refusal = await attemptHere(
+      'service_role',
+      publishCall({ refunds: 11_000, value: 39_000, digest: DIGEST_B }),
+    );
+    expect(refusal?.code).toBe('23001');
+    expect(refusal?.message).toContain('was published before');
+    const count = await h.one<{ n: string }>(
+      'select count(*)::text as n from public.financial_publications',
+    );
+    expect(count.n).toBe('0');
+  });
+
+  it('still allows a DIFFERENT period, so the rule above is not a blanket refusal', async () => {
+    // Non-vacuity. A guard that refused every publication after any rollback
+    // would pass the test above while making the table useless.
+    const rows = await h.as('service_role', null, async () =>
+      h.all<{ published_now: boolean }>(
+        publishCall({ start: '2026-07-01', end: '2026-07-31' }),
+      ),
+    );
+    expect(rows[0]!.published_now).toBe(true);
   });
 });

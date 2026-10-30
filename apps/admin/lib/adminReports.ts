@@ -71,6 +71,7 @@ import {
   periodEligibility,
   resolveMonthlyMoney,
   type PublicationLookup,
+  type PublishedMoney,
 } from './publication';
 import { formatCount, type PaymentOrderRow, type SubscriptionRow } from './adminViews';
 
@@ -898,6 +899,15 @@ function suppressRows(
    * FINDING 9 was about.
    */
   publishedBuckets: number;
+  /**
+   * How many money buckets could not be resolved because the publication
+   * lookup FAILED.
+   *
+   * ROUND 18 FINDING 6: an outage and a deliberate withholding produced a
+   * byte-identical report with the same policy caption. The cell stays
+   * withheld either way; this is what lets the caption tell them apart.
+   */
+  failedBuckets: number;
 } {
   // The withheld cell for one value column.
   //
@@ -947,6 +957,7 @@ function suppressRows(
   if (confidentiality === 'platform_billing') {
     return {
       rows: rows.map((row) => [row.key, ...row.values]),
+      failedBuckets: 0,
       suppressedBuckets: 0,
       // Muthoy's own billing is not published through the snapshot mechanism
       // and deliberately cannot be: the database CHECK on `metric_family`
@@ -968,70 +979,123 @@ function suppressRows(
   // would hide operational facts for no privacy gain. `netIndexes` is exactly
   // the refund-net money columns, so this reaches `refund_net_pharmacy_sales`
   // and nothing else.
-  if (!revisionSafe && netIndexes.length > 0) {
-    // E4-B. A month is published or it is not, bucket by bucket.
-    //
-    // THE PUBLISHED VALUE REPLACES THE RECOMPUTED ONE. `row.values` already
-    // holds `netExportCell(<recomputed net>)`, and that cell is DISCARDED for a
-    // published month in favour of the snapshot's figure. That substitution is
-    // the entire point: serving the recomputation would reintroduce the channel
-    // the snapshot exists to close, because the recomputation is what moves.
-    //
-    // Publications are whole-month only, so a day- or snapshot-grained money
-    // report gets an empty lookup rather than one keyed on something that is
-    // not a month. `assertAnswerablePeriod` already refuses a partial month
-    // before any row is built, so a month key here covers the same window the
-    // publication does.
-    const lookup: PublicationLookup =
-      publication.grain === 'month' ? publication.lookup : () => undefined;
-    const out: (readonly ReportCell[])[] = [];
-    let withheld = 0;
-    let published = 0;
+  // E4-B. THE PUBLICATION STATE OF EVERY MONEY BUCKET, resolved ONCE, before
+  // any gating runs.
+  //
+  // ROUND 18 FINDING 2 is why this is a map read by the one loop below rather
+  // than a branch of its own. It used to be a separate `!revisionSafe &&
+  // netIndexes.length > 0` branch that returned early — so the OTHER branch
+  // never consulted a publication at all, and released the recomputed figure
+  // instead. The reviewer passed `{ publications: lookup, revisionSafe: true }`
+  // against a published net of 4000.00 and read 5400.00, the recomputation,
+  // out of the report.
+  //
+  // Not reachable in production today, because `PUBLICATION_IS_REVISION_SAFE`
+  // is false and only tests pass `true`. Still wrong, and wrong in the
+  // direction that matters: a published figure and a recomputation of the same
+  // period, both reachable, ARE the pair of answers the snapshot exists to
+  // eliminate. So a publication wins in BOTH modes, and `revisionSafe` governs
+  // only what happens to a bucket with NO publication.
+  //
+  // THE PUBLISHED VALUE REPLACES THE RECOMPUTED ONE. `row.values` already holds
+  // `netExportCell(<the recomputed net>)`, and that cell is DISCARDED for a
+  // published month in favour of the snapshot's figure.
+  //
+  // Publications are whole-month only, so a day- or snapshot-grained money
+  // report gets an empty lookup rather than one keyed on something that is not
+  // a month. `assertAnswerablePeriod` already refuses a partial month before
+  // any row is built, so a month key here covers the same window the
+  // publication does.
+  const publicationLookup: PublicationLookup =
+    publication.grain === 'month' ? publication.lookup : () => undefined;
+  const moneyByRow = new Map<AggregateRow, PublishedMoney>();
+  if (netIndexes.length > 0) {
     for (const row of rows) {
-      const money = resolveMonthlyMoney(
-        row.key,
-        periodEligibility(row.subPeriodDays ?? [], row.contributorIds),
-        lookup,
-      );
-      if (money.kind === 'published') {
-        published += 1;
-        out.push([
+      moneyByRow.set(
+        row,
+        resolveMonthlyMoney(
           row.key,
-          ...row.values.map((value, index) =>
-            netIndexes.includes(index)
-              // THROUGH the shared subtraction, not around it. `netExportCell`
-              // takes a branded NetSales that only `netSalesPaisa` mints, so
-              // the published figure is rebuilt from its two published sides.
-              // The database CHECK value_paisa = gross_paisa - refunds_paisa
-              // makes this identical to what was published; a cast would have
-              // produced the brand without the guarantee.
-              ? netExportCell(netSalesPaisa(money.grossPaisa, money.refundsPaisa))
-              : value,
-          ),
-        ]);
-        continue;
-      }
-      // ROUND 3 FINDING 1: a bucket that exists ONLY because of its refunds is
-      // omitted rather than blanked. A blank row still announces that there was
-      // something to withhold, and for a month with no sales that announcement
-      // is the refund. Still true when the month is unpublished — and NOT true
-      // when it is published, which is why this test sits after the published
-      // branch rather than before the loop as a filter.
+          periodEligibility(row.subPeriodDays ?? [], row.contributorIds),
+          publicationLookup,
+        ),
+      );
+    }
+  }
+  let publishedBuckets = 0;
+  let failedBuckets = 0;
+
+
+  for (const row of rows) {
+    const money = moneyByRow.get(row);
+
+    // 1. A PUBLICATION WINS, unconditionally and before everything else.
+    if (money?.kind === 'published') {
+      publishedBuckets += 1;
+      out.push([
+        row.key,
+        ...row.values.map((value, index) =>
+          netIndexes.includes(index)
+            // THROUGH the shared subtraction, not around it. `netExportCell`
+            // takes a branded NetSales that only `netSalesPaisa` mints, so the
+            // published figure is rebuilt from its two published sides. The
+            // database CHECK `value_paisa = gross_paisa - refunds_paisa` makes
+            // this identical to what was published; a cast would have produced
+            // the brand without the guarantee.
+            ? netExportCell(netSalesPaisa(money.grossPaisa, money.refundsPaisa))
+            : value,
+        ),
+      ]);
+      continue;
+    }
+
+    // 2. A FAILED LOOKUP NEVER RELEASES MONEY, in either mode.
+    //
+    // ROUND 18 FINDING 6. `failed` used to collapse into the same withheld
+    // cell as "nothing is published", with the same policy caption, so a
+    // byte-identical CSV came out of an outage and out of a deliberate
+    // withholding. The cell is still withheld — showing a figure we could not
+    // verify would be worse — but it is COUNTED separately so the caption can
+    // say which happened.
+    //
+    // And it withholds even when `revisionSafe` is true: a failed lookup means
+    // we do not know whether a publication exists, and serving a recomputation
+    // against an unknown publication is the pair channel again.
+    if (money?.kind === 'failed') {
       if (row.existsWithoutRefunds === false) continue;
-      // ROUND 4 FINDING 1: only what is SHOWN is counted, so the subtitle
-      // cannot disclose an omitted bucket.
-      withheld += 1;
+      failedBuckets += 1;
+      suppressedBuckets += 1;
       out.push([
         row.key,
         ...row.values.map((value, index) =>
           netIndexes.includes(index) ? withheldNetCell() : value,
         ),
       ]);
+      continue;
     }
-    return { rows: out, suppressedBuckets: withheld, publishedBuckets: published };
-  }
 
-  for (const row of rows) {
+    // 3. THE POLICY: a recomputed pharmacy money figure is not released.
+    //
+    // FOUNDER DECISION 2. Reached only for a money bucket with no publication.
+    // `no_activity` and `withheld` both land here and both withhold, which is
+    // correct — neither has a figure to show.
+    if (money !== undefined && !revisionSafe) {
+      // ROUND 3 FINDING 1: a bucket that exists ONLY because of its refunds is
+      // omitted rather than blanked. A blank row still announces that there was
+      // something to withhold, and for a month with no sales that announcement
+      // is the refund.
+      if (row.existsWithoutRefunds === false) continue;
+      // ROUND 4 FINDING 1: only what is SHOWN is counted, so the subtitle
+      // cannot disclose an omitted bucket.
+      suppressedBuckets += 1;
+      out.push([
+        row.key,
+        ...row.values.map((value, index) =>
+          netIndexes.includes(index) ? withheldNetCell() : value,
+        ),
+      ]);
+      continue;
+    }
+
     // GATE 5 FINDING 4 — PER-VALUE GATING.
     //
     // Row-level gating alone was a real k=5 bypass. `activity_summary`
@@ -1104,7 +1168,7 @@ function suppressRows(
   // The k-floor path, reached only when publication is revision-safe by policy.
   // Nothing here reads a snapshot: these are the non-money aggregates and the
   // floor-governed counts, which have no publication identity.
-  return { rows: out, suppressedBuckets, publishedBuckets: 0 };
+  return { rows: out, suppressedBuckets, publishedBuckets, failedBuckets };
 }
 
 /**
@@ -1434,7 +1498,7 @@ export function buildReportTable(
   // §6i round 11: the net columns are resolved — and verified — HERE, on the
   // rows that become the exported bytes.
   const netIndexes = netValueIndexes(entry);
-  const { cells, suppressedBuckets, publishedBuckets } =
+  const { cells, suppressedBuckets, publishedBuckets, failedBuckets } =
     entry.kind === 'aggregate'
       ? (() => {
           const gated = suppressRows(built, netIndexes, entry.confidentiality, revisionSafe, {
@@ -1445,12 +1509,14 @@ export function buildReportTable(
             cells: gated.rows,
             suppressedBuckets: gated.suppressedBuckets,
             publishedBuckets: gated.publishedBuckets,
+            failedBuckets: gated.failedBuckets,
           };
         })()
       : {
           cells: built.map((row) => [row.key, ...row.values]),
           suppressedBuckets: 0,
           publishedBuckets: 0,
+          failedBuckets: 0,
         };
   // NOT flattened here. Round 12 finding 4: the text is produced by
   // `reportTextRows`, at the serializer, so there is no window between a
@@ -1484,13 +1550,28 @@ export function buildReportTable(
   // published value. A caption contradicting its own rows is GATE 5 FINDING 9,
   // and it would be the same defect in the other direction: understating what
   // has been disclosed.
-  if (!revisionSafe && netIndexes.length > 0) {
+  if (netIndexes.length > 0) {
+    // ROUND 18 FINDING 6 — AN OUTAGE IS NOT A POLICY.
+    //
+    // Said FIRST and unconditionally when it happened. A failed publication
+    // read and a deliberate withholding render the same empty money cell, and
+    // the caption was the only thing that could distinguish them — so it said
+    // "policy" for both, and an operator reading a withheld figure during an
+    // outage would conclude the floor was doing its job.
+    if (failedBuckets > 0) {
+      parts.push(
+        failedBuckets + ' money '
+        + (failedBuckets === 1 ? 'figure' : 'figures')
+        + ' could NOT be read — these are withheld because the published record '
+        + 'was unavailable, not because policy withheld them',
+      );
+    }
     if (publishedBuckets > 0) {
       parts.push(
         publishedBuckets + ' published from immutable snapshots'
         + (suppressedBuckets > 0 ? '; the rest withheld' : ''),
       );
-    } else {
+    } else if (!revisionSafe) {
       parts.push(REVISABLE_WITHHOLDING);
     }
   }
