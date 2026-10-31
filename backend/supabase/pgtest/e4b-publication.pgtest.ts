@@ -494,9 +494,32 @@ describe('E4-B publication snapshots', () => {
     // assertion catches the mutation at every hour, which is what a guard
     // against regression has to do.
     const source = migrationSql('20261030000000_e4b_publication_snapshots.sql');
-    expect(source).toContain("p_period_end >= (now() at time zone 'Asia/Dhaka')::date");
+
+    // ROUND 25 FINDING 1 made this stricter. `toContain` only checked that the
+    // Dhaka expression was PRESENT, so adding
+    // `or p_period_end >= <Dhaka today> - 1` kept the string and left 43/43
+    // pgtests green while changing the behaviour — the mutant refuses a
+    // September that the real guard publishes.
+    //
+    // So the comparison is pinned EXACTLY and counted. There is one
+    // `p_period_end >=` in this file and it is this statement; any added
+    // disjunct, any second comparison, and any change of column fails here.
+    const comparisons = [...source.matchAll(/p_period_end\s*>=/g)];
+    expect(comparisons).toHaveLength(1);
+    expect(source).toContain(
+      "if p_period_end >= (now() at time zone 'Asia/Dhaka')::date then\n",
+    );
     // And no bare `current_date` comparison survives anywhere in the file.
     expect(source).not.toMatch(/p_period_end\s*>=\s*current_date/);
+
+    // WHY THIS IS STRUCTURAL AND NOT BEHAVIOURAL, stated so the next reader
+    // does not take it for laziness. `>= today` and `>= today - 1` differ on
+    // exactly one input: a whole month whose end is yesterday in Dhaka. A
+    // month ends on its last day, so that input exists only on the FIRST of a
+    // month — any behavioural test for it would pass on thirty days out of
+    // thirty-one regardless of which implementation is present. The database
+    // clock cannot be injected here. So the text is what carries this, and the
+    // behavioural test below carries the part that can be executed.
   });
 
   it('refuses a period ending on the Dhaka day it is still inside, and accepts yesterday', async () => {

@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // Plain .mjs tooling, the same import style
 // migration-rollback-classification.test.ts uses for classify-migrations.mjs.
@@ -10,6 +11,7 @@ import {
   checkOrWrite,
   hashFile,
   SUPERSEDABLE_EVIDENCE_FILES,
+  manifestDrift,
   supersededBy,
 } from '../../../scripts/e4-evidence-manifest.mjs';
 import { currentSupersessions } from '../../../scripts/post-e4-evidence-manifest.mjs';
@@ -179,5 +181,127 @@ describe('declared supersession cannot bless a sealed artifact', () => {
       expect((ends as { e4: string }).e4, path).toBe(RECORDED.files[path]);
       expect((ends as { now: string }).now, path).toBe(hashFile(path));
     }
+  });
+});
+
+// ───────────────────────────── round 25: the negative tests, made adversarial
+
+describe('the supersession guard, with input a tamperer would actually supply', () => {
+  // ROUND 25 FINDING 3, and both halves were my fault in the same way.
+  //
+  // The test above claiming a HAND-EDITED manifest is ignored only read the
+  // REAL manifest, which declares nothing forbidden — so removing the
+  // allowlist filter in `supersededBy` left 12 of 12 tests green. And the
+  // changed-artifact test compared copied maps instead of invoking the
+  // checker, so making `checkOrWrite('--check')` return [] unconditionally
+  // ALSO left 12 of 12 green.
+  //
+  // A negative test that never supplies the adversarial input is not a
+  // negative test, and a gate nothing invokes is not a gate.
+
+  const SEALED = 'backend/supabase/checks/e4_postmigration_checks.sql';
+
+  it('IGNORES a declaration for the sealed SQL when one is actually present', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'e4b-supersede-'));
+    try {
+      const forged = join(dir, 'post-e4-source-hashes.json');
+      writeFileSync(
+        forged,
+        JSON.stringify({
+          supersedes: {
+            // Forbidden: the sealed acceptance SQL.
+            [SEALED]: { e4: 'a'.repeat(64), now: 'b'.repeat(64) },
+            // Allowed, so the test proves FILTERING rather than wholesale
+            // rejection of a manifest that contains anything forbidden.
+            'backend/supabase/pgtest/checkFile.ts': { e4: 'c'.repeat(64), now: 'd'.repeat(64) },
+          },
+        }),
+      );
+      const declared = supersededBy(forged) as Record<string, unknown>;
+      expect(declared[SEALED]).toBeUndefined();
+      expect(declared['backend/supabase/pgtest/checkFile.ts']).toEqual({
+        e4: 'c'.repeat(64),
+        now: 'd'.repeat(64),
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports drift for a changed artifact, and the checker is what says so', () => {
+    // Driven through the extracted comparison with synthetic inputs, so a
+    // checker that returned [] unconditionally fails this.
+    const recorded = {
+      files: { 'a.ts': 'a'.repeat(64) },
+      counts: { migrations: 1 },
+      expectedChain: ['20260813000000'],
+      h9BaselineUnchanged: { postmigrationChecks: 'x', migration34: 'y' },
+    };
+    const built = {
+      files: { 'a.ts': 'z'.repeat(64) },
+      counts: { migrations: 1 },
+      expectedChain: ['20260813000000'],
+      h9BaselineUnchanged: { postmigrationChecks: 'x', migration34: 'y' },
+    };
+    expect(manifestDrift(recorded, built, {})).toEqual(['a.ts']);
+  });
+
+  it('forgives that same drift ONLY when both ends are declared', () => {
+    const recorded = {
+      files: { 'a.ts': 'a'.repeat(64) },
+      counts: { migrations: 1 },
+      expectedChain: [],
+      h9BaselineUnchanged: { postmigrationChecks: 'x', migration34: 'y' },
+    };
+    const built = {
+      files: { 'a.ts': 'z'.repeat(64) },
+      counts: { migrations: 1 },
+      expectedChain: [],
+      h9BaselineUnchanged: { postmigrationChecks: 'x', migration34: 'y' },
+    };
+    // Both ends right: forgiven.
+    expect(
+      manifestDrift(recorded, built, { 'a.ts': { e4: 'a'.repeat(64), now: 'z'.repeat(64) } }),
+    ).toEqual([]);
+    // Wrong ORIGIN: still drift, so a file cannot be laundered through two
+    // undeclared changes.
+    expect(
+      manifestDrift(recorded, built, { 'a.ts': { e4: 'q'.repeat(64), now: 'z'.repeat(64) } }),
+    ).toEqual(['a.ts']);
+    // Wrong DESTINATION: still drift.
+    expect(
+      manifestDrift(recorded, built, { 'a.ts': { e4: 'a'.repeat(64), now: 'q'.repeat(64) } }),
+    ).toEqual(['a.ts']);
+  });
+
+  it('reports a recorded file that has vanished, and the baseline hashes', () => {
+    const base = {
+      counts: { migrations: 1 },
+      expectedChain: [],
+      h9BaselineUnchanged: { postmigrationChecks: 'x', migration34: 'y' },
+    };
+    expect(
+      manifestDrift({ ...base, files: { 'gone.ts': 'a' } }, { ...base, files: {} }, {}),
+    ).toEqual(['gone.ts (recorded but absent)']);
+    expect(
+      manifestDrift(
+        { ...base, files: {} },
+        { ...base, files: {}, h9BaselineUnchanged: { postmigrationChecks: 'CHANGED', migration34: 'y' } },
+        {},
+      ),
+    ).toEqual(['h9BaselineUnchanged.postmigrationChecks']);
+    expect(
+      manifestDrift(
+        { ...base, files: {} },
+        { ...base, files: {}, h9BaselineUnchanged: { postmigrationChecks: 'x', migration34: 'CHANGED' } },
+        {},
+      ),
+    ).toEqual(['h9BaselineUnchanged.migration34']);
+  });
+
+  it('the live tree reports no drift THROUGH the checker, not through a copy', () => {
+    // The positive case, invoking the real gate. Paired with the synthetic
+    // negatives above, an unconditional [] now fails one of the two.
+    expect(checkOrWrite('--check')).toEqual([]);
   });
 });

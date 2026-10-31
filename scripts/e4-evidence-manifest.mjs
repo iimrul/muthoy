@@ -184,8 +184,14 @@ export const SUPERSEDABLE_EVIDENCE_FILES = Object.freeze([
  * reported. Failing open here would be a privacy-adjacent gate that disables
  * itself when its input is broken.
  */
-export function supersededBy() {
-  const path = resolve(SUCCESSOR_MANIFEST_PATH);
+export function supersededBy(manifestPath = SUCCESSOR_MANIFEST_PATH) {
+  // The path is a PARAMETER so a test can point this at a manifest carrying a
+  // forbidden declaration. ROUND 25 FINDING 3: the test that claimed to prove a
+  // hand-edited manifest is ignored only read the REAL manifest, which declares
+  // nothing forbidden -- so removing the allowlist filter below left 12 of 12
+  // tests green. A negative test that never supplies the adversarial input is
+  // not a negative test.
+  const path = resolve(manifestPath);
   if (!existsSync(path)) return {};
   let parsed;
   try {
@@ -234,7 +240,20 @@ export function checkOrWrite(mode = '--check') {
   // FROM exactly the hash recorded here TO exactly the hash now on disk. A
   // file that moved twice, or whose declaration names the wrong origin, still
   // fails — and so does a file nothing declares at all.
-  const superseded = supersededBy();
+  return manifestDrift(recorded, built, supersededBy());
+}
+
+/**
+ * The comparison itself, as a pure function of three inputs.
+ *
+ * EXTRACTED for ROUND 25 FINDING 3. The suite could not tell a working checker
+ * from one that returned [] unconditionally, because the only test touching
+ * this compared copied maps instead of invoking it. A pure predicate can be
+ * driven with synthetic recorded/built pairs where the answer is known, which
+ * is the pattern this repository already uses for successorPinDrift and
+ * classificationDrift.
+ */
+export function manifestDrift(recorded, built, superseded) {
   const drift = [];
   for (const [filePath, hash] of Object.entries(built.files)) {
     const before = recorded.files?.[filePath];

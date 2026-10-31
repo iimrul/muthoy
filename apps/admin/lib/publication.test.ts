@@ -17,6 +17,7 @@ import { parseCsv } from '@muthoy/utils';
 import { adminReportExportQuerySchema } from '@muthoy/validation';
 import { SUPPRESSED_DISPLAY, SUPPRESSION_K, type DaySides } from './adminSuppression';
 import {
+  assertWholeMonthRange,
   buildReportTable,
   reportTextRows,
   reportToCsv,
@@ -630,6 +631,39 @@ describe('zero refunds and the k floor', () => {
     };
     expect(periodEligibility([fiftyDistinct, sixDistinctShops], cohort).eligible).toBe(true);
   });
+
+  test('deduplicates the SALE side, isolated from the refund side', () => {
+    // ROUND 25 FINDING 2. The test above duplicates BOTH sides, so replacing
+    // the sale side's `distinctCount(ids)` with `ids.length` left 230 targeted
+    // tests green — the refund side's deduplication still refused the fixture.
+    // One side was masking the other, which is the same shape as round 24
+    // finding 2 where the k floor masked the no-trade clause.
+    //
+    // Fifty repetitions of ONE seller, with six DISTINCT refunders: only the
+    // sale side can refuse this.
+    const duplicateSellers: DaySides = {
+      day: '2026-10-01',
+      saleShopIds: Array.from({ length: 50 }, () => 'shop-1'),
+      refundShopIds: ['a', 'b', 'c', 'd', 'e', 'f'],
+    };
+    const eligibility = periodEligibility([duplicateSellers], ['shop-1', 'a', 'b', 'c', 'd', 'e']);
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.reason).toContain('selling pharmacies');
+    expect(eligibility.reason).not.toContain('refunding');
+  });
+
+  test('deduplicates the REFUND side, isolated from the sale side', () => {
+    // The mirror, so neither side can be deleted while the other covers for it.
+    const duplicateRefunders: DaySides = {
+      day: '2026-10-01',
+      saleShopIds: ['a', 'b', 'c', 'd', 'e', 'f'],
+      refundShopIds: Array.from({ length: 50 }, () => 'shop-1'),
+    };
+    const eligibility = periodEligibility([duplicateRefunders], ['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(eligibility.eligible).toBe(false);
+    expect(eligibility.reason).toContain('refunding pharmacies');
+    expect(eligibility.reason).not.toContain('selling');
+  });
 });
 
 // ─────────────────────── 16-18. every output, and no way round the boundary
@@ -994,6 +1028,63 @@ describe('the withheld cell has two forms and they must not be confused', () => 
     // refunds" sits next to one in the preamble — so a true claim about the
     // money cell was written as a false claim about the file.
     expect(csvDataRow(csv).join('|')).not.toContain(SUPPRESSED_DISPLAY);
+  });
+});
+
+describe('the date remediation cannot be reverted undetected', () => {
+  // ROUND 25 FINDING 4. Restoring the previous month arithmetic and removing
+  // the bound validation left 230 tests green, while
+  // `{ from: '2026-10-01', to: '2026-13-00' }` was accepted again — because
+  // nothing reached these guards with malformed input independently of the
+  // request schema that had already rejected it earlier in the real flow.
+  //
+  // A control only reachable through another control that already refuses the
+  // input is a control nothing tests.
+
+  test('periodEndOf REFUSES an invalid month instead of inventing one', () => {
+    // The `?? 0` fallback this replaced returned `'2026-13-00'`, which
+    // `assertWholeMonthRange` then validated against itself.
+    expect(() => periodEndOf('2026-13')).toThrow(/not a calendar month/);
+    expect(() => periodEndOf('2026-00')).toThrow(/not a calendar month/);
+    expect(() => periodEndOf('2026-1')).toThrow(/not a calendar month/);
+    expect(() => periodEndOf('not-a-month')).toThrow(/not a calendar month/);
+    // And it still answers for every real month.
+    expect(periodEndOf('2026-01')).toBe('2026-01-31');
+    expect(periodEndOf('2026-12')).toBe('2026-12-31');
+  });
+
+  test('the whole-month range rule refuses a malformed bound DIRECTLY', () => {
+    // Called with the malformed bound the schema would normally have stopped,
+    // so the guard is exercised on its own rather than behind another one.
+    expect(() =>
+      assertWholeMonthRange({ from: '2026-10-01', to: '2026-13-00' }, 'The X report'),
+    ).toThrow(/not a calendar date/);
+    expect(() =>
+      assertWholeMonthRange({ from: '2026-00-00', to: '2026-10-31' }, 'The X report'),
+    ).toThrow(/not a calendar date/);
+    // A day that matches the shape but does not exist in its month.
+    expect(() =>
+      assertWholeMonthRange({ from: '2026-02-30', to: '2026-10-31' }, 'The X report'),
+    ).toThrow(/not a calendar date/);
+  });
+
+  test('and it still accepts every range it should', () => {
+    // Non-vacuity: a guard that refused everything would pass the test above
+    // and break the reports.
+    expect(() =>
+      assertWholeMonthRange({ from: '2026-10-01', to: '2026-10-31' }, 'X'),
+    ).not.toThrow();
+    expect(() => assertWholeMonthRange({ from: '2026-10-01' }, 'X')).not.toThrow();
+    expect(() => assertWholeMonthRange({ to: '2026-10-31' }, 'X')).not.toThrow();
+    expect(() => assertWholeMonthRange({}, 'X')).not.toThrow();
+    // A leap February, which is where an arithmetic month end could go wrong.
+    expect(() =>
+      assertWholeMonthRange({ from: '2028-02-01', to: '2028-02-29' }, 'X'),
+    ).not.toThrow();
+    // And a part-month range is still refused, for its own reason.
+    expect(() =>
+      assertWholeMonthRange({ from: '2026-10-01', to: '2026-10-15' }, 'X'),
+    ).toThrow(/answers for whole months only/);
   });
 });
 
