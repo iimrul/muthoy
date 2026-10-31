@@ -3,8 +3,10 @@
 **Date:** 2026-10-30, revised the same day after the founder's Round 9 decisions
 **Accepted application code:** `ef08537` (unchanged by this work)
 **Delivered:** `origin/main` at `87ec9dc`, CI run `41022095283` success
-**Delivered:** `origin/main` at **`d395ce8`** — 18 commits, dual-accepted and
-pushed; CI run `41052144668` **success**
+**Delivered:** `origin/main` at **`02501b9`** — the 18-commit delivery at
+`d395ce8` (CI `41052144668`), then 11 more commits carrying the publication
+snapshot and ten rounds of remediation (CI `41160054329`). Both successes are
+`lint-and-typecheck` only; neither ran a test.
 **Classification:** **CODE-COMPLETE AND DUAL-REVIEWED, NOT CLOSED.** See §5.15
 for the delivery record and §6 for what remains open.
 
@@ -741,20 +743,526 @@ claiming otherwise.
 
 ---
 
+## 5A. Step 1 — the publication snapshot, built
+
+**Commit `827ad2e`.** The mechanism §5.8 recorded as "unblocked but NOT built"
+is now built, with migration 36 under founder Option B.
+
+### 5A.1 What it closes, and the half it does not
+
+Two independent things withhold a pharmacy money figure. **This closes one.**
+
+| # | Reason a figure is withheld | After migration 36 |
+|---|---|---|
+| 1 | a RECOMPUTED figure can change, and the change is the disclosure | **closed.** A published figure is read from an immutable row |
+| 2 | the k=5 floor on the REFUND side of every trading day | **untouched, and at ten pharmacies it is the one that bites** |
+
+So the expected production behaviour of all of this, today, is to **publish
+nothing**. That is the correct answer for a population in which five distinct
+refunding pharmacies do not exist on a given day, and it is not a reason to
+weaken the floor. Anyone reading "the publication system is built" as "the
+money figures are now visible" has read it wrong.
+
+### 5A.2 The design decisions worth your attention
+
+**Class B by constraint, not by luck.** The obvious shape — publications as
+their own append-only evidence store — would have been a **second class C**
+migration, and class C means the only recovery is the restore H-11 C5 has never
+rehearsed. So the publication *evidence* is written into `admin_audit_log`,
+already class C, inside the same transaction, and `financial_publications` is
+the serving copy. One class-C store, not two. The reversal is **executed** in
+`e4b-publication.pgtest.ts`, not merely documented.
+
+**`service_role` has no INSERT.** The only writer is
+`publish_financial_snapshot()`, SECURITY DEFINER with a pinned `search_path`,
+which re-checks eligibility in SQL and writes the audit row in the same
+transaction. A publication without an audit row cannot exist, because no path
+writes one without the other. UPDATE, DELETE and TRUNCATE are refused by
+trigger **even for the table owner**.
+
+**One cohort, enforced by CHECK.** "All shops, October" minus "Banani, October"
+is "non-Banani, October", which need not clear any floor though both
+publications did. Complementary release is not solvable per-publication, so the
+control is to have no second cohort to difference against. Widening that CHECK
+is a privacy decision, not a schema change.
+
+### 5A.3 Option B, measured both ways
+
+| Act | Before Option B | Now |
+|---|---|---|
+| stage an undeclared migration | 13 tests failed across 4 files, 3 of them E4 acceptance evidence | **1 test fails**, in the live-chain gate, naming what to do |
+
+The five declarations moved together with the rollback class, the two generated
+documents and the `.gitattributes` eol pin. All five sealed artifacts —
+`e4-source-hashes.json`, migrations 34 and 35, both `*_postmigration_checks.sql`
+— are **byte-identical to `d395ce8`**, verified by `git diff`.
+
+### 5A.4 The signed evidence problem, and what I did instead of the easy thing
+
+Declaring a successor **necessarily** moves seven E4-pinned gate files:
+`POST_E4_MIGRATIONS` lives in `checkFile.ts`, the chain tail in
+`h9-prod-preflight.mjs`, the class letter in `rollback-classification.json`, and
+`ROLLBACK.md`/`README.md` are generated from it. There were three options:
+
+| | Option | Verdict |
+|---|---|---|
+| a | regenerate `e4-source-hashes.json` | **forbidden by name** — "Do not rewrite … Signed source-hash pins" — and it would destroy the only record of the E4 gate files at acceptance |
+| b | leave the drift unexplained | the gate exits 1 and a reader cannot tell an authorized successor from tampering |
+| c | **declare the transition at both ends** | implemented |
+
+`post-e4-source-hashes.json` records, per path, the hash E4 signed **and** the
+hash it moved to, and `e4-evidence-manifest.mjs` forgives a drift only when both
+match. That is strictly stronger than the status quo, where any drift is one
+undifferentiated failure.
+
+**What it is weaker than, stated rather than glossed:** "these bytes can never
+change". A file can now move once, to a declared value, and the `now` side is
+only as good as the review of the commit that wrote it. That is unavoidable the
+moment the chain is extended, and a fourth manifest would have the same property
+one level up.
+
+### 5A.5 Rounds 18 and 19 — fifteen more findings, and a pattern worth naming
+
+| Round | Revision | Verdict | Findings |
+|---|---|---|---|
+| 18 | `827ad2e` | **REVISE** | 3 HIGH, 4 MEDIUM, 2 LOW |
+| 19 | `a11a15b` | **REVISE** | 1 HIGH, 4 MEDIUM, 1 LOW |
+| 20 | `df8371a` | **REVISE** | 1 HIGH, 3 MEDIUM, 1 LOW |
+| 21 | `90e3d06` | **REVISE** | 2 MEDIUM, 1 LOW — **no HIGH** |
+| 22 | `48b2d59` | **REVISE** | 1 MEDIUM, 2 LOW |
+| 23 | `ce197bc` | **REVISE** | 1 MEDIUM, 2 LOW |
+| 24 | `595a33f` | **REVISE** | 2 MEDIUM, 2 LOW |
+| 25 | `c3386c4` | **REVISE** | 3 MEDIUM, 1 LOW |
+| 26 | `4345b10` | **REVISE** | 2 MEDIUM |
+| 27 | `02501b9` | **ACCEPT** | **none** |
+
+**Twenty-three findings, every one mine.** The trend across the whole batch now reads
+10:(2H,2M) → 11:(2H,2M) → 12:(1M,1L) → 13:(1M,2L) → 14:(1L) → 15:(1L) →
+16:(1L) → 17:ACCEPT → **18:(3H,4M,2L) → 19:(1H,4M,1L) → 20:(1H,3M,1L) → 21:(2M,1L)**. The jump at 18 is not
+noise: rounds 10–17 were reviewing tooling and documentation, and 18 was the
+first review of **new money-path code with a database behind it**.
+
+**THE PATTERN, which is the thing worth carrying forward.** Three of my nine
+round-18 fixes were reported in round 19 as *"remains open"*. I fixed the
+instance that was demonstrated and missed the class, three times out of nine:
+
+| Round 18 finding | What I fixed | What I missed |
+|---|---|---|
+| 5 — the k floor was caller-selectable through `deps.k` | removed `deps.k` | `revisionSafe`, the same seam one layer up — round 19 HIGH 1 |
+| 6 — failures captioned as policy | counted them separately | I counted AFTER the omission, so refund-only outages stayed silent — round 19 MEDIUM 4 |
+| 8 — the refusal named the wrong side | named the first failing day's side | the count still covered every failing day, so mixed input produced a confident false sentence — round 19 LOW 6 |
+
+**Twice more, a fix of mine opened a new channel rather than closing one:**
+
+- **Round 18 HIGH 1.** I closed the report channel and opened an **audit**
+  channel. The repeat-publish audit row carried the caller's freshly recomputed
+  refunds, so two attempts differed by exactly the late refund — the round-1B
+  oracle rebuilt one table over, in a log the audit page displays.
+- **Round 18 MEDIUM 7.** The supersession mechanism I built to protect the chain
+  declarations could **launder the sealed acceptance SQL** those declarations are
+  checked against. Building the protection and leaving a hole in the thing that
+  protects it is worse than not building it.
+
+**And one finding was my own test asserting the defect.**
+`it('ALLOWS a period with no trade at all and no contributors')` existed as a
+*non-vacuity control* — written to prove the refusal tests were not passing
+against a function that refuses everything. So the test written to stop me
+fooling myself is the one that locked the bug in, while being the careful thing
+to do. That is the single most useful thing in this record.
+
+**Rounds 20 and 21 repeated it twice more**, and round 20 is where I stopped
+patching instances and looked for a root. Three of its five findings came from
+one wrong decision: `publications` was a **lookup function**. A function cannot
+be enumerated, so the report could only serve months its source rows produced —
+remove the last source row behind a published month and the figure vanished from
+CSV and PDF. And failure could only be signalled by *throwing*, per month, so
+whether an outage appeared depended on which private buckets existed, which is
+the same leak my round-19 fix had **moved rather than closed**: I replaced a
+count with a boolean for exactly that reason, and a boolean set while walking
+rows is still a function of which rows exist.
+
+Making it a value — `readonly PublicationRecord[] | 'unavailable'` — closed all
+three at once. **That is the lesson I would keep from these rounds: when three
+findings in one review share a shape, the shape is the defect.**
+
+**Twice I introduced a fresh defect while fixing one, and caught both myself
+before committing:** renaming the set-level failure state left the withholding
+guard matching only the old name, so an unreadable set released a recomputation
+and reopened round 19's HIGH; and refusing a malformed record blanked its value
+while leaving its key, so a row labelled `2026-13` still appeared. A month that
+cannot be served must not become a row — the key is as much a published claim as
+the figure.
+
+**What the reviewer did better than I did.** It exhaustively checked the shared
+day predicate over 4,096 shapes (I checked eight); ran 42 manifest mutation
+cases and 54 count/floor/complement cases; and found `-infinity`, a valid
+`date` that defeated three controls at once **by making each of them NULL rather
+than wrong** — a CHECK fails only on FALSE.
+
+It also found two things I would not have thought to look for. **PostgREST caps
+a response at 1,000 rows**, so the audit cross-check I had just built compared
+two independently truncated sets above that size — and the truncation that makes
+audit history look *shorter* is the direction that releases money. And
+**`Date.UTC` normalises an out-of-range month**: `Date.UTC(2026, 13, 0)` is
+2027-01-31, so a record claiming `2026-13-01` validated against an expectation
+derived from itself and rendered a published row labelled `2026-13`. A boundary
+that builds its expectation out of its own input is not a boundary.
+
+**Still true at the end, as at the beginning:** Codex could not start vitest in
+any of eleven rounds (`spawn EPERM`). **There are two independent code reviews
+and one executed suite.** Nothing in this report should be read as claiming two.
+
+---
+
 ## 6. Is Batch 3 operationally closed?
 
 **No, and this report does not close it.**
 
-Mandatory gates that remain open: independent review of four commits (§5.3), a
-push and its CI (§5.4), E4-H (§5.5), E15 (§5.6), device acceptance (§5.7), and
-the publication snapshot (§5.8). Two further items are founder confirmations
-rather than work: the deployed `ADMIN_ROLES` value (§3.4) and the cross-device
-logout behaviour (§3.5, recorded in `admin-architecture-rbac.md` §6p).
+**Updated after Step 1.** Of the gates this section listed, three have closed
+and five have not:
 
-**Two of the ten Gate 7 blockers did close today**, by decision rather than by
-code: the billing cohort is accepted and recorded, and the migration question is
-decided and implemented.
+| Gate | Was | Now |
+|---|---|---|
+| independent review (§5.3) | PARTIAL | **closed TWICE** — rounds 10–17 on `d395ce8`, then rounds 18–27 on the publication snapshot, dual ACCEPT on `02501b9` |
+| push and CI (§5.4) | none since `87ec9dc` | **closed TWICE** — `d395ce8` (CI `41052144668`), then `02501b9` (CI `41160054329`); both lint/typecheck only, neither ran tests |
+| publication snapshot (§5.8) | unblocked, NOT built | **built, dual-accepted and DELIVERED** (§5A) — `02501b9` |
+| E4-H hosted apply (§5.5) | open | **open.** Now TWO migrations, in a forced order, and migration 35's class-C recovery is still untested |
+| H-11 C5 restore | open | **open, and blocked on two prerequisites** — see the package §4 |
+| E15 browser (§5.6) | open | **open.** No deployment; `chrome-devtools` failed to connect again today |
+| device acceptance (§5.7) | open | **open.** `bd0fa4d` does not certify current code |
+| E10–E14 | deferred | **catalogued, not closed** — see §7 item 14 |
+
+Two further items are founder confirmations rather than work: the deployed
+`ADMIN_ROLES` value (§3.4) and the cross-device logout behaviour (§3.5, recorded
+in `admin-architecture-rbac.md` §6p).
+
+**Three of the ten Gate 7 blockers closed by decision rather than by code:** the
+billing cohort is accepted and recorded, the migration question is decided, and
+Option B is now implemented rather than merely approved.
 
 **Batch 4 entry recommendation:** not yet offered. It is due once Batch 3 is
 genuinely closed, and the directive is explicit that no Batch 4 implementation
 begins without a founder GO.
+
+---
+
+## 7. THE GATE 7 OPERATIONAL CLOSURE REPORT
+
+The definitive handoff, in the twenty parts the directive asks for. Where an
+item is not satisfied it says so, and where evidence does not exist it says
+that rather than describing what the evidence would show.
+
+### 1. Executive classification
+
+**B — BATCH 3 TECHNICALLY ACCEPTED, OPERATIONAL GATES PENDING.**
+
+Not A. Classification A requires hosted, browser, device and founder gates to
+have passed, and four of those have not been attempted because each needs
+something this prompt does not authorize or this machine does not have.
+
+### 2. Actual final source revision
+
+| | |
+|---|---|
+| local `HEAD` | **`02501b9`** |
+| `origin/main` | `d395ce8` |
+| unpushed | **6 commits** — `a53e721` (delivery record), `827ad2e` (the publication snapshot), then `a11a15b`, `df8371a`, `90e3d06`, `48b2d59` (remediations for rounds 18 to 21) |
+
+### 3. Codex verdict
+
+**`ROUND 27: ACCEPT 02501b9`** — **no findings.** In its own words: *"No
+production defect confirmed in 02501b9. No regression found in suppressRows or
+buildReportTable."*
+
+That took **ten rounds**, 18 through 27, and **thirty-two findings, every one
+mine**:
+
+| Round | Revision | HIGH | MEDIUM | LOW |
+|---|---|---|---|---|
+| 18 | `827ad2e` | 3 | 4 | 2 |
+| 19 | `a11a15b` | 1 | 4 | 1 |
+| 20 | `df8371a` | 1 | 3 | 1 |
+| 21 | `90e3d06` | — | 2 | 1 |
+| 22 | `48b2d59` | — | 1 | 2 |
+| 23 | `ce197bc` | — | 1 | 2 |
+| 24 | `595a33f` | — | 2 | 2 |
+| 25 | `c3386c4` | — | 3 | 1 |
+| 26 | `4345b10` | — | 2 | — |
+| 27 | `02501b9` | — | — | — |
+
+**Twenty-three findings, every one mine**, and **three of my fixes were incomplete in each of rounds 19, 20 and 21** — see §5A.5, which is the part of this report I would read first if
+I were you. Remediated in `a11a15b` and `df8371a`. **Round 22, on `48b2d59`, is
+the verdict that matters; until it returns there is no Codex acceptance of the
+publication snapshot.**
+
+### 4. Claude verdict
+
+**ACCEPT `02501b9`**, recorded after round 27 on the same revision, with the
+limitations in §7.5 and §7.9 stated rather than waived.
+
+**And I would not have reached it alone.** My own verification on `827ad2e` was
+1640 passing tests, a 12/12 mutation probe, clean typecheck and clean lint, and
+I was ready to call it done. Round 18 then found three HIGH defects in it, one
+of which was a disclosure channel I had opened while closing another. Nine more
+rounds followed.
+
+**The shape of those thirty-two findings is the part worth keeping:**
+
+| | |
+|---|---|
+| were mine | **32 of 32** |
+| were defects in my fix to the previous round's defect | rounds 19, 20 and 21 each reported three such |
+| were my own TESTS rather than the implementation | all four in round 25, three of four in round 24, both in round 26 |
+| were a control I had written that locked in the defect it existed to catch | **three** — the no-trade pgtest, the CSV exclusion aimed at an impossible figure, and `readIsIncomplete(6, 5)` |
+| were a fact I asserted that was simply false | **two** — that the database clock could not be injected, and that rounds 24 and 25 were both entirely test findings |
+
+The last row matters most. Both times I used a wrong fact to justify a weaker
+piece of work: the clock claim justified a structural pin doing a behavioural
+test's job, and the miscount flattered my own record. The reviewer corrected
+both.
+
+### 5. Test totals
+
+Measured on **`02501b9`**, by me, locally, after Codex accepted it.
+
+| Gate | Result |
+|---|---|
+| **full repository vitest suite** | **6978 passed / 6978, 298 files, exit 0** |
+| Node suites (6 files) | **165 passed, 0 failed** |
+| PowerShell installer staging gate | **27 checks**; staging 0, execution 0, credentials 0, network 0 |
+| PowerShell path-lock probe | **13 passed, 0 skipped, 0 failed** |
+| workspace typecheck | **7 of 7** |
+| workspace lint | **7 of 7**, 0 errors, 2 pre-existing mobile warnings |
+| Next.js production build | **compiled successfully** |
+| E4 and E4-B manifests | no drift |
+| generated rollback documents | no drift |
+| pre-push audit | **23 of 23, all clear** -- 29 files in range |
+| mutation probes, rounds 18/24/25/26 | 12/12, 4/4, 10/10, 4/4 |
+| supersession laundering probe | **5 of 5 refused** |
+| successor byte-pin probe | 2 of 2 |
+
+### 5a. The full suite needed two runs, and the first one failed
+
+**Reported because the number alone would mislead.** The first full-suite run,
+at `maxThreads=4`, gave **6976 of 6978 with two failures and exit 1**:
+
+| Failing test | Duration |
+|---|---|
+| `handler-authorization.test.ts` -- refuses the legacy anon key as the bearer | **1,800,146 ms** |
+| `pre-ledger-upgrade.sqlite.test.ts` -- spelled the same way in both migrations | **1,473,943 ms** |
+
+Thirty and twenty-four minutes, for tests that take milliseconds. Both files
+are **unchanged since `d395ce8`** by `git diff`, and both passed **284/284**
+in isolation. The second name mentions migrations and I had just added one, so
+I checked rather than assumed: it compares the **SQLite** migrations 0006 and
+0010 in `apps/mobile/db/`, which this batch has not touched.
+
+The re-run at `maxThreads=2` was clean **and faster** -- 1531s against 4283s,
+with `collect` at 221s against 5408s. Fewer threads finishing sooner is
+over-subscription, not logic.
+
+**What I am not claiming is that this had nothing to do with me.**
+`e4b-publication.pgtest.ts` now creates THREE PGlite harnesses -- the main
+suite, the class-B rollback suite, and the fixed-clock suite -- each applying
+all 36 migrations, and each needing its own database for reasons recorded in
+the file. That raises the peak of a parallel run, so my additions are a
+plausible contributor to the starvation even though they did not break the
+logic. A reader deciding how to run this suite should know that.
+
+### 5b. What is still NOT corroborated
+
+Codex could not start vitest in any of the ten rounds (`spawn EPERM`). From
+round 24 it ran an in-memory fallback -- 308, then 285, then 295, then 301
+tests, including real PGlite suites -- which is the first execution on its
+side in this project. **It is still not this repository's suite**, so the
+standing caveat holds: there are two independent code reviews and **one**
+executed suite. Every count in the table above is my measurement.
+
+### 6. GitHub pushed SHA
+
+**`02501b9`** — eleven commits, `d395ce8..02501b9`, non-force, fast-forward.
+
+Verified by reading the tip back **FROM the remote** with `git ls-remote` rather
+than from a local ref: `02501b913d9ddf2d6fb684008d5b3a17f8cc38cf`, exactly the
+revision both agents accepted. 0 ahead / 0 behind afterwards, and `d395ce8` is
+still an ancestor, so nothing was rewritten.
+
+The pre-push audit that gated it: **23 of 23**, over 29 files — no secret shape
+in the commit messages, the patch, or the `HEAD` blobs of every file the range
+touched; all five sealed artifacts byte-identical to `d395ce8`; nothing from
+`audit-artifacts/` or the prototype; the index empty, so only committed work
+shipped; and the Preview worktree still detached at `bd0fa4d`.
+
+### 7. GitHub CI URL and job status
+
+Run **`41160054329`** on `02501b9` — **completed, success**:
+`github.com/iimrul/muthoy/actions/runs/41160054329`.
+
+| | |
+|---|---|
+| head_sha | `02501b9`, matching the pushed and accepted revision |
+| branch / event | `main` / `push` |
+| run status | completed |
+| conclusion | **success** |
+| jobs | **1** — `lint-and-typecheck`, completed, success, 02:36:49Z |
+
+The previous delivery was run `41052144668` on `d395ce8` — completed, success.
+
+**It has ONE job, `lint-and-typecheck`. It does not run tests.** Never read that
+green tick as evidence that any test executed. Everything in §7.5 is local.
+
+**And one correction to my own reporting.** While verifying this run I printed
+"no run yet" six times. That was wrong: the GitHub API was answering HTTP 403
+rate-limited, and my loop read `workflow_runs` off the error object and treated
+the absence as "no run". A query that checks the status code found the run
+immediately. An absent field is not an answer, which is the same mistake as
+every vacuous test in §5A.5 — a check that cannot distinguish "no" from
+"I could not ask".
+
+### 8. Publication Snapshot acceptance
+
+**Implemented, dual-accepted and delivered.** Codex `ROUND 27: ACCEPT 02501b9`
+after ten rounds; my own ACCEPT on the same revision; pushed as
+`d395ce8..02501b9` with CI `41160054329` success. Migration 36 creates
+`financial_publications` and `publish_financial_snapshot()`; the policy, writer,
+reader and report integration are built and tested; the reversal is executed
+rather than documented. Acceptance waits on round 19.
+
+**Applied to no hosted project, and no page passes the lookup.** That second
+part is deliberate: the table exists in no hosted database, so wiring a page
+now would turn a correct "withheld" into "failed" on every Admin money figure.
+
+### 9. Financial privacy limitations
+
+**The one sentence that matters: this does not make pharmacy money visible.**
+
+Two independent things withhold a figure. The snapshot closes revisability. The
+k=5 floor on the refund side of **every trading day** is untouched, and at ten
+pharmacies almost no day has five distinct refunding pharmacies — so almost
+nothing becomes eligible, and the expected output is to publish nothing.
+
+That is k-anonymity giving the right answer for a population in which five
+contributors do not exist. The three honest options remain what `daysReleasable`
+already records: withhold, stop publishing per-shop gross (accepted 8.2
+functionality), or accept the disclosure. **Only the first is mine to choose.**
+
+**Publication makes a figure STABLE, not CORRECT.** Stability is what closes the
+disclosure channel. Correctness against a device that syncs three days late is
+not achievable in an offline-first product, which is why provenance and drift
+detection exist and why empty and unfinished periods are now refused.
+
+### 10. Migration-chain and historical seal verification
+
+| Claim | Evidence |
+|---|---|
+| chain is 36 long, in strictly increasing unique version order | `live-chain-succession.pgtest.ts` |
+| migration 34, migration 35, `e4-source-hashes.json`, both `*_postmigration_checks.sql` | **byte-identical to `d395ce8`**, by `git diff` |
+| migration 36's bytes are pinned | `post-e4-source-hashes.json`, raw-byte SHA-256, verified to survive git check-out |
+| the sealed SQL cannot be laundered through supersession | allowlist + consumer-side filter; probe 5/5 |
+
+### 11. H-11 C5 restore evidence
+
+**NONE. No backup was taken and no restore was attempted.** Blocked on two
+prerequisites, both measured rather than assumed — see the package's §4:
+
+1. the only Postgres client tooling here is **18.6**, and the hosted projects
+   are not 18.x, so a dump/restore round-trip is not something this toolchain
+   can do correctly;
+2. there is **no safe isolated target** — the rehearsal project is the only
+   proof migration 34 applied, DEV holds real data, and a new project is a
+   hosted change this prompt does not authorize.
+
+The verification half already exists and is better than expected:
+`restore_baseline.sql` fingerprints each scope by row count, money total **and**
+digest. It needs running before and after, not writing.
+
+### 12. E4-H hosted evidence
+
+**NONE. No hosted SQL was run.** The package is prepared and now covers two
+migrations in a **forced order** — 35 then 36, because migration 36's function
+inserts into `admin_audit_log`, which 35 creates. Applying 36 first would not
+fail at apply time, which is worse than failing: the first publish would fail at
+runtime on a missing relation.
+
+**Two separate authorizations, not one.** 35 is class C with an untested
+recovery; 36 is class B and reverses by `drop function` then `drop table`.
+
+### 13. E15 browser evidence
+
+**NONE, and it cannot be produced from here.** No deployment exists — no
+`vercel.json`, no `.vercel`, no recorded URL — and the `chrome-devtools` MCP
+**failed to connect again in this session** (`CONNECT_TIMEOUT`). Needs an
+approved staging URL plus either that tool working or a human with devtools.
+
+### 14. E10–E14 disposition
+
+| Gate | What it needs | Blocks closure? |
+|---|---|---|
+| **E10** subscription override API | a founder decision plus money-path SQL under CLAUDE.md rule 10 | no — §8.3 ships without overrides, labelled |
+| **E11** `b4_refresh_entitlement_snapshot` | money-path SQL under rule 10 | **read the next paragraph** |
+| **E12** subscription lifecycle history | a migration — now mechanically unblocked by the same Option B machinery | no — MRR trend and churn ship as BLOCKED, labelled |
+| **E13** location consent record | a consent design plus a mobile capture flow | no — Maps ships an empty state |
+| **E14** map tile provider | an approved provider and a data-processing design | no — no third-party request is made until a URL is set |
+
+**E11 deserves your attention, and the plan's own wording is accurate but easy
+to misread.** Batch 3 "removes the surface and forbids the RPC by name". What
+that means precisely: the admin panel cannot call it, and a source scan enforces
+that. **The capability was never revoked** —
+`20260831000000_b4_commercial_platform.sql:632` still grants `execute` on
+`b4_refresh_entitlement_snapshot(uuid)` to `service_role`, and nothing revokes
+it. So anything holding the service-role key can still advance `verified_at`
+without rederiving entitlement, and `verified_at` is the offline paid-access
+ceiling. The mitigation is a surface removal, not a privilege removal.
+
+### 15. Eleven Admin page acceptance
+
+**NOT ACCEPTED. Zero of eleven verified in a browser.** Gated entirely on E15.
+No page is DONE by the playbook's own standard until the deployed devtools and
+bundle inspection passes.
+
+### 16. Two-device mobile acceptance
+
+**NOT ACCEPTED. Zero of twenty cases executed.** `bd0fa4d` does not certify
+current Batch 3 code. Needs an authorized current-revision Preview build at
+`com.muthoy.pos.preview` and two physical Android devices.
+
+### 17. Historical artifact reconciliation
+
+**COMPLETE.** Recorded in `h9-e4-artifact-reconciliation-2026-10-30.md` §4,
+including where the directive's own premise was wrong — seven unpushed commits
+rather than two, non-adjacent, and the named `5c8d691` was the commit that
+*removed* the literal. Recovery refs remain in place.
+
+### 18. Remaining founder decisions
+
+1. **E4-H target and the untested restore.** A project ref, and a decision about
+   migration 35's class-C recovery — accept that it is untested, or clear the
+   two §4 prerequisites first.
+2. **Migration 36**, separately: apply or hold.
+3. **A staging URL** for E15, confirmed as staging.
+4. **A current-revision Preview build** and two devices.
+5. **The deployed `ADMIN_ROLES` value** — interior whitespace or over 64
+   characters now refuses at boot.
+6. **Cross-device logout** — confirm or reverse. Reversing reopens the HIGH it
+   closed.
+7. **E11** — whether the un-revoked `execute` grant is acceptable in the
+   interim, given the panel can no longer call it.
+
+### 19. Production-release limitations
+
+- **No production deployment exists and none was created.**
+- No hosted migration was applied; the hosted schema is at migration 34 on the
+  rehearsal project and unverified elsewhere.
+- No physical device has run Batch 3 code.
+- Every pharmacy money figure in Admin is withheld, and will remain so at beta
+  scale even once migration 36 is applied.
+- CI verifies lint and typecheck only.
+- The E11 grant above.
+
+### 20. Final Batch 3 closure classification
+
+**B — BATCH 3 TECHNICALLY ACCEPTED, OPERATIONAL GATES PENDING.**
+
+Six mandatory gates are open: H-11 C5 restore, E4-H hosted apply, E15 browser
+acceptance, physical-device acceptance, and two founder confirmations. Nothing
+in this report should be read as closing any of them.
