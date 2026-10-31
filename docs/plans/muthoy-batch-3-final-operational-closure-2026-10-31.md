@@ -769,10 +769,35 @@ thing, and not of the gates that check the migration declarations.
 
 ## 11. Final commit and CI
 
-See §13.
+| | |
+|---|---|
+| Commits | `2ffad52` (code), `83f7606` (this report) |
+| Range pushed | `f0b4845..83f7606`, non-force, fast-forward confirmed |
+| Remote tip | `83f7606`, read back with `git ls-remote` |
+| CI run | **`41187573456` — completed / success** |
 
-CI runs `lint-and-typecheck` only. **It does not run the test suite.** Every
-test number in this report was produced locally and is labelled as such.
+### A standing claim of mine was wrong, and it was wrong in your favour
+
+Every previous report of mine — and the baseline in your own brief — says CI
+checks **only** lint and typecheck and does not run the test suite. **That is
+false.** I inherited it, carried it in my notes, and repeated it in two reports
+without ever opening the workflow.
+
+`.github/workflows/ci.yml` has a job *named* `lint-and-typecheck` which runs
+five things: `Lint`, `Typecheck`, **`Test` (`pnpm turbo run test`)**, and
+`H9 offline remediation contracts` (`pnpm test:h9-remediation`). I checked what
+`turbo run test` resolves to rather than assuming: `turbo run test --dry=json`
+reports `//#test` with command `vitest run` — the root task, which is the
+**entire repository suite**. The step took **484 seconds** and passed, and the
+H-9 Node contracts ran too.
+
+So this delivery has **two independent executions of the full suite**: mine
+locally (7024/7024, exit 0, 1401s) and GitHub's (484s on a larger runner, no
+competing load). That is strictly better evidence than I have been claiming,
+and the only reason I was understating it is that I did not check.
+
+The caveat that remains true: CI does **not** run the PowerShell suites, the
+mutation probes, the Next.js production build, or any hosted/device gate.
 
 ---
 
@@ -912,10 +937,15 @@ implementation.
 
 | | |
 |---|---|
-| Full suite | *recorded on completion* |
-| Codex round 29 | *recorded on completion* |
-| Final commit | *recorded on completion* |
-| CI run | *recorded on completion* |
+| Full suite, local | **7024/7024 across 299 files, vitest exit 0** (1401s at `maxThreads=2`) |
+| Full suite, CI | **passed** — `turbo run test` → `vitest run`, 484s, see §11 |
+| Codex verdict | **round 35: ACCEPT**, with the Admin metrics item as an open founder decision, "non-blocking for this delivery" |
+| Claude verdict | **ACCEPT** on the same revision |
+| Code commit | **`2ffad52`** |
+| This report | **`83f7606`** |
+| Pushed range | `f0b4845..83f7606`, non-force fast-forward |
+| CI run | **`41187573456` — completed / success** |
+| Pre-push audit | **29 of 29**, 16 files in range |
 | **Classification** | **TECHNICALLY ACCEPTED — OPERATIONAL GATES PENDING** |
 
 Batch 3 is **not** operationally closed, and this report does not claim it is.
