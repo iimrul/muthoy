@@ -4317,3 +4317,193 @@ H-11's C5 restore rehearsal. Each is enumerated with its owner in
 `docs/plans/release-readiness-checklist.md`. **No admin page is DONE until E15 —
 the deployed devtools check Volume 5 calls "a hard-spot verification, not a
 formality" — has been performed.**
+
+## 2026-10-31 — Batch 3: the six consolidated founder decisions, and five records that were missing
+
+*Decision:* Batch 3 stays **TECHNICALLY ACCEPTED — OPERATIONAL GATES PENDING**.
+One of the six decisions is **delivered**, one came back **NO on a prerequisite**,
+one is **refused with evidence**, and three are **prepared and waiting on
+authorisation or hardware**. Execution detail:
+`docs/plans/muthoy-batch-3-founder-decision-execution-2026-10-31.md`.
+
+*The six, with what actually happened:*
+
+**1. Migration 37 (E11) — the read-only preflight is prepared; the apply is not
+available as specified.** The founder asked that 37 be applied while 35 and 36
+remain held, and warned against treating functional independence as proof the
+hosted ledger supports that order. The warning was right and the answer is no.
+This project's only sanctioned applier is `supabase db push --linked`, whose
+unit of selection is every local migration absent from the remote ledger, in
+version order; the captured CLI 2.117.0 help receipt shows no per-migration
+flag. DEV's ledger tail is 34, so one push applies **35, 36 and 37 together**.
+The two ways to apply 37 alone — a repair row, or out-of-band SQL plus a repair
+row — are both forbidden by this project's own written policy ("Never use
+`--include-all` ... or migration repair"), and the second leaves an out-of-order
+ledger that only the forbidden flag could later push. **So Decision 1 and
+Decision 2 cannot both be executed as written, and Decision 1 is gated on
+Decision 3**: any push carrying 37 also carries class-C migration 35, whose
+recovery depends on the restore that has never been rehearsed.
+
+**2. E4-H — 35 and 36 are held.** Order 35 then 36 preserved; both applied to no
+hosted project; the E4 evidence manifest and the E4-B successor manifest show no
+drift and the five sealed declaration files are unchanged. Nothing was executed,
+which is the decision.
+
+**3. H-11 C5 — the minimum safe action is a capability READ, not a restore.**
+Checking the provider's documentation found **Supabase contradicting itself**:
+its Free-plan FAQ says there are no automatic backups, its Database Backups
+guide says every Free project is backed up daily, and nothing in its own
+documentation confirms that a restore can target a **separate** project. PITR is
+a paid add-on (about $100/month per 7 days). So the drill cannot be designed
+yet, which is what the repo's own prerequisite 1 has said all along. The
+recommended rehearsal is on a **disposable project seeded with the synthetic
+97,165-row fixture** — it exercises the provider's real restore path with zero
+pharmacy data, satisfying the data-protection constraint by construction rather
+than by procedure. If DEV itself is ever rehearsed, only `restore_baseline.sql`'s
+**per-table digests** leave the provider; no row does. A dump of DEV onto the
+Windows host is explicitly not the minimum safe action.
+
+**4. The Android Preview build is prepared and costed, and not submitted.** The
+Preview identity resolves from the current revision — `com.muthoy.pos.preview`,
+scheme `muthoy-preview`, "Muthoy POS Preview" — and the pinned `eas-cli@21.8.0`
+matches `eas.json` exactly. The account's entire build history is **three
+builds**, which also confirms from the provider's own record that the existing
+Preview APK is `bd0fa4d` on profile `internal`. Against the Free plan's 15
+Android builds a month, October used two, so **quota is not a constraint and one
+`internal` build costs $0**. Two corrections to earlier records: the local JDK 8
+blocks only a local build, not a cloud one; and `eas env:list` timed out, so
+whether EAS's `preview` environment carries the DEV Supabase configuration is
+**unconfirmed** and must be checked before any build. Zero devices are
+available, so the ten-step two-device checklist is PENDING, not failed.
+
+**5. The Admin Dashboard's entitlement counts — DELIVERED, by deletion.** The
+panel's TypeScript transcription of the status/date rule and its three exported
+predicates are **gone**, not patched: migration 37 made every server decision
+additionally require the snapshot to agree with the subscription behind it, and
+that is not transcribable because the evidence is in another table. The counts
+now consume `b4_effective_tier` by RPC, once per account, for the page's single
+instant — and `entitlementCounts` **takes no clock at all**, which is the real
+fix, because a function with no date in reach cannot drift from the rule that
+reads them. Evidence at three layers, none sufficient alone: real PostgreSQL for
+the 13-case matrix and the three reproductions, a new query-layer suite proving
+the RPC is asked at all and that a failure raises rather than answering with the
+half that replied, and the route contract proving the **rendered figure** moves
+when the verdict moves and the snapshot does not. A mutation probe narrowing one
+arm of the SQL failed exactly two tests and no others. **One honest limit:
+against a project where 37 is not yet applied, `b4_effective_tier` is the
+pre-E11 function, so the figures still over-report there.** Decision 5 does not
+close the misstatement by itself; applying 37 does.
+
+The independent review of this pass returned **four findings, all mine, two
+blocking**, and the first is worth recording for what it says rather than what
+it cost. `status` came from the snapshot read and the verdict from a later round
+trip, so an account that moved between them was reported as `trialing/pro` — a
+pair the SQL cannot produce, counting a paying customer as a trial. The
+reviewer's diagnosis: *"`p_now` fixes the clock, not the database snapshot."* I
+had spent the whole fix arguing clock-independence and introduced **snapshot**
+incoherence while doing it. The panel now re-reads the verdict-relevant columns
+and **refuses the page** if any of them moved, while deliberately ignoring the
+`verified_at`/`version` stamp that every device poll bumps — with a test for the
+refusal and a second for the non-refusal, because a check that is too strict
+fails as badly as one that is too loose. The reviewer could **not execute
+Vitest** (esbuild `spawn EPERM`, zero tests run) and said so; its findings came
+from its own PostgreSQL probes.
+
+**6. The logout wording was NOT shipped, because the behaviour it describes does
+not exist.** The founder approved the sentence "Signing out signs this shop out
+on every device", on a premise that came from my own closure report — which I
+wrote without opening the logout code. The code is the opposite, deliberately
+and with tests: the Logout button runs the narrowest possible clear and does not
+even drop the cloud token; `signOutDevice` uses `scope: 'local'` with a comment
+saying "on purpose" and a test asserting it, precisely so one handset's sign-out
+does not sign the owner out of their other phone; and a second device signing in
+inserts its own binding and revokes nothing. Sessions are cut across every
+device by four paths, none of them a logout: staff **deactivation** and a
+**role change** (`signOutAppUser`), a **PIN reset**
+(`revokeCallerSessionsGlobally`), and **rebinding an auth identity** — and for
+PIN reset the app already says so correctly. An Owner revoking a **device** is a
+different and TARGETED operation for live sessions: it cuts that handset and its
+bindings while a second handset keeps its own, but it also leaves a persistent
+enrollment hold, so enrolling the same actor on a fresh handset afterwards
+raises `MU070` and needs a second administrator. Two review rounds corrected
+this entry: the first because I had listed device revocation among the global
+paths, the second because "that device only" and a three-item list were both
+still incomplete. So there is no all-device logout to keep. Preserving the behaviour is
+satisfied by changing nothing; three wording options are in the execution record
+and the choice is the founder's. `ADMIN_ROLES` verification remains
+unperformable because nothing is deployed, but the validator already fails the
+panel closed at boot, and the staging procedure records only a count, a set of
+roles and a verdict — never a username or a value.
+
+*Five decisions that were made earlier and never recorded here:*
+
+**A. The Batch 3 financial privacy policy.** A pharmacy money figure is released
+only as an **immutable published snapshot**, never as a recomputation, because a
+recomputed figure can change and the change itself discloses the difference. On
+top of that sits a **k=5 floor on every trading day**, on both the selling and
+the refunding side. The consequence is stated rather than discovered later: at
+ten pharmacies the expected production behaviour is to **publish nothing**. No
+pharmacy coordinate is plotted at all — a capture timestamp is not an
+affirmative, versioned, revocable consent record, and no tile provider is
+configured — so no viewport around a pharmacy leaves the browser.
+
+**B. The publication snapshot (migration 36 / E4-B), and why it is class B
+rather than C.** It was the first migration whose rollback class was a **design
+constraint rather than an outcome**. Publication evidence is written to
+`admin_audit_log` — already class C — inside the same transaction, and
+`financial_publications` is only the serving copy. So discarding the serving
+table loses what the panel reads, not the record of what was published, and a
+later republication at a different value would contradict the audit log. The
+guard is exactly as strong as audit retention, which is an operator decision
+taken outside the application. This deliberately avoided creating a second
+class-C migration whose only recovery is the restore H-11 C5 has never
+rehearsed.
+
+**C. Migration succession after the H-9 seal.** H-9 sealed the chain at 34. Every
+later migration is a **successor with its own acceptance check**, never an edit
+to a sealed one — which is why `e4_postmigration_checks.sql` exists beside the
+byte-identical `h9_postmigration_checks.sql` rather than replacing it.
+`POST_E4_MIGRATIONS` in `backend/supabase/pgtest/checkFile.ts` is the
+authoritative successor list, the production preflight carries the same list, and
+a test asserts the two agree — so the declaration cannot drift from the files
+without a gate failing. A successor that is not declared makes the preflight's
+refusal lie, which is why 36 and 37 were declared on the day they were written
+and before either was applied anywhere.
+
+**D. The dual-agent acceptance process.** No revision is accepted on one
+reviewer's word: Claude and an independent Codex review must both ACCEPT **the
+same final source revision**, and the loop repeats until they do. Passing tests
+that do not exercise the claimed behaviour are not acceptance — which is the
+rule that produced this batch's mutation probes and negative controls. **Codex's
+inability to execute Vitest is disclosed whenever it persists** rather than
+smoothed over: across Batch 3's E11 review it ran the suite in one round out of
+eight, on a subset, and the report says so in those words. Eight rounds produced
+thirteen findings, every one of them mine, five of them defects in my own fixes.
+
+**E. iOS becomes B6-03 — and this supersedes a clause, which is recorded rather
+than rewritten.** The 2026-10-23 entry above gives Batch 6 "**exactly two
+deliverables and no third**". That clause is now **SUPERSEDED**: iOS delivery is
+approved as a third Batch 6 deliverable, **B6-03**. The 2026-10-23 entry keeps
+its original wording and this is its addendum, per that entry's own rule that
+records carry dated addenda instead of being rewritten. B6-03's scope is **not
+yet specified** and nothing in the repository implements it; the two existing
+bars still apply — no deliverable is DONE before real evidence, and final public
+launch stays blocked until every Batch 6 deliverable and every applicable
+release gate is accepted.
+
+*What this entry supersedes:* the closure report's §4 claim that migration 37
+"depends on B4 only" (it also needs migrations 23/25 for
+`h7_shop_billing_bootstrap_allowed`, now measured in both directions); the
+Decision 5 deferral recorded hours earlier, which is now delivered; and the
+premise behind Decision 6's wording. The historical entries above are unchanged.
+
+*Boundaries honoured without exception:* no hosted SQL executed, no hosted
+project altered, no migration applied anywhere, no credential retrieved or
+printed, no production deployment, no EAS build submitted, no paid resource
+consumed, no device operation, no `audit-artifacts/**` file modified. The
+mutation probe on migration 37 was reversed and its blob verified byte-identical
+(`d27580c8`), leaving `backend/supabase/migrations/` clean. The Preview worktree
+`D:\Muthoy-Preview-Test` is untouched at `bd0fa4d`. Both Supabase Free projects
+are untouched.
+
+*Batch 4 is not begun.*

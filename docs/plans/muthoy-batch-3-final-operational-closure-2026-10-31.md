@@ -220,15 +220,31 @@ dependency, measured:
 |---|---|---|---|---|
 | 35 | `20261023000000_e4_batch3_admin_platform` | **C** | — | first; creates `admin_audit_log` |
 | 36 | `20261030000000_e4b_publication_snapshots` | B | **35** | second |
-| 37 | `20261031000000_e11_entitlement_verification` | B | **B4 only** | any time |
+| 37 | `20261031000000_e11_entitlement_verification` | B | **B4 (21) + H-7 (23/25)** | after 23; independent of 35/36 |
 
 Migration 36's function inserts into `admin_audit_log`, so applying it before 35
 fails **at runtime, not at apply time** — the migration would appear to succeed.
 
-Migration 37's dependency was measured rather than assumed: a test applies the
-chain up to B4 only — with both 35 and 36 absent — then applies 37 and drives
-both of its answers. It also asserts 37's text contains none of 35's or 36's
-objects. **So 37 can be applied independently of the E4-H decision.**
+> **CORRECTION, 2026-10-31 (second pass).** This row said **"B4 only"**, and the
+> paragraph below it said the dependency had been *measured rather than
+> assumed*. The row was wrong and the measurement did not measure it. Migration
+> 37 calls `h7_shop_billing_bootstrap_allowed` three times — created by
+> migration 23 (`20260907000000`), amended by 25 (`20260907020000`). The test I
+> cited applies 37 onto a B4-only chain and **succeeds**, because a PL/pgSQL
+> body is not resolved at `CREATE` time, and it never called either H-7 gate —
+> so a missing dependency presented as independence. Two tests now measure both
+> halves: 37 on the **actual DEV chain (1–34)** answers on every gate it
+> redefines, including the bootstrap branch; and 37 on **B4 alone** raises
+> `42883 undefined_function` naming that helper. Nothing about the DEV apply
+> changes — DEV's ledger tail is migration 34, so 21, 23 and 25 are all applied
+> there — but the claim is now the narrower and true one: **37 is independent of
+> 35 and 36 specifically, not of the chain.** Apply-time success is not evidence
+> of a satisfied dependency.
+
+**37 is independent of 35 and 36 in SCHEMA terms. It is not independent of them
+in LEDGER terms**, which is a different question and the one Decision 1 asks.
+See the second-pass execution record,
+`muthoy-batch-3-founder-decision-execution-2026-10-31.md`, §1.
 
 Migration 35 remains class C with restore-dependent recovery, and that restore
 has still never been rehearsed against a real hosted backup. That is why
