@@ -484,6 +484,34 @@ describe('admin write power is bounded at the source', () => {
     expect(approved?.code).toContain(".lte('expires_at', now)");
   });
 
+  // E11 / Decision 5. The Dashboard's entitlement figures are now READ through
+  // an RPC, which is a different claim from the write allowlist above and needs
+  // its own assertion: the read path is only correct if service_role may call
+  // the function at all. Without the grant the page would raise AdminDataError
+  // and show an error notice instead of a figure -- a visible failure rather
+  // than a wrong number, but still a failure, and one a revoke somewhere in the
+  // chain could introduce silently.
+  test('the entitlement verdict RPC is readable by service_role, and by nobody public', () => {
+    expect(MIGRATIONS_SQL).toMatch(
+      /grant execute on function b4_effective_tier\(uuid,timestamptz\)[\s\S]{0,400}?to [a-z_,\s]*service_role/i,
+    );
+    // And it is NOT reachable from a browser session: the same chain revokes it
+    // from anon and authenticated, so the verdict cannot be probed by anyone
+    // holding only a shop's own token.
+    expect(MIGRATIONS_SQL).toMatch(
+      /revoke execute on function b4_effective_tier\(uuid,timestamptz\)[\s\S]{0,400}?from public,\s*anon,\s*authenticated/i,
+    );
+  });
+
+  test('the read path calls that RPC, and the dashboard query is where it does', () => {
+    const queries = ADMIN_SOURCES.find((source) => source.path === 'lib/adminPlatformQueries.ts');
+
+    expect(queries?.code).toContain(".rpc('b4_effective_tier'");
+    // A guard against the fix being undone by reinstating a local predicate:
+    // the file must not grow its own status/date reading of a snapshot.
+    expect(queries?.code).not.toMatch(/paidThrough.*>.*now|status === 'trialing'/);
+  });
+
   test('every other write goes through an existing SECURITY DEFINER RPC', () => {
     const approved = ADMIN_SOURCES.find((source) => source.path === APPROVED_WRITE_SITE);
     const rpcNames = [...(approved?.code.matchAll(/\.rpc\('([a-z0-9_]+)'/g) ?? [])].map((match) => match[1]);

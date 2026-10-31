@@ -33,6 +33,8 @@ const clientBox = vi.hoisted(() => ({
   // row whose `role` it cannot read, so every page fails closed and the test
   // measures nothing. A table nobody set answers empty.
   rowsByTable: {} as Record<string, Record<string, unknown>[]>,
+  /** `b4_effective_tier`'s answer per billing account id; unset means 'free'. */
+  effectiveTierByAccount: {} as Record<string, string>,
   error: undefined as string | undefined,
   // GATE 5 FINDING 13. `error` used to fail EVERY table, including
   // `admin_role_assignments` — which IS the authorization gate (§4.3 reads it
@@ -152,7 +154,22 @@ vi.mock('../lib/supabaseAdmin', () => ({
         insert: () => Promise.resolve({ data: null, error: null }),
         update: () => ({ eq: () => Promise.resolve({ data: null, error: null }) }),
       }),
-      rpc: () => Promise.resolve({ data: null, error: null }),
+      // E11 / Decision 5. The Dashboard asks `b4_effective_tier` for each
+      // account's entitlement verdict, so the double has to answer it. The
+      // verdict is STATED here, never derived from the snapshot fixture: it is
+      // an input to this app, and computing it in the test would reintroduce
+      // the second implementation the change exists to delete. Unset means
+      // 'free', which is what the function itself answers for an account with
+      // no snapshot.
+      rpc: (name: string, args: Record<string, unknown>) =>
+        Promise.resolve(
+          name === 'b4_effective_tier'
+            ? {
+              data: clientBox.effectiveTierByAccount[String(args.p_billing_account_id)] ?? 'free',
+              error: null,
+            }
+            : { data: null, error: null },
+        ),
     };
   },
 }));
@@ -260,6 +277,7 @@ beforeEach(() => {
   cookieStore.value = undefined;
   clientBox.calls = [];
   clientBox.rowsByTable = {};
+  clientBox.effectiveTierByAccount = {};
   clientBox.error = undefined;
   clientBox.healthyTables = ['admin_role_assignments', 'admin_audit_log'];
   vi.resetModules();
@@ -890,6 +908,24 @@ function seedPlatform(): void {
   clientBox.rowsByTable.billing_accounts = [{ id: ACCOUNT_ID, primary_shop_id: SHOP_ID }];
 }
 
+/**
+ * The three entitlement figures as the Dashboard actually PRINTS them.
+ *
+ * Read out of the rendered markup rather than asserted on a return value: the
+ * question these tests settle is what a founder reading the page would see, and
+ * a count that is correct in a variable and mis-wired into a tile is still a
+ * misstatement. `currently_paid_entitlements` renders the paid figure as its
+ * value and names the other two in its note.
+ */
+function entitlementFigures(html: string): { trial: number; paid: number; entitled: number } {
+  const paid = /Currently paid entitlements<\/p>[\s\S]*?tabular-nums[^>]*>(\d+)</.exec(html);
+  const note = /(\d+) trialing, (\d+) entitled in total/.exec(html);
+  if (paid === null || note === null) {
+    throw new Error('the Dashboard did not render the entitlement figures at all');
+  }
+  return { trial: Number(note[1]), paid: Number(paid[1]), entitled: Number(note[2]) };
+}
+
 describe('§8.1 the Dashboard renders its nine figures and all five alerts', () => {
   beforeEach(() => {
     setEnvironment({ founder: 'super_admin' });
@@ -1035,6 +1071,59 @@ describe('§8.1 the Dashboard renders its nine figures and all five alerts', () 
     }
     // And it rendered the fixture's own row, not an empty state.
     expect(html).toContain('Banani Pharmacy');
+  });
+
+  // ── E11 / Decision 5 ────────────────────────────────────────────────────
+  //
+  // The fixture's snapshot says pro / past_due with a future `paid_through`,
+  // and both assertions below use THAT SAME ROW unchanged. The only thing that
+  // differs is what `b4_effective_tier` answers about it. If the page still
+  // read the snapshot's own columns, the number could not move.
+  //
+  // This is the route-level half of the fix. The other two halves are
+  // `adminQueries.test.ts` (that the RPC is asked at all, once per account,
+  // for the page's own instant) and
+  // `backend/supabase/pgtest/e11-entitlement-verification.pgtest.ts` (that an
+  // unbacked claim really does answer 'free' on PostgreSQL).
+
+  test('a server verdict of pro makes the account count as currently paid', async () => {
+    await signInAs('founder', 'super_admin');
+    clientBox.effectiveTierByAccount = { [ACCOUNT_ID]: 'pro' };
+
+    const html = await render('./page');
+
+    expect(entitlementFigures(html)).toEqual({ trial: 0, paid: 1, entitled: 1 });
+  });
+
+  test('the SAME snapshot counts for nothing when the server answers free', async () => {
+    await signInAs('founder', 'super_admin');
+    clientBox.effectiveTierByAccount = {};
+
+    const html = await render('./page');
+
+    expect(entitlementFigures(html)).toEqual({ trial: 0, paid: 0, entitled: 0 });
+  });
+
+  test('a trial verdict is reported as a trial, not as paid', async () => {
+    await signInAs('founder', 'super_admin');
+    // b4_effective_tier answers 'ultra' for a live trial whatever the tier,
+    // and the snapshot's status is what separates the two figures.
+    clientBox.rowsByTable.entitlement_snapshots = [
+      {
+        billing_account_id: ACCOUNT_ID,
+        tier: 'free',
+        status: 'trialing',
+        trial_ends_at: '2026-11-10T00:00:00.000Z',
+        paid_through: null,
+        grace_ends_at: null,
+        verified_at: '2026-10-20T00:00:00.000Z',
+      },
+    ];
+    clientBox.effectiveTierByAccount = { [ACCOUNT_ID]: 'ultra' };
+
+    const html = await render('./page');
+
+    expect(entitlementFigures(html)).toEqual({ trial: 1, paid: 0, entitled: 1 });
   });
 
   test('all nine metric captions come from the manifest', async () => {

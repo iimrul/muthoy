@@ -75,6 +75,35 @@ export interface EntitlementRow {
   verifiedAt: string;
 }
 
+/**
+ * One account's entitlement AS THE SERVER DECIDES IT — not as the snapshot
+ * claims it.
+ *
+ * E11 / Decision 5. `effectiveTier` is `b4_effective_tier`'s own answer,
+ * fetched by RPC for the same instant the rest of the page is built for. That
+ * function requires the snapshot to AGREE with the `billing_subscriptions`
+ * row behind it (`b4_entitlement_claim_backed`), so an unbacked claim answers
+ * `'free'` here however confident the snapshot's own columns look.
+ *
+ * `status` is carried alongside because the tier alone cannot say WHY an
+ * account is entitled: `b4_effective_tier` answers `'ultra'` both for a live
+ * trial and for a paid Ultra plan. The snapshot's status label separates them,
+ * and it is a label, not a judgement — no date is compared against it.
+ *
+ * THERE IS NO TIMESTAMP IN THIS TYPE, deliberately. Every date the decision
+ * depends on was already consumed by the server. A consumer that wanted to
+ * re-derive the verdict would have nothing here to do it with, which is the
+ * point: the status/date rule had SIX copies before migration 37 and the
+ * seventh was in this app.
+ */
+export interface EntitlementVerdictRow {
+  billingAccountId: string;
+  /** The snapshot's own status label, carried verbatim. */
+  status: string;
+  /** `b4_effective_tier(billing_account_id, now)`: 'free' | 'pro' | 'ultra'. */
+  effectiveTier: string;
+}
+
 export interface AccountRow {
   id: string;
   principalOwnerUserId: string;

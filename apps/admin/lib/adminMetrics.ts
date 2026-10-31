@@ -1,32 +1,40 @@
 // Batch 3 §5 — the three money figures, defined ONCE and kept apart.
 //
-// PURE. No Supabase client, no Next import, no clock of its own: every function
-// takes the rows and the instant. That is what makes the predicates below
-// testable against a fixture carrying one row of every status, which is the
-// only way to know they are right.
+// PURE. No Supabase client, no Next import, no clock of its own: every
+// function takes the rows, and the ones that still judge a date take the
+// instant explicitly. That is what makes them testable against a fixture
+// carrying one row of every status, which is the only way to know they are
+// right.
 //
-// THE PREDICATE WAS NOT RE-DERIVED, AND IS NOW OUT OF DATE. It was copied from
-// `b4_user_has_premium` (20260831000000_b4_commercial_platform.sql:261-272),
-// which WAS the canonical definition — revision 2 of the plan invented its own
-// and got two cases wrong:
+// THE ENTITLEMENT VERDICT IS NO LONGER DERIVED HERE. It used to be: a
+// transcription of `b4_user_has_premium`
+// (20260831000000_b4_commercial_platform.sql:261-272) that re-derived the
+// status/date rule in TypeScript, with three exported predicates spelling out
+// its branches. Migration 37 (E11) made every server-side decision
+// additionally require the snapshot to AGREE with the `billing_subscriptions`
+// row behind it, and no transcription can follow that: the evidence lives in
+// another table.
 //
-//   - an ACTIVE row qualifies through EITHER paid_through OR grace_ends_at, so
-//     requiring paid_through alone excluded an active subscription inside its
-//     grace window;
-//   - a CANCELED row with paid_through in the future is still entitled, because
-//     access runs to the end of the period that was paid for.
+// So the transcription is GONE. `entitlementCounts` takes
+// `EntitlementVerdictRow`, carrying `b4_effective_tier`'s own answer, and it
+// takes NO CLOCK at all — see the function for why that is the real fix.
 //
-// Both are pinned by tests, and the branches are laid out in the SQL's order
-// because this file was a transcription of it.
+// WHY A SEVENTH COPY WAS NOT WRITTEN INSTEAD. Codex round 34 reproduced what
+// the transcription did: for an account the database treats as having no
+// entitlement whatsoever, `entitlementCounts` answered
+// `{trialing: 0, currentlyPaid: 1, entitled: 1}`. The defect was never the
+// arithmetic — it was that a second definition of the rule existed at all, and
+// so could drift from the first. There were SIX copies in SQL before migration
+// 37 consolidated them into one, and this file held the seventh. Re-deriving
+// the new two-table rule here would have made it the seventh again.
 //
-// IT IS NO LONGER A FAITHFUL TRANSCRIPTION. Migration 37 (E11) made
-// `b4_user_has_premium` require the snapshot to AGREE with the
-// `billing_subscriptions` row behind it. The predicates below still trust the
-// snapshot alone, so they count an unbacked snapshot as entitled while the
-// database answers `free`. See `isEntitledNow` for the reproduction and the
-// scope of the consequence — reporting only, no enforcement — and the Batch 3
-// closure report for the founder decision that closes it.
-//
+// WHAT IS STILL DEFINED HERE, deliberately: `isMrrEligible` and
+// `isActiveSubscriptionNow`. Both read `billing_subscriptions` rows, not
+// entitlement snapshots, and neither has a server-side counterpart to consume
+// — MRR is an admin reporting concept the database has no opinion about, and
+// it differs from entitlement by design (a canceled row is still entitled and
+// will not recur). They are not copies of the tier rule; they are different
+// questions asked of the evidence table itself.
 // THE THREE FIGURES, and what each is NOT:
 //
 //   MRR                              a forward-looking RUN RATE. Not cash.
@@ -41,7 +49,7 @@ import { addPaisa, asPaisa, type Paisa } from '@muthoy/types';
 import { dhakaMonthLabel } from './adminDashboard';
 import type {
   AccountRow,
-  EntitlementRow,
+  EntitlementVerdictRow,
   OfferingRow,
   PaymentOrderRow,
   SubscriptionRow,
@@ -49,6 +57,9 @@ import type {
 
 const ZERO: Paisa = asPaisa(0);
 const PAID_TIERS: readonly string[] = ['pro', 'ultra'];
+/** `b4_effective_tier`'s answer for an account with no entitlement. */
+const FREE_TIER = 'free';
+const TRIALING_STATUS = 'trialing';
 const MONTHS_PER_YEAR = 12;
 
 /**
@@ -67,55 +78,6 @@ function isAfter(timestamp: string | null, nowMs: number): boolean {
 }
 
 // ───────────────────────────────────────────────────────────────── predicates
-
-/** The canonical trialing branch, verbatim. */
-export function isTrialingNow(row: EntitlementRow, nowMs: number): boolean {
-  return row.status === 'trialing' && isAfter(row.trialEndsAt, nowMs);
-}
-
-/**
- * The canonical predicate MINUS the trialing branch: entitlement somebody is
- * paying, or has paid, for.
- *
- * `canceled` is included on the paid_through branch, deliberately — see the
- * header. `past_due` and `grace` qualify only through grace_ends_at.
- */
-export function isPaidEntitlementNow(row: EntitlementRow, nowMs: number): boolean {
-  if (!PAID_TIERS.includes(row.tier)) return false;
-  if (['active', 'canceled'].includes(row.status) && isAfter(row.paidThrough, nowMs)) return true;
-  return ['active', 'past_due', 'grace'].includes(row.status) && isAfter(row.graceEndsAt, nowMs);
-}
-
-/**
- * The status/date predicate in full — what `b4_user_has_premium` used to be.
- *
- * IT IS NO LONGER EQUIVALENT, AND THAT IS A KNOWN OPEN FINDING. Migration 37
- * made every server-side capacity decision require the snapshot to AGREE with
- * the `billing_subscriptions` row behind it, via
- * `b4_entitlement_claim_backed`. This predicate still trusts the snapshot
- * alone, so a snapshot carrying Pro/active with future dates and no
- * subscription behind it counts as entitled here while the server answers
- * `free`. Review round 34 reproduced exactly that: `entitlementCounts`
- * returned `{trialing: 0, currentlyPaid: 1, entitled: 1}` for an account the
- * database treats as having no entitlement, and an over-extended trial counts
- * too.
- *
- * It MISREPORTS and grants nothing — the reviewer confirmed no enforcement
- * copy remains in SQL — but a dashboard that reports an unpaid account as
- * entitled is a financial misstatement, so it is named as a founder decision
- * in the Batch 3 closure report rather than left implicit here.
- *
- * The fix is not another copy of the rule: the counts should consume the
- * server's answer, which already checks both halves — a subscription row backs
- * a paid claim, and `billing_accounts.launch_trial_granted_at` backs a trial.
- *
- * An earlier version of this comment said closing it required exposing that
- * grant timestamp to the Dashboard. That was wrong: the SQL reads it already,
- * so nothing new has to reach the panel. Round 35 corrected me.
- */
-export function isEntitledNow(row: EntitlementRow, nowMs: number): boolean {
-  return isTrialingNow(row, nowMs) || isPaidEntitlementNow(row, nowMs);
-}
 
 /**
  * The MRR predicate: the paid predicate MINUS `canceled`.
@@ -396,24 +358,43 @@ export function expiredWithoutCancellation(
 export interface EntitlementCounts {
   trialing: number;
   currentlyPaid: number;
-  /** Trialing plus currently paid: the canonical predicate's own population. */
+  /** Trialing plus currently paid: every account the SERVER treats as entitled. */
   entitled: number;
 }
 
+/**
+ * The three entitlement figures, counted off the server's verdict.
+ *
+ * NOTE THE SIGNATURE: no `nowMs`. There is nothing to compare a clock
+ * against, because `b4_effective_tier` already consumed every date the
+ * decision depends on — at the one instant the rest of the page is built for
+ * (adminPlatformQueries.ts passes it as `p_now`). A function that cannot see a
+ * date cannot drift from the rule that reads them.
+ *
+ * `effectiveTier` is `'free'` for an account with no entitlement, with an
+ * expired one, OR with a live-looking snapshot that no `billing_subscriptions`
+ * row and no trial grant backs. Those are one answer here precisely because
+ * they are one answer in the database.
+ *
+ * THE SPLIT IS A LABEL, NOT A SECOND JUDGEMENT. `b4_effective_tier` answers
+ * `'ultra'` for a live trial and the plan's tier for a live paid plan, so the
+ * tier alone cannot say which. The snapshot's `status` separates them, and the
+ * two branches are provably disjoint: read the CASE at migration 37, the
+ * `trialing` arm is the only one a `status = 'trialing'` row can reach, and no
+ * other status can reach it. So the total is added rather than re-counted —
+ * which the previous version could not do, its branches not being disjoint.
+ */
 export function entitlementCounts(
-  rows: readonly EntitlementRow[],
-  nowMs: number,
+  rows: readonly EntitlementVerdictRow[],
 ): EntitlementCounts {
   let trialing = 0;
   let currentlyPaid = 0;
   for (const row of rows) {
-    if (isTrialingNow(row, nowMs)) trialing += 1;
-    if (isPaidEntitlementNow(row, nowMs)) currentlyPaid += 1;
+    if (row.effectiveTier === FREE_TIER) continue;
+    if (row.status === TRIALING_STATUS) trialing += 1;
+    else currentlyPaid += 1;
   }
-  // Not trialing + currentlyPaid: the two branches are not provably disjoint,
-  // so the total is counted over the rows rather than added up.
-  const entitled = rows.filter((row) => isEntitledNow(row, nowMs)).length;
-  return { trialing, currentlyPaid, entitled };
+  return { trialing, currentlyPaid, entitled: trialing + currentlyPaid };
 }
 
 // ───────────────────────────────────────────────────────── the label guard

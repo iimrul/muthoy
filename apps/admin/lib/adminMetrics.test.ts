@@ -25,10 +25,7 @@ import {
   currentSubscriptionPerAccount,
   entitlementCounts,
   expiredWithoutCancellation,
-  isEntitledNow,
   isMrrEligible,
-  isPaidEntitlementNow,
-  isTrialingNow,
   metricById,
   monthlyContributionPaisa,
   monthlyRecurringRevenue,
@@ -39,7 +36,7 @@ import {
 } from './adminMetrics';
 import type {
   AccountRow,
-  EntitlementRow,
+  EntitlementVerdictRow,
   OfferingRow,
   PaymentOrderRow,
   SubscriptionRow,
@@ -48,19 +45,6 @@ import type {
 const NOW = Date.parse('2026-10-25T06:00:00.000Z');
 const PAST = '2026-10-01T00:00:00.000Z';
 const FUTURE = '2026-12-01T00:00:00.000Z';
-
-function entitlement(overrides: Partial<EntitlementRow> = {}): EntitlementRow {
-  return {
-    billingAccountId: 'account-1',
-    tier: 'pro',
-    status: 'active',
-    trialEndsAt: null,
-    paidThrough: FUTURE,
-    graceEndsAt: null,
-    verifiedAt: PAST,
-    ...overrides,
-  };
-}
 
 function subscription(overrides: Partial<SubscriptionRow> = {}): SubscriptionRow {
   return {
@@ -116,65 +100,82 @@ const OFFERINGS: readonly OfferingRow[] = [
   { tier: 'ultra', billingCycle: 'annual', amountPaisa: asPaisa(1_000_000), isActive: false },
 ];
 
-describe('the two cases revision 2 got wrong', () => {
-  test('an ACTIVE row inside its GRACE window, with paid_through past, is entitled', () => {
-    const row = entitlement({ status: 'active', paidThrough: PAST, graceEndsAt: FUTURE });
+// THE STATUS/DATE MATRIX IS NO LONGER TESTED HERE, because it is no longer
+// IMPLEMENTED here. Two describes used to live at this point: "the two cases
+// revision 2 got wrong" and "the canonical predicate, one row of every status",
+// thirteen cases plus the null, unparseable and strict-`>` boundary checks.
+// They tested a TypeScript transcription of `b4_user_has_premium`.
+//
+// The transcription is gone (see the module header), so those tests would now
+// have nothing to exercise. The coverage did not go with it: it MOVED, to
+// `backend/supabase/pgtest/e11-entitlement-verification.pgtest.ts`, where the
+// same matrix runs against `b4_effective_tier` itself on real PostgreSQL —
+// every status, both date branches, the free-tier case and the strict-`>`
+// boundary, on an account whose claim is backed so the matrix is what is under
+// test. That is a stronger test than this file could ever have been: it
+// exercises the function the server actually uses, rather than a copy of it
+// that was already two cases adrift once before.
 
-    expect(isPaidEntitlementNow(row, NOW)).toBe(true);
-    expect(isEntitledNow(row, NOW)).toBe(true);
+describe('entitlement counts follow the SERVER, not the snapshot', () => {
+  const verdict = (overrides: Partial<EntitlementVerdictRow> = {}): EntitlementVerdictRow => ({
+    billingAccountId: 'account-1',
+    status: 'active',
+    effectiveTier: 'pro',
+    ...overrides,
   });
 
-  test('a CANCELED row still inside paid_through is entitled', () => {
-    const row = entitlement({ status: 'canceled', paidThrough: FUTURE });
-
-    expect(isPaidEntitlementNow(row, NOW)).toBe(true);
-    expect(isEntitledNow(row, NOW)).toBe(true);
+  test('a live trial counts as trialing and pays nothing', () => {
+    // b4_effective_tier answers 'ultra' for a live trial whatever the tier.
+    expect(entitlementCounts([verdict({ status: 'trialing', effectiveTier: 'ultra' })]))
+      .toEqual({ trialing: 1, currentlyPaid: 0, entitled: 1 });
   });
-});
 
-describe('the canonical predicate, one row of every status', () => {
+  test('a paid Ultra plan is NOT read as a trial, though the tier is the same', () => {
+    // The whole reason `status` is carried alongside the tier.
+    expect(entitlementCounts([verdict({ status: 'active', effectiveTier: 'ultra' })]))
+      .toEqual({ trialing: 0, currentlyPaid: 1, entitled: 1 });
+  });
+
   test.each([
-    ['trialing, in trial', { status: 'trialing', tier: 'free', trialEndsAt: FUTURE }, true],
-    ['trialing, trial over', { status: 'trialing', tier: 'free', trialEndsAt: PAST }, false],
-    ['active, paid', { status: 'active', paidThrough: FUTURE }, true],
-    ['active, lapsed with no grace', { status: 'active', paidThrough: PAST }, false],
-    ['active, in grace', { status: 'active', paidThrough: PAST, graceEndsAt: FUTURE }, true],
-    ['past_due, in grace', { status: 'past_due', paidThrough: PAST, graceEndsAt: FUTURE }, true],
-    ['past_due, grace over', { status: 'past_due', paidThrough: PAST, graceEndsAt: PAST }, false],
-    ['grace, in grace', { status: 'grace', paidThrough: PAST, graceEndsAt: FUTURE }, true],
-    ['canceled, still paid', { status: 'canceled', paidThrough: FUTURE }, true],
-    ['canceled, past paid_through', { status: 'canceled', paidThrough: PAST }, false],
-    // A canceled row does NOT get the grace branch in the SQL.
-    ['canceled, in grace only', { status: 'canceled', paidThrough: PAST, graceEndsAt: FUTURE }, false],
-    ['expired', { status: 'expired', paidThrough: PAST }, false],
-    ['free tier, paid dates', { status: 'active', tier: 'free', paidThrough: FUTURE }, false],
-  ])('%s -> %s', (_label, overrides, expected) => {
-    expect(isEntitledNow(entitlement(overrides), NOW)).toBe(expected);
+    ['an expired trial the server already discounted', { status: 'trialing', effectiveTier: 'free' }],
+    ['a lapsed paid plan', { status: 'active', effectiveTier: 'free' }],
+    ['a free-tier account', { status: 'active', effectiveTier: 'free' }],
+    ['an account the server found UNBACKED', { status: 'active', effectiveTier: 'free' }],
+  ])('%s counts for nothing', (_label, overrides) => {
+    expect(entitlementCounts([verdict(overrides)]))
+      .toEqual({ trialing: 0, currentlyPaid: 0, entitled: 0 });
   });
 
-  test('a trialing row is premium but pays nothing, so it is NOT currently paid', () => {
-    const row = entitlement({ status: 'trialing', tier: 'free', trialEndsAt: FUTURE });
+  test('the two branches are disjoint, so entitled is their sum', () => {
+    const counts = entitlementCounts([
+      verdict({ billingAccountId: 'a1', status: 'trialing', effectiveTier: 'ultra' }),
+      verdict({ billingAccountId: 'a2', status: 'active', effectiveTier: 'pro' }),
+      verdict({ billingAccountId: 'a3', status: 'canceled', effectiveTier: 'pro' }),
+      verdict({ billingAccountId: 'a4', status: 'expired', effectiveTier: 'free' }),
+    ]);
 
-    expect(isTrialingNow(row, NOW)).toBe(true);
-    expect(isEntitledNow(row, NOW)).toBe(true);
-    expect(isPaidEntitlementNow(row, NOW)).toBe(false);
+    expect(counts).toEqual({ trialing: 1, currentlyPaid: 2, entitled: 3 });
+    expect(counts.trialing + counts.currentlyPaid).toBe(counts.entitled);
   });
 
-  test('a null date is not a future one', () => {
-    expect(isPaidEntitlementNow(entitlement({ paidThrough: null }), NOW)).toBe(false);
-    expect(isTrialingNow(entitlement({ status: 'trialing', trialEndsAt: null }), NOW)).toBe(false);
+  test('no rows is no entitlement, not a crash', () => {
+    expect(entitlementCounts([])).toEqual({ trialing: 0, currentlyPaid: 0, entitled: 0 });
   });
 
-  test('an unparseable date does not grant entitlement', () => {
-    // The wrong direction to fail would be the generous one.
-    expect(isPaidEntitlementNow(entitlement({ paidThrough: 'tomorrow' }), NOW)).toBe(false);
+  test('the function takes no clock, so no date can change its answer', () => {
+    // Not a style point. The defect this replaced was a SECOND reading of the
+    // same dates; `entitlementCounts.length` is the arity, and a single
+    // parameter is the guarantee that there is no instant to disagree about.
+    expect(entitlementCounts.length).toBe(1);
   });
 
-  test('the boundary is STRICTLY after, as the SQL `>` is', () => {
-    const exactly = new Date(NOW).toISOString();
-    expect(isPaidEntitlementNow(entitlement({ paidThrough: exactly }), NOW)).toBe(false);
-    expect(isPaidEntitlementNow(entitlement({ paidThrough: new Date(NOW + 1).toISOString() }), NOW))
-      .toBe(true);
+  test('MUTATION: counting a free verdict as entitled would differ', () => {
+    // Non-vacuity for the four cases above: they would all read 1 under the
+    // predicate this change deleted, which trusted the snapshot's own columns.
+    const free = [verdict({ status: 'active', effectiveTier: 'free' })];
+
+    expect(entitlementCounts(free).entitled).toBe(0);
+    expect(free.filter((row) => row.effectiveTier !== 'nonsense')).toHaveLength(1);
   });
 });
 
@@ -182,7 +183,11 @@ describe('MRR is forward-looking', () => {
   test('a canceled row counts as paid entitlement but NOT towards the run rate', () => {
     const canceled = { status: 'canceled', paidThrough: FUTURE };
 
-    expect(isPaidEntitlementNow(entitlement(canceled), NOW)).toBe(true);
+    // The entitlement half is now the server's to answer: a canceled plan
+    // keeps its tier until paid_through, so b4_effective_tier says 'pro'.
+    expect(entitlementCounts([{
+      billingAccountId: 'account-1', status: 'canceled', effectiveTier: 'pro',
+    }]).currentlyPaid).toBe(1);
     expect(isMrrEligible(subscription(canceled), NOW)).toBe(false);
   });
 
@@ -319,9 +324,13 @@ describe('MRR is forward-looking', () => {
 
     expect(monthlyRecurringRevenue({ subscriptions: rows, offerings: OFFERINGS, nowMs: NOW })
       .countedSubscriptions).toBe(1);
-    // And the canceled row IS still a paid entitlement, which is the asymmetry.
-    expect(isPaidEntitlementNow(entitlement({ status: 'canceled', paidThrough: FUTURE }), NOW))
-      .toBe(true);
+    // And the canceled row IS still a paid entitlement, which is the
+    // asymmetry. Asked the way the panel now asks it: the server still grants
+    // a canceled plan its paid tier until paid_through, so it counts towards
+    // *currently paid* while contributing nothing to the run rate.
+    expect(entitlementCounts([{
+      billingAccountId: 'a2', status: 'canceled', effectiveTier: 'pro',
+    }])).toEqual({ trialing: 0, currentlyPaid: 1, entitled: 1 });
   });
 
   test('MUTATION: excluding an active-in-grace row would differ', () => {
@@ -374,10 +383,10 @@ describe('the counts are named for what they measure', () => {
 
   test('the gap between ever-paid and currently-paid is itself information', () => {
     const counts = entitlementCounts([
-      entitlement({ billingAccountId: 'a1', status: 'active', paidThrough: FUTURE }),
-      entitlement({ billingAccountId: 'a2', status: 'expired', paidThrough: PAST }),
-      entitlement({ billingAccountId: 'a3', status: 'trialing', tier: 'free', trialEndsAt: FUTURE }),
-    ], NOW);
+      { billingAccountId: 'a1', status: 'active', effectiveTier: 'pro' },
+      { billingAccountId: 'a2', status: 'expired', effectiveTier: 'free' },
+      { billingAccountId: 'a3', status: 'trialing', effectiveTier: 'ultra' },
+    ]);
 
     expect(counts).toEqual({ trialing: 1, currentlyPaid: 1, entitled: 2 });
     expect(accountsEverPaid([

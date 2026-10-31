@@ -872,11 +872,31 @@ describe('the gate gives the same answer under any clock', () => {
  * What migration 37 actually depends on, measured, because the E4-H hosted
  * package has to state the apply order and "it is 37th in the directory" is not
  * a dependency. Migration 36 depends on `admin_audit_log`, which 35 creates, so
- * 36 before 35 fails at RUNTIME rather than at apply time. 37 is a different
- * shape: it needs only B4, so it can be applied whether or not 36 has been.
+ * 36 before 35 fails at RUNTIME rather than at apply time.
+ *
+ * 37 IS NOT "B4 ONLY", WHICH IS A CORRECTION. I wrote that into the closure
+ * report's dependency table, and the test below was what I pointed at as the
+ * measurement. It does not measure it: 37's two H-7 gates call
+ * `h7_shop_billing_bootstrap_allowed`, created by `20260907000000` (migration
+ * 23) and amended by `20260907020000` (migration 25), and a PL/pgSQL body is
+ * not resolved at CREATE time — so applying 37 onto a B4-only chain SUCCEEDS
+ * and only fails when one of those gates is called. The test below never called
+ * them, so a missing dependency looked like independence.
+ *
+ * The real dependency set is B4 (21) for the entitlement objects plus 23/25 for
+ * the bootstrap helper, and the two tests after it measure both halves: 37 on
+ * the actual DEV chain (1-34) answers, and 37 on B4 alone raises
+ * `undefined_function` from exactly that helper.
+ *
+ * None of this changes the hosted answer for DEV, whose ledger tail is
+ * migration 34 — 21, 23 and 25 are all long applied there. What it changes is
+ * the CLAIM: 37 is independent of 35 and 36 specifically, not of the chain.
  */
 describe('migration 37 dependency, for the hosted apply order', () => {
   const B4 = '20260831000000_b4_commercial_platform.sql';
+  const H7 = '20260907000000_h7_security_hardening.sql';
+  /** The DEV project's recorded ledger tail: migration 34. */
+  const M34 = '20261015000000_h9_api_role_table_privileges.sql';
 
   it('applies and works on the B4-era chain alone, with 36 absent', async () => {
     // Everything up to and including B4 -- so neither migration 35 (which
@@ -915,15 +935,135 @@ describe('migration 37 dependency, for the hosted apply order', () => {
     }
   }, 90_000);
 
-  it('names B4 as the only migration it reads objects from', () => {
+  // ── The two halves of the real dependency ───────────────────────────────
+
+  it('applies on the ACTUAL DEV chain (1-34) and all five redefined gates answer', async () => {
+    // This is the apply Decision 1 is about: DEV's ledger tail is migration 34,
+    // and 35/36 are pending. The B4-only test above is a weaker chain, and in
+    // one respect a misleading one -- it leaves out the H-7 migration whose
+    // helper 37's gates call.
+    const h = await createBareHarness();
+    try {
+      for (const name of migrationFiles().filter((name) => name <= M34)) {
+        await h.exec(migrationSql(name));
+      }
+      // 35 and 36 really are absent, which is the state being tested.
+      expect(await h.one<{ audit: boolean; publications: boolean }>(
+        `select to_regclass('public.admin_audit_log') is not null as audit,
+                to_regclass('public.financial_publications') is not null as publications`,
+      )).toEqual({ audit: false, publications: false });
+
+      await h.exec(migrationSql(E11_MIGRATION));
+      await seedShops(h);
+      const accountId = (await h.one<{ id: string }>(
+        'select id::text as id from billing_accounts where principal_owner_user_id=$1::uuid',
+        [OWNER_A],
+      )).id;
+
+      // The stamp works, and refuses an unbacked claim.
+      expect(await refusal(h, REFRESH, [accountId])).toBeNull();
+      await h.one(
+        `update entitlement_snapshots set tier='pro',status='active',trial_ends_at=null,
+           paid_through=now()+interval '30 days',grace_ends_at=now()+interval '37 days'
+         where billing_account_id=$1::uuid returning billing_account_id`,
+        [accountId],
+      );
+      expect((await refusal(h, REFRESH, [accountId]))?.code).toBe('MU037');
+
+      // AND the two H-7 write gates answer, including on the branch that
+      // reaches h7_shop_billing_bootstrap_allowed -- a shop with no billing
+      // account. Merely installing them proves nothing; the next test shows
+      // why.
+      await h.one(
+        `update shops set billing_account_id=null where id=$1::uuid returning id`, [SHOP_B],
+      );
+      expect(await refusal(h, 'select b4_shop_write_permitted($1::uuid) as ok', [SHOP_B]))
+        .toBeNull();
+      expect(await refusal(h, 'select b4_user_within_current_staff_limit($1::uuid) as ok', [STAFF_A]))
+        .toBeNull();
+      expect(await refusal(h, 'select b4_user_has_premium($1::uuid) as ok', [OWNER_A])).toBeNull();
+
+      // STAFF ADMISSION and RECONCILIATION -- the two gates the first version
+      // of this test did not call, while its name claimed "every gate". The
+      // reviewer proved the omission by replacing b4_staff_row_within_limit
+      // with a body calling a nonexistent function and watching every
+      // assertion here still pass. They are called now, and with an expected
+      // VALUE rather than an absence of error, so the tier lookup inside them
+      // is what the assertion depends on.
+      await h.one('update users set is_active=false where id=$1::uuid returning id', [STAFF_A]);
+      const admits = () => h.one<{ ok: boolean | null }>(
+        `select b4_staff_row_within_limit(jsonb_build_object('id',$1::text,'is_active',true)) as ok`,
+        [STAFF_A],
+      );
+      // The snapshot is still the UNBACKED pro/active set above, so the
+      // effective tier is 'free' -- one non-owner staff per shop, and Manager
+      // A already holds it.
+      expect(await admits()).toEqual({ ok: false });
+
+      // Restore the backed trial and the same call is admitted, because ultra
+      // carries no staff limit at all. The tier lookup is the only difference.
+      await h.one(
+        `update entitlement_snapshots set status='trialing',tier='free',paid_through=null,
+           grace_ends_at=null,
+           trial_ends_at=(select launch_trial_granted_at+interval '14 days'
+                          from billing_accounts where id=$1::uuid)
+         where billing_account_id=$1::uuid returning billing_account_id`,
+        [accountId],
+      );
+      expect(await admits()).toEqual({ ok: true });
+
+      // And reconciliation, the WRITE that applies a snapshot, runs here too.
+      expect(await refusal(h, 'select b4_reconcile_plan_limits($1::uuid) as ok', [accountId]))
+        .toBeNull();
+    } finally {
+      await h.close();
+    }
+  }, 120_000);
+
+  it('the H-7 helper is a REAL dependency: on a B4-only chain the gate cannot answer', async () => {
+    // The measurement that was missing, and the reason "B4 only" was wrong.
+    // Applying 37 onto a B4-only chain SUCCEEDS -- PL/pgSQL bodies are not
+    // resolved at CREATE -- so apply-time success is not evidence of a
+    // satisfied dependency. The failure appears at the first call that reaches
+    // the helper.
+    const h = await createBareHarness();
+    try {
+      for (const name of migrationFiles().filter((name) => name <= B4)) {
+        await h.exec(migrationSql(name));
+      }
+      expect(await h.one<{ present: boolean }>(
+        `select exists (select 1 from pg_proc where proname='h7_shop_billing_bootstrap_allowed') as present`,
+      )).toEqual({ present: false });
+
+      // Applies without complaint, which is the trap.
+      await h.exec(migrationSql(E11_MIGRATION));
+      await seedShops(h);
+      await h.one(
+        `update shops set billing_account_id=null where id=$1::uuid returning id`, [SHOP_B],
+      );
+
+      const denied = await refusal(h, 'select b4_shop_write_permitted($1::uuid) as ok', [SHOP_B]);
+      // 42883 is undefined_function.
+      expect(denied?.code).toBe('42883');
+      expect(denied?.message).toMatch(/h7_shop_billing_bootstrap_allowed/);
+    } finally {
+      await h.close();
+    }
+  }, 120_000);
+
+  it('reads objects from B4 and from H-7, and from neither 35 nor 36', () => {
     const sql = migrationSql(E11_MIGRATION);
-    // The objects the body touches, each created by B4 (20260831000000).
+    // The entitlement objects, each created by B4 (20260831000000).
     for (const object of [
       'entitlement_snapshots', 'billing_accounts', 'billing_subscriptions', 'b4_effective_tier',
     ]) {
       expect(sql).toContain(object);
       expect(migrationSql(B4)).toContain(object);
     }
+    // And the H-7 helper, which is the dependency the previous version of this
+    // test was named as excluding.
+    expect(sql).toContain('h7_shop_billing_bootstrap_allowed');
+    expect(migrationSql(H7)).toContain('h7_shop_billing_bootstrap_allowed');
     // And nothing from 35 or 36, whose objects would force an order.
     for (const later of ['admin_audit_log', 'financial_publications', 'publish_financial_snapshot']) {
       expect(sql).not.toContain(later);
@@ -984,4 +1124,248 @@ describe('E11 reverted, to prove the refusals are not free', () => {
     await h.exec(migrationSql(E11_MIGRATION));
     expect((await refusal(h, REFRESH, [accountId]))?.code).toBe('MU037');
   }, 30_000);
+});
+
+/**
+ * DECISION 5 — the tier the Dashboard now reads.
+ *
+ * `apps/admin` used to decide entitlement itself, with a TypeScript
+ * transcription of the status/date rule and three exported predicates
+ * (`isTrialingNow`, `isPaidEntitlementNow`, `isEntitledNow`). Those are gone:
+ * `entitlementCounts` now consumes `b4_effective_tier`'s answer, fetched per
+ * account. So this function IS the panel's definition of entitlement, and the
+ * matrix that used to live in `apps/admin/lib/adminMetrics.test.ts` lives here
+ * instead — tested against the function the server actually runs, rather than
+ * against a copy of it that had already drifted by two cases once before.
+ *
+ * The describes above assert the REFUSAL (MU037). These assert the TIER, which
+ * is a different observable and the one the Dashboard reads: a refused stamp
+ * stops the device's ceiling advancing, while the tier is what every capacity
+ * decision and now every reported figure is derived from.
+ *
+ * Its own harness: the suites above mutate a shared fixture in sequence, and a
+ * matrix that rewrites every snapshot column would not survive being inserted
+ * among them.
+ */
+describe('Decision 5 — the tier the Dashboard now reads', () => {
+  let h: Harness;
+  let accountId: string;
+
+  beforeAll(async () => {
+    h = await createHarness();
+    await seedShops(h);
+    accountId = (await h.one<{ id: string }>(
+      'select id::text as id from billing_accounts where principal_owner_user_id=$1::uuid',
+      [OWNER_A],
+    )).id;
+    // One generously dated subscription backs the whole matrix. Every case
+    // below keeps the snapshot's own dates inside these, so the matrix tests
+    // the status/date arms rather than the backing rule — which the describes
+    // above already test on its own.
+    await h.one(
+      `insert into billing_subscriptions(
+         billing_account_id,tier,billing_cycle,status,starts_at,paid_through,grace_ends_at,provider
+       ) values ($1::uuid,'pro','monthly','active',now(),
+         now()+interval '400 days',now()+interval '430 days','sslcommerz') returning id`,
+      [accountId],
+    );
+  }, 60_000);
+  afterAll(async () => h.close());
+
+  const tierNow = async (): Promise<string | null> =>
+    (await h.one<{ tier: string | null }>(
+      'select b4_effective_tier($1::uuid) as tier', [accountId],
+    )).tier;
+
+  /** The four statuses whose evidence is the subscription row. */
+  const SUBSCRIPTION_BACKED = ['active', 'canceled', 'grace', 'past_due'];
+
+  const GRANTED = `(select launch_trial_granted_at from billing_accounts where id=$1::uuid)`;
+
+  interface Case {
+    label: string;
+    status: string;
+    tier?: string;
+    trial?: string;
+    paid?: string;
+    grace?: string;
+    expected: string;
+  }
+
+  const CASES: readonly Case[] = [
+    // The trial arm returns before the tier is consulted, which is why a
+    // `free`-tier snapshot answers `ultra` while its trial runs.
+    { label: 'trialing, in trial', status: 'trialing', tier: `'free'`,
+      trial: `${GRANTED}+interval '14 days'`, expected: 'ultra' },
+    { label: 'trialing, trial over', status: 'trialing', tier: `'free'`,
+      trial: `${GRANTED}-interval '1 day'`, expected: 'free' },
+    { label: 'active, paid', status: 'active',
+      paid: `now()+interval '30 days'`, expected: 'pro' },
+    { label: 'active, lapsed with no grace', status: 'active',
+      paid: `now()-interval '1 day'`, expected: 'free' },
+    { label: 'active, in grace', status: 'active',
+      paid: `now()-interval '1 day'`, grace: `now()+interval '5 days'`, expected: 'pro' },
+    { label: 'past_due, in grace', status: 'past_due',
+      paid: `now()-interval '1 day'`, grace: `now()+interval '5 days'`, expected: 'pro' },
+    { label: 'past_due, grace over', status: 'past_due',
+      paid: `now()-interval '9 days'`, grace: `now()-interval '1 day'`, expected: 'free' },
+    { label: 'grace, in grace', status: 'grace',
+      paid: `now()-interval '1 day'`, grace: `now()+interval '5 days'`, expected: 'pro' },
+    { label: 'canceled, still paid', status: 'canceled',
+      paid: `now()+interval '30 days'`, expected: 'pro' },
+    { label: 'canceled, past paid_through', status: 'canceled',
+      paid: `now()-interval '1 day'`, expected: 'free' },
+    // A canceled row does NOT get the grace arm, so a live grace window
+    // cannot rescue it. This is the case a hand-written predicate is most
+    // likely to get wrong, and revision 2 of the admin plan did.
+    { label: 'canceled, in grace only', status: 'canceled',
+      paid: `now()-interval '1 day'`, grace: `now()+interval '5 days'`, expected: 'free' },
+    { label: 'expired', status: 'expired',
+      paid: `now()-interval '1 day'`, expected: 'free' },
+    { label: 'free tier with paid dates', status: 'active', tier: `'free'`,
+      paid: `now()+interval '30 days'`, expected: 'free' },
+  ];
+
+  // label, expected, case -- in that order so the two %s in the title are the
+  // two readable fields and not the whole object.
+  it.each(CASES.map((item) => [item.label, item.expected, item] as const))(
+    '%s -> %s',
+    async (_label, _expected, item) => {
+      if (SUBSCRIPTION_BACKED.includes(item.status)) {
+        // Status equality is part of the evidence, so the subscription moves
+        // with the snapshot. Otherwise every non-active row below would answer
+        // 'free' for the round-28 reason instead of the one it is named for.
+        await h.one(
+          `update billing_subscriptions set status=$2,
+             canceled_at=case when $2='canceled' then now() else null end
+           where billing_account_id=$1::uuid returning id`,
+          [accountId, item.status],
+        );
+      }
+      await setSnapshot(h, accountId, {
+        tier: item.tier ?? `'pro'`,
+        status: `'${item.status}'`,
+        trial_ends_at: item.trial ?? 'null',
+        paid_through: item.paid ?? 'null',
+        grace_ends_at: item.grace ?? 'null',
+      });
+
+      expect(await tierNow()).toBe(item.expected);
+    },
+  );
+
+  it('the date boundary is STRICTLY after, as the SQL `>` is', async () => {
+    await h.one(
+      `update billing_subscriptions set status='active',canceled_at=null
+       where billing_account_id=$1::uuid returning id`,
+      [accountId],
+    );
+    await setSnapshot(h, accountId, {
+      tier: `'pro'`, status: `'active'`, trial_ends_at: 'null',
+      paid_through: `now()+interval '10 days'`, grace_ends_at: 'null',
+    });
+    const at = (offset: string) => h.one<{ tier: string | null }>(
+      `select b4_effective_tier($1::uuid,
+         (select paid_through${offset} from entitlement_snapshots where billing_account_id=$1::uuid)
+       ) as tier`,
+      [accountId],
+    );
+
+    // p_now exactly at paid_through: not after it, so not entitled.
+    expect(await at('')).toEqual({ tier: 'free' });
+    // One microsecond earlier: entitled. Postgres timestamps are microsecond
+    // precision, so this is the smallest step that exists.
+    expect(await at(`-interval '1 microsecond'`)).toEqual({ tier: 'pro' });
+  });
+
+  // ── The three reproductions, answered as a TIER ─────────────────────────
+  //
+  // Each ends by restoring the evidence and asserting the tier comes back, so
+  // none of them can pass because the fixture was broken.
+
+  it('REPRODUCTION 1: a paid claim with no subscription reads free', async () => {
+    await h.one(
+      `update billing_subscriptions set status='active',canceled_at=null
+       where billing_account_id=$1::uuid returning id`,
+      [accountId],
+    );
+    await setSnapshot(h, accountId, {
+      tier: `'pro'`, status: `'active'`, trial_ends_at: 'null',
+      paid_through: `now()+interval '30 days'`, grace_ends_at: `now()+interval '37 days'`,
+    });
+    expect(await tierNow()).toBe('pro');
+
+    const removed = await h.all<{ id: string }>(
+      `delete from billing_subscriptions where billing_account_id=$1::uuid returning id::text as id`,
+      [accountId],
+    );
+    expect(removed).toHaveLength(1);
+
+    // The snapshot is UNCHANGED: pro, active, both dates in the future. This
+    // is the row the Dashboard used to count as a paying customer.
+    expect(await tierNow()).toBe('free');
+
+    await h.one(
+      `insert into billing_subscriptions(
+         billing_account_id,tier,billing_cycle,status,starts_at,paid_through,grace_ends_at,provider
+       ) values ($1::uuid,'pro','monthly','active',now(),
+         now()+interval '400 days',now()+interval '430 days','sslcommerz') returning id`,
+      [accountId],
+    );
+    expect(await tierNow()).toBe('pro');
+  });
+
+  it('REPRODUCTION 2: a trial longer than the grant reads free', async () => {
+    await setSnapshot(h, accountId, {
+      tier: `'free'`, status: `'trialing'`,
+      trial_ends_at: `${GRANTED}+interval '14 days'`,
+      paid_through: 'null', grace_ends_at: 'null',
+    });
+    expect(await tierNow()).toBe('ultra');
+
+    await setSnapshot(h, accountId, { trial_ends_at: `${GRANTED}+interval '400 days'` });
+    expect(await tierNow()).toBe('free');
+
+    await setSnapshot(h, accountId, { trial_ends_at: `${GRANTED}+interval '14 days'` });
+    expect(await tierNow()).toBe('ultra');
+  });
+
+  it('REPRODUCTION 3: an active claim a canceled subscription backs reads free', async () => {
+    await h.one(
+      `update billing_subscriptions set status='active',canceled_at=null
+       where billing_account_id=$1::uuid returning id`,
+      [accountId],
+    );
+    await setSnapshot(h, accountId, {
+      tier: `'pro'`, status: `'active'`, trial_ends_at: 'null',
+      paid_through: `now()+interval '30 days'`, grace_ends_at: `now()+interval '37 days'`,
+    });
+    expect(await tierNow()).toBe('pro');
+
+    // Only the subscription's status moves. Tier and both dates still match.
+    await h.one(
+      `update billing_subscriptions set status='canceled',canceled_at=now()
+       where billing_account_id=$1::uuid returning id`,
+      [accountId],
+    );
+    expect(await tierNow()).toBe('free');
+
+    // And a snapshot that agrees is entitled again, on the canceled arm —
+    // which is the coupling: a revocation must move both rows.
+    await setSnapshot(h, accountId, { status: `'canceled'` });
+    expect(await tierNow()).toBe('pro');
+  });
+
+  it('an account with no snapshot at all answers NULL, which the callers coalesce', async () => {
+    // The panel reads this as 'free', matching migration 37's own callers.
+    // Asserted rather than assumed, because the admin fetch depends on it.
+    await h.one(
+      'delete from entitlement_snapshots where billing_account_id=$1::uuid returning billing_account_id',
+      [accountId],
+    );
+    expect(await tierNow()).toBeNull();
+    expect(await h.one<{ tier: string }>(
+      `select coalesce(b4_effective_tier($1::uuid),'free') as tier`, [accountId],
+    )).toEqual({ tier: 'free' });
+  });
 });

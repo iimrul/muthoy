@@ -127,7 +127,12 @@ export default async function DashboardPage() {
   const { overview, stats, nowMs } = result;
   const { shops, subscriptions, entitlements, orders, events, offerings } = overview;
 
-  const counts = entitlementCounts(entitlements, nowMs);
+  // E11 / Decision 5. The counts come from `entitlementVerdicts` — the
+  // server's own `b4_effective_tier` answer — and not from `entitlements`,
+  // which is the snapshot's unverified claim. No `nowMs` is passed because
+  // there is no date left here to judge; the server consumed them all at the
+  // same instant this page's other figures were taken.
+  const counts = entitlementCounts(overview.entitlementVerdicts);
 
   // GATE 5 FINDING 11. These counted the literal status, so a row left at
   // `active` with `paid_through` in the past was reported as active for ever,

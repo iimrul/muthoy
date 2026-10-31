@@ -71,6 +71,7 @@ import {
 } from './adminSupportStore';
 import type {
   EntitlementRow,
+  EntitlementVerdictRow,
   OfferingRow,
   PaymentOrderRow,
   ProviderEventRow,
@@ -1357,6 +1358,136 @@ function toEntitlementRow(row: Record<string, unknown>): EntitlementRow {
   };
 }
 
+/** How many `b4_effective_tier` calls are in flight at once. */
+const VERDICT_CONCURRENCY = 8;
+
+/** `b4_effective_tier`'s answer for an account with no entitlement row. */
+const FREE_TIER = 'free';
+
+/**
+ * Each account's entitlement verdict, asked of the SERVER.
+ *
+ * E11 / Decision 5. This panel used to answer "is this account entitled?"
+ * itself, by re-deriving the status/date rule from the snapshot's own columns.
+ * Migration 37 made every server-side decision additionally require the
+ * snapshot to AGREE with the `billing_subscriptions` row behind it, and that
+ * is not transcribable — the evidence is in another table, and a second
+ * implementation of a two-table rule is a second thing to drift. So the
+ * question is asked of `b4_effective_tier`, which is the one definition.
+ *
+ * ONE CALL PER ACCOUNT, and that is the cost of consuming the canonical answer
+ * rather than copying it. PostgREST can invoke a function once per request, so
+ * there is no `lateral` to fold this into the snapshot read; a single
+ * round-trip version needs a set-returning wrapper in SQL, which is a
+ * migration and therefore a separate authorisation. The pool bounds the
+ * fan-out meanwhile. All of it is read-only: `b4_effective_tier` is `stable`,
+ * and the only RPC this app is permitted to WRITE through remains
+ * `b4_reconcile_plan_limits` at lib/adminActions.ts.
+ *
+ * `p_now` is passed explicitly rather than left to the function's `now()`
+ * default, so the verdict is computed for the SAME instant as every other
+ * figure on the page. A dashboard whose counts were taken a few milliseconds
+ * after its trend is a dashboard that can disagree with itself at a boundary.
+ *
+ * THE VERDICT IS ONLY AS BACKED AS THE SCHEMA IT RUNS AGAINST. Against a
+ * project where migration 37 is not yet applied, `b4_effective_tier` is the
+ * PRE-E11 function — status and dates, no backing check — so these counts
+ * still over-report there. The call site is correct either way; what closes
+ * the misreport is applying migration 37, which is its own decision.
+ */
+/**
+ * The verdict-relevant columns of every snapshot, as one comparable string.
+ *
+ * `verified_at` and `version` are deliberately EXCLUDED. The device's own
+ * billing-status poll stamps both on every call, so a token that included them
+ * would differ on almost every dashboard load and the coherence check below
+ * would refuse the page constantly. What it must detect is a change that could
+ * move a VERDICT, and those are exactly the columns the SQL CASE reads.
+ */
+function verdictRelevantToken(rows: readonly EntitlementRow[]): string {
+  return rows
+    .map((row) => [
+      row.billingAccountId, row.tier, row.status,
+      row.trialEndsAt ?? '', row.paidThrough ?? '', row.graceEndsAt ?? '',
+    ].join(' '))
+    .sort()
+    .join('');
+}
+
+async function entitlementVerdicts(
+  rows: readonly EntitlementRow[],
+  now: Date,
+): Promise<readonly EntitlementVerdictRow[]> {
+  if (rows.length === 0) return [];
+  const supabase = getSupabaseAdmin();
+  const nowIso = now.toISOString();
+  const tierByAccount = new Map<string, string>();
+  let cursor = 0;
+
+  const worker = async (): Promise<void> => {
+    while (cursor < rows.length) {
+      const row = rows[cursor];
+      cursor += 1;
+      if (row === undefined) continue;
+      const { data, error } = await supabase.rpc('b4_effective_tier', {
+        p_billing_account_id: row.billingAccountId,
+        p_now: nowIso,
+      });
+      if (error) {
+        // Never a partial answer. A count built from the accounts that did
+        // reply would under-report entitlement and look like a real figure.
+        console.error('[admin] entitlement verdict failed:', error.message);
+        throw new AdminDataError('entitlement verdict failed');
+      }
+      // A null answer means no snapshot row, which every SQL caller already
+      // coalesces to 'free' (migration 37's b4_reconcile_plan_limits and the
+      // gates beside it). Matching them is consuming the rule, not inventing
+      // a branch of our own.
+      tierByAccount.set(row.billingAccountId, typeof data === 'string' ? data : FREE_TIER);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(VERDICT_CONCURRENCY, rows.length) }, () => worker()),
+  );
+
+  // THE TWO HALVES MUST DESCRIBE THE SAME ROW.
+  //
+  // Review finding, executed against real PostgreSQL: `status` comes from the
+  // snapshot read and `effectiveTier` from a LATER round trip, so an account
+  // that moved from `trialing` to a backed `pro/active` between them was
+  // reported as `trialing/pro` -- a pair the SQL CASE cannot produce, counted
+  // as a trial although the customer had paid. Passing `p_now` fixes the
+  // clock; it does nothing about the database moving underneath.
+  //
+  // So the snapshot's verdict-relevant columns are re-read and compared. If
+  // anything that could change an answer changed, the page is REFUSED rather
+  // than answered: a figure assembled from two different versions of a row
+  // looks exactly like a real one. This is the same rule the report reads
+  // apply -- a truncated read is refused, not answered -- and a reload
+  // retries.
+  const after = await readAllPages<Record<string, unknown>>('entitlement_snapshots', (from, to) =>
+    asPageQuery(supabase.from('entitlement_snapshots').select(ENTITLEMENT_COLUMNS))
+      .order('billing_account_id', { ascending: true })
+      .range(from, to),
+  );
+  if (verdictRelevantToken(rows) !== verdictRelevantToken(after.map(toEntitlementRow))) {
+    console.error('[admin] entitlement snapshots moved while their verdicts were read');
+    throw new AdminDataError('entitlement verdicts are not consistent');
+  }
+
+  return rows.map((row) => {
+    const effectiveTier = tierByAccount.get(row.billingAccountId);
+    if (effectiveTier === undefined) {
+      // Unreachable while billing_account_id is this table's primary key, and
+      // asserted rather than defaulted: a missing verdict silently read as
+      // 'free' is the same class of bug as the one this function closes.
+      throw new AdminDataError('entitlement verdict missing');
+    }
+    return { billingAccountId: row.billingAccountId, status: row.status, effectiveTier };
+  });
+}
+
 function toProviderEventRow(row: Record<string, unknown>): ProviderEventRow {
   return {
     id: text(row.id),
@@ -1375,6 +1506,12 @@ export interface DashboardOverview {
   shops: readonly ShopRow[];
   subscriptions: readonly SubscriptionRow[];
   entitlements: readonly EntitlementRow[];
+  /**
+   * The same accounts, as the SERVER judges them. Separate from `entitlements`
+   * on purpose: that array is the snapshot's CLAIM, this one is the verdict on
+   * it, and collapsing them would hide which is which.
+   */
+  entitlementVerdicts: readonly EntitlementVerdictRow[];
   orders: readonly PaymentOrderRow[];
   events: readonly ProviderEventRow[];
   offerings: readonly OfferingRow[];
@@ -1549,12 +1686,17 @@ export async function dashboardOverview(now: Date = new Date()): Promise<Dashboa
       days,
     );
 
+  const entitlements = entitlementRows.map(toEntitlementRow);
+
   return {
     businessDate: day.businessDate,
     days,
     shops,
     subscriptions: subscriptionRows.map(toSubscriptionRow),
-    entitlements: entitlementRows.map(toEntitlementRow),
+    entitlements,
+    // After the parallel block, not inside it: the accounts to ask about are
+    // not known until the snapshot read returns.
+    entitlementVerdicts: await entitlementVerdicts(entitlements, now),
     orders: orderRows.map(toPaymentOrderRow),
     events: eventRows.map(toProviderEventRow),
     offerings,
