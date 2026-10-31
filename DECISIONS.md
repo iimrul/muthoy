@@ -4540,13 +4540,16 @@ the real maintenance window: the Supabase image's `postgres` database is never
 empty (`auth`/`cron`/`vault`/`storage` pre-exist, so step 8's "EMPTY target" plus
 step 9's ban on `--clean` cannot both hold); a `pg_cron`-enabled archive cannot be
 restored into any database but `cron.database_name`, which is the one that is
-never empty, making an owner-preserving single-transaction restore of such a
-database impossible as written; owner preservation needs `SET ROLE
-supabase_admin`, and `postgres` is neither superuser nor a member, which is all a
-hosted project ever grants. The fourth is the good one: **DEV's actual shape
-restores cleanly** - exit 0, rows 2/2, with `SECURITY DEFINER`, owner and ACLs
-(`anon` denied, `service_role` granted) all preserved. Defect 2 is a **PROD**
-problem, not a DEV one, because DEV deliberately has no scheduler.
+never empty - a **configuration requirement** on a local target, where that
+setting can be changed with a restart, and a hard stop on a hosted project where
+it cannot; owner preservation needs `SET ROLE supabase_admin`, and `postgres` is
+neither superuser nor a member, which is all a hosted project ever grants. The
+fourth is the good one, stated no wider than it was measured: **a postgres-owned
+synthetic SUBSET restores cleanly** - exit 0, rows 2/2, with `SECURITY DEFINER`,
+owner and ACLs preserved. That is **not** DEV's shape: DEV carries
+`supabase_admin`-owned extensions, exactly the class that fails above, so whether
+DEV restores cleanly is still unmeasured. Defect 2 is a **PROD** problem, not a
+DEV one, because DEV deliberately has no scheduler.
 
 **3. Migration 33's own `cron.schedule` call ran against real `pg_cron 1.6.4`**,
 and the job it created matched the PGlite stand-in in **all seven columns**. A
@@ -4660,11 +4663,12 @@ the dashboard (blocked on nothing, and the root of the chain); decide the
 the ordered 35 -> 36 -> 37 push. Item 3 is the binding constraint.
 
 *Boundaries honoured:* no hosted SQL, no hosted project contacted or altered, no
-project created/deleted/paused (the H-9 rehearsal project untouched), no migration
-applied anywhere, no credential requested/retrieved/printed/stored, no EAS build
-submitted, no paid resource consumed, no device operation, no production signing
-or package identity changed, no `audit-artifacts/**` modification, and no real
-pharmacy or customer record read - every row in the rehearsal was synthetic. The
-`h3scratch` project was read and left as found.
+project created/deleted/paused (the H-9 rehearsal project untouched), **no hosted
+migration applied** (migration 33 *was* applied to a disposable local container
+holding synthetic rows), no credential requested/retrieved/printed/stored, no EAS
+build submitted, no paid resource consumed, no device operation, no production
+signing or package identity changed, no `audit-artifacts/**` modification, and no
+real pharmacy or customer record read - every row in the rehearsal was synthetic.
+The `h3scratch` project was read and left as found.
 
 *Batch 4 is not begun.*

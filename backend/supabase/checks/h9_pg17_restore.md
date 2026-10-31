@@ -142,29 +142,40 @@ project was contacted.** This does not close H-11 C5, and the rule stated above
 still governs: *"H5 does not close H-11 C5."*
 
 Four steps of the sequence above fail when executed literally, and each refusal is
-now encoded in `scripts/h11/dev-backup.mjs` rather than left as prose:
+recorded below. The two a machine can see - a PG17 client and a PG17 archive -
+are enforced by `scripts/h11/dev-backup.mjs`, which **captures only**: an earlier
+revision of it also restored, with emptiness and pg_cron gates fed from the
+command line, which checked what the operator typed rather than what the target
+held. Steps 8-10 stay a human operation with independent target verification.
 
 1. **Step 8's "EMPTY isolated target" is unobtainable in the image's own
    `postgres` database.** It ships `auth`, `cron`, `vault` and `storage`
    pre-created, so step 9's restore - correctly forbidden from using `--clean` -
    aborts on `ERROR: schema "auth" already exists`. Only a freshly created
    database is empty (`public` + `plpgsql`).
-2. **A `pg_cron`-enabled archive cannot go into a fresh database.** pg_cron
+2. **A `pg_cron`-enabled archive needs the scheduler's own database.** pg_cron
    refuses: *"can only create extension in database postgres... the pg_cron
-   background worker reads job descriptions from this database."* With (1) this
-   makes an owner-preserving `--single-transaction --exit-on-error` restore of a
-   pg_cron-enabled Supabase database impossible as written, because the only
-   permitted database is the one that is never empty. **This is a PROD-shaped
-   problem; DEV has no pg_cron.**
+   background worker reads job descriptions from this database."* With (1) the
+   procedure as written has nowhere to put such an archive, because the only
+   database it permits is the one that is never empty. **Scope, corrected after
+   review:** on a *local* target `cron.database_name` is changeable with a server
+   restart, so this is a **configuration requirement**, not an impossibility; on
+   a hosted project, where the setting is not yours, it is a hard stop. **And it
+   is a PROD-shaped problem either way; DEV has no pg_cron.**
 3. **Step 9's "preserving owners/privileges" needs superuser.** Objects owned by
    `supabase_admin` require `SET ROLE supabase_admin`. Measured: `postgres` is
    `super=false` and is **not** a member of `supabase_admin`. A hosted project
    only ever grants `postgres`, so an owner-preserving round trip between two
    hosted projects is not available by this route.
-4. **DEV's actual shape works.** A postgres-owned source without pg_cron,
-   restored by `postgres` into a fresh database: `pg_restore` **exit 0**, rows
-   2/2, and `SECURITY DEFINER`, owner and ACLs (`anon` denied, `service_role`
-   granted) all preserved.
+4. **A postgres-owned synthetic SUBSET restores cleanly.** A source without
+   pg_cron, restored by `postgres` into a fresh database: `pg_restore` **exit 0**,
+   rows 2/2, and `SECURITY DEFINER`, owner and ACLs (`anon` denied,
+   `service_role` granted) all preserved. **This is not DEV's shape**, and an
+   earlier draft of this addendum said it was. DEV's recorded inventory
+   (`docs/plans/h9-pg17-extension-verification-2026-10-19.md`) includes
+   `supabase_admin`-owned extensions - precisely the ownership class that fails
+   in (3) - which this fixture did not contain. Whether DEV itself restores
+   cleanly remains **unmeasured**.
 
 Also measured, correcting an assumption: **a dump DOES carry the schedule.**
 `pg_restore --list` contains `TABLE DATA cron job`, because pg_cron marks its job

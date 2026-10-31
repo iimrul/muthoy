@@ -345,9 +345,9 @@ environment `preview`, 440 entries each carrying a SHA-256** - which independent
 cross-confirms the 440-file archive count measured earlier, and is the archive
 validation the brief asks for.
 
-**It stopped at the submit, and that is the control working rather than failing.**
+**It stopped at the submit, and I do not know why.**
 `validate-mobile-environment.mjs` spawns `eas build` with `stdio: 'inherit'` and
-deliberately omits `--non-interactive`; its comment says why - *"Interactive
+deliberately omits `--non-interactive`, with the comment *"Interactive
 credentials/approval flow retained; no automatic submit."* With no terminal
 attached the CLI produced no output and nothing reached the provider. Verified
 against the provider's own record: `eas build:list` still shows only
@@ -355,8 +355,29 @@ against the provider's own record: `eas build:list` still shows only
 `0b88af8d-98f8-4ef8-960b-c3b9a1d30f2e` (errored, commit `5a9ffe92`), and
 **zero builds at `4418bbf`**. No quota was consumed and no remote state created.
 
-So the submit is a deliberate human action, not a blocker I can clear. The
-worktree is left in place, installed and passing, so it is one command:
+An earlier draft of this section concluded that the submit *requires* a terminal.
+That was an inference dressed as a measurement, and the independent review
+falsified it: EAS credential setup run with no TTY and existing credentials
+returns without prompting, and Expo documents headless CI builds, so omitting
+`--non-interactive` does not by itself force human approval. **Zero builds
+establishes that no build exists, not the cause.** The honest statement is that
+the headless invocation produced no output and no build, and the reason is
+**unmeasured** - diagnosing it needs a terminal-attached run, which is the next
+cheapest step and is the founder action below.
+
+The worktree is left in place, installed and passing, so it is one command.
+**PowerShell:**
+
+```powershell
+cd D:\Muthoy-Preview-Build\apps\mobile
+$env:APP_VARIANT = 'preview'
+node ..\..\scripts\validate-mobile-environment.mjs --eas-build --profile internal `
+  --revision 4418bbfbb4afd8fb19f88c6a63ae06c07ccb676c `
+  --output C:\Users\Imrul\Desktop\muthoy-preview-archive
+```
+
+**CMD** (the form an earlier draft gave without labelling it, which PowerShell
+cannot parse):
 
 ```
 cd D:\Muthoy-Preview-Build\apps\mobile
@@ -387,8 +408,8 @@ demonstrated the behaviour is other than as recorded.
 ## 5. New: a repeatable backup executor
 
 `scripts/h11/dev-backup.mjs`, with `scripts/h11/test/backup-contract.test.mjs`
-(24 tests), wired into `package.json` as `test:h11-backup` and into CI as
-"H11 C5 backup executor contracts".
+(25 tests), wired into `package.json` as `test:h11-backup` and into CI as
+"H11 C5 backup executor contracts" - a step confirmed running and green in CI.
 
 It is the machine-repeatable part of `h9_pg17_restore.md`: the version and
 emptiness gates, the archive inventory, the hashes and a manifest. It performs no
@@ -417,12 +438,10 @@ could therefore record `pgMajor: 17` for a PG16 archive.
 What changed in response:
 
 - **The gates are enforced, not merely exported.** `main()` takes injectable
-  dependencies, version-checks both binaries, pins the **archive's own** source
-  major from its header (`Dumped from database version:`), and gained a real
-  `--restore` path that checks the target's `server_version_num`, its emptiness
-  and the pg_cron rule before `pg_restore` runs. Nine CLI-level tests assert the
-  command sequence and that each refusal happens *before* anything is dumped or
-  restored.
+  dependencies, version-checks **both** binaries and refuses a mixed toolchain,
+  and pins the **archive's own** source major from its header (`Dumped from
+  database version:`). CLI-level tests assert the command sequence and that each
+  refusal happens *before* anything is dumped.
 - **Credential detection was leaky.** The review got a password through as
   `--service "h9_dev_verified password = 'SYNTHETIC'"` - libpq permits whitespace
   around `=`, which a `password=` substring check misses - and again as
@@ -441,13 +460,37 @@ What changed in response:
 - **The manifest accepted contradictions** - `clientMajor: 18` beside an asserted
   `pgMajor: 17`. Fields must now agree.
 
-Nine mutation probes now confirm the tests bite, including the review's own
-counterexample: the CLI replaced by a throw, the extension rejection removed, the
-emptiness gate removed from the CLI, the archive-source gate removed, the target
-version gate removed, `carriesCronJob` loosened to a prefix, the password check
-returned to no-whitespace, the service-name pattern loosened, and the URL check
-re-anchored - **all nine killed**. The two mutations the review found surviving
-are among them.
+**A second round then found seven more, and two of them mattered a great deal.**
+The `--restore` mode I had added in response to round 1 took its emptiness,
+extension and `cron.database_name` facts **from the command line** - so the gates
+checked what the operator typed, never what the target held - and
+`--restore-database` never reached the connection at all, because the destination
+is whatever the service file says. Nine mutations still survived, including
+pointing the restore at the **source** service and swapping the manifest's hashes
+and byte sizes for plausible constants.
+
+**So the restore mode is gone.** That is the correction, not more layering: the
+brief asked for a backup script, the restore is steps 8-10 of
+`h9_pg17_restore.md` and is a human operation with independent target
+verification, and a gate fed by the operator's own assertion is worse than no
+gate because it manufactures the appearance of safety. The module now captures,
+and says so in its header. The flags are refused outright rather than ignored.
+
+Also fixed in that round: percent-encoded credentials (`pass%77ord=`) and
+`PGSYSCONFDIR`, which is another service-file lookup route; a TOC parser that
+silently dropped `DEFAULT`, `ROW SECURITY`, `PROCEDURE` and `DOMAIN` entries and
+so shrank `entryCount`; and a manifest that accepted `archiveSourceVersion:
+'16.4'` beside `pgMajor: 17`, impossible capture dates and negative counts.
+Because pg_dump prints identifiers **unquoted**, a name or owner containing a
+space cannot be recovered from a listing at all - so the parser now reports such
+entries **ambiguous** and the capture refuses rather than guessing.
+
+**Eighteen mutation probes now confirm the tests bite, all eighteen killed** -
+including both rounds' counterexamples: the CLI replaced by a throw, the
+pg_restore version check removed, measured hashes and byte sizes replaced by
+constants, every CLI gate removed in turn, the credential guard's
+percent-decoding and `PGSYSCONFDIR` removed, and `carriesCronJob` loosened to
+accept an ambiguous line.
 
 ---
 
@@ -461,7 +504,7 @@ Measured, on the delivered revision rather than on intention:
 | Repo-wide `turbo run lint` | 7 successful, 7 total - and the `Failed:` line read, not the exit code |
 | Repo-wide `turbo run typecheck` | 7 successful, 7 total |
 | Admin production build | `1 successful, 1 total`, exit 0 |
-| H-11 backup executor contracts | 24 tests, exit 0; **9 mutation probes, all killed** |
+| H-11 capture executor contracts | 25 tests, exit 0; **18 mutation probes, all killed** |
 | H9 offline remediation contracts | exit 0 |
 | `scripts/render-rollback-docs.mjs --check` | exit 0 |
 | E4 and post-E4 evidence manifests | exit 0 each |
