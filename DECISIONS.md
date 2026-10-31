@@ -4600,6 +4600,20 @@ generated native project and no dirt, so both gates pass without touching
 So no founder decision about `h3scratch` is required; that item is withdrawn, and
 the refusal was mine rather than the repository's.
 
+**Acting on that, the route was then proven.** A fresh worktree at the delivered
+revision shows 0 dirt lines and no native project, and after a frozen-lockfile
+install the gating validator returns `Mobile environment validation PASS.` The
+full `--eas-build` path produced the archive and its inspection manifest - 440
+entries, each with a SHA-256, at cli 21.8.0, profile internal, environment
+preview. It then stopped at the submit, which is the control working: the script
+spawns `eas build` with inherited stdio and deliberately omits
+`--non-interactive`, because the credentials and approval flow is meant to have a
+human in it. Verified against the provider: zero builds exist at `4418bbf`, so no
+quota was consumed and no remote state created. One mechanical trap is recorded
+for next time - the validator must run from `apps/mobile`, since from the
+checkout root `eas` writes a stray `{"expo": {}}` stub that is untracked,
+un-ignored, and dirties the tree on the following run.
+
 **B. The EAS `preview` environment is confirmed to carry DEV.**
 `EXPO_PUBLIC_SUPABASE_URL` = `https://btfprhticjgeihcngpif.supabase.co`, matching
 both the resolved config's `supabaseProjectRef` and the policy's pinned

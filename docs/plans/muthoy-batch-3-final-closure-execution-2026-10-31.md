@@ -319,9 +319,58 @@ CLAUDE.md rule 15. Measured against `85e5c90` itself: REFUSES. So the build need
 those five resolved as well, which is a founder call because I did not create
 them.
 
-**Therefore no build was submitted.** Quota is confirmed not to be the
-constraint, and the build would have cost nothing; the gates are safety checks,
-not a budget.
+### 4.2a The fresh checkout was built and the route PASSES - measured, not argued
+
+A fresh dedicated worktree was created at the delivered revision
+(`D:\Muthoy-Preview-Build`, detached at `4418bbf`) and it behaves exactly as H-9
+says it should: **0 dirt lines** and **no `android/` or `ios/` directory**, so the
+two refusals in the main tree do not arise. After `pnpm install
+--frozen-lockfile --ignore-scripts` (needed because `eas` evaluates
+`app.config.js` to find `owner`/`projectId`), the gating validator returns
+**`Mobile environment validation PASS.`**, exit 0 - which covers the clean
+revision, the absent native project, the pinned `eas-cli/21.8.0`, the absence of
+any account-wide variable collision, both public variables present and
+non-withheld, and the public-key fingerprint checked against the pinned value.
+
+One mechanical trap worth recording, because it cost a run: the validator must be
+invoked **from `apps/mobile`**, not the checkout root. From the root, `eas` cannot
+resolve the project and writes a stray `{"expo": {}}` stub as `app.json`, which is
+untracked, is not covered by `.gitignore`, and therefore trips
+`assertCleanRevision` on the next invocation. Run from `apps/mobile` it creates
+nothing and the tree stays at 0 dirt lines.
+
+The full `--eas-build` path then ran and got as far as producing the archive and
+its inspection manifest: **revision `4418bbf`, cli `21.8.0`, profile `internal`,
+environment `preview`, 440 entries each carrying a SHA-256** - which independently
+cross-confirms the 440-file archive count measured earlier, and is the archive
+validation the brief asks for.
+
+**It stopped at the submit, and that is the control working rather than failing.**
+`validate-mobile-environment.mjs` spawns `eas build` with `stdio: 'inherit'` and
+deliberately omits `--non-interactive`; its comment says why - *"Interactive
+credentials/approval flow retained; no automatic submit."* With no terminal
+attached the CLI produced no output and nothing reached the provider. Verified
+against the provider's own record: `eas build:list` still shows only
+`76ee0fcb-5ce9-4ca8-8f84-be4d5072d82e` (finished, commit `bd0fa4d`) and
+`0b88af8d-98f8-4ef8-960b-c3b9a1d30f2e` (errored, commit `5a9ffe92`), and
+**zero builds at `4418bbf`**. No quota was consumed and no remote state created.
+
+So the submit is a deliberate human action, not a blocker I can clear. The
+worktree is left in place, installed and passing, so it is one command:
+
+```
+cd D:\Muthoy-Preview-Build\apps\mobile
+set APP_VARIANT=preview
+node ..\..\scripts\validate-mobile-environment.mjs --eas-build --profile internal ^
+  --revision 4418bbfbb4afd8fb19f88c6a63ae06c07ccb676c ^
+  --output C:\Users\Imrul\Desktop\muthoy-preview-archive
+```
+
+(The `--output` path must be absolute, must not already exist, and must sit
+outside the checkout - H-9's "keep inspection outputs outside it".) Expect
+`com.muthoy.pos.preview` on profile `internal` against DEV, at $0 against a
+15-build monthly allowance of which October used two. Production signing and the
+`com.muthoy.pos` identity are untouched by this profile.
 
 ### 4.3 Device acceptance: BLOCKED — PHYSICAL HARDWARE REQUIRED
 
@@ -404,8 +453,34 @@ are among them.
 
 ## 6. Verification
 
-Recorded in the commit for this run, with the measured numbers rather than a
-claim that checks were run.
+Measured, on the delivered revision rather than on intention:
+
+| Check | Result |
+|---|---|
+| Full suite, `--pool=threads --poolOptions.threads.maxThreads=2` | **300 files, 7051 tests, 0 failures, exit 0** (1401.95 s) |
+| Repo-wide `turbo run lint` | 7 successful, 7 total - and the `Failed:` line read, not the exit code |
+| Repo-wide `turbo run typecheck` | 7 successful, 7 total |
+| Admin production build | `1 successful, 1 total`, exit 0 |
+| H-11 backup executor contracts | 24 tests, exit 0; **9 mutation probes, all killed** |
+| H9 offline remediation contracts | exit 0 |
+| `scripts/render-rollback-docs.mjs --check` | exit 0 |
+| E4 and post-E4 evidence manifests | exit 0 each |
+| `backend/supabase/migrations/` | byte-clean, 0 changes |
+| `audit-artifacts/**` | 0 changes |
+| Five sealed declarations | 0 changes each |
+| Secret audit over this run's 11 files | 0 hits across 12 patterns, with **12/12 firing on a planted control** |
+| Admin client bundle, 6 secret-shaped patterns | 0 files, with three controls proving the scan is not vacuous |
+| EAS archive inspection | 440 entries, 440 carrying a SHA-256 |
+
+Two notes on honesty rather than coverage. The suite was run twice: once before
+the executor rewrite and once after, both 7051/7051 - and the second is the one
+that matches the delivered bytes. And the **H-9 production preflight could not be
+run, by construction rather than by omission**: its own header states it *"refuses
+while the committed production policy is unset - which it is until a reviewed PROD
+identity is committed"*, `environmentPolicy.js` indeed has
+`production.supabaseProjectRef: null`, no approved PROD manifest exists, and it
+additionally requires `backup.restoreRehearsal` evidence - which is H-11 C5, the
+very thing still owed.
 
 ---
 
@@ -418,7 +493,7 @@ is waiting on anything I can do.
 | # | Action | Cost | Unblocks |
 |---|---|---|---|
 | **1** | **Read DEV's backup capability** in the Supabase dashboard — does `btfprhticjgeihcngpif` offer a restore, and can it target a separate project? | 5 minutes, no password | `restore_drill.md` prerequisite 1, and therefore the whole C5 design |
-| **2** | ~~Decide the `h3scratch` native project~~ **WITHDRAWN.** No decision is needed: H-9's own prescription is a fresh dedicated checkout, which passes both gates without touching `h3scratch` or the prototype-web files. See §4.2 | free | nothing - this was my error |
+| **2** | **Run one command to submit the Preview build.** Every gate passes in the prepared worktree and the archive validates 440/440; the submit is deliberately interactive, so it needs your terminal. Exact command in §4.2a. *(This replaces an earlier item asking you to decide the `h3scratch` native project - that was my error: H-9 already prescribes a fresh checkout, which touches neither `h3scratch` nor the prototype files.)* | $0, 1 of 15 | the current-revision Preview APK |
 | **3** | **Supply two physical Android devices**, or one plus willingness to wipe | hardware | the twenty device scenarios, **and** C5 Parts B and C |
 | **4** | **Authorise the hosted apply of 35 → 36 → 37 in one ordered push**, naming the project — only after (1) and the resulting C5 acceptance | — | E4-H, and the hosted E11 verification |
 
