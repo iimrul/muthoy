@@ -405,92 +405,76 @@ demonstrated the behaviour is other than as recorded.
 
 ---
 
-## 5. New: a repeatable backup executor
+## 5. New: a repeatable capture executor, and three rounds of being wrong about it
 
 `scripts/h11/dev-backup.mjs`, with `scripts/h11/test/backup-contract.test.mjs`
 (25 tests), wired into `package.json` as `test:h11-backup` and into CI as
-"H11 C5 backup executor contracts" - a step confirmed running and green in CI.
+"H11 C5 backup executor contracts" - a step confirmed running and green.
 
-It is the machine-repeatable part of `h9_pg17_restore.md`: the version and
-emptiness gates, the archive inventory, the hashes and a manifest. It performs no
-hosted write — `pg_dump` is read-only — and it refuses before connecting if a
-password appears in argv or `PGPASSWORD`. The connection is named only by a libpq
-service, so no credential reaches the command line, the manifest or any log.
+It automates one part of `h9_pg17_restore.md`: step 6's capture, plus step 7's
+hashes and the manifest. `pg_dump` is read-only, no hosted write happens, and the
+connection is named only by a libpq service, so no password can reach argv, the
+environment, the manifest or a log. What it establishes is deliberately narrow
+and soundly checkable: the toolchain is PG17 (both binaries, and they must
+agree), the **archive** came from a PG17 server, no credential is in reach, only
+four flags are accepted, and these exact bytes were produced at this time.
 
-Its refusals encode §1.2 rather than restating it in prose: a PG18 client is
-refused, a non-17 `server_version_num` is refused, the Supabase image's own
-`postgres` database fails the emptiness gate, and a `pg_cron`-enabled archive
-aimed at anything other than `cron.database_name` is refused up front instead of
-failing halfway through a restore. Its fixtures are the **real** captured
-strings, not invented ones. The manifest's `hostedRecoveryAcceptance` is
-hard-wired to `null`: this tool cannot assert the thing only the founder can.
+**Three independent review rounds rejected three successive versions of this
+file, and each rejection was right.** It is the most useful thing in this run, so
+it is recorded plainly rather than summarised away.
 
-**The first revision of this file did not deserve to ship, and the independent
-review is why it does now.** Its verdict was REVISE with ten findings, four of
-them HIGH, and the sharpest one was the project's own recurring defect in pure
-form: *replacing the entire CLI with an immediate throw still left 12/12 tests
-passing*, because every test exercised a helper and none exercised `main()`.
-Worse, `main()` never called three of the guards this file advertises -
-`assertServerVersionNum`, `assertTargetEmpty` and `assertRestoreTargetCompatible`
-were exported, documented, tested in isolation, and wired to nothing. A manifest
-could therefore record `pgMajor: 17` for a PG16 archive.
+- **Round 1 (10 findings).** It exported gates `main()` never called. The
+  counterexample: *replacing the entire CLI with an immediate throw left 12/12
+  tests passing*, because every test exercised a helper. Credential detection
+  also leaked twice - libpq permits whitespace around `=`, and the URL pattern
+  was anchored to the start of the argument.
+- **Round 2 (7 findings).** My fix made it worse. The `--restore` mode I added
+  took the target's emptiness, extensions and `cron.database_name` **from the
+  command line**, so the gates checked what the operator typed, never what the
+  target held - and `--restore-database` never reached the connection at all,
+  because the destination is whatever the service file says. A recording double
+  restored to the **source** service with the suite green. Nine of nineteen
+  mutations survived.
+- **Round 3 (5 findings).** The archive **classifier** I had kept - TOC parsing,
+  pg_cron detection, an "ambiguous entry" policy - refused six ordinary PG17
+  descriptors (`EVENT TRIGGER`, `STATISTICS`, `COLLATION`, `RULE`,
+  `TEXT SEARCH CONFIGURATION`, `SECURITY LABEL`), so **it would have blocked a
+  real DEV backup**: the exact opposite of this deliverable's purpose. It also
+  claimed `cron.job` for `" cron".job`, because pg_dump prints identifiers
+  **unquoted** and a whitespace-bearing name cannot be recovered from that text.
+  Sixteen of twenty-six mutations survived, and the diagnosis indicted the
+  tests: the forbidden-variable test iterated the implementation's own list, so
+  deleting an entry deleted its test case; the command double answered by label
+  regardless of which binary or arguments it was given; and manifest assertions
+  read the returned object rather than the persisted JSON.
 
-What changed in response:
+**The answer each time should have been less code, and twice I added more.** The
+restore mode is deleted: the restore is steps 8-10 of the procedure, a human
+operation with independent target verification, and a gate fed by the operator's
+own assertion is worse than no gate because it manufactures the appearance of
+safety. The classifier is deleted too: `pg_restore --list` output is saved
+**verbatim** as `archive.toc` and hashed, and that file *is* the inventory
+evidence. The one-off pg_cron measurement this rehearsal produced belongs in the
+documentation - where it now lives - not re-derived on every capture. Obsolete
+and unknown flags are refused outright rather than ignored.
 
-- **The gates are enforced, not merely exported.** `main()` takes injectable
-  dependencies, version-checks **both** binaries and refuses a mixed toolchain,
-  and pins the **archive's own** source major from its header (`Dumped from
-  database version:`). CLI-level tests assert the command sequence and that each
-  refusal happens *before* anything is dumped.
-- **Credential detection was leaky.** The review got a password through as
-  `--service "h9_dev_verified password = 'SYNTHETIC'"` - libpq permits whitespace
-  around `=`, which a `password=` substring check misses - and again as
-  `--dbname=postgresql://user:pass@host`, which the URL pattern missed because it
-  was anchored to the start of the argument. A service name is now validated as
-  an identifier, the password pattern tolerates whitespace, the URL pattern is
-  unanchored, and `PGPASSFILE`, `PGSERVICEFILE` and `PGSERVICE` are refused
-  alongside `PGPASSWORD`.
-- **Emptiness needed positive evidence.** `assertTargetEmpty()` with no argument
-  returned `true`, and a `public`-only inventory reads identically whether
-  `public` is empty or full. It now requires the inventory *and* a relation count.
-- **The TOC parser was matching loosely.** Real, legal entries
-  `cron.job-archive`, `cron."job.old"` and a table literally named
-  `EXTENSION - pg_cron` were misclassified. Parsing is now anchored on the
-  descriptor with exact schema and name comparison.
-- **The manifest accepted contradictions** - `clientMajor: 18` beside an asserted
-  `pgMajor: 17`. Fields must now agree.
+The test harness was rebuilt on the same principle: it dispatches on the real
+command path and argv and refuses anything unexpected, it parses the **written**
+manifest bytes, and it states the forbidden-variable set literally so deleting
+one fails.
 
-**A second round then found seven more, and two of them mattered a great deal.**
-The `--restore` mode I had added in response to round 1 took its emptiness,
-extension and `cron.database_name` facts **from the command line** - so the gates
-checked what the operator typed, never what the target held - and
-`--restore-database` never reached the connection at all, because the destination
-is whatever the service file says. Nine mutations still survived, including
-pointing the restore at the **source** service and swapping the manifest's hashes
-and byte sizes for plausible constants.
+**Thirty-three mutation probes, all thirty-three killed** - including every one
+of round 3's sixteen survivors: the wrong binary used for the dump, a plain
+instead of custom format, the dump written to the wrong path, the listing
+replaced by `--version`, a different file listed than the one dumped, wrong bytes
+written as the TOC, `{}` written as the manifest, constant hashes and byte sizes,
+each of the five forbidden variables removed individually, fractional byte
+counts, and an any-`17.`-prefix archive check.
 
-**So the restore mode is gone.** That is the correction, not more layering: the
-brief asked for a backup script, the restore is steps 8-10 of
-`h9_pg17_restore.md` and is a human operation with independent target
-verification, and a gate fed by the operator's own assertion is worse than no
-gate because it manufactures the appearance of safety. The module now captures,
-and says so in its header. The flags are refused outright rather than ignored.
-
-Also fixed in that round: percent-encoded credentials (`pass%77ord=`) and
-`PGSYSCONFDIR`, which is another service-file lookup route; a TOC parser that
-silently dropped `DEFAULT`, `ROW SECURITY`, `PROCEDURE` and `DOMAIN` entries and
-so shrank `entryCount`; and a manifest that accepted `archiveSourceVersion:
-'16.4'` beside `pgMajor: 17`, impossible capture dates and negative counts.
-Because pg_dump prints identifiers **unquoted**, a name or owner containing a
-space cannot be recovered from a listing at all - so the parser now reports such
-entries **ambiguous** and the capture refuses rather than guessing.
-
-**Eighteen mutation probes now confirm the tests bite, all eighteen killed** -
-including both rounds' counterexamples: the CLI replaced by a throw, the
-pg_restore version check removed, measured hashes and byte sizes replaced by
-constants, every CLI gate removed in turn, the credential guard's
-percent-decoding and `PGSYSCONFDIR` removed, and `carriesCronJob` loosened to
-accept an ambiguous line.
+**What it still does not do**, stated so nobody infers otherwise: it does not
+restore, does not inspect a restore target, does not interpret the archive's
+contents, and cannot assert hosted recovery acceptance. C5 additionally needs
+`restore_drill.md` Parts B and C, which require a physical device.
 
 ---
 
@@ -536,7 +520,7 @@ is waiting on anything I can do.
 | # | Action | Cost | Unblocks |
 |---|---|---|---|
 | **1** | **Read DEV's backup capability** in the Supabase dashboard — does `btfprhticjgeihcngpif` offer a restore, and can it target a separate project? | 5 minutes, no password | `restore_drill.md` prerequisite 1, and therefore the whole C5 design |
-| **2** | **Run one command to submit the Preview build.** Every gate passes in the prepared worktree and the archive validates 440/440; the submit is deliberately interactive, so it needs your terminal. Exact command in §4.2a. *(This replaces an earlier item asking you to decide the `h3scratch` native project - that was my error: H-9 already prescribes a fresh checkout, which touches neither `h3scratch` nor the prototype files.)* | $0, 1 of 15 | the current-revision Preview APK |
+| **2** | **Run one command to submit the Preview build, in a terminal.** Every gate passes in the prepared worktree and the archive validates 440/440. The headless attempt produced no output and no build, and **why is unmeasured** - a terminal-attached run both diagnoses that and completes the build. Exact command in §4.2a, PowerShell and CMD. *(This replaces an earlier item asking you to decide the `h3scratch` native project - that was my error: H-9 already prescribes a fresh checkout, which touches neither `h3scratch` nor the prototype files.)* | $0, 1 of 15 | the current-revision Preview APK |
 | **3** | **Supply two physical Android devices**, or one plus willingness to wipe | hardware | the twenty device scenarios, **and** C5 Parts B and C |
 | **4** | **Authorise the hosted apply of 35 → 36 → 37 in one ordered push**, naming the project — only after (1) and the resulting C5 acceptance | — | E4-H, and the hosted E11 verification |
 
