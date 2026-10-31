@@ -60,10 +60,10 @@ The two axes never collapse: **CODE-COMPLETE** means tested in CI;
 | Item | State |
 |---|---|
 | N0 account capacity | **PARTIAL** — one authorized read succeeded; complete account-wide visibility is unverified |
-| PG17 runtime | **PASS** on an isolated synthetic verification. Real H5 restore acceptance is **PENDING** |
+| PG17 runtime | **PASS** on an isolated synthetic verification, re-confirmed 2026-10-31 on two real PG17.6 containers (`server_version_num=170006`) with a PG17.6 `pg_dump` in-image. Real H5 restore acceptance is **PENDING** |
 | A2 fresh 34-chain | **BLOCKED** on the Supabase Free-slot count |
 | A3 historical upgrade | **BLOCKED** on capacity and a DEV credential |
-| H-11 C5 restore rehearsal | **OWED.** Needs a real backup provider. **Local PGlite validation is never reported as a real restore** |
+| H-11 C5 restore rehearsal | **OWED.** Needs a real backup provider **and a physical device** - C5 includes `restore_drill.md` Parts B and C, so no amount of server-side work can close it. 2026-10-31 verified the tooling on isolated PG17 containers with synthetic data and found four defects in the written procedure; **neither local PGlite nor that synthetic PG17 run is ever reported as a real restore** |
 | Vault and backup authorization evidence | **OWED**, founder-controlled |
 
 ---

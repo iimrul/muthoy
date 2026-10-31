@@ -162,3 +162,35 @@ version of this drill would have passed.
 A drill with any row still reading *not run* has not been passed, and H-11 stays
 open. Record the completed table in `DECISIONS.md` with the date and the device
 model, the way H-3's sign-off was recorded.
+
+---
+
+## Addendum, 2026-10-31 - tooling verified; every row above is still *not run*
+
+A local PG17 rehearsal was executed against two isolated
+`public.ecr.aws/supabase/postgres:17.6.1.159` containers on loopback, with
+synthetic data only. It verified the **tooling and the procedure**, and found four
+defects in `h9_pg17_restore.md` (see that file's 2026-10-31 addendum).
+
+**It changes no result in the table above, and none may be marked passed.** The
+reasons are structural, not procedural:
+
+- **Prerequisite 1 is still open**, though the documentation question is now
+  settled and an earlier note here was wrong. Supabase's current Database Backups
+  guide specifies **automatic backups for paid plans** and recommends **exports**
+  for Free projects; and restoring into a **separate new project** *is* documented
+  (its clone-project guide), but is **restricted to paid plans**. So the route
+  exists and is simply not available on Free. What remains a founder dashboard
+  read is which of these `btfprhticjgeihcngpif` actually offers today. The
+  earlier claim that "nothing documents a separate-project restore" is retracted.
+- **Prerequisite 2 is still open.** Part B (device restore) and Part C (the
+  encryption migration at 21.8 MiB, plus the mid-migration kill) need a physical
+  handset. `adb` is not installed and zero devices are attached. **C5 therefore
+  cannot pass in any session without hardware**, however complete the server half
+  becomes.
+- **No real DEV data moved.** The DEV password is the founder's, by this
+  project's own written rule, and is not in custody here.
+
+What the rehearsal did add is a repeatable executor for Part A's capture step -
+`scripts/h11/dev-backup.mjs`, tested offline by `pnpm test:h11-backup` - so the
+next attempt does not rebuild the workflow from scratch.

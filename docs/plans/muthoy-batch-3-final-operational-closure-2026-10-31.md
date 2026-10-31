@@ -970,3 +970,21 @@ authorisation and one needs hardware.
 
 **Batch 4 is not begun and no Batch 4 implementation has been written.**
 Readiness only, on your explicit GO.
+
+---
+
+## Addendum, 2026-10-31 (later the same day) - superseded operational status
+
+This report remains the record of the first pass. The operational status in it is
+superseded by
+`docs/plans/muthoy-batch-3-final-closure-execution-2026-10-31.md`, which records
+the closure run: the first PG17 restore rehearsal this host could execute, four
+defects it found in `h9_pg17_restore.md`, the EAS `preview` environment read
+(confirmed to carry the DEV project), a **new** Android blocker
+(`native-project-stale`, from the retained `h3scratch` native project), the Admin
+production build and browser-bundle separation result, and a four-item founder
+action package.
+
+The classification is unchanged: **TECHNICALLY ACCEPTED, OPERATIONAL GATES
+PENDING.** Historical content above is preserved, including its already-corrected
+section 4 dependency table.

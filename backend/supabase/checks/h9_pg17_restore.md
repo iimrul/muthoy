@@ -125,3 +125,58 @@ Do not assume the multi-file batch was atomic. Reconcile the exact checkpoint/RP
 then obtain separate founder authorization for DEV recovery. No inverse grant set for
 34, no corrective stock/money backfill, no reset/history repair. Historical 0818 is
 conservatively forward-only regardless of the unchanged classifier's B label.
+
+---
+
+## Addendum, 2026-10-31 - the procedure executed against a real PG17 target
+
+The paragraph at the top of this file recorded that *"The local Docker daemon was
+unavailable; no image was downloaded or container started."* That is no longer
+the case. Two `public.ecr.aws/supabase/postgres:17.6.1.159` containers were run on
+**127.0.0.1 only** (ports 54329/54330), each `server_version_num = 170006`, each
+carrying a **PG17.6 `pg_dump`** - which is how the PG17-client requirement is met
+on a host whose own client is 18.6.
+
+**Synthetic data only. No DEV credential was requested or used, and no hosted
+project was contacted.** This does not close H-11 C5, and the rule stated above
+still governs: *"H5 does not close H-11 C5."*
+
+Four steps of the sequence above fail when executed literally, and each refusal is
+now encoded in `scripts/h11/dev-backup.mjs` rather than left as prose:
+
+1. **Step 8's "EMPTY isolated target" is unobtainable in the image's own
+   `postgres` database.** It ships `auth`, `cron`, `vault` and `storage`
+   pre-created, so step 9's restore - correctly forbidden from using `--clean` -
+   aborts on `ERROR: schema "auth" already exists`. Only a freshly created
+   database is empty (`public` + `plpgsql`).
+2. **A `pg_cron`-enabled archive cannot go into a fresh database.** pg_cron
+   refuses: *"can only create extension in database postgres... the pg_cron
+   background worker reads job descriptions from this database."* With (1) this
+   makes an owner-preserving `--single-transaction --exit-on-error` restore of a
+   pg_cron-enabled Supabase database impossible as written, because the only
+   permitted database is the one that is never empty. **This is a PROD-shaped
+   problem; DEV has no pg_cron.**
+3. **Step 9's "preserving owners/privileges" needs superuser.** Objects owned by
+   `supabase_admin` require `SET ROLE supabase_admin`. Measured: `postgres` is
+   `super=false` and is **not** a member of `supabase_admin`. A hosted project
+   only ever grants `postgres`, so an owner-preserving round trip between two
+   hosted projects is not available by this route.
+4. **DEV's actual shape works.** A postgres-owned source without pg_cron,
+   restored by `postgres` into a fresh database: `pg_restore` **exit 0**, rows
+   2/2, and `SECURITY DEFINER`, owner and ACLs (`anon` denied, `service_role`
+   granted) all preserved.
+
+Also measured, correcting an assumption: **a dump DOES carry the schedule.**
+`pg_restore --list` contains `TABLE DATA cron job`, because pg_cron marks its job
+table for extension config dump.
+
+Separately, migration 33 was applied verbatim against real `pg_cron 1.6.4` and
+produced a job matching the PGlite stub in all seven columns. This is **not** the
+first execution of that branch: `h9-verification-report.md` records migrations
+32-33 applied on the 2026-10-15 hosted rehearsal with pg_cron enabled. The
+difference is which half of the conditional ran. There, *"B2 created cron job 1
+itself"*, so 33 took its `v_jobs = 1` verify branch. Here there was no
+pre-existing job, so 33 took `v_jobs = 0` and called `cron.schedule` itself. Both
+halves are now covered against real pg_cron.
+
+Full record: `docs/plans/muthoy-batch-3-final-closure-execution-2026-10-31.md`.

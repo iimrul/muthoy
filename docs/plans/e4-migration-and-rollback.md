@@ -156,3 +156,24 @@ there is no second copy.
 retrieved, and no `audit-artifacts/**` file was modified** during Batch 3. Both
 Supabase Free projects are untouched: not deleted, paused, repurposed or
 upgraded.
+
+---
+
+## Addendum, 2026-10-31 - 35, 36 and 37 remain unapplied
+
+No migration was applied to any hosted project. The hold is doubly determined:
+
+- The founder's conditional authorisation applies *only after* a real
+  backup-and-restore acceptance has passed. H-11 C5 has not passed, and cannot
+  without a physical device (`restore_drill.md` Parts B and C).
+- The sanctioned applier is **absent from this host** - `supabase` is not
+  installed and not in `node_modules/.bin` - so `supabase migration list --linked`
+  and `supabase db push --linked --dry-run` could not be run, and the hosted
+  ledger is still read from a prior session's receipt rather than live.
+
+Migration 35's class-C recovery requirement was **not** weakened to permit an
+earlier apply. `backend/supabase/migrations/` is byte-clean and all five sealed
+declarations are unchanged. The ordering constraint stands: one
+`supabase db push --linked` applies 35, 36 and 37 together in version order, both
+routes to 37 alone are forbidden in writing, and any push carrying 37 therefore
+inherits 35's recovery requirement.

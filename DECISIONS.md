@@ -4507,3 +4507,150 @@ mutation probe on migration 37 was reversed and its blob verified byte-identical
 are untouched.
 
 *Batch 4 is not begun.*
+
+## 2026-10-31 (closure run) - Batch 3 stays OPEN, and the reason is hardware
+
+*Decision:* the one-pass closure run is complete and Batch 3 is **NOT closed**.
+It remains **TECHNICALLY ACCEPTED, OPERATIONAL GATES PENDING**. Full record:
+`docs/plans/muthoy-batch-3-final-closure-execution-2026-10-31.md`. The earlier
+report of the same date keeps its wording and carries a dated addendum pointing
+here; nothing above is rewritten.
+
+*The finding that settles it:* **H-11 C5 cannot be closed without a physical
+Android device, so no amount of further server-side work can close Batch 3.**
+C5 is not only the server restore. `restore_drill.md` Part B is a device restore
+and Part C is the encryption migration at 21.8 MiB with a mid-migration kill.
+`adb` is not installed and zero devices are attached. This was always true in the
+document and is now stated as a conclusion rather than left to be rediscovered.
+
+*What the run did accomplish, with real new evidence:*
+
+**1. The first PG17 restore rehearsal this host could actually execute.** Every
+prior record says the Docker daemon was unavailable. It is now up, and
+`public.ecr.aws/supabase/postgres:17.6.1.159` was already cached - so an
+isolated, Supabase-flavoured PG17 target existed locally with **no new Supabase
+project, nothing purchased and no hosted contact**. Two containers on 127.0.0.1
+only, each `server_version_num = 170006`, each shipping a **PG17.6 `pg_dump`**,
+which is how the PG17-client requirement is met on a host whose own client is
+18.6. Synthetic data only; the DEV password was never requested, because by this
+project's own written rule it is the founder's.
+
+**2. Four defects in our own written restore procedure**, found for free before
+the real maintenance window: the Supabase image's `postgres` database is never
+empty (`auth`/`cron`/`vault`/`storage` pre-exist, so step 8's "EMPTY target" plus
+step 9's ban on `--clean` cannot both hold); a `pg_cron`-enabled archive cannot be
+restored into any database but `cron.database_name`, which is the one that is
+never empty, making an owner-preserving single-transaction restore of such a
+database impossible as written; owner preservation needs `SET ROLE
+supabase_admin`, and `postgres` is neither superuser nor a member, which is all a
+hosted project ever grants. The fourth is the good one: **DEV's actual shape
+restores cleanly** - exit 0, rows 2/2, with `SECURITY DEFINER`, owner and ACLs
+(`anon` denied, `service_role` granted) all preserved. Defect 2 is a **PROD**
+problem, not a DEV one, because DEV deliberately has no scheduler.
+
+**3. Migration 33's own `cron.schedule` call ran against real `pg_cron 1.6.4`**,
+and the job it created matched the PGlite stand-in in **all seven columns**. A
+draft of this entry claimed the branch ran "for the first time anywhere". That
+was false - the fourth unenumerated quantifier I have written in this batch, after
+"B4 only", "every gate" and "every capacity decision".
+`docs/plans/h9-verification-report.md` records the 2026-10-15 hosted rehearsal
+applying migrations 32-33 with pg_cron enabled, 0 failures, `cron` checks 5/5,
+and finding F10 stating *"migration 33 applied and verified B2's job."* The real,
+narrower gain: that rehearsal says *"B2 created cron job 1 itself"*, so 33 took
+its `v_jobs = 1` verify branch and never scheduled anything. This run had no
+pre-existing job, so 33 took `v_jobs = 0` and scheduled the job itself. Both
+halves of the conditional are now covered against a real scheduler rather than a
+stand-in.
+
+**4. A correction to my own expectation:** a dump **does** carry the schedule.
+`pg_restore --list` contains `TABLE DATA cron job`, because pg_cron marks its job
+table for extension config dump. I had expected it to be lost.
+
+*Decisions taken, not deferred:*
+
+**A. The Android Preview build was NOT submitted, and the reason is new.** With
+the EAS `preview` environment injected, the gating validator's refusal changed
+from `configuration-invalid` to **`native-project-stale`** - so the environment
+and the pinned public-key fingerprint validate, and something else refuses. The
+cause is `apps/mobile/android/app/build.gradle` carrying `applicationId
+'com.muthoy.pos.h3scratch'`. That refusal is **intended and asserted**:
+`apps/mobile/tests/environment-policy.test.ts:100` enumerates that very package
+among those that must "refuse before build". And `h3scratch` is **retained**
+device-testing state, recorded in this file across H-3, H-4, H-10, A2.3 and H-5,
+with the H-9 remediation report stating it remains. The remedy therefore deletes
+another workstream's state, and the authorisation was explicitly *"after these
+checks pass."* They do not pass, so nothing was built and nothing was deleted.
+Quota was never the constraint - the build would have cost $0.
+
+This is not a local advisory that could be stepped around: the sanctioned command
+`pnpm build:eas` routes through `validate-mobile-environment.mjs --eas-build`,
+whose `main()` calls `assertNativeProjects` unconditionally before it ever spawns
+`eas build`. A **second** precondition also refuses - `assertCleanRevision` uses
+`git status --porcelain=v1 --untracked-files=all` and so refuses on any dirty
+tree, and five pre-existing `apps/prototype-web` entries make the revision dirty
+regardless of this run's work.
+
+**Then the independent review found that refusing was still wrong, and it was
+right.** H-9's own environment document prescribes, for exactly this
+`requireCommit=false` problem, *"Use a fresh dedicated checkout, keep inspection
+outputs outside it."* A fresh checkout of a committed revision carries no
+generated native project and no dirt, so both gates pass without touching
+`h3scratch` or the prototype files - and the precedent is already here, since
+`D:\Muthoy-Preview-Test` at `bd0fa4d` is how the existing Preview APK was built.
+So no founder decision about `h3scratch` is required; that item is withdrawn, and
+the refusal was mine rather than the repository's.
+
+**B. The EAS `preview` environment is confirmed to carry DEV.**
+`EXPO_PUBLIC_SUPABASE_URL` = `https://btfprhticjgeihcngpif.supabase.co`, matching
+both the resolved config's `supabaseProjectRef` and the policy's pinned
+`DEV_PROJECT_REF`; `EXPO_PUBLIC_SUPABASE_ANON_KEY` exists and is marked
+SENSITIVE. It was **deliberately never fetched** - `eas env:exec` can feed a
+checker a value without displaying it, which is how the fingerprint was validated
+without disclosure. This closes the second of the previously outstanding
+approvals.
+
+**C. Admin E15 is NOT VERIFIED, and no substitute evidence is offered.** The
+production build passes (`1 successful, 1 total`). The service-role key is
+confined: six secret-shaped patterns return **0 files** across the client
+chunks, with three controls proving the scan is not vacuous - it finds strings
+that are there, the identifier **does** appear in the server build, and a planted
+canary in a copied chunk is caught. But that proves an identifier's absence from
+client chunks, not eleven working routes. No browser driver exists (no
+Playwright/Puppeteer; the configured `chrome-devtools` MCP server timed out
+connecting) and no DEV service-role credential is in custody. Per the founder's
+own fallback instruction, E15 is recorded NOT VERIFIED rather than dressed up in
+build or unit-test evidence.
+
+**D. Migrations 35, 36 and 37 remain unapplied**, held by two independent
+conditions: the founder's authorisation requires a passed backup-and-restore
+acceptance (which C5 is not), and the sanctioned applier is not installed on this
+host, so even the read-only `--dry-run` could not be run. Migration 35's class-C
+requirement was **not** weakened to manufacture closure.
+
+**E. The logout behaviour was not rewritten.** A normal shift logout stays the
+narrowest possible clear and `signOutDevice` keeps `scope: 'local'` with the test
+asserting it. Option A wording stands; nothing in this run showed the behaviour
+differs from the record.
+
+*New tooling:* `scripts/h11/dev-backup.mjs` with 12 offline contract tests, wired
+into CI as "H11 C5 backup executor contracts". It encodes the four defects above
+as refusals rather than prose, names the connection only by a libpq service so no
+password can reach argv or a log, and hard-wires `hostedRecoveryAcceptance` to
+`null` because a tool cannot assert what only the founder can. Four mutation
+probes - removing the pg_cron guard, removing the emptiness guard, loosening the
+`cron job` match, accepting any client major - were **all killed**.
+
+*What is now owed, consolidated to four items:* read DEV's backup capability in
+the dashboard (blocked on nothing, and the root of the chain); decide the
+`h3scratch` native project; supply two physical Android devices; then authorise
+the ordered 35 -> 36 -> 37 push. Item 3 is the binding constraint.
+
+*Boundaries honoured:* no hosted SQL, no hosted project contacted or altered, no
+project created/deleted/paused (the H-9 rehearsal project untouched), no migration
+applied anywhere, no credential requested/retrieved/printed/stored, no EAS build
+submitted, no paid resource consumed, no device operation, no production signing
+or package identity changed, no `audit-artifacts/**` modification, and no real
+pharmacy or customer record read - every row in the rehearsal was synthetic. The
+`h3scratch` project was read and left as found.
+
+*Batch 4 is not begun.*
