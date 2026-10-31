@@ -84,6 +84,9 @@ export const E4_MIGRATIONS = Object.freeze([
   // hosted project: this preflight is what refuses a workdir whose chain does
   // not match, and declaring the file here is what makes that refusal accurate.
   '20261030000000_e4b_publication_snapshots.sql',
+  // Migration 37, E11. Also NOT applied to any hosted project, and declared
+  // here for the same reason: an undeclared file makes this refusal lie.
+  '20261031000000_e11_entitlement_verification.sql',
 ]);
 // The chain, pinned by NAME rather than by count.
 //

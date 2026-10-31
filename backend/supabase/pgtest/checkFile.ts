@@ -77,6 +77,11 @@ export const POST_E4_MIGRATIONS: readonly string[] = Object.freeze([
   // closes the revision channel, and for the part it deliberately does NOT
   // close (the k=5 refund-side floor, which stands).
   '20261030000000_e4b_publication_snapshots.sql',
+  // Migration 37, E11. verify-then-stamp on b4_refresh_entitlement_snapshot.
+  // The offline verification ceiling was being reset by a function that checked
+  // nothing; it now refuses to attest a premium claim no payment evidence
+  // backs. Class B, and applied to no hosted project.
+  '20261031000000_e11_entitlement_verification.sql',
 ]);
 
 /**

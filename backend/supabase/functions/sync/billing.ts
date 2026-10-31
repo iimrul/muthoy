@@ -32,6 +32,14 @@ function requireOwner(record: Awaited<ReturnType<typeof assertCallerCurrent>>) {
  */
 const INVALID_OWNER_BILLING_TARGET = "MU032";
 
+/**
+ * Migration 37 turned b4_refresh_entitlement_snapshot from a stamp into a
+ * verification, so MU037 — "this snapshot's live premium claim is not backed
+ * by payment evidence" — is a real answer about the data, not an outage. It is
+ * handled the way MU032 is below: as information, not as a fault.
+ */
+const UNBACKED_ENTITLEMENT_CLAIM = "MU037";
+
 async function ensureOwnerBillingAccount(
   record: Awaited<ReturnType<typeof assertCallerCurrent>>,
 ): Promise<string | null> {
@@ -60,7 +68,27 @@ export async function billingStatus(caller: Caller, body: Record<string, unknown
   const { error: refreshError } = await supabaseAdmin.rpc("b4_refresh_entitlement_snapshot", {
     p_billing_account_id: billingAccountId,
   });
-  if (refreshError) throw new HttpError(500, "Could not verify billing status");
+  if (refreshError) {
+    const unbacked = refreshError.code === UNBACKED_ENTITLEMENT_CLAIM
+      || /not backed by/i.test(refreshError.message ?? "");
+    if (!unbacked) throw new HttpError(500, "Could not verify billing status");
+    // Logged without the account id: a diverged snapshot is a data defect
+    // someone must look at, and the reason code is what they need.
+    console.error("sync/billing-status: entitlement claim refused verification (MU037)");
+  }
+  // Reconciliation runs EITHER WAY, and that has been true in both directions
+  // during review, so it is worth saying why it is right now.
+  //
+  // b4_reconcile_plan_limits applies the snapshot: it decides how many shops
+  // stay active and how many staff stay unsuspended. While the guard inside it
+  // merely RETURNED on an unbacked claim, calling it after MU037 was pointless
+  // and skipping was correct. Migration 37 now has it derive the tier from
+  // b4_effective_tier, which answers 'free' for an unbacked claim — so the call
+  // NARROWS, and skipping it would withhold exactly the correction that undoes
+  // an expansion. Round 32 found the skip preserving active flags for that
+  // reason.
+  //
+  // For a backed account MU037 never fires, so this costs them nothing.
   await supabaseAdmin.rpc("b4_reconcile_plan_limits", { p_billing_account_id: billingAccountId });
   const orderId = typeof body.orderId === "string" ? body.orderId : null;
   if (orderId) {

@@ -5,10 +5,10 @@
 // testable against a fixture carrying one row of every status, which is the
 // only way to know they are right.
 //
-// THE PREDICATE IS NOT RE-DERIVED. `b4_user_has_premium`
-// (20260831000000_b4_commercial_platform.sql:261-272) is the canonical
-// definition, and revision 2 of the plan invented its own and got two cases
-// wrong:
+// THE PREDICATE WAS NOT RE-DERIVED, AND IS NOW OUT OF DATE. It was copied from
+// `b4_user_has_premium` (20260831000000_b4_commercial_platform.sql:261-272),
+// which WAS the canonical definition — revision 2 of the plan invented its own
+// and got two cases wrong:
 //
 //   - an ACTIVE row qualifies through EITHER paid_through OR grace_ends_at, so
 //     requiring paid_through alone excluded an active subscription inside its
@@ -16,8 +16,16 @@
 //   - a CANCELED row with paid_through in the future is still entitled, because
 //     access runs to the end of the period that was paid for.
 //
-// Both are pinned by tests. The SQL is the source of truth and this file is a
-// transcription of it, which is why the branches are laid out in that order.
+// Both are pinned by tests, and the branches are laid out in the SQL's order
+// because this file was a transcription of it.
+//
+// IT IS NO LONGER A FAITHFUL TRANSCRIPTION. Migration 37 (E11) made
+// `b4_user_has_premium` require the snapshot to AGREE with the
+// `billing_subscriptions` row behind it. The predicates below still trust the
+// snapshot alone, so they count an unbacked snapshot as entitled while the
+// database answers `free`. See `isEntitledNow` for the reproduction and the
+// scope of the consequence — reporting only, no enforcement — and the Batch 3
+// closure report for the founder decision that closes it.
 //
 // THE THREE FIGURES, and what each is NOT:
 //
@@ -78,7 +86,33 @@ export function isPaidEntitlementNow(row: EntitlementRow, nowMs: number): boolea
   return ['active', 'past_due', 'grace'].includes(row.status) && isAfter(row.graceEndsAt, nowMs);
 }
 
-/** The canonical predicate in full: `b4_user_has_premium`, as a function. */
+/**
+ * The status/date predicate in full — what `b4_user_has_premium` used to be.
+ *
+ * IT IS NO LONGER EQUIVALENT, AND THAT IS A KNOWN OPEN FINDING. Migration 37
+ * made every server-side capacity decision require the snapshot to AGREE with
+ * the `billing_subscriptions` row behind it, via
+ * `b4_entitlement_claim_backed`. This predicate still trusts the snapshot
+ * alone, so a snapshot carrying Pro/active with future dates and no
+ * subscription behind it counts as entitled here while the server answers
+ * `free`. Review round 34 reproduced exactly that: `entitlementCounts`
+ * returned `{trialing: 0, currentlyPaid: 1, entitled: 1}` for an account the
+ * database treats as having no entitlement, and an over-extended trial counts
+ * too.
+ *
+ * It MISREPORTS and grants nothing — the reviewer confirmed no enforcement
+ * copy remains in SQL — but a dashboard that reports an unpaid account as
+ * entitled is a financial misstatement, so it is named as a founder decision
+ * in the Batch 3 closure report rather than left implicit here.
+ *
+ * The fix is not another copy of the rule: the counts should consume the
+ * server's answer, which already checks both halves — a subscription row backs
+ * a paid claim, and `billing_accounts.launch_trial_granted_at` backs a trial.
+ *
+ * An earlier version of this comment said closing it required exposing that
+ * grant timestamp to the Dashboard. That was wrong: the SQL reads it already,
+ * so nothing new has to reach the panel. Round 35 corrected me.
+ */
 export function isEntitledNow(row: EntitlementRow, nowMs: number): boolean {
   return isTrialingNow(row, nowMs) || isPaidEntitlementNow(row, nowMs);
 }

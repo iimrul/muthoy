@@ -427,6 +427,10 @@ export default defineConfig({
       // so an entry omitted here is a gate that silently never runs — the
       // defect that nearly shipped with the live-chain gate itself.
       "backend/supabase/pgtest/e4b-publication.pgtest.ts",
+      // E11, migration 37. verify-then-stamp on the offline verification
+      // ceiling, with the old unconditional body re-applied for real in its own
+      // harness so the refusals are not free.
+      "backend/supabase/pgtest/e11-entitlement-verification.pgtest.ts",
       // W4-05. Both barriers proven INDEPENDENTLY — the owner gate with the pin
       // bypassed, the pin with the gate bypassed — plus the seven working paths.
       "backend/supabase/pgtest/w405-shop-identity.pgtest.ts",

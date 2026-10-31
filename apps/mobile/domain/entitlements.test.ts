@@ -98,3 +98,85 @@ describe('B4 entitlement contract', () => {
     expect(partitionByPlanLimit(result.allowed, null).suspended).toEqual([]);
   });
 });
+
+/**
+ * E11, measured rather than asserted.
+ *
+ * b4_refresh_entitlement_snapshot stamps verified_at = now() and rederives
+ * NOTHING (20260831000000:620-630), and billing-status calls it on every poll
+ * (sync/billing.ts:60). The Batch 3 plan recorded the consequence as "extends
+ * paid access with no payment". These tests exist to find out whether that is
+ * true, because the remediation depends on which of two defects this is.
+ *
+ * It is NOT true, and the reason is visible in resolveEntitlement: the
+ * verification ceiling is ANDed with the business dates, never substituted for
+ * them. Advancing verified_at cannot create access the snapshot does not
+ * already carry. What it CAN do is keep extending trust in a snapshot that
+ * nothing has checked against payment evidence -- a false attestation and a
+ * defeated backstop, not a payment bypass.
+ */
+describe('E11 -- what advancing verified_at can and cannot buy', () => {
+  it('cannot extend premium one millisecond past paid_through', () => {
+    // paid_through is 20 days out, grace 27. A refresh stamps verified_at now,
+    // so the ceiling is 30 days out -- strictly BEYOND both business dates.
+    const refreshed = { ...base, verifiedAt: now.toISOString() };
+    const ceiling = now.getTime() + MAX_OFFLINE_VERIFICATION_DAYS * DAY_MS;
+    expect(ceiling).toBeGreaterThan(Date.parse(base.graceEndsAt!));
+
+    // Access still ends at grace, not at the ceiling.
+    const atGrace = resolveEntitlement(refreshed, new Date(Date.parse(isoAfter(27)) - 1));
+    expect(atGrace.premium).toBe(true);
+    const pastGrace = resolveEntitlement(refreshed, new Date(Date.parse(isoAfter(27)) + 1));
+    expect(pastGrace.premium).toBe(false);
+    expect(pastGrace.effectiveTier).toBe('free');
+    expect(pastGrace.reason).toBe('paid_expired');
+  });
+
+  it('grants nothing at all on a snapshot whose dates have already run out', () => {
+    // The adversarial case the plan described: an account with no live
+    // entitlement, refreshed repeatedly. Each refresh moves the ceiling and
+    // buys zero access, because every branch requires a business date ahead of
+    // now BEFORE the ceiling is consulted.
+    const spent = {
+      ...base, paidThrough: isoAfter(-40), graceEndsAt: isoAfter(-33),
+      verifiedAt: now.toISOString(),
+    };
+    const resolved = resolveEntitlement(spent, now);
+    expect(resolved).toMatchObject({ premium: false, effectiveTier: 'free', reason: 'paid_expired' });
+
+    // And a trial that has ended is not revived by a fresh stamp either.
+    const endedTrial = {
+      ...base, tier: 'free' as const, status: 'trialing' as const,
+      trialEndsAt: isoAfter(-1), paidThrough: null, graceEndsAt: null,
+      verifiedAt: now.toISOString(),
+    };
+    expect(resolveEntitlement(endedTrial, now)).toMatchObject({ premium: false, reason: 'trial_ended' });
+  });
+
+  it('does move the offline ceiling, which is the one legitimate thing it is for', () => {
+    // This is why the call cannot simply be deleted. A paid device that has
+    // been offline 31 days is stale and resolves to free; contacting the
+    // server is exactly what should restore it. Removing the refresh without
+    // replacing it would strip premium from paying customers who are online.
+    const annual = { ...base, paidThrough: isoAfter(300), graceEndsAt: isoAfter(307) };
+    const stale = { ...annual, verifiedAt: isoAfter(-31) };
+    expect(resolveEntitlement(stale, now)).toMatchObject({ premium: false, reason: 'verification_stale' });
+
+    const refreshed = { ...annual, verifiedAt: now.toISOString() };
+    expect(resolveEntitlement(refreshed, now)).toMatchObject({ premium: true, reason: 'paid' });
+  });
+
+  it('bounds the exposure window at 30 days of unchecked trust per refresh', () => {
+    // The measured impact. A snapshot that has diverged from payment reality
+    // but still carries open business dates keeps premium for min(business
+    // date, verified_at + 30d). The ceiling is the ONLY mechanism that would
+    // ever force that snapshot to be re-derived, and the refresh resets it, so
+    // the window renews indefinitely while the dates stay open.
+    const diverged = { ...base, paidThrough: isoAfter(300), graceEndsAt: isoAfter(307) };
+    const resolved = resolveEntitlement({ ...diverged, verifiedAt: now.toISOString() }, now);
+    expect(resolved.offlineValidUntil)
+      .toBe(new Date(now.getTime() + MAX_OFFLINE_VERIFICATION_DAYS * DAY_MS).toISOString());
+    // Not the business date: the ceiling binds here, and a refresh moves it.
+    expect(resolved.offlineValidUntil).not.toBe(resolved.accessEndsAt);
+  });
+});

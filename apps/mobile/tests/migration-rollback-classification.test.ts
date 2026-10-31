@@ -142,8 +142,8 @@ describe('a volatile ADD COLUMN default is a backfill', () => {
 
 describe('the corrected PostgreSQL classification', () => {
   it('covers every migration on disk exactly once', () => {
-    expect(pg.length).toBe(36);
-    expect(new Set(pg.map((row) => row.name)).size).toBe(36);
+    expect(pg.length).toBe(37);
+    expect(new Set(pg.map((row) => row.name)).size).toBe(37);
   });
 
   it('is A 8 / B 19 / C 9 — not the 14 forward-only the first audit claimed', () => {
@@ -173,7 +173,13 @@ describe('the corrected PostgreSQL classification', () => {
     // by luck. See its ROLLBACK.md row: the alternative shape was a second
     // append-only evidence store, which would have been a second class C whose
     // only recovery is the restore H-11 C5 has never rehearsed.
-    expect(classCounts(pg)).toEqual({ A: 8, B: 19, C: 9 });
+    // E11 (2026-10-31): the 37th is one `create or replace function` and
+    // nothing else. b4_refresh_entitlement_snapshot stops attesting a
+    // verification it never performed; the reversal is the predecessor
+    // definition out of 20260831000000, which is a deploy, not a data
+    // operation -- so B, and the suite executes that reversal rather than
+    // claiming it.
+    expect(classCounts(pg)).toEqual({ A: 8, B: 20, C: 9 });
   });
 
   it('declares its two judgements instead of inferring them', () => {
@@ -208,7 +214,7 @@ describe('the corrected PostgreSQL classification', () => {
   );
 
   it('states the corrected headline count in the document itself', () => {
-    expect(ROLLBACK_DOC).toContain('**A: 8 · B: 19 · C: 9 — of 36.**');
+    expect(ROLLBACK_DOC).toContain('**A: 8 · B: 20 · C: 9 — of 37.**');
   });
 
   it('carries no OTHER headline anywhere in any of the three documents', () => {
