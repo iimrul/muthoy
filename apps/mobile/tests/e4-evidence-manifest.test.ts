@@ -305,3 +305,57 @@ describe('the supersession guard, with input a tamperer would actually supply', 
     expect(checkOrWrite('--check')).toEqual([]);
   });
 });
+
+describe('the real checker, driven to a FAILING answer', () => {
+  // ROUND 26 FINDING 1. Replacing `checkOrWrite`'s delegation with `return []`
+  // left 17 of 17 tests green: the negative cases exercised `manifestDrift`
+  // directly, and the only case that invoked `checkOrWrite` supplied a clean
+  // tree, where [] is the correct answer. A gate nothing drives to a failing
+  // answer is a gate nothing tests — which is the same defect as round 25
+  // finding 3, one layer up, in the fix for round 25 finding 3.
+  //
+  // So this points the real function at a manifest whose recorded hash for a
+  // real file is wrong, and requires it to say so.
+
+  it('reports the drifted path when the recorded hash is wrong', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'e4b-checker-'));
+    try {
+      const path = join(dir, 'e4-source-hashes.json');
+      const built = buildManifest();
+      const target = 'backend/supabase/pgtest/checkFile.ts';
+      expect(Object.keys(built.files)).toContain(target);
+      // Everything right except ONE hash, so the answer can only be that path.
+      writeFileSync(
+        path,
+        JSON.stringify({
+          ...built,
+          files: { ...built.files, [target]: '0'.repeat(64) },
+        }),
+      );
+      const drift = checkOrWrite('--check', path);
+      expect(drift).toContain(target);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports NOTHING for a manifest that matches the tree', () => {
+    // The positive control, through the same injectable path — so the test
+    // above cannot pass by the checker simply always reporting something.
+    const dir = mkdtempSync(join(tmpdir(), 'e4b-checker-ok-'));
+    try {
+      const path = join(dir, 'e4-source-hashes.json');
+      writeFileSync(path, JSON.stringify(buildManifest()));
+      expect(checkOrWrite('--check', path)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('defaults to the REAL manifest when no path is given', () => {
+    // The parameter must not have moved the gate. With no argument this is the
+    // shipped CLI behaviour, and the tree is clean.
+    expect(checkOrWrite('--check')).toEqual([]);
+    expect(checkOrWrite()).toEqual([]);
+  });
+});

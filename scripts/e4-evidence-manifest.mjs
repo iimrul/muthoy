@@ -216,9 +216,15 @@ export function supersededBy(manifestPath = SUCCESSOR_MANIFEST_PATH) {
  * Compares the recorded manifest with the tree and returns the paths that
  * disagree. `--write` regenerates it instead.
  */
-export function checkOrWrite(mode = '--check') {
+export function checkOrWrite(mode = '--check', manifestPath = MANIFEST_PATH) {
+  // The path is a PARAMETER so a test can drive this against a manifest whose
+  // recorded hashes it controls. ROUND 26 FINDING 1: replacing this function's
+  // delegation with `return []` left 17 of 17 tests green, because the negative
+  // cases exercised `manifestDrift` directly and the only case that invoked
+  // THIS function supplied a clean tree. A gate nothing drives to a failing
+  // answer is a gate nothing tests.
   const built = buildManifest();
-  const path = resolve(MANIFEST_PATH);
+  const path = resolve(manifestPath);
 
   if (mode === '--write') {
     mkdirSync(dirname(path), { recursive: true });
@@ -226,7 +232,7 @@ export function checkOrWrite(mode = '--check') {
     return [];
   }
 
-  if (!existsSync(path)) throw new Error(`E4 evidence manifest is missing: ${MANIFEST_PATH}`);
+  if (!existsSync(path)) throw new Error(`E4 evidence manifest is missing: ${manifestPath}`);
   const recorded = JSON.parse(readFileSync(path, 'utf8'));
 
   // DECLARED SUPERSESSION. See scripts/post-e4-evidence-manifest.mjs for why

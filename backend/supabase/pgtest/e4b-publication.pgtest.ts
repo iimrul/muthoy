@@ -81,6 +81,32 @@ function publishCall(args: PublishArgs = {}): string {
     ${a.daysRequiring}::integer, ${a.daysClearing}::integer, ${quote(a.by)})`;
 }
 
+/**
+ * Runs `sql` as `role` on a GIVEN harness and reports the SQLSTATE.
+ *
+ * Module level because two describes need it now — the main suite has its own
+ * closure over its harness, and the fixed-clock suite below has a different
+ * one. One implementation rather than a third copy.
+ */
+async function attemptIn(
+  h: Harness,
+  role: string,
+  sql: string,
+): Promise<{ code: string | null; message: string } | null> {
+  return h.as(role, null, async () => {
+    try {
+      await h.exec(sql);
+      return null;
+    } catch (error) {
+      const code =
+        error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+          ? (error as { code: string }).code
+          : null;
+      return { code, message: error instanceof Error ? error.message : String(error) };
+    }
+  });
+}
+
 /** An INSERT straight at the table, for the constraint-level assertions. */
 function rawInsert(values: string): string {
   return `insert into public.financial_publications
@@ -512,14 +538,24 @@ describe('E4-B publication snapshots', () => {
     // And no bare `current_date` comparison survives anywhere in the file.
     expect(source).not.toMatch(/p_period_end\s*>=\s*current_date/);
 
-    // WHY THIS IS STRUCTURAL AND NOT BEHAVIOURAL, stated so the next reader
-    // does not take it for laziness. `>= today` and `>= today - 1` differ on
-    // exactly one input: a whole month whose end is yesterday in Dhaka. A
-    // month ends on its last day, so that input exists only on the FIRST of a
-    // month — any behavioural test for it would pass on thirty days out of
-    // thirty-one regardless of which implementation is present. The database
-    // clock cannot be injected here. So the text is what carries this, and the
-    // behavioural test below carries the part that can be executed.
+    // THIS PIN IS CRUDE, AND IT IS NO LONGER WHAT CARRIES THE RULE.
+    //
+    // ROUND 26 FINDING 2: counting `>=` occurrences and matching the statement
+    // text is defeated by PREPENDING a separate check —
+    //
+    //   if p_period_end = (now() at time zone 'Asia/Dhaka')::date - 1 then
+    //     raise exception 'refused' using errcode = 'restrict_violation';
+    //   end if;
+    //
+    // — which leaves exactly one counted `>=`, the exact original statement
+    // intact, and 43/43 green while changing the boundary. A structural pin
+    // can only constrain the text it names; it cannot see code added beside it.
+    //
+    // I had also written that the database clock could not be injected here,
+    // and that was simply wrong: the reviewer replaced PGlite's
+    // `pg_catalog.now()` and fixed it. The FIXED-CLOCK test below does that,
+    // and it is what actually establishes the boundary now. This assertion is
+    // kept as a cheap tripwire, not as the proof.
   });
 
   it('refuses a period ending on the Dhaka day it is still inside, and accepts yesterday', async () => {
@@ -705,6 +741,78 @@ describe('E4-B publication snapshots', () => {
          -1, 0, -1, 1, 0, ${quote(DIGEST_A)}, 5, 6, 1, 1, 'x'`),
     );
     expect(refusal?.code).toBe('23514');
+  });
+});
+
+// ───────────────────────────── the Dhaka boundary, against a FIXED clock
+
+describe('E4-B period-ended boundary, at a fixed Dhaka instant', () => {
+  // ROUND 26 FINDING 2, and the technique is the reviewer's: PGlite lets
+  // `pg_catalog.now()` be replaced, which fixes the clock. I had written that
+  // it could not be injected and that was wrong.
+  //
+  // WHY A FIXED CLOCK IS THE ONLY WAY TO TEST THIS. `>= today` and
+  // `>= today - 1` differ on exactly one input — a whole month whose end is
+  // YESTERDAY in Dhaka — and a month ends on its last day, so that input
+  // exists only on the first of a month. Against the real clock any such test
+  // would pass on thirty days out of thirty-one whichever implementation were
+  // present. Fixing the clock to 2026-11-01 00:30 Dhaka makes October's end
+  // exactly yesterday, every time this runs.
+  //
+  // A HARNESS OF ITS OWN, because replacing `now()` changes every timestamp
+  // default in the database and must not reach another test.
+  let h: Harness;
+
+  beforeAll(async () => {
+    h = await createHarness();
+    // 2026-11-01T00:30+06:00 — half past midnight on November 1st in Dhaka,
+    // which is still 18:30 on October 31st in UTC. So this instant also pins
+    // the UTC/Dhaka disagreement the guard exists to resolve.
+    await h.exec(`
+      create or replace function pg_catalog.now() returns timestamptz
+        language sql stable
+        as $$ select '2026-11-01T00:30:00+06:00'::timestamptz $$;`);
+  }, 180_000);
+  afterAll(async () => {
+    await h?.close();
+  });
+
+  it('agrees the clock is fixed, and that UTC and Dhaka disagree at it', async () => {
+    // Non-vacuity for everything below: if the override had not taken effect,
+    // the two assertions that follow would be about today rather than about
+    // the instant this test is written for.
+    const row = await h.one<{ dhaka: string; utc: string }>(`
+      select (now() at time zone 'Asia/Dhaka')::date::text as dhaka,
+             (now() at time zone 'UTC')::date::text as utc`);
+    expect(row.dhaka).toBe('2026-11-01');
+    expect(row.utc).toBe('2026-10-31');
+  });
+
+  it('PUBLISHES a month whose end is YESTERDAY in Dhaka', async () => {
+    // THE ASSERTION THE PREVIOUS TEST WAS MISSING. My behavioural test computed
+    // yesterday and never tried to publish it, so both of the reviewer's
+    // mutations — the added disjunct and the prepended equality check — left
+    // the suite green. This is the input they both refuse.
+    const rows = await h.as('service_role', null, async () =>
+      h.all<{ published_now: boolean; published_value_paisa: string }>(
+        publishCall({ start: '2026-10-01', end: '2026-10-31' }),
+      ),
+    );
+    expect(rows[0]!.published_now).toBe(true);
+    expect(Number(rows[0]!.published_value_paisa)).toBe(40_000);
+  });
+
+  it('and still REFUSES the month it is currently inside', async () => {
+    // The other side of the same boundary, so a guard that accepted everything
+    // would fail here. November has not ended at 2026-11-01.
+    const refusal = await attemptIn(
+      h,
+      'service_role',
+      publishCall({ start: '2026-11-01', end: '2026-11-30' }),
+    );
+    expect(refusal?.code).toBe('23001');
+    expect(refusal?.message).toContain('has not ended in Dhaka');
+    expect(refusal?.message).toContain('2026-11-01');
   });
 });
 
