@@ -39,3 +39,6 @@ jobs:
 
       - name: H9 offline remediation contracts
         run: pnpm test:h9-remediation
+
+      - name: H11 C5 backup executor contracts
+        run: pnpm test:h11-backup

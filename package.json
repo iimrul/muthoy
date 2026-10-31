@@ -11,6 +11,7 @@
     "typecheck": "turbo run typecheck",
     "test": "vitest run",
     "test:h9-remediation": "node scripts/h9/test/remediation.test.mjs",
+    "test:h11-backup": "node --test scripts/h11/test/backup-contract.test.mjs",
     "build": "turbo run build",
     "format": "prettier --write ."
   },
