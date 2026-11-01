@@ -4672,3 +4672,141 @@ real pharmacy or customer record read - every row in the rehearsal was synthetic
 The `h3scratch` project was read and left as found.
 
 *Batch 4 is not begun.*
+
+## 2026-11-01 - the device ran the tests, and the record I wrote this morning was wrong
+
+*Decision:* Batch 3 remains **TECHNICALLY ACCEPTED, OPERATIONAL GATES PENDING**.
+Three of the six device cases now have real evidence from real hardware. Three
+do not, for reasons that are physical rather than technical. No server-side gate
+closed.
+
+**1. The installed APK is EAS build `ffab3562`, built from `fdbe8c3`. I said it
+was of unknown provenance. That was wrong, and the error was mine.** I compared
+the installed APK against build `76ee0fcb` only, found a mismatch, and concluded
+it came from outside EAS. I never re-listed the builds. A fresh
+`eas build:list` shows `ffab3562-bac0-492b-b78e-538384e31177`, status FINISHED,
+`gitCommitHash` `fdbe8c31039b373f89c7b4a9fc69c9876ee00768`, created
+2026-11-01T00:41Z and completed 00:59Z. Downloading its artifact gives
+215,937,028 bytes, sha256
+`686350b773b5ed044acb739dd1b9c590d300297849796c5769d4b7f3dab56500` - and `cmp`
+against the APK pulled off the handset reports the two files **identical**.
+Signing identity follows from byte equality; `installerPackageName` is
+`com.google.android.packageinstaller`, consistent with a downloaded sideload.
+
+This is the sixth unenumerated or unchecked claim I have written in this project,
+and the first where the correction arrived within hours rather than sessions. The
+lesson is narrower than "re-list before concluding": I had the means to refute
+myself cheaply and did not spend it, because the first comparison agreed with
+what I already believed about a stale build.
+
+**2. The Babel fix is proven, by the measure the prompt set.** `4418bbf` errored
+with "Cannot find module 'babel-preset-expo'". `fdbe8c3` declared the preset and
+`@babel/plugin-transform-react-jsx`, and the next real EAS build on that commit
+**succeeded**. The standing instruction was not to claim the APK was fixed until
+a real build succeeded. One has.
+
+**3. Three device cases ran on `RZ8W40HDRMK` (SM-A047F, Android 14) against the
+`fdbe8c3` build. One passes with a stated limit, one is partial, one is
+inconclusive - and an independent review downgraded two of the three from what I
+first wrote.** My first draft of this entry claimed three passes. It did not
+survive review, and the corrections are recorded in place below rather than
+quietly amended.
+
+*Case 6, FEFO at read time (rule 3) - **INCONCLUSIVE**, after the review caught
+me overclaiming it.* I first recorded this as PASS on the grounds that the sale
+list put the earlier-expiring batch first "although it was created later, holds
+less stock and sorts after alphabetically - so the order is neither insertion,
+quantity nor name." **That elimination was incomplete and the conclusion was
+wrong.** The "All Medicine" list is `listSaleInsights(shopId,'all')`, whose SQL
+ends `ORDER BY m.name COLLATE NOCASE, m.id LIMIT 20`. Both rows are named
+"Progut MUPS", so the name **ties** and the tiebreaker is `m.id` - not expiry.
+The order I observed was arbitrary, and I never excluded the key that actually
+decided it.
+
+What survives is narrower than a device pass. In source, `domain/fefo.ts`'s
+`sortByExpiry` orders by the real `expiryDate` with null last and recomputes on
+every call, and `activeSellableBatch` picks the earliest-expiring sellable batch
+per medicine - so the *batch shown on a card* is FEFO-selected. On the device
+both day counts were exact for the day they were read, 75d and 406d, for a batch
+created minutes earlier and one created weeks earlier, which is real evidence
+against a day-count stored at creation. Selling three units drew from the cart's
+bound batch, `FEFO-EARLY` (50 to 47), leaving `#Baban` at 200.
+
+But **the FEFO selection itself was never exercised**: each medicine held exactly
+one batch, so `activeSellableBatch` always had a single candidate, and no
+multi-batch ordering or spill-over deduction ran on hardware. Rule 3 governs
+batches *within* a medicine, and that path is untested on device. Closing it
+needs two batches under one medicine, which this build's UI cannot create - see
+the defect in item 5.
+
+*Case 3, offline then online, including a kill mid-sync - **PASS, client-side
+only**.* With WiFi and mobile data off and `Active default network: none`, a full
+sale completed from local storage alone: `INV-2026-000001-26C9352E610C`, total
+9.00, change 1.00 on 10.00 tendered. On reconnect the history showed **exactly
+one** sale and no sync conflicts. Repeated: a second sale was taken offline, the
+network restored, and the app force-stopped 2.5 seconds later. After relaunch the
+history showed **exactly two** sales, `000001` and `000002`, neither duplicated
+nor lost, and stock stood at 44 - a single decrement per sale.
+
+Two limits the review was right to insist on, and the gate is not fully closed
+without them. First, **every observation is from the device's own store.** No DEV
+credential exists here, so I did not confirm that either sale reached the hosted
+database, nor that it arrived once. "The queue drains once" is therefore shown
+for the local queue only; the server copy is **unverified**. Second, I called the
+kill "mid-sync", and I cannot prove it was: 2.5 seconds after re-enabling the
+radios is when I sent `force-stop`, but I captured nothing showing a request
+in flight at that moment. The honest statement is that the app was killed shortly
+after reconnect and the local store survived it intact. Settling both needs a
+service-role read of DEV and a captured sync log.
+
+*Case 5, opening cash (rule 5) - PARTIAL.* Opening Cash reads 0.00 today, and the
+drawer reconciles exactly: 0 opening plus 0 cash sales plus 0 collections, less 0
+expenses, less 0 withdrawals, less 100.00 supplier payments, equals **-100.00**,
+which is what the screen shows. That is rule 4's formula checked arithmetically
+on hardware. It is **not** proof of the midnight reset: this shop has no
+prior-day cash session to inherit from, and without root the device clock cannot
+be moved. Recorded as partial rather than passed.
+
+**4. Three cases did not run, and none of the reasons is a software defect.**
+Case 4, refund bucketing by business date, needs a sale dated to a previous
+business day; sales history was empty when the run began and the clock is not
+settable, so no such sale can be made. Case 2, tenant isolation under sync, needs
+a second handset. Case 1, owner handover, needs a second owner registration,
+which means signing out of the H-5 E2E shop - credentials I do not hold, and a
+sign-out I will not perform uninvited on the only configured test shop.
+
+**5. A defect candidate found by accident, and it is worth Batch 4's attention.**
+There is no path in the UI to add a batch to an existing medicine. Edit Medicine
+offers only "Edit batch" for batches already present, and Manual Entry with an
+identical name, generic and manufacturer created a **second, parallel medicine
+row** rather than a second batch. FEFO sorts batches within a medicine; stock
+split across two medicine rows never enters one FEFO ordering. A pharmacist
+restocking the same drug would silently divide their own stock. Not fixed here -
+Batch 4 is not begun - but recorded with the reproduction.
+
+**6. An incident on the founder's personal phone, disclosed in full.** Midway
+through form entry a Truecaller caller-details screen took focus, and three taps
+and three text inputs intended for the app went into that third-party screen
+instead. Measured against its layout the taps fall in non-interactive gaps, and
+the call log is unambiguous that nothing was dialled - every entry predates the
+session by about two hours and `mCallState` was 0 throughout. I cannot prove
+nothing changed inside Truecaller. The screenshots that captured caller
+information were deleted. A guard now refuses every input event unless
+`com.muthoy.pos.preview` holds focus; it was verified to block (exit 90) and then
+to allow, and it blocked two further interruptions during the run.
+
+*Device boundaries:* no root, no factory reset, no uninstall, no data cleared, no
+personal file touched. Production `com.muthoy.pos` untouched. Two settings were
+changed and both restored: `stay_on_while_plugged_in` 0 to 7 to 0, and WiFi and
+mobile data off and on again - data and WiFi only, never airplane mode, so calls
+kept arriving. Left on the device: one synthetic medicine row, one batch of 50
+units less six sold, and two synthetic sales totalling 18.00 in the H-5 E2E test
+shop.
+
+*Gates unchanged:* H-11 C5 Part A still needs the DEV password through the
+protected prompt. Parts B and C are now unblocked on provenance but unexecuted.
+E15 still needs the DEV service-role key server-side. Hosted migrations remain
+**HELD**: DEV's tail is `20261005000000` with 31 applied and **six** pending, and
+the founder has authorised three.
+
+*Batch 4 is not begun.*

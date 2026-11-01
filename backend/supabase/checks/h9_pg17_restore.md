@@ -142,11 +142,14 @@ project was contacted.** This does not close H-11 C5, and the rule stated above
 still governs: *"H5 does not close H-11 C5."*
 
 Four steps of the sequence above fail when executed literally, and each refusal is
-recorded below. The two a machine can see - a PG17 client and a PG17 archive -
-are enforced by `scripts/h11/dev-backup.mjs`, which **captures only**: an earlier
-revision of it also restored, with emptiness and pg_cron gates fed from the
-command line, which checked what the operator typed rather than what the target
-held. Steps 8-10 stay a human operation with independent target verification.
+recorded below. The two a machine could see - a PG17 client and a PG17 archive -
+were once enforced by a capture executor, `scripts/h11/dev-backup.mjs`.
+**That executor was DELETED on 2026-11-01** after a fourth consecutive REVISE
+("operational reliance: no"), so **this procedure is now entirely manual** and
+the command shapes at lines 87-89 are the authoritative capture. Check the
+client and archive majors by hand, with `pg_dump --version` and the archive's own
+`Dumped from database version:` header. Steps 8-10 remain a human operation with
+independent target verification.
 
 1. **Step 8's "EMPTY isolated target" is unobtainable in the image's own
    `postgres` database.** It ships `auth`, `cron`, `vault` and `storage`

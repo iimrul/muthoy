@@ -191,6 +191,9 @@ reasons are structural, not procedural:
 - **No real DEV data moved.** The DEV password is the founder's, by this
   project's own written rule, and is not in custody here.
 
-What the rehearsal did add is a repeatable executor for Part A's capture step -
-`scripts/h11/dev-backup.mjs`, tested offline by `pnpm test:h11-backup` - so the
-next attempt does not rebuild the workflow from scratch.
+The rehearsal did add a repeatable executor for Part A's capture step, but
+**that executor was DELETED on 2026-11-01** after a fourth consecutive REVISE
+whose verdict was "operational reliance: no" - a capture tool that can
+mis-attribute a backup is worse than none. Part A's capture is therefore the
+manual command shapes in `h9_pg17_restore.md` lines 87-89, which are unchanged
+and authoritative. Nothing else in this drill depended on the executor.

@@ -891,8 +891,11 @@ and the evidence you should expect back.
   that sets `APP_VARIANT=preview`), from the accepted revision
 - **Target:** `com.muthoy.pos.preview`, DEV environment, internal distribution
 - **Why:** `bd0fa4d` is not even an ancestor of `main`; 80 commits and 66
-  mobile files separate them. The twenty device scenarios cannot start without
-  this.
+  mobile files separate them. The device scenarios - **six**, not twenty; see the
+2026-11-01 `DECISIONS.md` entry - needed this, and **it is now done**: build
+  `ffab3562` from `fdbe8c3` succeeded and is installed, byte-identical by `cmp`.
+  Cases 3, 5 and 6 ran against it on 2026-11-01; cases 1, 2 and 4 remain blocked
+  on a second handset, owner credentials and an unsettable device clock.
 - **Risk:** consumes EAS build quota. No production identity is touched. Use
   synthetic data only — no real pharmacy or customer information.
 - **Also needed:** two physical Android devices, and JDK 17 if you would rather

@@ -106,8 +106,9 @@ before the founder spends the one DEV password entry on it.
    changeable with a server restart, so this is a **configuration requirement**,
    not an impossibility. An earlier draft called it impossible; that was
    overstated. On a hosted project, where the setting is not yours, it remains a
-   hard stop. The guard in `dev-backup.mjs` compares the archive against the
-   target's **effective** setting, which is correct in both cases.
+   hard stop. A guard in the capture executor once compared the archive against
+   the target's **effective** setting; that executor was deleted on 2026-11-01,
+   so this comparison is now a manual step for the operator.
 4. **Owner preservation needs superuser, which hosted Supabase does not grant.**
    Restoring `supabase_admin`-owned objects needs `SET ROLE supabase_admin`.
    Measured: `postgres super=false`, and `postgres` is **not** a member of
@@ -405,7 +406,14 @@ demonstrated the behaviour is other than as recorded.
 
 ---
 
-## 5. New: a repeatable capture executor, and three rounds of being wrong about it
+## 5. A repeatable capture executor, four rounds of being wrong about it, and its deletion
+
+**SUPERSEDED 2026-11-01: this executor no longer exists.** After a fourth
+consecutive REVISE - verdict "operational reliance: no", four P2 defects and
+twelve surviving mutations - `scripts/h11/**`, the `test:h11-backup` script and
+the CI step were all deleted. The manual capture in `h9_pg17_restore.md` lines
+87-89 is unchanged and authoritative. The section below is kept as the record of
+what was attempted and why it failed; it describes nothing that is still present.
 
 `scripts/h11/dev-backup.mjs`, with `scripts/h11/test/backup-contract.test.mjs`
 (25 tests), wired into `package.json` as `test:h11-backup` and into CI as
@@ -521,7 +529,7 @@ is waiting on anything I can do.
 |---|---|---|---|
 | **1** | **Read DEV's backup capability** in the Supabase dashboard — does `btfprhticjgeihcngpif` offer a restore, and can it target a separate project? | 5 minutes, no password | `restore_drill.md` prerequisite 1, and therefore the whole C5 design |
 | **2** | **Run one command to submit the Preview build, in a terminal.** Every gate passes in the prepared worktree and the archive validates 440/440. The headless attempt produced no output and no build, and **why is unmeasured** - a terminal-attached run both diagnoses that and completes the build. Exact command in §4.2a, PowerShell and CMD. *(This replaces an earlier item asking you to decide the `h3scratch` native project - that was my error: H-9 already prescribes a fresh checkout, which touches neither `h3scratch` nor the prototype files.)* | $0, 1 of 15 | the current-revision Preview APK |
-| **3** | **Supply two physical Android devices**, or one plus willingness to wipe | hardware | the twenty device scenarios, **and** C5 Parts B and C |
+| **3** | ~~Supply two physical Android devices~~ **PARTLY DONE 2026-11-01.** One authorised device is attached (`RZ8W40HDRMK`, SM-A047F, Android 14). Provenance is **PROVEN**: the installed APK is byte-identical (`cmp`) to EAS build `ffab3562`, built from `fdbe8c3` - an earlier note here claiming it matched no successful build was my error, corrected in the 2026-11-01 `DECISIONS.md` entry. Cases 3, 5 and 6 ran against it; **case 2 still needs a second handset**, case 1 needs credentials for a second owner registration, and case 4 needs a prior-business-date sale the unsettable device clock cannot produce. The authoritative matrix is **six** cases, not twenty | hardware | cases 1, 2 and 4, **and** C5 Parts B and C |
 | **4** | **Authorise the hosted apply of 35 → 36 → 37 in one ordered push**, naming the project — only after (1) and the resulting C5 acceptance | — | E4-H, and the hosted E11 verification |
 
 Item 1 is blocked on nothing and is the root of the chain. Item 2 is new in this
