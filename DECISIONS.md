@@ -4810,3 +4810,85 @@ E15 still needs the DEV service-role key server-side. Hosted migrations remain
 the founder has authorised three.
 
 *Batch 4 is not begun.*
+
+
+## 2026-11-01 — Batch 3: explicit existing-medicine restocking
+
+Manual Entry previously allocated a fresh medicine ID for every receipt. Identical
+brand/generic/manufacturer text therefore fragmented stock across medicine IDs,
+preventing those batches from participating in one FEFO ordering. Names remain
+review hints, never identity keys: users explicitly select a shop medicine ID or
+acknowledge a distinct new product. Existing identities and historical transactions
+are preserved. No automatic merge, deletion or historical data repair runs.
+
+Add Stock and Edit Medicine now expose existing-medicine/new-batch entry. The legacy
+batch detail route uses the same supplier receipt form. The receipt reuses the
+atomic purchase writer, stock movements, supplier credit and COD cash settlement.
+It checks inventory_add again inside the transaction, validates shop ownership,
+and rejects an already-used batch number. Existing-batch top-ups remain in the
+supplier purchase flow. FEFO continues to use real expiry dates at read time;
+no FEFO algorithm change or SQLite schema migration is needed.
+
+The existing hosted inventory_add_purchase contract required a medicine INSERT.
+Staff restocking therefore needs an additive hosted contract extension. Its SQL
+is a local held draft in backend/supabase/held-migrations, outside the active chain;
+PGlite tests opt into it explicitly. Hosted migrations remain HELD. Promotion,
+chain classification and byte pins, hosted application and client distribution
+need their separate release gate. Do not distribute clients emitting the new
+graph before that approved activation. No hosted change was executed here.
+
+Historical duplicate reconciliation is a separate, proposed reversible identity
+alias procedure in docs/plans/restock-history-reconciliation.md. It needs owner
+identity review and separate schema/sync/RLS authorization; it was not implemented
+or executed. This correction belongs to Batch 3; Batch 4 is not started.
+
+**Independent review, same day — the warning above is now enforced in code, not
+just written down.** The implementation as first written set
+`inventoryRestock: Boolean(input.existingMedicineId)`, so every restock staged as
+`inventory_add_purchase`. DEV's live constraint is
+`check (operation_kind<>'inventory_add_purchase' or expected_row_count in (5,7,8))`
+(`20260825000000_inventory_add_purchase_sync.sql:25`), and a restock graph carries
+no medicines row. **Staging would have rejected every restock - owners included,
+not only staff.** The widening to `(4,5,6,7,8)` exists only in the held draft, and
+the chain is HELD, so the client would have shipped ahead of its server. A
+sentence in this file is not a gate; the code now is.
+
+My first write-up of the mechanism was itself imprecise, and the re-review caught
+it. A restock counts **4** (credit), **6** (COD onto an existing drawer) or **7**
+(COD creating one) - not "4 or 6" - and **7 passes** the count constraint. What
+actually refuses every shape is the graph validator in the same file (~line 179),
+which requires **exactly one `medicines` row**. The count check is real but not
+sufficient on its own; the comments and tests now say so.
+
+Two changes. `inventoryRestock` is pinned `false`, so a restock stages as
+`purchase_create`, which has no row-count constraint and already expresses
+"add a batch to an existing medicine" - it is what the supplier-purchase flow
+emits. And restocking is owner-only, because
+`20260823050000_b3_groups456_sync_completion.sql:211-213` enforces `r.name='owner'`
+for that kind and answers anyone else with **MU015 "% is Owner-only"** - queueing
+it for an `inventory_add` staff member would have stranded their outbox: offline
+success, online failure, which rule 12 does not permit. One earlier test asserting
+staff restocking succeeds was therefore wrong about the hosted contract and now
+asserts the refusal, with the migration lines quoted beside it.
+
+**And the re-review found that my own fix carried the same defect class I had just
+removed.** Moving restocks onto `purchase_create` pulled them under B4 row
+authorization, which requires premium for `purchases` and `purchase_items` - the
+exemption is enabled only for `inventory_add_purchase`
+(`20260831000000_b4_commercial_platform.sql:429`). My restock path skipped the
+premium check that ordinary purchase creation performs, so a **Free owner** would
+have committed the receipt locally and then been answered **MU010** by DEV:
+offline success, online failure, exactly what I had objected to. The restock
+fixture seeds Pro, which is what hid it. A `requirePremiumFeature(shopId,
+'supplier_invoices')` gate now runs before any write on the existing-medicine
+path, and new-medicine creation keeps its deliberate Free eligibility because it
+stages under the exempt kind.
+
+Three guards, each mutation-tested rather than asserted: reverting
+`inventoryRestock` kills three tests, removing the owner check kills two, and
+removing the premium gate kills one. Revocation coverage moved to the
+new-medicine path, because with staff categorically denied for restocking the old
+assertion no longer proved revocation - the owner guard threw first. Staff and
+Free-plan restocking return in the same change that applies the held extension
+and flips the flag; the tests fail loudly if any of it moves without the rest.
+Premium owner restocking works online today.

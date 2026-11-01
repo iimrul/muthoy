@@ -144,6 +144,8 @@ const deps = vi.hoisted(() => ({
   archiveMedicine: vi.fn(),
   createSupplier: vi.fn(),
   createMedicineWithPurchase: vi.fn(),
+  addBatchWithPurchase: vi.fn(),
+  searchRestockMedicines: vi.fn(),
   adjustBatchStock: vi.fn(),
   archiveBatch: vi.fn(),
   getMedicine: vi.fn(),
@@ -161,6 +163,8 @@ vi.mock("../../db/inventory", () => ({
   adjustBatchStock: deps.adjustBatchStock,
   archiveBatch: deps.archiveBatch,
   createMedicineWithPurchase: deps.createMedicineWithPurchase,
+  addBatchWithPurchase: deps.addBatchWithPurchase,
+  searchRestockMedicines: deps.searchRestockMedicines,
   getMedicine: deps.getMedicine,
   listBatchesForMedicine: deps.listBatchesForMedicine,
   listManufacturerSuggestions: deps.listManufacturerSuggestions,
@@ -227,6 +231,7 @@ const { InventoryCard } = await import("../../app/(tabs)/inventory");
 const EditMedicineScreen = (await import("../../app/inventory/edit-medicine"))
   .default;
 const EditBatchScreen = (await import("../../app/inventory/edit-batch")).default;
+const { ManualEntryForm } = await import("../../components/inventory/ManualEntryForm");
 
 const SESSION = {
   shopId: "10000000-0000-4000-8000-000000000001",
@@ -249,6 +254,8 @@ beforeEach(() => {
   });
   deps.listManufacturerSuggestions.mockResolvedValue([]);
   deps.listMedicines.mockResolvedValue([]);
+  deps.searchRestockMedicines.mockResolvedValue([]);
+  deps.addBatchWithPurchase.mockResolvedValue({ purchaseId: "purchase-1" });
   deps.listBatchesForMedicine.mockResolvedValue([]);
   deps.getMedicine.mockResolvedValue(null);
   deps.adjustBatchStock.mockResolvedValue(undefined);
@@ -266,6 +273,292 @@ function MoneyProbe() {
   const { formatMoney } = useI18n();
   return createElement("p", null, formatMoney(asPaisa(123450)));
 }
+
+const RESTOCK_MEDICINE = {
+  id: "shop-medicine-1", name: "Progut MUPS", generic: "Esomeprazole",
+  manufacturer: "Popular", strength: "20mg", type: "Tablet",
+  unitOfMeasure: "piece", barcode: "123456", category: null,
+  requiresPrescription: false, threshold: 10,
+  batchContext: "Baban / 2099-12-12 / 200",
+};
+
+async function fillRestockBatch() {
+  const fields: [string, string][] = [
+    ["Batch number *", "FEFO-EARLY"], ["Expiry date *", "2099-01-15"],
+    ["Purchase price (৳) *", "10"], ["Sale price (৳) *", "12"],
+    ["Quantity *", "50"],
+  ];
+  for (const [label, value] of fields) fireEvent.change(screen.getByLabelText(label!), { target: { value } });
+  await waitFor(() => expect(deps.listSupplierPickerOptions).toHaveBeenCalled());
+  fireEvent.click(screen.getByLabelText("Select supplier"));
+  fireEvent.click(await screen.findByLabelText("Square"));
+}
+
+function renderManualForRestock(role: "owner" | "staff" = "owner") {
+  const session = { ...SESSION, role };
+  useSessionStore.setState({ session });
+  render(createElement(ManualEntryForm, { session, onSaved: vi.fn() }));
+}
+
+async function reviewMatchingMedicine() {
+  const fields: [string, string][] = [
+    ["Medicine name *", RESTOCK_MEDICINE.name],
+    ["Generic name *", RESTOCK_MEDICINE.generic],
+    ["Manufacturer", RESTOCK_MEDICINE.manufacturer],
+  ];
+  for (const [label, value] of fields) fireEvent.change(screen.getByLabelText(label!), { target: { value } });
+  await fillRestockBatch();
+  await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+  await screen.findByLabelText("Create a distinct medicine");
+}
+
+describe("Explicit medicine identity during restocking", () => {
+  beforeEach(() => {
+    deps.searchRestockMedicines.mockResolvedValue([RESTOCK_MEDICINE]);
+    deps.getMedicine.mockResolvedValue(RESTOCK_MEDICINE);
+  });
+
+  it("locks a confirmed distinct receipt through repeated taps until navigation unmounts it", async () => {
+    let finish!: () => void;
+    deps.createMedicineWithPurchase.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
+    renderManualForRestock();
+    await reviewMatchingMedicine();
+    const confirm = screen.getByLabelText("Create a distinct medicine");
+    await act(async () => { fireEvent.click(confirm); fireEvent.click(confirm); });
+    expect(deps.createMedicineWithPurchase).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(); });
+    await act(async () => { fireEvent.click(confirm); });
+    expect(deps.createMedicineWithPurchase).toHaveBeenCalledTimes(1);
+  });
+
+  it("reviews matching manual entry before writing, then restocks the explicitly chosen shop medicine", async () => {
+    renderManualForRestock();
+    await reviewMatchingMedicine();
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+    expect(deps.addBatchWithPurchase).not.toHaveBeenCalled();
+    expect(screen.getByText(RESTOCK_MEDICINE.batchContext)).toBeTruthy();
+    fireEvent.click(await screen.findByLabelText(/This is the same medicine: Progut MUPS/));
+    await waitFor(() => expect(screen.queryByLabelText("Medicine name *")).toBeNull());
+    await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledWith(expect.objectContaining({
+      medicineId: RESTOCK_MEDICINE.id, supplierId: "supplier-1", paymentType: "cod",
+      batch: { batchNo: "FEFO-EARLY", expiryDate: "2099-01-15", quantity: 50,
+        purchasePrice: 1000, salePrice: 1200 },
+    }));
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+  });
+
+  it("creates a legitimate distinct product only after explicit confirmation", async () => {
+    renderManualForRestock();
+    await reviewMatchingMedicine();
+    await act(async () => { fireEvent.click(screen.getByLabelText("Create a distinct medicine")); });
+    expect(deps.createMedicineWithPurchase).toHaveBeenCalledWith(expect.objectContaining({
+      name: RESTOCK_MEDICINE.name, confirmDistinctMedicine: true,
+    }));
+    expect(deps.addBatchWithPurchase).not.toHaveBeenCalled();
+  });
+
+  it("confirmation validates and saves current form values instead of the review snapshot", async () => {
+    renderManualForRestock();
+    await reviewMatchingMedicine();
+    fireEvent.change(screen.getByLabelText("Quantity *"), { target: { value: "51" } });
+    await act(async () => { fireEvent.click(screen.getByLabelText("Create a distinct medicine")); });
+    expect(deps.createMedicineWithPurchase).toHaveBeenCalledWith(expect.objectContaining({
+      firstBatch: expect.objectContaining({ quantity: 51 }),
+    }));
+  });
+
+  it("lets inventory_add staff restock an explicitly chosen existing medicine", async () => {
+    renderManualForRestock("staff");
+    await fillRestockBatch();
+    fireEvent.click(screen.getByLabelText("Restock existing medicine"));
+    fireEvent.click(await screen.findByLabelText(/This is the same medicine: Progut MUPS/));
+    await waitFor(() => expect((screen.getByLabelText("Save") as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledTimes(1);
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledWith(expect.objectContaining({
+      medicineId: RESTOCK_MEDICINE.id, actorUserId: SESSION.userId,
+      shopId: SESSION.shopId, supplierId: "supplier-1", paymentType: "cod",
+    }));
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+  });
+
+  it("keeps the latest explicit identity when medicine reads resolve out of order", async () => {
+    const second = { ...RESTOCK_MEDICINE, id: "shop-medicine-2", strength: "40mg" };
+    deps.searchRestockMedicines.mockResolvedValue([RESTOCK_MEDICINE, second]);
+    let resolveFirst!: (row: typeof RESTOCK_MEDICINE) => void;
+    deps.getMedicine.mockImplementation((_: string, id: string) => id === RESTOCK_MEDICINE.id
+      ? new Promise((resolve) => { resolveFirst = resolve; }) : Promise.resolve(second));
+    renderManualForRestock();
+    await fillRestockBatch();
+    fireEvent.click(screen.getByLabelText("Restock existing medicine"));
+    fireEvent.click(await screen.findByLabelText(/This is the same medicine: Progut MUPS \/ 20mg/));
+    fireEvent.click(screen.getByLabelText(/This is the same medicine: Progut MUPS \/ 40mg/));
+    await waitFor(() => expect(screen.queryByLabelText("Medicine name *")).toBeNull());
+    await act(async () => { resolveFirst(RESTOCK_MEDICINE); });
+    expect(screen.getByText(second.id)).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledWith(expect.objectContaining({ medicineId: second.id }));
+  });
+});
+
+describe("Restock identity safety", () => {
+  beforeEach(() => {
+    deps.searchRestockMedicines.mockResolvedValue([RESTOCK_MEDICINE]);
+    deps.getMedicine.mockResolvedValue(RESTOCK_MEDICINE);
+  });
+
+  it("locks medicine selection before asynchronous Save validation begins", async () => {
+    const second = { ...RESTOCK_MEDICINE, id: "second-medicine", strength: "40mg" };
+    deps.searchRestockMedicines.mockResolvedValue([RESTOCK_MEDICINE, second]);
+    renderManualForRestock();
+    await fillRestockBatch();
+    fireEvent.click(screen.getByLabelText("Restock existing medicine"));
+    fireEvent.click(await screen.findByLabelText(/This is the same medicine: Progut MUPS \/ 20mg/));
+    await waitFor(() => expect(screen.queryByLabelText("Medicine name *")).toBeNull());
+    fireEvent.click(screen.getByLabelText("Choose this shop's medicine"));
+    const secondChoice = await screen.findByLabelText(/This is the same medicine: Progut MUPS \/ 40mg/);
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Save"));
+      fireEvent.click(secondChoice);
+    });
+    expect(deps.getMedicine).not.toHaveBeenCalledWith(SESSION.shopId, second.id);
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledTimes(1);
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledWith(expect.objectContaining({ medicineId: RESTOCK_MEDICINE.id }));
+    expect((screen.getByLabelText("Save") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps a failed existing selection from falling back to medicine creation", async () => {
+    deps.getMedicine.mockRejectedValue(new Error("read failed"));
+    renderManualForRestock();
+    await fillRestockBatch();
+    fireEvent.click(screen.getByLabelText("Restock existing medicine"));
+    fireEvent.click(await screen.findByLabelText(/This is the same medicine: Progut MUPS/));
+    await screen.findByText("Could not load medicine. Go back and try again.");
+    expect((screen.getByLabelText("Save") as HTMLButtonElement).disabled).toBe(true);
+    expect(deps.addBatchWithPurchase).not.toHaveBeenCalled();
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+  });
+
+  it("ignores hidden new-medicine validation errors after choosing an existing medicine", async () => {
+    renderManualForRestock();
+    fireEvent.change(screen.getByLabelText("Minimum stock"), { target: { value: "-1" } });
+    await fillRestockBatch();
+    fireEvent.click(screen.getByLabelText("Restock existing medicine"));
+    fireEvent.click(await screen.findByLabelText(/This is the same medicine: Progut MUPS/));
+    await waitFor(() => expect(screen.queryByLabelText("Minimum stock")).toBeNull());
+    await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes the previous shop's picker context immediately when the shop changes", async () => {
+    const { ExistingMedicinePicker } = await import("../../components/inventory/ExistingMedicinePicker");
+    const view = render(createElement(ExistingMedicinePicker, { shopId: "shop-a", onSelect: vi.fn() }));
+    await screen.findByText(RESTOCK_MEDICINE.batchContext);
+    deps.searchRestockMedicines.mockRejectedValue(new Error("other shop unavailable"));
+    view.rerender(createElement(ExistingMedicinePicker, { shopId: "shop-b", onSelect: vi.fn() }));
+    expect(screen.queryByText(RESTOCK_MEDICINE.batchContext)).toBeNull();
+    await screen.findByText("Could not load medicine. Go back and try again.");
+    expect(screen.queryByText(RESTOCK_MEDICINE.batchContext)).toBeNull();
+  });
+});
+
+const LOCAL_MEDICINE = {
+  id: "medicine-1", name: "Progut MUPS", generic: "Esomeprazole",
+  manufacturer: "Popular", strength: "20 mg", type: "Tablet",
+  unitOfMeasure: "piece", barcode: "123", threshold: 10,
+  requiresPrescription: false, category: null,
+  batchContext: "#Baban / 2027-12-12 / 200",
+};
+
+async function enterDuplicateMedicine() {
+  render(createElement(AddMedicineScreen));
+  fireEvent.click(screen.getByLabelText("Manual Entry"));
+  for (const [label, value] of [
+    ["Medicine name *", "Progut MUPS"], ["Generic name *", "Esomeprazole"],
+    ["Manufacturer", "Popular"], ["Batch number *", "FEFO-EARLY"],
+    ["Expiry date *", "2027-01-15"], ["Purchase price (৳) *", "2"],
+    ["Sale price (৳) *", "3"], ["Quantity *", "50"],
+  ]) fireEvent.change(screen.getByLabelText(label!), { target: { value } });
+  fireEvent.click(screen.getByLabelText("Select supplier"));
+  fireEvent.click(await screen.findByLabelText("Square"));
+  await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+}
+
+describe("Explicit restocking", () => {
+  beforeEach(() => {
+    useSessionStore.setState({ session: { ...SESSION, role: "owner" } });
+    deps.searchRestockMedicines.mockResolvedValue([LOCAL_MEDICINE]);
+    deps.getMedicine.mockResolvedValue(LOCAL_MEDICINE);
+  });
+
+  it("opens Add Batch for the route's explicit medicine id and keeps identity read-only", async () => {
+    const AddBatchScreen = (await import("../../app/inventory/add-batch")).default;
+    render(createElement(AddBatchScreen));
+    await screen.findByText("This is the same medicine: Progut MUPS");
+    expect(deps.getMedicine).toHaveBeenCalledWith(SESSION.shopId, "medicine-1");
+    expect(screen.queryByLabelText("Medicine name *")).toBeNull();
+    await fillRestockBatch();
+    await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledWith(expect.objectContaining({ medicineId: "medicine-1" }));
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+  });
+
+  it("regression: identical manual entry requires an explicit medicine choice before any write", async () => {
+    await enterDuplicateMedicine();
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+    expect(deps.addBatchWithPurchase).not.toHaveBeenCalled();
+    expect(await screen.findByLabelText("Create a distinct medicine")).toBeTruthy();
+    expect(screen.getByText("#Baban / 2027-12-12 / 200")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("This is the same medicine: Progut MUPS / 20 mg / medicine-1"));
+    await waitFor(() => expect(screen.queryByLabelText("Medicine name *")).toBeNull());
+    await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledTimes(1);
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledWith(expect.objectContaining({
+      medicineId: "medicine-1", supplierId: "supplier-1", paymentType: "cod",
+      batch: { batchNo: "FEFO-EARLY", expiryDate: "2027-01-15", quantity: 50, purchasePrice: 200, salePrice: 300 },
+    }));
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+  });
+
+  it("preserves a distinct same-name product only after explicit acknowledgement", async () => {
+    await enterDuplicateMedicine();
+    await act(async () => { fireEvent.click(screen.getByLabelText("Create a distinct medicine")); });
+    expect(deps.createMedicineWithPurchase).toHaveBeenCalledWith(expect.objectContaining({
+      name: "Progut MUPS", confirmDistinctMedicine: true,
+    }));
+    expect(deps.addBatchWithPurchase).not.toHaveBeenCalled();
+  });
+
+  it("offers local medicine selection with an empty reference catalogue", async () => {
+    render(createElement(AddMedicineScreen));
+    fireEvent.click(screen.getByLabelText("Restock existing medicine"));
+    fireEvent.click(await screen.findByLabelText("This is the same medicine: Progut MUPS / 20 mg / medicine-1"));
+    expect(routerMock.push).toHaveBeenCalledWith({ pathname: "/inventory/add-batch", params: { medicineId: "medicine-1" } });
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when local candidate lookup fails", async () => {
+    deps.searchRestockMedicines.mockRejectedValue(new Error("sqlite unavailable"));
+    await enterDuplicateMedicine();
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+    expect(deps.addBatchWithPurchase).not.toHaveBeenCalled();
+  });
+
+  it("restocks for granted staff without creating a duplicate", async () => {
+    useSessionStore.setState({ session: SESSION });
+    await enterDuplicateMedicine();
+    fireEvent.click(screen.getByLabelText("This is the same medicine: Progut MUPS / 20 mg / medicine-1"));
+    await waitFor(() => expect((screen.getByLabelText("Save") as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledTimes(1);
+    expect(deps.addBatchWithPurchase).toHaveBeenCalledWith(expect.objectContaining({
+      medicineId: "medicine-1", actorUserId: SESSION.userId, shopId: SESSION.shopId,
+      supplierId: "supplier-1", paymentType: "cod",
+    }));
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+  });
+});
 
 describe("Add Medicine parity recovery", () => {
   // W2-02. The wiring test: a regression to the stub provider would make every

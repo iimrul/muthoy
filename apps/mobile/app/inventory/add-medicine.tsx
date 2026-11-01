@@ -5,6 +5,7 @@ import { StandardHeader } from "../../components/ui/StandardHeader";
 import { AccessDenied } from "../../components/ui/AccessDenied";
 import { SearchMedicineTab } from "../../components/inventory/SearchMedicineTab";
 import { ManualEntryForm } from "../../components/inventory/ManualEntryForm";
+import { ExistingMedicinePicker } from "../../components/inventory/ExistingMedicinePicker";
 import type { MedicineSearchResult } from "../../domain/medicineSearchProvider";
 import {
   medicinePrefillFromCatalog,
@@ -19,7 +20,7 @@ import {
 import { usePermission } from "../../state/usePermission";
 import { useI18n } from "../../state/localeStore";
 
-type AddMedicineTab = "search" | "manual";
+type AddMedicineTab = "search" | "manual" | "existing";
 
 // Add Medicine — Volume 0 Day 8, revised for the founder's Sales+Inventory
 // prototype-parity recovery: two real, always-switchable entry points
@@ -79,6 +80,10 @@ export default function AddMedicineScreen() {
         onBackPress={() => router.back()}
       />
       <View className="border-b border-[#E5E7EB] px-4 py-4">
+        <Pressable onPress={() => setTab("existing")} accessibilityRole="button"
+          accessibilityLabel={t("restockLabel")} className="mb-3 rounded-xl bg-brand-green p-3">
+          <Text className="text-center font-sans-semibold text-white">{t("restockLabel")}</Text>
+        </Pressable>
         <View className="flex-row gap-2">
           <Pressable
             onPress={() => setTab("search")}
@@ -118,7 +123,9 @@ export default function AddMedicineScreen() {
         contentContainerClassName="gap-4 p-4 pb-32"
         keyboardShouldPersistTaps="handled"
       >
-        {tab === "search" ? (
+        {tab === "existing" ? <ExistingMedicinePicker key={`${session.shopId}:${session.userId}`} shopId={session.shopId} onSelect={(medicineId) => {
+          router.push({ pathname: "/inventory/add-batch" as never, params: { medicineId } });
+        }} /> : tab === "search" ? (
           <SearchMedicineTab
             provider={catalogMedicineSearchProvider}
             onSelect={(result) => {
@@ -132,6 +139,7 @@ export default function AddMedicineScreen() {
           />
         ) : (
           <ManualEntryForm
+            key={`${session.shopId}:${session.userId}`}
             session={session}
             onSaved={() => router.back()}
             initialMedicine={selectedMedicine}

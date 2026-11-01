@@ -28,6 +28,7 @@ import { triggerSyncNow } from "../../sync";
 export default function EditMedicineScreen() {
   const { medicineId } = useLocalSearchParams<{ medicineId: string }>();
   const { session, isAllowed } = usePermission("inventory_edit");
+  const { isAllowed: canAdd } = usePermission("inventory_add");
   const { t, formatDate, formatMoney, formatNumber } = useI18n();
   const [name, setName] = useState("");
   const [generic, setGeneric] = useState("");
@@ -117,6 +118,10 @@ export default function EditMedicineScreen() {
         onBackPress={() => router.back()}
       />
       <ScrollView contentContainerClassName="gap-4 p-4 pb-32">
+        {canAdd ? <Pressable onPress={() => router.push({ pathname: "/inventory/add-batch" as never, params: { medicineId } })}
+          accessibilityRole="button" accessibilityLabel={t("addBatchLabel")} className="rounded-xl bg-brand-green p-4">
+          <Text className="font-sans-semibold text-white">{t("addBatchLabel")}</Text>
+        </Pressable> : null}
         <View className="gap-4 rounded-2xl bg-white p-4 shadow-sm">
           <View className="flex-row items-center gap-2">
             <View className="h-9 w-9 items-center justify-center rounded-lg bg-brand-softGreen">

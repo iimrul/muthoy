@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createHarness,
@@ -193,6 +195,183 @@ describe("inventory_add_purchase", () => {
     await grantInventoryAdd();
     const { purchaseId, rows } = graph();
     await expect(stage("purchase_create", purchaseId, rows.slice(1))).rejects.toMatchObject({ code: "MU015" });
+  });
+});
+
+// Deliberately outside migrations/: the authorized hosted chain stays HELD.
+// Only this isolated PGlite suite opts into the reviewable release draft.
+const restockDraft = readFileSync(resolve(
+  "backend/supabase/held-migrations/20261101000000_b3_existing_medicine_restock.sql",
+), "utf8");
+
+function restockGraph(kind: "credit" | "cod" = "credit", medicineId = DRAFT_MEDICINE_A) {
+  const result = graph(kind);
+  const rows = result.rows.slice(1);
+  rows[1]!.payload.medicine_id = medicineId;
+  rows[2]!.payload.medicine_id = medicineId;
+  return { medicineId, purchaseId: result.purchaseId, rows };
+}
+
+describe("existing-medicine restock deployment prerequisite", () => {
+  it("rejects reference-only receipts on the active chain before held migration activation", async () => {
+    await grantInventoryAdd();
+    const { purchaseId, rows } = restockGraph();
+    await expect(stage("inventory_add_purchase", purchaseId, rows)).rejects.toMatchObject({ code: "23514" });
+    expect((await h!.one<{ n: number }>("select count(*)::int n from purchases where id=$1", [purchaseId])).n).toBe(0);
+  });
+});
+
+describe("HELD Batch 3 existing-medicine restock contract", () => {
+  beforeEach(async () => { await h!.exec(restockDraft); });
+
+  it.each(["credit", "cod"] as const)("preserves the existing new-medicine %s graph", async (kind) => {
+    await grantInventoryAdd();
+    const { medicineId, purchaseId, rows } = graph(kind);
+    expect((await stage("inventory_add_purchase", purchaseId, rows)).result.status).toBe("applied");
+    expect((await h!.one<{ n: number }>("select count(*)::int n from medicines where id=$1", [medicineId])).n).toBe(1);
+  });
+
+  it.each(["credit", "cod"] as const)("staff restocks an explicitly selected existing medicine with %s and preserves its identity", async (kind) => {
+    await grantInventoryAdd();
+    const before = await h!.one("select * from medicines where id=$1", [DRAFT_MEDICINE_A]);
+    const { medicineId, purchaseId, rows } = restockGraph(kind);
+    expect((await stage("inventory_add_purchase", purchaseId, rows)).result.status).toBe("applied");
+    expect(await h!.one("select * from medicines where id=$1", [medicineId])).toEqual(before);
+    expect(await h!.one(`select
+      (select count(*)::int from medicines where shop_id=$1) medicines,
+      (select count(*)::int from batches where medicine_id=$2 and stock=2) batches,
+      (select count(*)::int from purchase_items where purchase_id=$3 and medicine_id=$2) items,
+      (select sum(change_qty)::int from inventory_movements where ref_id=$3) movement_qty,
+      (select paid_amount::int from purchases where id=$3) paid,
+      (select coalesce(sum(amount),0)::int from payments where ref_id=$3) cash_paid`,
+    [SHOP_A, medicineId, purchaseId])).toEqual({
+      medicines: 1, batches: 1, items: 1, movement_qty: 2,
+      paid: kind === "cod" ? 20000 : 0, cash_paid: kind === "cod" ? 20000 : 0,
+    });
+    if (kind === "cod") {
+      expect((await h!.one<{ closing: number }>(
+        "select closing_expected::int closing from cash_drawer where shop_id=$1", [SHOP_A],
+      )).closing).toBe(-20000);
+    }
+    expect((await stage("inventory_add_purchase", purchaseId, rows)).result.status).toBe("applied");
+    expect((await h!.one<{ stock: number }>("select stock from batches where medicine_id=$1", [medicineId])).stock).toBe(2);
+    expect((await h!.one<{ n: number }>("select count(*)::int n from payments where ref_id=$1", [purchaseId])).n)
+      .toBe(kind === "cod" ? 1 : 0);
+  });
+
+  it("rejects a cross-shop existing medicine atomically", async () => {
+    await grantInventoryAdd();
+    const { purchaseId, rows } = restockGraph("credit", DRAFT_MEDICINE_B);
+    await expect(stage("inventory_add_purchase", purchaseId, rows)).rejects.toMatchObject({ code: "MU003" });
+    expect((await h!.one<{ n: number }>("select count(*)::int n from purchases where id=$1", [purchaseId])).n).toBe(0);
+  });
+
+  it("applies the six-row existing-medicine COD graph against an already-open drawer", async () => {
+    await grantInventoryAdd();
+    const { purchaseId, rows } = restockGraph("cod");
+    const drawer = rows[5]!.payload;
+    await h!.one(`insert into cash_drawer(
+      id,shop_id,business_date,opening_cash,opened_by,opened_at,closing_expected,created_at,updated_at
+    ) values($1,$2,'2026-08-25',0,$3,$4,0,$4,$4) returning id`,
+    [drawer.id, SHOP_A, STAFF_A, CREATED_AT]);
+    rows.splice(5, 1); // existing drawer: only its update is queued
+    expect(rows).toHaveLength(6);
+    expect((await stage("inventory_add_purchase", purchaseId, rows)).result.status).toBe("applied");
+    expect(await h!.one(`select opening_cash::int opening,closing_expected::int closing,
+      (select sum(amount)::int from payments where ref_id=$1) cash_paid
+      from cash_drawer where shop_id=$2`, [purchaseId, SHOP_A]))
+      .toEqual({ opening: 0, closing: -20000, cash_paid: 20000 });
+  });
+
+  it.each([5000, 30000])("uses %i paisa of available supplier credit before existing-medicine COD cash", async (creditAmount) => {
+    await grantInventoryAdd();
+    // A paid historical purchase returned in full creates real supplier credit.
+    await h!.exec(`
+      insert into purchases(id,shop_id,invoice_no,supplier_id,total,payment_terms,paid_amount,source,created_at,updated_at)
+      values('98000000-0000-4000-8600-000000000001','${SHOP_A}','PUR-RESTOCK-CREDIT','${SUPPLIER}',${creditAmount},'cod',${creditAmount},'manual','${T0}','${T0}');
+      insert into purchase_items(id,shop_id,purchase_id,medicine_id,batch_no,expiry_date,qty,purchase_price,sale_price,status,received_at,created_at,updated_at)
+      values('98000000-0000-4000-8600-000000000002','${SHOP_A}','98000000-0000-4000-8600-000000000001','${DRAFT_MEDICINE_A}','RETURNED-OLD','2027-01-01',1,${creditAmount},${creditAmount + 1000},'received','${T0}','${T0}','${T0}');
+      insert into purchase_returns(id,shop_id,purchase_id,purchase_item_id,qty,reason,credit_amount,created_by,created_at,updated_at)
+      values('98000000-0000-4000-8600-000000000003','${SHOP_A}','98000000-0000-4000-8600-000000000001','98000000-0000-4000-8600-000000000002',1,'expired',${creditAmount},'${OWNER_A}','${T0}','${T0}');
+    `);
+    const residualCash = Math.max(0, 20000 - creditAmount);
+    const { medicineId, purchaseId, rows } = restockGraph("cod");
+    rows[0]!.payload.paid_amount = residualCash;
+    if (residualCash === 0) rows.splice(4);
+    else {
+      rows[4]!.payload.amount = residualCash;
+      rows[6]!.payload.closing_expected = -residualCash;
+    }
+    expect(rows).toHaveLength(residualCash === 0 ? 4 : 7);
+    expect((await stage("inventory_add_purchase", purchaseId, rows)).result.status).toBe("applied");
+    expect(await h!.one(`select
+      (select paid_amount::int from purchases where id=$1) paid,
+      (select coalesce(sum(amount),0)::int from payments where ref_id=$1) cash_paid,
+      (select count(*)::int from cash_drawer where shop_id=$2) drawers,
+      (select sum(stock)::int from batches where medicine_id=$3) stock,
+      (select sum(change_qty)::int from inventory_movements where ref_id=$1) movement_qty`,
+    [purchaseId, SHOP_A, medicineId])).toEqual({
+      paid: residualCash, cash_paid: residualCash, drawers: residualCash === 0 ? 0 : 1,
+      stock: 2, movement_qty: 2,
+    });
+    if (residualCash > 0) {
+      expect((await h!.one<{ closing: number }>(
+        "select closing_expected::int closing from cash_drawer where shop_id=$1", [SHOP_A],
+      )).closing).toBe(-residualCash);
+    }
+  });
+
+  it("rejects a deleted existing medicine atomically", async () => {
+    await grantInventoryAdd();
+    await h!.exec(`update medicines set is_deleted=true where id='${DRAFT_MEDICINE_A}'`);
+    const { purchaseId, rows } = restockGraph();
+    await expect(stage("inventory_add_purchase", purchaseId, rows)).rejects.toMatchObject({ code: "MU003" });
+    expect((await h!.one<{ n: number }>("select count(*)::int n from batches where medicine_id=$1", [DRAFT_MEDICINE_A])).n).toBe(0);
+  });
+
+  it.each(["insert", "update"] as const)("rejects forged existing medicine metadata using %s", async (op) => {
+    await grantInventoryAdd();
+    const { purchaseId, rows } = restockGraph();
+    const metadata = graph().rows[0]!;
+    rows.unshift({ ...metadata, rowId: DRAFT_MEDICINE_A, op,
+      payload: { ...metadata.payload, id: DRAFT_MEDICINE_A, name: "Forged", requires_prescription: false } });
+    await expect(stage("inventory_add_purchase", purchaseId, rows)).rejects.toMatchObject({ code: "MU024" });
+    expect((await h!.one<{ name: string }>("select name from medicines where id=$1", [DRAFT_MEDICINE_A])).name)
+      .toBe("Cancelled Draft Medicine");
+  });
+
+  it("requires a live inventory_add grant for existing medicine receipts", async () => {
+    const { purchaseId, rows } = restockGraph();
+    await expect(stage("inventory_add_purchase", purchaseId, rows)).rejects.toMatchObject({ code: "MU015" });
+  });
+
+  it.each([
+    ["stock", 1, "stock", 99],
+    ["medicine identity", 1, "medicine_id", DRAFT_MEDICINE_B],
+    ["quantity", 3, "change_qty", 99],
+    ["invoice total", 0, "total", 99],
+    ["cash amount", 4, "amount", 99],
+    ["opening cash", 5, "opening_cash", 99],
+    ["closing cash", 6, "closing_expected", 99],
+  ])("rejects forged restock %s without partial stock or financial writes", async (_label, index, field, value) => {
+    await grantInventoryAdd();
+    const { purchaseId, rows } = restockGraph("cod");
+    rows[index]!.payload[field] = value;
+    await expect(stage("inventory_add_purchase", purchaseId, rows)).rejects.toMatchObject({ code: "MU024" });
+    expect(await h!.one(`select
+      (select count(*)::int from purchases where id=$1) purchases,
+      (select count(*)::int from batches where medicine_id=$2) batches,
+      (select count(*)::int from payments where ref_id=$1) payments`, [purchaseId, DRAFT_MEDICINE_A]))
+      .toEqual({ purchases: 0, batches: 0, payments: 0 });
+  });
+
+  it("preserves the public wrapper and inner implementation ACLs", async () => {
+    for (const role of ["anon", "authenticated", "service_role"]) {
+      expect(await h!.one(`select
+        has_function_privilege($1,'public.sync_apply_operation_pre_b4(uuid,uuid,text,uuid,text,jsonb)','EXECUTE') inner_allowed,
+        has_function_privilege($1,'public.sync_apply_operation(uuid,uuid,text,uuid,text,jsonb)','EXECUTE') wrapper_allowed`, [role]))
+        .toEqual({ inner_allowed: role === "service_role", wrapper_allowed: role === "service_role" });
+    }
   });
 });
 

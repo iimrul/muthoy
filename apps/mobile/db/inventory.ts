@@ -6,7 +6,7 @@
 // built once on Day 13 and every write site (including this one) is
 // backfilled together (see db/README.md).
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import type { Paisa } from "@muthoy/types";
 import {
   assertIsoDate,
@@ -15,6 +15,7 @@ import {
   dhakaBusinessDate,
 } from "@muthoy/utils";
 import { db } from "./client";
+import { requirePremiumFeature } from "./commercial";
 import {
   auditLogs,
   batchPromotions,
@@ -310,6 +311,10 @@ export async function createMedicineWithBatch(
 }
 
 export interface CreateMedicineWithPurchaseInput {
+  /** Explicit shop medicine id; identity fields are ignored when restocking. */
+  existingMedicineId?: string;
+  /** Explicit acknowledgement after reviewing same-name shop medicines. */
+  confirmDistinctMedicine?: boolean;
   shopId: string;
   actorUserId: string;
   isStillActive: () => boolean;
@@ -358,13 +363,28 @@ export async function createMedicineWithPurchase(
   purchaseId: string;
   invoiceNo: string;
 }> {
+  if (input.existingMedicineId !== undefined && !input.existingMedicineId.trim()) {
+    throw new Error("Medicine selection is required");
+  }
   await requirePermission(
     input.shopId,
     input.actorUserId,
     permissionForDataGate("inventoryAdd"),
   );
+  if (input.existingMedicineId) {
+    // A restock stages as `purchase_create` (see the writePurchaseEffects call
+    // below), and B4 row authorization requires premium for `purchases` and
+    // `purchase_items` -- its exemption is enabled only for the
+    // `inventory_add_purchase` kind
+    // (20260831000000_b4_commercial_platform.sql:429). Without this gate a FREE
+    // owner commits the receipt locally and then gets MU010 back from DEV:
+    // offline success, online failure, the same defect class this whole change
+    // exists to remove. New-medicine creation keeps its deliberate Free
+    // eligibility because it stages under the exempt kind.
+    await requirePremiumFeature(input.shopId, "supplier_invoices");
+  }
 
-  const medicineId = generateId();
+  const medicineId = input.existingMedicineId ?? generateId();
 
   return db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
@@ -387,7 +407,7 @@ export async function createMedicineWithPurchase(
       )
       .innerJoin(
         roles,
-        and(eq(roles.id, users.roleId), eq(roles.shopId, users.shopId)),
+        and(eq(roles.id, users.roleId), eq(roles.shopId, users.shopId), eq(roles.isDeleted, false)),
       )
       .where(
         and(
@@ -424,6 +444,37 @@ export async function createMedicineWithPurchase(
       throw new NotAuthorizedError();
     }
 
+    if (input.existingMedicineId) {
+      // Owner-only while the sync contract extension is HELD. A restock emits
+      // `purchase_create` (see writePurchaseEffects call below), and that kind
+      // is owner-only server-side -- queueing it for an inventory_add-only
+      // staff member would stage a graph the server refuses, stranding their
+      // outbox. Staff restocking becomes available in the same change that
+      // applies backend/supabase/held-migrations/20261101000000_*.sql and
+      // flips `inventoryRestock` to true; not before.
+      if (role !== "owner") throw new NotAuthorizedError();
+      const existing = tx.select({ id: medicines.id }).from(medicines).where(and(
+        eq(medicines.id, medicineId), eq(medicines.shopId, input.shopId),
+        eq(medicines.isDeleted, false),
+      )).get();
+      if (!existing) throw new Error("Medicine does not belong to this shop");
+      // This affordance creates a NEW batch. Reusing an existing batch belongs
+      // to the supplier-purchase flow; never book an accidental second receipt.
+      if (tx.select({ id: batches.id }).from(batches).where(and(
+        eq(batches.shopId, input.shopId), eq(batches.medicineId, medicineId),
+        eq(batches.batchNo, input.firstBatch.batchNo),
+      )).get()) throw new DuplicateBatchError(medicineId, input.firstBatch.batchNo);
+    }
+    // A name is a warning, never proof of identity. The user must select an
+    // existing id or explicitly confirm a distinct product before creating it.
+    const sameName = tx.select({ id: medicines.id }).from(medicines).where(and(
+      eq(medicines.shopId, input.shopId), eq(medicines.isDeleted, false),
+      sql`lower(trim(${medicines.name})) = lower(trim(${input.name}))`,
+    )).get();
+    if (!input.existingMedicineId && sameName && !input.confirmDistinctMedicine) {
+      throw new Error("Review existing medicines before creating a distinct product");
+    }
+
     const now = new Date().toISOString();
     const medicineValues = {
       id: medicineId,
@@ -444,7 +495,7 @@ export async function createMedicineWithPurchase(
       createdAt: now,
       updatedAt: now,
     };
-    tx.insert(medicines).values(medicineValues).run();
+    if (!input.existingMedicineId) tx.insert(medicines).values(medicineValues).run();
 
     const { purchaseId, invoiceNo } = writePurchaseEffects(tx, {
       shopId: input.shopId,
@@ -452,7 +503,29 @@ export async function createMedicineWithPurchase(
       staffId: input.actorUserId,
       paymentType: input.paymentType,
       source: "manual",
-      inventoryAddMedicine: { id: medicineId, payload: medicineValues },
+      inventoryAddMedicine: input.existingMedicineId ? undefined : { id: medicineId, payload: medicineValues },
+      // DELIBERATELY NOT `Boolean(input.existingMedicineId)`. Under the
+      // `inventory_add_purchase` kind DEV rejects a restock on TWO independent
+      // grounds, and the second is the decisive one:
+      //   1. the row-count constraint
+      //        check (operation_kind<>'inventory_add_purchase'
+      //               or expected_row_count in (5,7,8))
+      //      (20260825000000_inventory_add_purchase_sync.sql:25). A restock
+      //      carries no medicines row, so it counts 4 (credit), 6 (COD onto an
+      //      existing drawer) or 7 (COD creating one). 4 and 6 fail here; 7
+      //      slips through, so this check alone is NOT sufficient.
+      //   2. the graph validator at the same file's line ~179 requires
+      //      EXACTLY ONE `medicines` row. A restock has none, so every shape --
+      //      4, 6 and 7 alike -- is refused. This is what actually closes it.
+      // The widening to (4,5,6,7,8) plus a restock-shaped graph lives in
+      // backend/supabase/held-migrations/ and the hosted chain is HELD, so it
+      // is not applied and must not be assumed.
+      // `purchase_create` carries no row-count constraint and already expresses
+      // "add a batch to an existing medicine" (it is what the supplier-purchase
+      // flow emits), so restocking syncs correctly today under the owner-only
+      // contract. Flip this to true ONLY in the same change that applies the
+      // held extension. Pinned by b2-restock.sqlite.test.ts.
+      inventoryRestock: false,
       lineItems: [
         {
           medicineId,
@@ -465,10 +538,8 @@ export async function createMedicineWithPurchase(
       ],
     });
 
-    // The batch writePurchaseEffects just created for this brand-new
-    // medicineId — medicineId is freshly generated above, so there is no
-    // prior batch row it could have matched instead (same non-collision
-    // argument createMedicineWithBatch's own comment makes).
+    // New medicine or explicitly selected existing medicine: this entry point
+    // always creates a new batch; duplicate batch numbers are rejected above.
     const batchRow = tx
       .select({ id: batches.id })
       .from(batches)
@@ -481,7 +552,7 @@ export async function createMedicineWithPurchase(
       )
       .get();
     if (!batchRow) {
-      throw new Error("Batch was not created for the new medicine");
+      throw new Error("Batch was not created for the selected medicine");
     }
 
     return { medicineId, batchId: batchRow.id, purchaseId, invoiceNo };
@@ -628,11 +699,49 @@ export interface MedicineDetail {
   generic: string | null;
   manufacturer: string | null;
   strength: string | null;
+  type: string | null;
   category: string | null;
   unitOfMeasure: string;
   requiresPrescription: boolean;
   threshold: number;
   barcode: string | null;
+}
+
+/** Local shop identity picker. Catalogue ids must never enter this path. */
+export async function searchRestockMedicines(shopId: string, query: string) {
+  const term = `%${query.trim().replace(/[\\%_]/g, "\\$&")}%`;
+  return db.select({
+    id: medicines.id, name: medicines.name, generic: medicines.generic,
+    manufacturer: medicines.manufacturer, strength: medicines.strength,
+    type: medicines.type, unitOfMeasure: medicines.unitOfMeasure,
+    barcode: medicines.barcode,
+    batchContext: sql<string>`coalesce((select group_concat(b.batch_no || ' / ' || coalesce(b.expiry_date, '—') || ' / ' || b.stock, '; ') from batches b where b.shop_id = ${medicines.shopId} and b.medicine_id = ${medicines.id} and b.is_deleted = 0), '')`,
+  }).from(medicines).where(and(
+    eq(medicines.shopId, shopId), eq(medicines.isDeleted, false),
+    or(
+      sql`${medicines.name} like ${term} escape '\\'`,
+      sql`${medicines.generic} like ${term} escape '\\'`,
+      sql`${medicines.barcode} like ${term} escape '\\'`,
+    ),
+  )).orderBy(medicines.name, medicines.id).limit(50).all();
+}
+
+// Uses the inventory_add receipt capability, not standalone purchase access.
+// Release prerequisite: held B3 existing-medicine sync contract extension.
+export async function addBatchWithPurchase(input: {
+  shopId: string; actorUserId: string; isStillActive: () => boolean;
+  medicineId: string; supplierId: string; paymentType: PurchasePaymentType;
+  batch: CreateMedicineWithPurchaseInput["firstBatch"];
+}) {
+  if (!input.medicineId.trim()) throw new Error("Medicine selection is required");
+  return createMedicineWithPurchase({
+    shopId: input.shopId, actorUserId: input.actorUserId,
+    isStillActive: input.isStillActive, supplierId: input.supplierId,
+    paymentType: input.paymentType, existingMedicineId: input.medicineId,
+    // Identity is read and verified in the transaction; these are never written.
+    name: "", unitOfMeasure: "piece", requiresPrescription: false,
+    firstBatch: input.batch,
+  });
 }
 
 export async function getMedicine(
@@ -646,6 +755,7 @@ export async function getMedicine(
       generic: medicines.generic,
       manufacturer: medicines.manufacturer,
       strength: medicines.strength,
+      type: medicines.type,
       category: medicines.category,
       unitOfMeasure: medicines.unitOfMeasure,
       requiresPrescription: medicines.requiresPrescription,

@@ -177,6 +177,8 @@ export interface WritePurchaseEffectsInput {
     id: string;
     payload: Record<string, unknown>;
   };
+  /** Explicit existing-medicine receipt: same narrow inventory_add capability. */
+  inventoryRestock?: boolean;
 }
 
 // Shared purchase/stock/ledger mechanics: invoice numbering, COD Supplier-
@@ -295,7 +297,7 @@ export function writePurchaseEffects(
   let sequence = 0;
   const operation = (): SyncOperationGroup => ({
     id: purchaseId,
-    kind: input.inventoryAddMedicine ? 'inventory_add_purchase' : 'purchase_create',
+    kind: input.inventoryAddMedicine || input.inventoryRestock ? 'inventory_add_purchase' : 'purchase_create',
     sequence: sequence++,
     expectedCount,
   });

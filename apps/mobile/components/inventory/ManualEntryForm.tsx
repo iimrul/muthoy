@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, Switch, Text, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
@@ -16,6 +16,10 @@ import type { PurchasePaymentType } from "../../domain/purchases";
 import { MedicineTextScanner } from "../scanner/MedicineTextScanner";
 import { FormField } from "../forms/FormField";
 import {
+  addBatchWithPurchase,
+  getMedicine,
+  searchRestockMedicines,
+  type MedicineDetail,
   createMedicineWithPurchase,
   listManufacturerSuggestions,
 } from "../../db/inventory";
@@ -31,6 +35,7 @@ import { localizeValidationMessage, userFacingError } from "../../i18n/display";
 import { ManufacturerPicker } from "./ManufacturerPicker";
 import type { Session } from "../../state/sessionStore";
 import { triggerSyncNow } from "../../sync";
+import { ExistingMedicinePicker } from "./ExistingMedicinePicker";
 import { SupplierPickerField } from "./SupplierPickerField";
 
 interface ManualEntryFormProps {
@@ -38,6 +43,7 @@ interface ManualEntryFormProps {
   onSaved: () => void;
   initialMedicine?: MedicinePrefill | null;
   scanRequest?: number;
+  existingMedicineId?: string;
 }
 
 // Manual Entry — the prototype-parity field set (Volume 0 Day 8's identity
@@ -56,8 +62,18 @@ export function ManualEntryForm({
   onSaved,
   initialMedicine,
   scanRequest = 0,
+  existingMedicineId,
 }: ManualEntryFormProps) {
   const { t } = useI18n();
+  const submitLock = useRef(false);
+  const validationLock = useRef(false);
+  const selectionRequest = useRef(0);
+  const selectionPending = useRef(false);
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [existing, setExisting] = useState<MedicineDetail | null>(null);
+  const [chosenMedicineId, setChosenMedicineId] = useState(existingMedicineId ?? null);
+  const [showPicker, setShowPicker] = useState(false);
+  const [reviewInput, setReviewInput] = useState<AddMedicineOutput | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isScannerVisible, setIsScannerVisible] = useState(false);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
@@ -94,7 +110,15 @@ export function ManualEntryForm({
     unknown,
     AddMedicineOutput
   >({
-    resolver: zodResolver(addMedicineSchema),
+    // Existing identity is immutable here. Hidden new-medicine fields must
+    // never prevent receiving a batch (for example an old threshold error).
+    resolver: (values, context, options) => zodResolver(addMedicineSchema)(
+      existing ? {
+        ...values, name: existing.name, generic: undefined, manufacturer: undefined,
+        strength: undefined, type: undefined, threshold: undefined,
+        unitOfMeasure: existing.unitOfMeasure, requiresPrescription: existing.requiresPrescription,
+      } : values, context, options,
+    ),
     defaultValues: {
       name: "",
       unitOfMeasure: "piece",
@@ -103,6 +127,39 @@ export function ManualEntryForm({
     },
   });
 
+  const selectExisting = useCallback(async (id: string) => {
+    if (submitLock.current || validationLock.current) return;
+    const guard = captureSessionFor(session);
+    if (!guard) return;
+    const request = ++selectionRequest.current;
+    selectionPending.current = true;
+    setIsSelecting(true);
+    setChosenMedicineId(id);
+    setExisting(null);
+    try {
+      const row = await getMedicine(session.shopId, id);
+      guard.ifLive(() => {
+        if (request !== selectionRequest.current) return;
+        if (!row) { setErrorMessage(t("restockLoadFailed")); return; }
+        setExisting(row); setShowPicker(false); setReviewInput(null);
+        setValue("name", row.name);
+        setValue("generic", row.generic ?? "");
+        setValue("manufacturer", row.manufacturer ?? "");
+        setValue("unitOfMeasure", row.unitOfMeasure);
+      });
+    } catch { guard.ifLive(() => {
+      if (request === selectionRequest.current) setErrorMessage(t("restockLoadFailed"));
+    }); } finally {
+      if (request === selectionRequest.current) {
+        selectionPending.current = false;
+        guard.ifLive(() => setIsSelecting(false));
+      }
+    }
+  }, [session, setValue, t]);
+  useEffect(() => {
+    if (existingMedicineId) void selectExisting(existingMedicineId);
+  }, [existingMedicineId, selectExisting]);
+
   // Every mapped catalogue field lands in its own editable field — never
   // concatenated into `name`, which must stay the brand name (medicines_fts
   // indexes it, findExactNameMatch compares it). Unit of measure is only
@@ -110,7 +167,7 @@ export function ManualEntryForm({
   // size leaves the "piece" default standing rather than blanking a required
   // field (domain/catalogPrefill.ts).
   useEffect(() => {
-    if (!initialMedicine) return;
+    if (!initialMedicine || existingMedicineId) return;
     setValue("name", initialMedicine.name, { shouldDirty: true });
     setValue("generic", initialMedicine.generic ?? "", { shouldDirty: true });
     setValue("manufacturer", initialMedicine.manufacturer ?? "", {
@@ -123,7 +180,7 @@ export function ManualEntryForm({
         shouldDirty: true,
       });
     }
-  }, [initialMedicine, setValue]);
+  }, [initialMedicine, existingMedicineId, setValue]);
 
   useEffect(() => {
     if (scanRequest > 0) setIsScannerVisible(true);
@@ -160,12 +217,17 @@ export function ManualEntryForm({
     );
   };
 
-  const onSubmit = useCallback(
-    async (input: AddMedicineOutput) => {
+  const onSubmit = async (input: AddMedicineOutput, confirmDistinctMedicine = false) => {
+      if (submitLock.current || selectionPending.current) return;
+      // Confirm only the identity name the user actually reviewed. Other
+      // fields are revalidated from the current form, never a stale snapshot.
+      if (confirmDistinctMedicine && input.name !== reviewInput?.name) {
+        confirmDistinctMedicine = false;
+        setReviewInput(null);
+      }
       setErrorMessage(null);
       if (
-        !input.generic?.trim() ||
-        !input.manufacturer?.trim() ||
+        (!existing && (!input.generic?.trim() || !input.manufacturer?.trim())) ||
         !input.firstBatch.expiryDate
       ) {
         setErrorMessage(t("fillRequiredFieldsLabel"));
@@ -191,9 +253,31 @@ export function ManualEntryForm({
       if (!guard) {
         return;
       }
+      submitLock.current = true;
       setIsSubmitting(true);
+      let saved = false;
       try {
-        await createMedicineWithPurchase({
+        if (chosenMedicineId && !existing) throw new Error(t("restockLoadFailed"));
+        if (!existing && !confirmDistinctMedicine) {
+          const matches = await searchRestockMedicines(session.shopId, input.name);
+          if (!guard.isStillActive()) return;
+          if (matches.length > 0) { setReviewInput(input); return; }
+        }
+        const batch = {
+          batchNo: input.firstBatch.batchNo,
+          expiryDate: input.firstBatch.expiryDate,
+          quantity: input.firstBatch.quantity,
+          purchasePrice: fromTaka(input.firstBatch.purchasePrice),
+          salePrice: fromTaka(input.firstBatch.salePrice),
+        };
+        if (existing) {
+          await addBatchWithPurchase({
+            shopId: session.shopId, actorUserId: session.userId,
+            isStillActive: guard.isStillActive, medicineId: existing.id,
+            supplierId, paymentType, batch,
+          });
+        } else await createMedicineWithPurchase({
+          confirmDistinctMedicine,
           shopId: session.shopId,
           actorUserId: session.userId,
           isStillActive: guard.isStillActive,
@@ -217,6 +301,7 @@ export function ManualEntryForm({
             salePrice: fromTaka(input.firstBatch.salePrice),
           },
         });
+        saved = true;
         void triggerSyncNow(session.shopId);
         guard.ifLive(onSaved);
       } catch (caught) {
@@ -224,11 +309,14 @@ export function ManualEntryForm({
           setErrorMessage(userFacingError(caught, "medicineAddFailedLabel", t)),
         );
       } finally {
-        setIsSubmitting(false);
+        // Keep a successful receipt locked until navigation unmounts the form.
+        // A delayed second resolver must not record the same physical receipt.
+        if (!saved) {
+          submitLock.current = false;
+          setIsSubmitting(false);
+        }
       }
-    },
-    [onSaved, paymentType, session, supplierId, t],
-  );
+    };
 
   const handleCreateSupplier = useCallback(
     async (input: {
@@ -262,8 +350,41 @@ export function ManualEntryForm({
     [session],
   );
 
+  // React Hook Form awaits the resolver. Lock identity before validation so
+  // a picker tap cannot swap medicines under a pending Save closure.
+  const submitValidated = async (confirmDistinctMedicine = false) => {
+    if (validationLock.current || submitLock.current || selectionPending.current) return;
+    validationLock.current = true;
+    setIsSubmitting(true);
+    try {
+      await handleSubmit((input) => onSubmit(input, confirmDistinctMedicine))();
+    } finally {
+      validationLock.current = false;
+      if (!submitLock.current) setIsSubmitting(false);
+    }
+  };
+
   return (
     <View className="gap-4">
+      {existing ? <View className="gap-2 rounded-xl bg-white p-4">
+        <Text className="font-sans-semibold">{t("restockSameLabel")}: {existing.name}</Text>
+        <Text className="font-sans">{[existing.generic, existing.manufacturer, existing.strength, existing.type, existing.unitOfMeasure, existing.barcode].filter(Boolean).join(" / ")}</Text>
+        <Text className="font-sans text-xs">{existing.id}</Text>
+        <Text className="font-sans text-sm">{t("restockBatchHint")}</Text>
+        {!existingMedicineId ? <Pressable disabled={isSubmitting} onPress={() => setShowPicker(!showPicker)} accessibilityRole="button" accessibilityLabel={t("restockChooseLabel")}>
+          <Text className="font-sans-semibold text-brand-green">{t("restockChooseLabel")}</Text>
+        </Pressable> : null}
+      </View> : !chosenMedicineId ? <Pressable onPress={() => setShowPicker(!showPicker)} accessibilityRole="button" accessibilityLabel={t("restockLabel")} className="rounded-xl bg-brand-softGreen p-4">
+        <Text className="font-sans-semibold text-brand-green">{t("restockLabel")}</Text>
+      </Pressable> : <Text className="font-sans">{t("loadingLabel")}</Text>}
+      {showPicker || reviewInput ? <ExistingMedicinePicker key={`${session.shopId}:${reviewInput?.name ?? ""}`} shopId={session.shopId} initialQuery={reviewInput?.name} onSelect={(id) => { void selectExisting(id); }} /> : null}
+      {reviewInput ? <View className="gap-3 rounded-xl bg-white p-4">
+        <Text className="font-sans">{t("restockReviewHint")}</Text>
+        <Pressable disabled={isSubmitting || isSelecting} onPress={() => { void submitValidated(true); }} accessibilityRole="button" accessibilityLabel={t("restockDistinctLabel")} className="rounded-lg border border-brand-green p-3">
+          <Text className="font-sans-semibold text-brand-green">{t("restockDistinctLabel")}</Text>
+        </Pressable>
+        <Pressable onPress={() => setReviewInput(null)} accessibilityRole="button" accessibilityLabel={t("cancelLabel")}><Text className="font-sans">{t("cancelLabel")}</Text></Pressable>
+      </View> : null}
       <View className="flex-row items-center justify-between rounded-lg border border-info bg-[#EFF6FF] p-4">
         <View className="flex-1 pr-3">
           <Text className="mb-1 font-sans-semibold text-sm text-info">
@@ -286,6 +407,7 @@ export function ManualEntryForm({
         <Text className="font-sans text-sm text-midGray">{scanNotice}</Text>
       ) : null}
 
+      {!existing && !chosenMedicineId ? <>
       <FormField
         control={control}
         name="name"
@@ -356,6 +478,7 @@ export function ManualEntryForm({
         prototypeStyle
       />
 
+      </> : null}
       <View className="flex-row gap-3">
         <View className="flex-1">
           <FormField
@@ -411,7 +534,7 @@ export function ManualEntryForm({
             prototypeStyle
           />
         </View>
-        <View className="flex-1">
+        {!existing ? <View className="flex-1">
           <FormField
             control={control}
             name="threshold"
@@ -420,7 +543,7 @@ export function ManualEntryForm({
             numeric
             prototypeStyle
           />
-        </View>
+        </View> : null}
       </View>
 
       <SupplierPickerField
@@ -461,7 +584,7 @@ export function ManualEntryForm({
         </View>
       </View>
 
-      <View className="flex-row items-center justify-between rounded-xl border border-[#E5E7EB] bg-white px-4 py-3">
+      {!existing ? <View className="flex-row items-center justify-between rounded-xl border border-[#E5E7EB] bg-white px-4 py-3">
         <View className="flex-1 pr-3">
           <Text className="font-sans-semibold text-sm text-richBlack">
             {t("requiresPrescriptionLabel")}
@@ -484,6 +607,7 @@ export function ManualEntryForm({
         />
       </View>
 
+      : null}
       <Text className="text-center font-sans text-xs text-midGray">
         {t("requiredFieldsNoteLabel")}
       </Text>
@@ -503,8 +627,8 @@ export function ManualEntryForm({
           </Text>
         </Pressable>
         <Pressable
-          onPress={handleSubmit(onSubmit)}
-          disabled={isSubmitting}
+          onPress={() => { void submitValidated(); }}
+          disabled={isSubmitting || isSelecting || Boolean(reviewInput) || Boolean(chosenMedicineId && !existing)}
           accessibilityRole="button"
           accessibilityLabel={t("saveMedicineLabel")}
           className="h-12 flex-1 items-center justify-center rounded-lg bg-brand-green active:opacity-80 disabled:opacity-50"

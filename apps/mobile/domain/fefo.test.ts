@@ -171,6 +171,31 @@ describe('deduct', () => {
 });
 
 describe('sellable FEFO', () => {
+  it('restocked batches share partial depletion, spillover, expiry and out-of-stock selection', () => {
+    const batches = [
+      makeBatch({ id: 'Baban', expiryDate: '2027-12-12', quantityAvailable: 200 }),
+      makeBatch({ id: 'FEFO-EARLY', expiryDate: '2027-01-15', quantityAvailable: 50 }),
+      makeBatch({ id: 'other-product', medicineId: 'med-2', expiryDate: '2026-12-01', quantityAvailable: 100 }),
+    ];
+    expect(activeSellableBatch('med-1', batches, '2026-11-01')?.id).toBe('FEFO-EARLY');
+    expect(deductSellable('med-1', 20, batches, '2026-11-01')).toEqual([
+      { batchId: 'FEFO-EARLY', quantityDeducted: 20 },
+    ]);
+    expect(deductSellable('med-1', 55, batches, '2026-11-01')).toEqual([
+      { batchId: 'FEFO-EARLY', quantityDeducted: 50 },
+      { batchId: 'Baban', quantityDeducted: 5 },
+    ]);
+    expect(activeSellableBatch('med-1', batches, '2027-01-16')?.id).toBe('Baban');
+    expect(deductSellable('med-1', 200, batches, '2027-01-16')).toEqual([
+      { batchId: 'Baban', quantityDeducted: 200 },
+    ]);
+    expect(() => deductSellable('med-1', 201, batches, '2027-01-16')).toThrow(InsufficientStockError);
+    expect(activeSellableBatch('med-1', batches, '2027-12-13')).toBeUndefined();
+    const depleted = batches.map((batch) => ({ ...batch, quantityAvailable: 0 }));
+    expect(activeSellableBatch('med-1', depleted, '2026-11-01')).toBeUndefined();
+    expect(() => deductSellable('med-1', 1, depleted, '2026-11-01')).toThrow(InsufficientStockError);
+  });
+
   it('sells through printed expiry date, then hard-blocks next Dhaka business day', () => {
     const batch = makeBatch({ expiryDate: '2027-01-01' });
     expect(isBatchSellable(batch, '2027-01-01')).toBe(true);

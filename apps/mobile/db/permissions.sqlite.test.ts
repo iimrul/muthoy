@@ -51,17 +51,159 @@ const {
   recordExpense,
   setOpeningCash,
 } = await import('./cash');
-const { createMedicineWithBatch, createMedicineWithPurchase, listMedicines } = await import('./inventory');
+const { addBatchWithPurchase, searchRestockMedicines, createMedicineWithBatch, createMedicineWithPurchase, listMedicines, listBatchesForMedicine } = await import('./inventory');
 const { createSaleTransaction } = await import('./sales');
 const { createStaff, deactivateStaff, listStaff, resetStaffPin } = await import('./staff');
 const { changeOwnPin, getShopName, getShopProfile, updateShopProfile } = await import('./settings');
 const { createSupplier, getSupplierDetail, listSupplierPickerOptions, listSuppliers } = await import('./suppliers');
 const { createPurchase, listPurchasesForSupplier } = await import('./purchases');
+const { activeSellableBatch, deductSellable } = await import('../domain/fefo');
 const { collectPayment, createCustomer, getCustomerCreditLedger } = await import('./customers');
 const { requirePermission, verifyPin } = await import('./auth');
 const { hashPin, verifyPinHash } = await import('../native/crypto');
 
 const BUSINESS_DATE = currentBusinessDate();
+
+describe('explicit existing-medicine restocking', () => {
+  it('sells a partial restock then spills across batches, excludes expiry and reconciles cash and stock', async () => {
+    const f = seedShop();
+    sqlite.prepare('UPDATE batches SET expiry_date = ? WHERE id = ?').run('2099-12-12', f.batchId);
+    const receipt = await addBatchWithPurchase({
+      shopId: f.shopId, actorUserId: f.ownerId, isStillActive: ALWAYS_LIVE,
+      medicineId: f.medicineId, supplierId: f.supplierId, paymentType: 'cod',
+      batch: { batchNo: 'EARLY', expiryDate: '2099-01-15', quantity: 50, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+    });
+    const expired = await addBatchWithPurchase({
+      shopId: f.shopId, actorUserId: f.ownerId, isStillActive: ALWAYS_LIVE,
+      medicineId: f.medicineId, supplierId: f.supplierId, paymentType: 'credit',
+      batch: { batchNo: 'EXPIRED', expiryDate: '2000-01-01', quantity: 7, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+    });
+    expect((await getEndOfDaySummary(f.shopId, f.ownerId, BUSINESS_DATE)).expectedCash).toBe(-20000);
+    const sell = (quantity: number) => createSaleTransaction({
+      shopId: f.shopId, staffId: f.ownerId, isStillActive: ALWAYS_LIVE,
+      paymentType: 'cash', amountTendered: asPaisa(200000),
+      lines: [{ medicineId: f.medicineId, quantity }],
+    });
+    await sell(20);
+    expect(sqlite.prepare('SELECT stock FROM batches WHERE id = ?').get(receipt.batchId)).toMatchObject({ stock: 30 });
+    const spill = await sell(35);
+    expect(sqlite.prepare('SELECT batch_id, qty, unit_price FROM sale_items WHERE sale_id = ? ORDER BY unit_price').all(spill.saleId)).toEqual([
+      expect.objectContaining({ batch_id: receipt.batchId, qty: 30, unit_price: 700 }),
+      expect.objectContaining({ batch_id: f.batchId, qty: 5, unit_price: 1000 }),
+    ]);
+    expect((await getEndOfDaySummary(f.shopId, f.ownerId, BUSINESS_DATE)).expectedCash).toBe(20000);
+    await sell(95);
+    const countBefore = countRows('sales', f.shopId);
+    await expect(sell(1)).rejects.toThrow(/stock/i);
+    expect(countRows('sales', f.shopId)).toBe(countBefore);
+    const rows = await listBatchesForMedicine(f.shopId, f.medicineId);
+    expect(rows.find((row) => row.id === expired.batchId)?.quantityAvailable).toBe(7);
+    expect(activeSellableBatch(f.medicineId, rows, BUSINESS_DATE)).toBeUndefined();
+    for (const row of rows) {
+      const ledger = sqlite.prepare('SELECT SUM(change_qty) AS stock FROM inventory_movements WHERE batch_id = ?').get(row.id) as { stock: number };
+      expect(row.quantityAvailable).toBe(ledger.stock);
+    }
+    expect((await getEndOfDaySummary(f.shopId, f.ownerId, BUSINESS_DATE)).expectedCash).toBe(115000);
+  });
+
+  it.each(['cod', 'credit'] as const)('reconciles %s restocking with purchase, supplier, cash and movement ledgers', async (paymentType) => {
+    const fixture = seedShop();
+    const original = sqlite.prepare('SELECT * FROM medicines WHERE id = ?').get(fixture.medicineId);
+    const result = await addBatchWithPurchase({
+      shopId: fixture.shopId, actorUserId: fixture.ownerId, isStillActive: ALWAYS_LIVE,
+      medicineId: fixture.medicineId, supplierId: fixture.supplierId, paymentType,
+      batch: { batchNo: 'RESTOCK', expiryDate: '2027-12-12', quantity: 50, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+    });
+    expect(sqlite.prepare('SELECT * FROM medicines WHERE id = ?').get(fixture.medicineId)).toEqual(original);
+    expect(countRows('medicines', fixture.shopId)).toBe(1);
+    expect(sqlite.prepare('SELECT total, paid_amount FROM purchases WHERE id = ?').get(result.purchaseId)).toEqual({ total: 20000, paid_amount: paymentType === 'cod' ? 20000 : 0 });
+    expect(sqlite.prepare('SELECT medicine_id, qty FROM purchase_items WHERE purchase_id = ?').get(result.purchaseId)).toEqual({ medicine_id: fixture.medicineId, qty: 50 });
+    expect(sqlite.prepare('SELECT stock FROM batches WHERE id = ?').get(result.batchId)).toEqual({ stock: 50 });
+    expect(sqlite.prepare('SELECT SUM(change_qty) AS stock FROM inventory_movements WHERE batch_id = ?').get(result.batchId)).toEqual({ stock: 50 });
+    expect(await getCashSummary(fixture.shopId, fixture.ownerId, BUSINESS_DATE)).toEqual(expect.objectContaining({ supplierPayments: paymentType === 'cod' ? 20000 : 0, openingCash: 0 }));
+    const position = await getSupplierDetail(fixture.shopId, fixture.ownerId, fixture.supplierId);
+    expect(position?.payable).toBe(paymentType === 'credit' ? 20000 : 0);
+    if (paymentType === 'cod') {
+      expect(sqlite.prepare('SELECT opening_cash, closing_expected FROM cash_drawer WHERE shop_id = ?').get(fixture.shopId)).toEqual({ opening_cash: 0, closing_expected: -20000 });
+    }
+    const queued = sqlite.prepare('SELECT table_name, operation_kind, operation_sequence, operation_expected_count FROM sync_queue WHERE operation_group_id = ? ORDER BY operation_sequence').all(result.purchaseId) as unknown as { table_name: string; operation_kind: string; operation_sequence: number; operation_expected_count: number }[];
+    expect(queued.some((row) => row.table_name === 'medicines')).toBe(false);
+    // `purchase_create`, NOT `inventory_add_purchase`. A restock graph carries no
+    // medicines row, so its expected_row_count (4 or 6) falls outside the live
+    // constraint's (5,7,8) for that kind -- DEV would reject every restock. See
+    // the regression tests in db/b2-restock.sqlite.test.ts for the full reason.
+    expect(queued.every((row, index) => row.operation_kind === 'purchase_create' && row.operation_sequence === index && row.operation_expected_count === queued.length)).toBe(true);
+  });
+
+  it('requires explicit distinct-product confirmation and preserves legitimate same-name products', async () => {
+    const fixture = seedShop();
+    const input = {
+      shopId: fixture.shopId, actorUserId: fixture.ownerId, isStillActive: ALWAYS_LIVE,
+      name: ' Napa ', unitOfMeasure: 'piece', requiresPrescription: false,
+      supplierId: fixture.supplierId, paymentType: 'credit' as const,
+      firstBatch: { batchNo: 'DISTINCT', expiryDate: '2028-01-01', quantity: 2, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+    };
+    await expect(createMedicineWithPurchase(input)).rejects.toThrow(/Review existing medicines/);
+    expect(countRows('medicines', fixture.shopId)).toBe(1);
+    expect(countRows('purchases', fixture.shopId)).toBe(0);
+    await createMedicineWithPurchase({ ...input, confirmDistinctMedicine: true });
+    expect(countRows('medicines', fixture.shopId)).toBe(2);
+  });
+
+  it('rejects other-shop, deleted and staff targets without ledger effects', async () => {
+    const fixture = seedShop();
+    const other = seedShop();
+    const input = {
+      shopId: fixture.shopId, actorUserId: fixture.ownerId, isStillActive: ALWAYS_LIVE,
+      medicineId: other.medicineId, supplierId: fixture.supplierId, paymentType: 'cod' as const,
+      batch: { batchNo: 'INVALID', expiryDate: '2028-01-01', quantity: 2, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+    };
+    await expect(addBatchWithPurchase(input)).rejects.toThrow(/Medicine does not belong/);
+    // A staff member without inventory_add must fail before any ledger write.
+    await expect(addBatchWithPurchase({ ...input, medicineId: fixture.medicineId, actorUserId: fixture.staffId })).rejects.toThrow();
+    sqlite.prepare('UPDATE medicines SET is_deleted = 1 WHERE id = ?').run(fixture.medicineId);
+    await expect(addBatchWithPurchase({ ...input, medicineId: fixture.medicineId })).rejects.toThrow(/Medicine does not belong/);
+    expect(await searchRestockMedicines(fixture.shopId, '')).toEqual([]);
+    expect(countRows('purchases', fixture.shopId)).toBe(0);
+    expect(countRows('payments', fixture.shopId)).toBe(0);
+    expect(queuedCount(fixture.shopId)).toBe(0);
+  });
+
+  it('rejects an existing batch expiry mismatch atomically', async () => {
+    const fixture = seedShop();
+    await expect(addBatchWithPurchase({
+      shopId: fixture.shopId, actorUserId: fixture.ownerId, isStillActive: ALWAYS_LIVE,
+      medicineId: fixture.medicineId, supplierId: fixture.supplierId, paymentType: 'cod',
+      batch: { batchNo: 'B1', expiryDate: '2029-01-01', quantity: 2, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+    })).rejects.toThrow();
+    expect(countRows('purchases', fixture.shopId)).toBe(0);
+    expect(countRows('payments', fixture.shopId)).toBe(0);
+    expect(queuedCount(fixture.shopId)).toBe(0);
+    expect(sqlite.prepare('SELECT stock FROM batches WHERE id = ?').get(fixture.batchId)).toEqual({ stock: 100 });
+  });
+
+  it('adds the earlier batch to the chosen medicine without fragmenting FEFO', async () => {
+    const fixture = seedShop();
+    grantPermission(fixture.shopId, fixture.staffId, 'inventory_add');
+    const input = {
+      shopId: fixture.shopId, actorUserId: fixture.ownerId, isStillActive: ALWAYS_LIVE,
+      existingMedicineId: fixture.medicineId,
+      name: 'Napa', unitOfMeasure: 'piece', requiresPrescription: false,
+      supplierId: fixture.supplierId, paymentType: 'credit' as const,
+      firstBatch: { batchNo: 'FEFO-EARLY', expiryDate: '2027-01-15', quantity: 50, purchasePrice: asPaisa(400), salePrice: asPaisa(700) },
+    };
+    const result = await createMedicineWithPurchase(input);
+    expect(result.medicineId).toBe(fixture.medicineId);
+    expect(countRows('medicines', fixture.shopId)).toBe(1);
+    const rows = await listBatchesForMedicine(fixture.shopId, fixture.medicineId);
+    expect(rows).toHaveLength(2);
+    expect(activeSellableBatch(fixture.medicineId, rows, '2026-11-01')?.id).toBe(result.batchId);
+    expect(deductSellable(fixture.medicineId, 55, rows, '2026-11-01')).toEqual([
+      { batchId: result.batchId, quantityDeducted: 50 },
+      { batchId: fixture.batchId, quantityDeducted: 5 },
+    ]);
+  });
+});
 
 function applyMigration(fileName: string): void {
   sqlite.exec(readFileSync(resolve('apps/mobile/db/migrations', fileName), 'utf8'));
