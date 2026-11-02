@@ -5,6 +5,8 @@ import { asPaisa } from '@muthoy/types';
 import { eq } from 'drizzle-orm';
 import { sqlite } from './test/expo-sqlite';
 import { ALWAYS_LIVE } from './errors';
+import { catalog } from '../i18n/catalog';
+import { userFacingError } from '../i18n/display';
 
 const { db } = await import('./client');
 const s = await import('./schema');
@@ -187,6 +189,27 @@ describe('Batch 3 existing medicine receipt and ledger reconciliation', () => {
     const before = counts(f.shopId);
     await expect(addBatchWithPurchase(f.input)).rejects.toThrow(/Upgrade to Pro or Ultra/);
     expect(counts(f.shopId)).toEqual(before);
+
+    // The refusal must also be legible. On a device on 2026-11-02 this exact
+    // path showed "Could not save the medicine. Please try again." -- a prompt
+    // to retry something that can never succeed, on a shop whose own Home
+    // screen was showing a trial-expired Upgrade banner at the same moment.
+    // Asserting the thrown error alone would not have caught that, because the
+    // throw was already correct; only the message the owner reads was wrong.
+    const caught = await addBatchWithPurchase(f.input).catch((e: unknown) => e);
+    // This second attempt must be as write-free as the first; asserting it
+    // only once would leave the capture call itself unchecked.
+    expect(counts(f.shopId)).toEqual(before);
+    // Pin the DISCRIMINANT, not just the message. display.test.ts reads
+    // `feature` off a hand-built error, so renaming the real field would leave
+    // that test green while every staff_limit and commercial_write refusal
+    // silently collapsed into the not-covered wording. This is the only
+    // assertion in the repo that holds the real class to the field name the
+    // mapper reads.
+    expect((caught as { feature?: string }).feature).toBe('supplier_invoices');
+    const shown = userFacingError(caught, 'medicineAddFailedLabel', (k) => catalog.en[k]);
+    expect(shown).toBe(catalog.en.planNotCoveredLabel);
+    expect(shown).not.toBe(catalog.en.medicineAddFailedLabel);
 
     // The gate is scoped to restocking. Creating a NEW medicine stages under
     // the exempt `inventory_add_purchase` kind, so Free must still work -- if

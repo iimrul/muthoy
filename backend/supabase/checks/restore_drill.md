@@ -197,3 +197,51 @@ whose verdict was "operational reliance: no" - a capture tool that can
 mis-attribute a backup is worse than none. Part A's capture is therefore the
 manual command shapes in `h9_pg17_restore.md` lines 87-89, which are unchanged
 and authoritative. Nothing else in this drill depended on the executor.
+
+---
+
+## Addendum, 2026-11-02 - a device is attached; Part C is still blocked, and the reason has changed
+
+A physical handset (SM-A047F, Android 14) was attached and used for other Batch
+3 work on this date, so the 2026-10-31 statement that "`adb` is not installed
+and zero devices are attached" no longer holds. Part C was re-examined against
+real hardware. **Every row in the table above still reads `_not run_`, and none
+may be marked passed.** What changed is the diagnosis.
+
+**Prerequisite 4 is now satisfied.** `node scripts/generate-history-fixture.mjs`
+produced **22,933,504 bytes (21.87 MiB)**, matching the documented 21.8 MiB,
+exit 0. The next run starts at step 17 rather than at fixture generation.
+
+**Steps 17-19 need to write a pre-migration database into app-private storage
+and then SIGKILL the app mid-migration.** That requires a *debuggable* build.
+What is on the device:
+
+| Package | Debuggable | Usable for Part C |
+|---|---|---|
+| `com.muthoy.pos.preview` (the accepted artifact, `9ed99b4`) | **no** — and `allowBackup=false` | no: no `run-as`, no `adb backup`; the only ways in are rooting the founder's phone or replacing the live database, both out of bounds |
+| `com.muthoy.pos.h3scratch`, `…h3scratch2` | **yes**, `run-as` works | no: Expo **dev-launcher** builds from 2026-10-06 that boot to `DevLauncherActivity` and need a Metro server; they do not carry the accepted revision |
+
+Loading the accepted revision's JS into one of those dev clients over Metro was
+considered and **rejected**: it would time Nov-2 JavaScript on an Oct-6 native
+layer, and step 18 exists specifically to decide whether the *shipping* upgrade
+needs a progress screen. A hybrid number cannot support that decision, and
+recording one would be the same overclaim this drill already corrected once.
+
+So the blocker is no longer "no device". It is precisely:
+
+> **a debuggable build of the accepted revision.**
+
+A debuggable build of `9ed99b4` makes steps 17-19 **executable** on the handset
+already in hand, with the fixture generated and no founder data touched.
+
+**Executable is not the same as representative, and step 18 needs both.** A
+debug build differs from the shipped release in optimisation and packaging, so
+its elapsed time does not by itself settle whether the real upgrade needs a
+progress screen. Whoever runs this must state which build was timed and show
+that its native dependencies and configuration match the shipping one, or
+record the number as diagnostic only. The same objection is what ruled out the
+Metro route above - it was never about the dates alone.
+
+The alternative - approving the replacement of the Preview app's database - is
+not recommended: it destroys the test shop that the Batch 3 device evidence
+rests on.

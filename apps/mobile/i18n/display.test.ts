@@ -18,6 +18,60 @@ describe('B3 user-facing localization', () => {
       .toBe(catalog.bn.batchExpiryMismatchErrorLabel);
   });
 
+  it('tells a blocked owner the plan is the reason, and keeps the two plan refusals apart', () => {
+    // Shape-based on purpose: db/commercial.ts cannot be imported here without
+    // a SQLite harness. The real class is pinned against this mapping in
+    // db/b2-restock.sqlite.test.ts, which constructs it through a genuine
+    // refusal; these two tests only pass together.
+    const planError = (feature: string) =>
+      Object.assign(new Error('Upgrade to Pro or Ultra to use this feature.'), {
+        name: 'PlanAccessError',
+        feature,
+      });
+
+    expect(userFacingError(planError('supplier_invoices'), 'medicineAddFailedLabel', bn))
+      .toBe(catalog.bn.planNotCoveredLabel);
+    // The generic fallback is what a device actually showed on 2026-11-02.
+    expect(userFacingError(planError('supplier_invoices'), 'medicineAddFailedLabel', bn))
+      .not.toBe(catalog.bn.medicineAddFailedLabel);
+    // A seat limit is not a locked feature, so it must not borrow that wording.
+    expect(userFacingError(planError('staff_limit'), 'medicineAddFailedLabel', bn))
+      .toBe(catalog.bn.planStaffLimitReachedLabel);
+    expect(userFacingError(planError('staff_limit'), 'medicineAddFailedLabel', bn))
+      .not.toBe(userFacingError(planError('expenses'), 'medicineAddFailedLabel', bn));
+    // Never leak the raw English sentence the Error carries.
+    expect(userFacingError(planError('export'), 'medicineAddFailedLabel', bn))
+      .not.toContain('Upgrade to Pro or Ultra');
+
+    // `commercial_write` is also thrown for an archived or inactive shop
+    // (db/commercial.ts:305), not only for the shop-count limit (:312). An
+    // owner cannot upgrade their way out of an archived shop, so this must not
+    // reuse the upgrade wording -- the first version of this fix did.
+    const shopWrite = userFacingError(planError('commercial_write'), 'medicineAddFailedLabel', bn);
+    expect(shopWrite).toBe(catalog.bn.planShopWriteBlockedLabel);
+    expect(shopWrite).not.toBe(catalog.bn.planNotCoveredLabel);
+    expect(shopWrite).not.toBe(catalog.bn.planStaffLimitReachedLabel);
+  });
+
+  it('never tells a blocked owner to buy a plan they may already own', () => {
+    // The hardest case is not a Free shop, it is a PAYING one. A paid, active
+    // Ultra shop that has been offline past the 30-day verification ceiling
+    // resolves to effectiveTier 'free' (domain/entitlements.ts:145) while
+    // commercialTier stays 'ultra', and a device holding no cached snapshot at
+    // all is treated the same way by requirePremiumFeature's `!entitlement`
+    // arm (db/commercial.ts:241) and by the fail-closed readMultiShopContext
+    // (:249). All of them throw the SAME PlanAccessError these labels render.
+    // For that owner "upgrade" is false twice over -- already paid, and Ultra
+    // is the top tier -- so reconnecting, not paying, is the remedy, and both
+    // labels have to say so. The first version of this fix did not.
+    for (const key of ['planNotCoveredLabel', 'planStaffLimitReachedLabel'] as const) {
+      expect(catalog.en[key], `${key} (en) must not imply paying is the only remedy`)
+        .toMatch(/connect to the internet/i);
+      expect(catalog.bn[key], `${key} (bn) must not imply paying is the only remedy`)
+        .toContain('ইন্টারনেটে');
+    }
+  });
+
   it('never exposes an unknown raw database message', () => {
     expect(userFacingError(new Error('internal operation count mismatch'), 'purchaseSaveFailedLabel', bn))
       .toBe(catalog.bn.purchaseSaveFailedLabel);

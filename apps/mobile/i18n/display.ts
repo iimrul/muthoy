@@ -165,6 +165,52 @@ export function userFacingError(error: unknown, fallback: CatalogKey, t: Transla
   const named = ownKey(ERROR_NAME_KEYS, error.name);
   if (named) return t(named);
 
+  // Read the discriminant off the error rather than mapping the name in
+  // ERROR_NAME_KEYS: PlanAccessError carries several unrelated meanings -- a
+  // premium feature the plan does not include, a staff seat limit, a blocked
+  // shop write -- and a flat name mapping would collapse them into one wrong
+  // sentence. Same shape as PurchaseNotVoidableError below. Verified on a
+  // device 2026-11-02: a Free owner restocking got `medicineAddFailedLabel`
+  // ("Could not save the medicine. Please try again."), which invites a retry
+  // that can never succeed and never mentions the plan -- while the Home
+  // screen was simultaneously showing that same shop a trial-expired Upgrade
+  // banner.
+  //
+  // NONE of these branches may instruct an unconditional purchase, and that is
+  // the harder constraint. `effectiveTier` degrades to 'free' while
+  // `commercialTier` stays paid whenever the snapshot cannot be trusted:
+  // offline past the 30-day verification ceiling (domain/entitlements.ts:145,
+  // reason `verification_stale`), an invalid snapshot (:139), or no cached
+  // snapshot at all -- which requirePremiumFeature's `!entitlement` arm
+  // (db/commercial.ts:241) and the deliberately fail-closed
+  // readMultiShopContext (:249) both treat as not entitled. An active, paid
+  // Ultra shop then throws exactly these errors, and telling that owner to
+  // upgrade is false twice over: they have already paid, and Ultra is the top
+  // tier, so there is nothing to buy. Reconnecting is what restores access.
+  // usePlan.ts:29 already models this as a distinct `unverified` reason, and
+  // TrialBanner.tsx:50 warns in as many words that conflating unverified with
+  // Free is a mistake this project has already made once on real devices.
+  //
+  // PlanAccessError carries only `feature`, never the reason, so the mapper
+  // cannot separate "your plan excludes this" from "we cannot confirm your
+  // plan" -- the wording has to hold for both until the error carries the
+  // reason too. Doing that means editing db/commercial.ts, which CLAUDE.md
+  // rule 10 gates behind an approved plan; it is recorded as a founder item.
+  if (error.name === 'PlanAccessError') {
+    const feature = (error as Error & { feature?: string }).feature;
+    // A seat limit is not a locked feature. Its limit is read off
+    // `effectiveTier` too (db/commercial.ts:321), so it inherits the same
+    // degradation and must not promise an upgrade either.
+    if (feature === 'staff_limit') return t('planStaffLimitReachedLabel');
+    // `commercial_write` is thrown for an archived or inactive shop
+    // (db/commercial.ts:305) as well as for the plan's shop-count limit
+    // (db/commercial.ts:312). Upgrading corrects only the second, so this
+    // branch must not promise it -- an owner cannot buy their way out of an
+    // archived shop. Neutral wording covers both.
+    if (feature === 'commercial_write') return t('planShopWriteBlockedLabel');
+    return t('planNotCoveredLabel');
+  }
+
   if (error.name === 'PurchaseNotVoidableError') {
     const reason = (error as Error & { reason?: string }).reason;
     return t(reason === 'has_payment' ? 'purchaseHasPaymentErrorLabel' : 'purchaseHasStockErrorLabel');

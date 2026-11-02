@@ -4892,3 +4892,206 @@ assertion no longer proved revocation - the owner guard threw first. Staff and
 Free-plan restocking return in the same change that applies the held extension
 and flips the flag; the tests fail loudly if any of it moves without the rest.
 Premium owner restocking works online today.
+
+## 2026-11-02 - FEFO proved on hardware, and two defects the unit suite could not see
+
+Build `47c9f0aa` (from `9ed99b4`) installed on SM-A047F, Android 14, in place
+over the existing test shop. No application data was cleared and none needed to
+be: package and versionCode matched, the signer certificate was identical on
+both sides (`3b1ee9f3...`), and there is no local schema change between
+`fdbe8c3` and `9ed99b4`. The bytes read back off the device after installing
+hash `6239d705...`, the same as the verified EAS artifact. The APK pulled
+*before* installing hashed `686350b7...`, byte-identical to the stored
+`ffab3562` artifact from `fdbe8c3` - which re-confirms the provenance baseline
+from the device itself rather than from the previous session's note.
+
+**Checks 6.2, 6.3 and 6.4 PASS.** The fixture is a synthetic product
+(`ZZFEFOProbe`) with three batches under one medicine, built through CSV import
+- which is not premium-gated and so was reachable on this Free shop, unlike the
+restock form. The batch that expires first, `FEFO-C` (18 d), was deliberately
+the **last** inserted and held the **middle** quantity (7, between 5 and 20).
+That is the point of the fixture: insertion order, quantity and the name tie
+were excluded together. The earlier Case 6 claim was downgraded precisely
+because it lacked that control.
+
+It does **not** exclude everything. Review found a fourth variable the fixture
+leaves open - **batch id order** - and executed a counterexample: an allocator
+sorting by id ascending reproduces every number below if the ids happen to sort
+C < A < B, a 1-in-6 coincidence. The ids were never recorded. What closes it is
+source, not this device run: `domain/fefo.ts:55` compares the real
+`expiryDate`, and `db/sales.ts:578` is what checkout allocates through. So
+6.2/6.3/6.4 stand as **observed behaviour plus source inspection**, not
+device-conclusive alone; closing it on the device means repeating with the
+expiry order changed and the batch ids held fixed.
+
+Selling 1 took `FEFO-C` 7 -> 6 and left the others alone. Selling 8 drained
+`FEFO-C` 6 -> 0 and took the remaining 2 from `FEFO-A` 5 -> 3, leaving
+`FEFO-B` at 20 - an exact 6+2 split across the expiry boundary. With both
+radios off, a further sale took `FEFO-A` 3 -> 2 and **skipped** the zero-stock
+`FEFO-C` rather than failing on it; on reconnect the day read Tk 30.00 over 3
+transactions and the conflict screen reported none. That last part is still the
+client's own assertion - server-side arrival is unconfirmed without a DEV
+service-role read, the same limit as checks 3.2-3.5. Separately, the sale list
+read 75/406 days at 23:56 and 74/405 at 00:02 in the same running process,
+which is direct evidence the day-count is recomputed at read time (CLAUDE.md
+rule 3) rather than stored.
+
+**Defect A, fixed here.** `PlanAccessError` appeared in no map in
+`i18n/display.ts`. An earlier draft of this entry said all **11** of its call
+sites "fell through to a generic fallback". Both halves were wrong, and review
+caught it: there are **6** `throw new PlanAccessError` statements
+(`db/commercial.ts:241,282,295,305,312,326`) behind **15** guard call sites
+(10 x `requirePremiumFeature`, 3 x `requireMultiShopAccess`, 1 x
+`requireShopSwitchAccess`, 1 x `requireStaffSlot`) - and they did not all
+reach a generic fallback, because only some of those sites route through
+`userFacingError` at all. The rest showed something else again:
+`components/expenses/QuickLogTab.tsx:154` discards the error in a bare
+`catch {}` and shows a fixed expense-save failure. The bypass table below is
+the accurate account. On the device a Free owner restocking got "Could not save the
+medicine. Please try again." - telling them to retry something that can never
+succeed, never mentioning the plan, while the same shop's Home screen showed a
+trial-expired Upgrade banner. The mapper now reads the error's `feature`
+discriminant, the way `PurchaseNotVoidableError` already did, keeping three
+cases apart: a locked premium feature, a full staff seat, and a blocked shop
+write. **One of those three is live today; the other two are defensive.**
+`staff_limit` is thrown only by `requireStaffSlot`, and `commercial_write`
+only by `requireCommercialWrite`, whose sole caller is `requireStaffSlot`
+(`db/commercial.ts:318`) - and the single path into it, `createStaff` ->
+`components/staff/AddStaffModal.tsx:125`, catches at `:142` **without** the
+mapper. `multi_shop` never reaches the mapper either. So the only feature value
+that reaches `userFacingError` in the shipped app is the catch-all - which is
+exactly the branch the defect below was found in. The branches are worth
+keeping, but this entry must not read as three repaired live cases. That third case was a defect in the **first version of this fix**,
+caught in review - `commercial_write` is thrown both for an archived or
+inactive shop (`db/commercial.ts:305`) and for the plan's shop-count limit
+(`:312`), and the first version told both to upgrade, which cannot un-archive a
+shop. Two tests pin it and only pass together: a shape-based one in
+`i18n/display.test.ts` (commercial.ts needs a SQLite harness) and one in
+`db/b2-restock.sqlite.test.ts` that drives a real refusal through the real
+class. Mutation: deleting the branch kills 2, swapping the labels kills 2,
+and deleting only the `commercial_write` branch kills 1 - the two tests do not
+cover the same feature values, so the per-branch numbers differ.
+
+**A second defect in my own fix, found by both reviewers independently, and it
+was the worse one.** The catch-all branch said "This needs a Pro or Ultra plan.
+Upgrade to use it." That is false for a **paying** owner. `effectiveTier`
+degrades to `free` while `commercialTier` stays paid whenever the entitlement
+snapshot cannot be trusted: offline past the 30-day verification ceiling
+(`domain/entitlements.ts:145`, reason `verification_stale`), an invalid
+snapshot (`:139`), or no cached snapshot at all - which
+`requirePremiumFeature`'s `!entitlement` arm (`db/commercial.ts:241`) and the
+deliberately fail-closed `readMultiShopContext` (`:249`) both treat as not
+entitled. An active Ultra shop then throws exactly this error, and "upgrade" is
+false twice over: they have already paid, and Ultra is the top tier, so there is
+nothing to buy. Reconnecting is what restores access. `state/usePlan.ts:29`
+already models this as a separate `unverified` reason and
+`components/ui/TrialBanner.tsx:50` warns in as many words that conflating
+unverified with Free is a mistake this project has already made once on real
+devices - so the first version of my fix made these states **worse** than the
+generic "please try again" it replaced, which at least implied a retry would
+work.
+
+Both labels now cover the paid case ("If you have already paid, connect to the
+internet to refresh your plan"), and `planStaffLimitReachedLabel` too, because
+its limit is read off `effectiveTier` as well (`db/commercial.ts:321`).
+`planShopWriteBlockedLabel` no longer tells the owner to "check the shop's
+status", which has no owner-visible surface for the active shop. A wording-pin
+test in `i18n/display.test.ts` fails if either label loses the reconnect
+clause, in either language; restoring the old upgrade-only sentence kills it
+(verified by mutation, exit 1).
+
+The **correct** fix is for `PlanAccessError` to carry the entitlement reason,
+not only the feature, so the mapper can separate "your plan excludes this" from
+"we cannot confirm your plan". That edits `db/commercial.ts`, which CLAUDE.md
+rule 10 gates behind an approved plan, so it is **not** done here and is listed
+as a founder decision. The wording fix is the honest interim: it is true in
+both cases rather than precise in one and false in the other.
+
+Also pinned here: `db/b2-restock.sqlite.test.ts` now asserts the real class's
+`feature` field by name. Nothing did before - `display.ts` reads it through an
+`as` cast, so renaming it produced no type error, and both tests stayed green
+while every `staff_limit` and `commercial_write` refusal silently collapsed
+into the catch-all. Renaming the field now kills that test (verified, exit 1).
+
+**The fix is not complete, and the limit is specific.** It repairs every
+consumer that routes refusals through `userFacingError`, which includes the
+restock path observed here and the supplier/purchase screens. Handlers that
+never call the mapper still misreport a plan refusal:
+`components/expenses/QuickLogTab.tsx:154` and `LedgerTab.tsx:76` discard the
+error and show a generic expense failure; `app/end-of-day.tsx:67` reports an
+**unknown printer error**, sending the owner to check hardware; and
+**six** sites surface the error's **raw untranslated English** into a Bengali
+UI - the exact class of leak `display.test.ts` already forbids elsewhere.
+An earlier draft of this entry said two. The six are
+`components/staff/AddStaffModal.tsx:142`, `app/reports/data-export.tsx:39`,
+`app/reports/monthly-report.tsx:54`, `app/reports/report.tsx:94` and `:102`,
+and `app/end-of-day.tsx:75`. The four export ones all sit behind
+`authorizeExport`, which gates file export *and* summary share with
+`requirePremiumFeature(shopId,'export')` (`services/reportExport.ts:93`), so a
+plan refusal there renders the literal string "Upgrade to Pro or Ultra to use
+this feature." in English. The multi-shop handlers bypass the mapper too.
+Left as a founder item rather than swept unverified at the end of this run;
+each needs its own fallback-key choice. The count being wrong twice is the
+reason it is written out site by site here.
+
+**Defect B, deliberately NOT fixed - and my first write-up of it was wrong.**
+I claimed a Free shop had "no route at all". That is false, and this very run
+disproved it: the fixture above was built through CSV import, which carries no
+premium check and resolves to `add_batch` against the existing medicine
+(`db/inventoryImport.ts:142`, `:289`). A Free **owner** does have a route.
+
+What is actually true is narrower and worse in kind - it is a **regression**,
+not a gap. Before `9ed99b4`, `app/inventory/batches.tsx:88` called
+`addBatchToMedicine` under `inventory_edit`: free, receipt-less and
+**staff-eligible**. That commit - which I reviewed and accepted - replaced it
+with Edit Medicine -> "Add batch", which posts a supplier receipt and is
+therefore premium-gated and Owner-only. So **Staff lost the ability to create
+an additional batch under an existing medicine**, and Free owners lost the
+manual route. An earlier draft said Staff "lost the ability to add stock
+entirely"; review showed that was too broad. A Staff member holding
+`inventory_edit` can still raise an existing batch's quantity through Edit
+Batch -> post adjustment (`app/inventory/edit-batch.tsx:270` ->
+`db/inventory.ts:1197`, which requires only the `inventoryEdit` permission and
+carries no premium gate). That is a reason-bearing stock *adjustment*, not a
+receipt-bearing restock, and it cannot introduce a new batch number or a new
+expiry date - so it is not an equivalent route, but it is not nothing either.
+CSV import is owner-only and refuses duplicated identities outright, so
+it is no workaround for Staff nor for the very products this defect split.
+`addBatchToMedicine` still has no production caller; its `batches` rows remain
+outside the server premium set (`20260831000000_b4_commercial_platform.sql:429`)
+and need **no** held migration. Left unfixed because the instruction for this
+run was "Do not treat Free/Staff restocking as enabled while the hosted
+contract extension is held" - restoring the route is the founder's call. The
+receipt path's premium guard should stay regardless: removing it recreates
+local success followed by server refusal.
+
+A third consequence surfaced on its own: CSV import refuses the duplicated
+product outright with "medicine match is ambiguous", because two medicine rows
+share name+generic+manufacturer.
+
+**H-11 Part C: still every row `_not run_`, but the blocker moved.**
+Prerequisite 4 is now satisfied - the fixture generates at 22,933,504 bytes
+(21.87 MiB), matching the documented 21.8 MiB. Steps 17-19 need to write a
+pre-migration database into app-private storage and SIGKILL mid-migration, and
+the Preview build is non-debuggable with `allowBackup=false`, so there is no
+way in short of rooting the founder's phone or replacing the live database.
+The two debuggable packages on the device are Expo dev-launcher builds from
+2026-10-06 that need a Metro server and do not carry the accepted revision.
+Serving the accepted revision's JS into one of them was considered and
+rejected: step 18 exists to decide whether the *shipping* upgrade needs a
+progress screen, and Nov-2 JS on an Oct-6 native layer cannot answer that. The
+blocker is now exactly one thing - **a debuggable build of the accepted
+revision** - after which Part C is executable on the handset already in hand.
+Executable is not representative, though: a debug build differs from the
+shipped release in optimisation and packaging, so whoever runs step 18 must
+show the timed build's native dependencies and configuration match the shipping
+one, or record the number as diagnostic only.
+
+Left in the shop, undeleted because deleting is the founder's call: medicine
+`ZZFEFOProbe` (batches **2**/20/0 - the offline sale took FEFO-A 3 -> 2, which
+an earlier draft of this list failed to carry through), three cash sales totalling Tk 30.00
+(`INV-2026-000003...`, `...000004...`, `...000005...`), and an unused
+`/sdcard/Download/fefo-probe.csv`. Two things were observed and are **not**
+claimed as defects: an expiry notification for `FEFO-C` timestamped before that
+batch existed, and a Tk -82.00 expected drawer for 2026-11-01, which may simply
+be yesterday's COD purchases against an opening of 0.
