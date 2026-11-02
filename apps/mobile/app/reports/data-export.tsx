@@ -9,6 +9,7 @@ import { addDays, assertDateRange } from '../../domain/reporting';
 import type { ExportFormat } from '../../native/reportExport';
 import { exportAndShareReport, type ExportDataset } from '../../services/reportExport';
 import { useI18n } from '../../state/localeStore';
+import { userFacingErrorKeepingDetail } from '../../i18n/display';
 import { useOwnerAccess } from '../../state/usePermission';
 
 const META: { key: ExportDataset; bn: string; en: string; icon: keyof typeof Feather.glyphMap; tint: string; bg: string }[] = [
@@ -20,7 +21,7 @@ const META: { key: ExportDataset; bn: string; en: string; icon: keyof typeof Fea
 
 export default function DataExportScreen() {
   const params = useLocalSearchParams<{ startDate?: string; endDate?: string }>();
-  const { locale } = useI18n(); const bn = locale === 'bn'; const { session, isAllowed } = useOwnerAccess();
+  const { locale, t } = useI18n(); const bn = locale === 'bn'; const { session, isAllowed } = useOwnerAccess();
   const today = currentBusinessDate(); const [startDate, setStartDate] = useState(params.startDate ?? addDays(today, -29));
   const [endDate, setEndDate] = useState(params.endDate ?? today);
   const [datasets, setDatasets] = useState<Record<ExportDataset, boolean>>({ sales: true, inventory: false, credit: false, expenses: false });
@@ -36,7 +37,7 @@ export default function DataExportScreen() {
     try {
       const file = await exportAndShareReport({ shopId: session.shopId, actorUserId: session.userId, range: { startDate, endDate }, datasets: selected, format, onProgress: setProgress });
       setDone(`${bn ? 'এক্সপোর্ট প্রস্তুত' : 'Export ready'} · ${file.filename} · ${Math.ceil(file.size / 1024)} KB`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : (bn ? 'এক্সপোর্ট ব্যর্থ হয়েছে' : 'Export failed')); }
+    } catch (cause) { setError(userFacingErrorKeepingDetail(cause, 'exportFailedLabel', t)); }
     finally { setBusy(false); }
   };
   return (

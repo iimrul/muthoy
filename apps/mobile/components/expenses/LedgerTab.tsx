@@ -5,6 +5,7 @@ import { businessDateDifference, dhakaBusinessDate, formatMoney } from '@muthoy/
 import { addPaisa, type Paisa } from '@muthoy/types';
 import type { MonthExpenseRow } from '../../db/cash';
 import { useI18n } from '../../state/localeStore';
+import { userFacingError } from '../../i18n/display';
 import { expenseCategoryIcon, expenseCategoryLabelKey } from './expenseCategoryMeta';
 
 // B3 Group 3 — Ledger tab: month navigator, grouped-by-day list with per-day
@@ -73,8 +74,8 @@ export function LedgerTab({ monthLabel, isCurrentMonth, onPrevMonth, onNextMonth
     setDeleteError(null);
     try {
       await onDelete(id);
-    } catch {
-      setDeleteError(t('expenseDeleteFailed'));
+    } catch (cause) {
+      setDeleteError(userFacingError(cause, 'expenseDeleteFailed', t));
     } finally {
       setIsDeleting(false);
       setConfirmDeleteId(null);

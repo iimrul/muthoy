@@ -85,6 +85,11 @@ export const ERROR_NAME_KEYS: Record<string, CatalogKey> = {
   StaleSessionError: 'sessionChangedRetryLabel',
   SupplierPayableOutstandingError: 'supplierOutstandingArchiveErrorLabel',
   DuplicateBatchError: 'duplicateBatchErrorLabel',
+  // H-7 staff creation. Mapped by NAME so AddStaffModal can route its whole
+  // catch through userFacingError: db/errors.ts throws these with English
+  // sentences, which the modal used to render verbatim into a Bengali UI.
+  DuplicatePhoneError: 'duplicatePhoneErrorLabel',
+  DuplicatePinError: 'duplicatePinErrorLabel',
   BatchExpiryMismatchError: 'batchExpiryMismatchErrorLabel',
   PurchaseLineNotReceivedError: 'lineNotReceivedForReturnLabel',
   PurchaseReturnExceedsAvailableError: 'quantityExceedsAvailableLabel',
@@ -155,6 +160,36 @@ export function countLabel(
   t: Translate,
 ): string {
   return t(count === 1 ? singular : plural);
+}
+
+/**
+ * `userFacingError`, except that an error the mapper does NOT recognise keeps
+ * its own message instead of collapsing into the fallback.
+ *
+ * The export and share screens deliberately surface a real operational failure
+ * verbatim -- `tests/reports-final-fixes.test.tsx` pins that a rejected export
+ * shows "disk full" and a refused share shows "Owner access only", and that a
+ * failure is never hidden behind fake progress. Routing those screens through
+ * the plain mapper threw that diagnostic away.
+ *
+ * A PLAN refusal is still translated, because PlanAccessError IS mapped: the
+ * mapper answers with a plan label, which is not the fallback. So this keeps
+ * the detail the tests want while refusing to leak "Upgrade to Pro or Ultra to
+ * use this feature." into a Bengali UI.
+ *
+ * The residual gap is deliberate and recorded: an unmapped operational error
+ * still reaches the owner in English. Translating those means mapping each one
+ * by name, which is a product decision about how much detail to keep, not a
+ * mechanical fix.
+ */
+export function userFacingErrorKeepingDetail(
+  error: unknown,
+  fallback: CatalogKey,
+  t: Translate,
+): string {
+  const mapped = userFacingError(error, fallback, t);
+  if (mapped !== t(fallback)) return mapped;
+  return error instanceof Error && error.message ? error.message : mapped;
 }
 
 export function userFacingError(error: unknown, fallback: CatalogKey, t: Translate): string {

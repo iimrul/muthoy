@@ -6,6 +6,7 @@ import type { Paisa } from '@muthoy/types';
 import type { ExpenseCategory } from '@muthoy/validation';
 import type { DuplicateExpenseMatch } from '../../db/cash';
 import { useI18n } from '../../state/localeStore';
+import { userFacingError } from '../../i18n/display';
 import { AmountKeypad, type AmountKeypadKey } from './AmountKeypad';
 import { CategoryCircles } from './CategoryCircles';
 import { DuplicateExpenseModal } from './DuplicateExpenseModal';
@@ -151,8 +152,10 @@ export function QuickLogTab({
         setPending(null);
         showSavedBanner();
       }
-    } catch {
-      setError(t('expenseWriteFailed'));
+    } catch (cause) {
+      // Was a bare `catch {}`: a plan refusal was discarded and the owner was
+      // told the write failed, with no mention of the plan.
+      setError(userFacingError(cause, 'expenseWriteFailed', t));
     } finally {
       saveLock.current = false;
       setIsSaving(false);

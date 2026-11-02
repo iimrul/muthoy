@@ -12,6 +12,7 @@ import { currentBusinessDate } from '../../db/cash';
 import { addDays, assertDateRange, reportHasActivity } from '../../domain/reporting';
 import { exportAndShareReport, shareReportSummary } from '../../services/reportExport';
 import { useI18n } from '../../state/localeStore';
+import { userFacingErrorKeepingDetail } from '../../i18n/display';
 import { captureSessionFor } from '../../state/sessionGuard';
 import { useOwnerAccess, usePermission } from '../../state/usePermission';
 import { useBillingAccountId } from '../../state/useBillingAccountId';
@@ -28,7 +29,7 @@ function ActionIcon({ name, label, onPress }: { name: 'download' | 'share-2'; la
 }
 
 export default function ReportScreen() {
-  const { locale, formatMoney, formatNumber } = useI18n(); const bn = locale === 'bn';
+  const { locale, formatMoney, formatNumber, t } = useI18n(); const bn = locale === 'bn';
   const { session, isAllowed } = usePermission('reports');
   const { isAllowed: canExternalize } = useOwnerAccess();
   const multiShop = useMultiShopAccess();
@@ -91,7 +92,7 @@ export default function ReportScreen() {
     try {
       await shareReportSummary({ shopId: session.shopId, actorUserId: session.userId, range, formatSummary: ({ totals }) =>
         `${bn ? 'বিক্রয় রিপোর্ট' : 'Sales Report'} (${startDate} — ${endDate})\n${bn ? 'মোট বিক্রয়' : 'Total Sales'}: ${formatMoney(totals.netSales)}\n${bn ? 'লেনদেন' : 'Transactions'}: ${formatNumber(totals.transactions)}\n${bn ? 'নিট মুনাফা' : 'Net Profit'}: ${formatMoney(totals.netProfit)}${totals.taxCollected !== 0 ? `\n${bn ? 'নিট ট্যাক্স' : 'Net Tax'}: ${formatMoney(totals.taxCollected)}` : ''}` });
-    } catch (cause) { setError(cause instanceof Error ? cause.message : (bn ? 'শেয়ার ব্যর্থ হয়েছে' : 'Share failed')); }
+    } catch (cause) { setError(userFacingErrorKeepingDetail(cause, 'shareFailedLabel', t)); }
     finally { setExporting(false); }
   };
   const download = async () => {
@@ -99,7 +100,7 @@ export default function ReportScreen() {
     if (!report || !reportHasActivity(report.totals)) { setError(bn ? 'ডাউনলোড করার জন্য কোনো ডাটা নেই' : 'No data to download'); setFailedExport(false); return; }
     setExporting(true); setError(null); setFailedExport(false);
     try { await exportAndShareReport({ shopId: session.shopId, actorUserId: session.userId, range, datasets: ['sales'], format: 'csv' }); }
-    catch (cause) { setFailedExport(true); setError(cause instanceof Error ? cause.message : (bn ? 'এক্সপোর্ট ব্যর্থ হয়েছে' : 'Export failed')); }
+    catch (cause) { setFailedExport(true); setError(userFacingErrorKeepingDetail(cause, 'exportFailedLabel', t)); }
     finally { setExporting(false); }
   };
   if (!session) return <AccessDenied message={bn ? 'সক্রিয় সেশন প্রয়োজন।' : 'Active session required.'} />;

@@ -528,6 +528,65 @@ describe('W3-08 — every dynamic value a screen renders has a translation', () 
 });
 
 // ── Source hygiene: a regex that cannot match what it claims ───────────
+// -- A plan refusal must reach the owner as plan language --------------------
+/**
+ * Six screens caught a refusal and told the owner something else. Two discarded
+ * it in a bare `catch {}`; End of Day reported it as an **unknown printer
+ * error**, sending the owner to check hardware for something only their plan
+ * could fix; and four rendered `cause.message` -- the plan's own English
+ * sentence, "Upgrade to Pro or Ultra to use this feature." -- into a Bengali UI.
+ *
+ * Asserted at the exact call sites rather than file-wide, because these same
+ * files still use `cause.message` on paths a plan refusal cannot reach (report
+ * load, day close). A file-wide ban would read stricter than the code is.
+ */
+const PLAN_REFUSAL_SITES: ReadonlyArray<[string, string]> = [
+  ['components/expenses/QuickLogTab.tsx', "userFacingError(cause, 'expenseWriteFailed', t)"],
+  ['components/expenses/LedgerTab.tsx', "userFacingError(cause, 'expenseDeleteFailed', t)"],
+  ['app/end-of-day.tsx', "userFacingError(cause, 'printFailedLabel', t)"],
+  ['app/end-of-day.tsx', "userFacingErrorKeepingDetail(cause, 'shareFailedLabel', t)"],
+  ['components/staff/AddStaffModal.tsx', 'userFacingError(cause, "staffAddFailedLabel", t)'],
+  ['app/reports/data-export.tsx', "userFacingErrorKeepingDetail(cause, 'exportFailedLabel', t)"],
+  ['app/reports/monthly-report.tsx', "userFacingErrorKeepingDetail(cause, 'exportFailedLabel', t)"],
+  ['app/reports/report.tsx', "userFacingErrorKeepingDetail(cause, 'shareFailedLabel', t)"],
+  ['app/reports/report.tsx', "userFacingErrorKeepingDetail(cause, 'exportFailedLabel', t)"],
+];
+
+describe('a plan refusal reaches the owner as plan language', () => {
+  it('every fixed call site routes its refusal through the mapper', () => {
+    for (const [file, call] of PLAN_REFUSAL_SITES) {
+      expect(code(read(file)), `${file} :: ${call}`).toContain(call);
+    }
+  });
+
+  it('End of Day no longer reports a plan refusal as an unknown printer error', () => {
+    // The worst of the set: a plan problem rendered as a hardware problem.
+    expect(code(read('app/end-of-day.tsx'))).not.toContain("printerMessage('unknown',bn)");
+  });
+
+  it('the expense screens bind the refusal instead of discarding it', () => {
+    // Scoped to the two handlers that were bare `catch {}`. A file-wide ban on
+    // that shape would be wrong: QuickLogTab's other catches guard amount
+    // PARSING and a duplicate-check READ, and neither can raise a plan refusal
+    // -- the premium gates sit on recordExpense and deleteExpense, both writes.
+    expect(code(read('components/expenses/QuickLogTab.tsx')))
+      .toMatch(/catch \(cause\) \{[\s\S]*?userFacingError\(cause, 'expenseWriteFailed'/);
+    expect(code(read('components/expenses/LedgerTab.tsx')))
+      .toMatch(/catch \(cause\) \{[\s\S]*?userFacingError\(cause, 'expenseDeleteFailed'/);
+  });
+
+  it('Add Staff no longer falls back to an English sentence', () => {
+    expect(code(read('components/staff/AddStaffModal.tsx')))
+      .not.toContain('"Staff could not be created"');
+  });
+
+  it("Settings' refund window is not hardcoded English", () => {
+    const source = code(read('app/settings/settings.tsx'));
+    expect(source).not.toContain('label="Refund window"');
+    expect(source).not.toContain('label="Refund window (days)"');
+  });
+});
+
 describe('no test in this suite carries a control byte', () => {
   it('rejects 0x08 and friends anywhere in the localization/guard tests', () => {
     // This has bitten SIX times in one session, and this guard caught the last

@@ -16,6 +16,7 @@ import { printEscPos, PrinterError } from '../../native/printer';
 import { exportAndShareReport } from '../../services/reportExport';
 import { captureSessionFor } from '../../state/sessionGuard';
 import { useI18n } from '../../state/localeStore';
+import { userFacingErrorKeepingDetail } from '../../i18n/display';
 import { useOwnerAccess, usePermission } from '../../state/usePermission';
 
 function PnlRow({ label, value, format, strong = false, negative = false, accent }: { label: string; value: Paisa; format: (value: Paisa) => string; strong?: boolean; negative?: boolean; accent?: string }) {
@@ -51,7 +52,7 @@ export default function MonthlyReportScreen() {
   const exportReport = async (format: 'csv'|'xlsx') => {
     setAction(format); setError(null); setFailedAction(null);
     try { await exportAndShareReport({ shopId: session.shopId, actorUserId: session.userId, range: monthRange(yearMonth), datasets: ['sales','expenses'], format, monthly: yearMonth }); }
-    catch (cause) { setFailedAction(format); setError(cause instanceof Error ? cause.message : 'Export failed'); } finally { setAction(null); }
+    catch (cause) { setFailedAction(format); setError(userFacingErrorKeepingDetail(cause, 'exportFailedLabel', t)); } finally { setAction(null); }
   };
   const print = async () => {
     if (!report) return; setAction('print'); setError(null); setFailedAction(null);

@@ -79,6 +79,29 @@ describe('B3 user-facing localization', () => {
       .toBe(catalog.bn.invalidFieldValueLabel);
   });
 
+  it('maps the staff duplicate errors by name instead of leaking their English', () => {
+    // db/errors.ts throws these with English sentences, and AddStaffModal used
+    // to render `cause.message` verbatim into a Bengali UI. Mapping them by
+    // NAME is what lets that whole catch collapse into one userFacingError
+    // call that also covers the plan refusal.
+    const named = (name: string, message: string) =>
+      Object.assign(new Error(message), { name });
+
+    expect(userFacingError(named('DuplicatePhoneError', 'That phone is taken.'), 'staffAddFailedLabel', bn))
+      .toBe(catalog.bn.duplicatePhoneErrorLabel);
+    expect(userFacingError(
+      named('DuplicatePinError', 'That PIN is already used by someone at this shop. Choose another.'),
+      'staffAddFailedLabel', bn,
+    )).toBe(catalog.bn.duplicatePinErrorLabel);
+
+    // The raw English must not survive into the Bengali string.
+    expect(userFacingError(named('DuplicatePinError', 'x'), 'staffAddFailedLabel', bn))
+      .not.toContain('already used by someone at this shop');
+    // And an unmapped staff failure still falls back rather than leaking.
+    expect(userFacingError(new Error('sqlite disk image is malformed'), 'staffAddFailedLabel', bn))
+      .toBe(catalog.bn.staffAddFailedLabel);
+  });
+
   it('localizes inventory archive failures instead of exposing DB copy', () => {
     expect(
       userFacingError(

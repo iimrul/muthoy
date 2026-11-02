@@ -16,7 +16,7 @@ import {
 } from "../ui/PinPad";
 import { PermissionMatrix } from "./PermissionMatrix";
 import { createStaff } from "../../db/staff";
-import { DuplicatePhoneError, DuplicatePinError } from "../../db/errors";
+import { userFacingError } from "../../i18n/display";
 import {
   PERMISSION_PRESETS,
   type PermissionOverrides,
@@ -140,16 +140,11 @@ export function AddStaffModal({
         onCreated();
       });
     } catch (cause) {
-      guard.ifLive(() =>
-        setError(
-          cause instanceof DuplicatePhoneError ||
-            cause instanceof DuplicatePinError
-            ? cause.message
-            : cause instanceof Error
-              ? cause.message
-              : "Staff could not be created",
-        ),
-      );
+      // Every branch here used to render `cause.message` -- raw English in a
+      // Bengali UI, including the plan's own "Upgrade to Pro or Ultra..."
+      // sentence. The duplicate phone/PIN errors are now mapped by name in
+      // ERROR_NAME_KEYS, so one call covers them and the plan refusal too.
+      guard.ifLive(() => setError(userFacingError(cause, "staffAddFailedLabel", t)));
     } finally {
       guard.ifLive(() => setSaving(false));
     }

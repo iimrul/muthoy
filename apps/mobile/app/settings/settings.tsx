@@ -269,8 +269,8 @@ export default function SettingsScreen() {
             onPress={() => setB2SettingsOpen(true)}
           />
           <Row
-            label="Refund window"
-            value={b2Settings ? `${b2Settings.maxRefundDays} days` : "…"}
+            label={t("refundWindowLabel")}
+            value={b2Settings ? `${b2Settings.maxRefundDays} ${t("daysSuffixLabel")}` : "…"}
             onPress={() => setB2SettingsOpen(true)}
           />
           <Row
@@ -437,6 +437,7 @@ function B2SettingsModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState(settings);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -489,7 +490,7 @@ function B2SettingsModal({
             onChange={(expiryFarDays) => setDraft({ ...draft, expiryFarDays })}
           />
           <NumberSetting
-            label="Refund window (days)"
+            label={t("refundWindowDaysLabel")}
             value={draft.maxRefundDays}
             onChange={(maxRefundDays) => setDraft({ ...draft, maxRefundDays })}
           />

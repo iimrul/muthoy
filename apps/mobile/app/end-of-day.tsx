@@ -17,6 +17,7 @@ import { printEscPos, PrinterError } from '../native/printer';
 import { shareReportSummary } from '../services/reportExport';
 import { captureSessionFor } from '../state/sessionGuard';
 import { useI18n } from '../state/localeStore';
+import { userFacingError, userFacingErrorKeepingDetail } from '../i18n/display';
 import { useOwnerAccess, usePermission } from '../state/usePermission';
 import { triggerSyncNow } from '../sync';
 
@@ -26,7 +27,7 @@ function printerMessage(code: string, bn: boolean): string {
 }
 
 export default function EndOfDayScreen() {
-  const { locale, formatMoney, formatNumber } = useI18n(); const bn = locale === 'bn';
+  const { locale, formatMoney, formatNumber, t } = useI18n(); const bn = locale === 'bn';
   const { session, isAllowed } = usePermission('cash_drawer'); const { isAllowed: canCredit } = usePermission('credit_view'); const { isAllowed: isOwner } = useOwnerAccess();
   const today = currentBusinessDate(); const [startDate, setStartDate] = useState(today); const [endDate, setEndDate] = useState(today);
   const range = useMemo(() => ({ startDate, endDate }), [startDate,endDate]); const oneDay = startDate === endDate;
@@ -64,7 +65,10 @@ export default function EndOfDayScreen() {
   const print = async () => {
     if (!report) return; setAction('print'); setError(null); setPrintFailed(false);
     try { await requirePremiumFeature(session.shopId, 'printer'); await printEscPos(buildEodReportPrint((await getShopName(session.shopId)) ?? 'Muthoy Pharmacy', report)); }
-    catch (cause) { setPrintFailed(true); setError(cause instanceof PrinterError ? printerMessage(cause.code,bn) : printerMessage('unknown',bn)); }
+    // A non-PrinterError here is usually a PLAN refusal (requirePremiumFeature
+    // 'printer' above). Reporting it as 'unknown printer error' sent the owner
+    // to check hardware for something only their plan could fix.
+    catch (cause) { setPrintFailed(true); setError(cause instanceof PrinterError ? printerMessage(cause.code,bn) : userFacingError(cause, 'printFailedLabel', t)); }
     finally { setAction(null); }
   };
   const share = async () => {
@@ -72,7 +76,7 @@ export default function EndOfDayScreen() {
     try {
       await shareReportSummary({ shopId: session.shopId, actorUserId: session.userId, range, formatSummary: ({ totals: summary }) =>
         `${bn ? 'বিক্রয় রিপোর্ট' : 'Sales Report'} ${startDate} — ${endDate}\n${bn ? 'মোট বিক্রয়' : 'Total Sales'}: ${formatMoney(summary.netSales)}\n${bn ? 'লেনদেন' : 'Transactions'}: ${formatNumber(summary.transactions)}\n${bn ? 'নিট মুনাফা' : 'Net Profit'}: ${formatMoney(summary.netProfit)}` });
-    } catch (cause) { setError(cause instanceof Error ? cause.message : (bn ? 'শেয়ার ব্যর্থ হয়েছে' : 'Share failed')); }
+    } catch (cause) { setError(userFacingErrorKeepingDetail(cause, 'shareFailedLabel', t)); }
     finally { setAction(null); }
   };
   return (
