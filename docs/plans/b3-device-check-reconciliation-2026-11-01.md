@@ -55,16 +55,15 @@ coincidence, and it is recorded as a derivation rather than a discovery.
 | 5.2 | The user can set opening cash | CLAUDE.md r5 | NOT RUN |
 | 5.3 | It resets at midnight and never inherits yesterday | CLAUDE.md r5 | NOT RUN |
 | 6.1 | The expiry day-count is correct for the day it is read | CLAUDE.md r3 | **PASS** |
-| 6.2 | Ordering uses the real expiry date, not a stored day-count | CLAUDE.md r3 | **PASS** (2026-11-02) † |
-| 6.3 | The earliest-expiring batch **within one medicine** is selected | CLAUDE.md r3 | **PASS** (2026-11-02) † |
-| 6.4 | A sale larger than one batch spills to the next by expiry | CLAUDE.md r3 | **PASS** (2026-11-02) † |
+| 6.2 | Ordering uses the real expiry date, not a stored day-count | CLAUDE.md r3 | **PASS** (2026-11-02, re-run) |
+| 6.3 | The earliest-expiring batch **within one medicine** is selected | CLAUDE.md r3 | **PASS** (2026-11-02, re-run) |
+| 6.4 | A sale larger than one batch spills to the next by expiry | CLAUDE.md r3 | **PASS** (2026-11-02, re-run) |
 
 **11 PASS, 9 NOT RUN.** (An earlier draft of this line said 10 and 10, which
 did not match the rows above it.)
 
-† Qualified, not device-conclusive on their own — see §2.1. Batch-UUID order
-was never excluded as a confound, so these three rest on observed device
-behaviour **plus** source inspection. Read the † before quoting the PASS.
+The † qualification these three carried is **withdrawn**: the second run of
+2026-11-02 excluded the batch-id confound directly. See §7.
 
 ### 2.1 How 6.2, 6.3 and 6.4 were closed, 2026-11-02
 
@@ -250,7 +249,10 @@ reach handlers that never call the mapper. Those still misreport a plan
 refusal, and are left as a founder item rather than swept unverified at the end
 of this run:
 
-| Handler | What a blocked user sees today |
+**FIXED on 2026-11-02** — every row below now routes through the mapper; the
+table is kept as the record of what each screen used to show. See §7.4.
+
+| Handler | What a blocked user saw before the fix |
 |---|---|
 | `components/expenses/QuickLogTab.tsx:154` | generic expense-save error (`catch {}` discards the error) |
 | `components/expenses/LedgerTab.tsx:76` | generic expense-delete error |
@@ -271,6 +273,36 @@ export *and* summary share with `requirePremiumFeature(shopId,'export')`
 of the set: `display.test.ts` already carries a test forbidding exactly that
 class of leak into a Bengali UI. Having miscounted this table twice, it is now
 written out site by site.
+
+### 7.4 What the fix changed, and the one thing it deliberately did not
+
+All nine sites now route through the mapper, and `DuplicatePhoneError` /
+`DuplicatePinError` are mapped by name so Add Staff's whole catch collapses
+into one call. End of Day no longer reports a plan refusal as an unknown
+printer error. `Refund window` and `Refund window (days)`, hardcoded English
+found by reading the running app, are catalogued.
+
+The first attempt was too broad and the suite caught it. Two tests in
+`tests/reports-final-fixes.test.tsx` pin that the export and share screens show
+a **real** failure verbatim — "disk full", "Owner access only" — so a failure
+is never hidden behind fake progress. A blanket catalog fallback threw that
+away. `userFacingErrorKeepingDetail` now translates what the mapper knows
+(plan refusals included) and keeps the real message when it does not.
+
+**Still open, deliberately:** an unmapped operational error still reaches the
+owner in English at those five sites. Translating them means mapping each error
+by name, which trades diagnostic detail for translation — a founder decision,
+not a mechanical fix.
+
+### 7.5 The suite is flaky under parallel load
+
+Three full runs on this date produced three different failing sets — 6, 16 and
+5 failed tests — and **every** failure passed when re-run in isolation, except
+the two `reports-final-fixes` cases, which were a real regression and are
+fixed. `eas-archive.test.ts` alone takes 130 s and passes 45/45 on its own.
+Treat a single red full-suite run as unproven until the named files are re-run
+individually; read the `Test Files` line rather than the exit code, because
+vitest also exits 1 on a reporter RPC timeout with every test passing.
 
 **B. The manual-entry route for restocking an existing medicine was removed by
 `9ed99b4`, and for Staff nothing replaced it.** An earlier draft of this
@@ -309,6 +341,93 @@ own: CSV import refuses the affected product outright with "medicine match is
 ambiguous", because two rows share name+generic+manufacturer. That is also why
 CSV import cannot serve as the workaround for products this defect already
 split.
+
+## 7. Second run, 2026-11-02: the FEFO confound closed, and a clear executed
+
+### 7.1 FEFO is driven by the expiry date — a controlled swap, not an inference
+
+§2.1 could not exclude batch-id order. This run excluded it by **changing only
+the expiry dates**, in place, on the same batch rows.
+
+`app/inventory/edit-batch.tsx` writes through `updateBatch`
+(`db/inventory.ts:1151`), which updates the existing row. No batch was deleted
+or recreated, so **every batch id, and the insertion order, stayed fixed**.
+Batch numbers, unit prices and per-batch quantities also stayed fixed. The
+only variable changed was the date.
+
+| Stage | FEFO-C | FEFO-B | FEFO-A | App's selected batch |
+|---|---|---|---|---|
+| Before | 2026-11-20, qty 0 | 2027-06-30, qty 20 | 2026-12-15, qty 2 | **A** |
+| After swapping A and B's dates | 2026-11-20, qty 0 | **2026-12-15**, qty 20 | **2027-06-30**, qty 2 | **B** |
+
+The selection followed the dates. That single flip excludes four explanations
+at once:
+
+- **batch id / insertion order** — unchanged by construction;
+- **alphabetical batch number** — `FEFO-A` < `FEFO-B`, so it would still pick A;
+- **smallest quantity first** — the selected batch went from qty 2 to qty 20;
+- **largest quantity first** — excluded by the before state.
+
+Confirmed by real sales, not just the list ordering:
+
+- a sale of 1 took **B 20 → 19**; A stayed at 2 (**6.3**);
+- a sale of 20 took **B 19 → 0 then spilled 1 to A 2 → 1** (**6.4**). The
+  spill ran B → A, the reverse of both alphabetical and insertion order;
+- `FEFO-C`, earliest of all at 18 days but holding 0 stock, was correctly
+  skipped throughout;
+- the displayed day-count moved with the date (43 → 240 and back), which is
+  **6.2**: it is recomputed at read time, not stored.
+
+Two behaviours worth recording as correct-and-deliberate, both observed here:
+the checkout refused an over-sell naming the true available figure, and a sale
+whose basis had shifted was refused with "price or stock has changed" — it
+fails closed and asks for re-confirmation. That guard needed three confirm
+presses before it passed, which is a UX wrinkle, not a dead end.
+
+### 7.2 The authorized app-data clear, and what it did and did not establish
+
+The founder authorized clearing `com.muthoy.pos.preview` data on
+`RZ8W40HDRMK`. Executed. Production `com.muthoy.pos` and both `h3scratch`
+packages were untouched and still installed afterwards; the helper refuses any
+package but the Preview one.
+
+**What it established:**
+
+- The clear is effective: relaunch shows the first-run chooser, with no trace
+  of the previous owner — no pre-filled phone, no shop name.
+- Entering the previous owner's phone goes straight to a returning-owner PIN
+  prompt, so the account exists server-side.
+
+**What it did NOT establish, and why — an error of mine.** Authorization step 4
+required verifying that re-entry credentials were available. I checked that the
+custody file contained an `H5_TEST_PIN` **key** and did not check that it held
+a **value**. It is empty, and none of the four stamped DEV OTP accounts matches
+that phone. So I cannot sign back in, and **H-11 Part B's recovery measurement
+is not complete**. The data is not destroyed — the server recognises the
+account, and two forced syncs ran while the device was online — but recovering
+it needs the founder's PIN.
+
+**Part B step 11 is independently not performable on this artifact.** It says
+"count the outbox before losing it". The release build exposes no sync-queue
+depth anywhere in the UI, and `run-as` is unavailable because the build is not
+debuggable. So step 14's "the difference must equal exactly the step 11 outbox
+count" cannot be evaluated on the accepted build by anyone, regardless of the
+credential problem.
+
+**One unexplained observation, recorded as unexplained.** After the first clear,
+the shop appeared fully restored — owner, the day's five transactions, all
+batches — without a PIN ever being entered. Two deliberate reproductions
+(clear → phone → PIN screen → force-stop → relaunch, and the same with a BACK
+exit) both returned the first-run screen. It did not reproduce, so **this is
+not reported as an authentication bypass**; it is an anomaly that needs a
+debuggable build and logs to diagnose, and it is the second reason to want one.
+
+### 7.3 The foreground guard earned its place
+
+An ADB foreground-package guard ran before every automated interaction. When a
+BACK press dropped the app to the Samsung launcher, the guard **refused** the
+next tap rather than sending it to a home-screen icon — the Truecaller-class
+incident, prevented automatically rather than noticed afterwards.
 
 ### Left in the shop, for the founder to remove or keep
 
