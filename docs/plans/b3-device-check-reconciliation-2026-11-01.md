@@ -548,3 +548,122 @@ notification for `FEFO-C` timestamped 2026-11-01 18:14, before that batch
 existed; and a cash-summary notification for 2026-11-01 reading an expected
 drawer of **৳-82.00**, which may simply be yesterday's COD purchases exceeding
 cash sales against an opening of 0. Neither is claimed as a defect.
+
+## 9. Fourth run, 2026-11-03: H-11 Part B, and two corrections
+
+### 9.1 Part B is BLOCKED, and two of my own claims about why were wrong
+
+The 2026-11-03 Part B attempt ended at a refusal, correctly reported as BLOCKED
+rather than PASS: no recovery assertion was exercised and no outbox depth was
+measured. That verdict stands. The *explanation* given for it did not.
+
+Independent review put the contract plainly: a truly new Owner and shop with no
+prior `device_enrollment_holds` row should not need a second device for its
+first enrolment. That is right, and the code says so.
+
+The refusal path is exact and traceable:
+
+`recoverPin.ts:159` -> `prepareInstallationEnrollment` (`deviceBinding.ts:82`)
+-> `a23_prepare_enrollment` -> `{allowed:false, held:true}` ->
+`enrollmentFailure("MU070")` -> `device_enrollment_held` -> `otp-verify.tsx:42`
+-> `authErrorEnrollmentHeld`.
+
+`held` is true only when a hold row exists for `(shop_id, actor_user_id)`. With
+no hold row and a device id present, `a23_prepare_enrollment` returns
+`allowed: true`. Hold rows are inserted in exactly two places, both deliberate
+administrative revocations: `a23_revoke_binding` and `a23_revoke_device`.
+Nothing in registration, login, PIN recovery or app-data clearing writes one,
+and `onboarding.ts` never calls the enrolment gate at all.
+
+So the gate fired because that DEV identity already carried a hold from earlier
+A2.3 testing. It is **not** the general rule for new enrolment, and the earlier
+report's generalisation of it was wrong.
+
+### 9.2 Two withdrawn claims
+
+**Withdrawn: "all four stamped DEV accounts are already registered."** Three of
+the four were probed by typing the number into Owner Login and observing the
+PIN pad appear. That proves nothing. `handlePhoneNext`
+(`app/(auth)/device-login.tsx:68`) runs a local Zod check and calls
+`setStep('pin')` with **no server call**; the screen's own comment says the
+"no account for this number" answer was deliberately not copied from the
+prototype, for anti-enumeration. The PIN pad appears for any well-formed
+number. A UI transition was reported as a server fact.
+
+**Withdrawn: the "log in again" screen meant "already registered."** That
+screen (`pb-08`) is `pin-login.tsx`, identified by its eyebrow
+`pinLoginEyebrow` / "দোকানে প্রবেশ" — the local PIN pad that `app/index.tsx`
+routes to when local rows exist without a session. No server
+`phone_already_registered` response was ever captured.
+
+The `...104` PIN-reset refusal is also now explained rather than mysterious:
+`recoverPin`'s `RECOVERY_REFUSED` is deliberately one code for "no such owner",
+"not an owner" and "not the number this session proved". There is no account on
+that number, so refusing was correct.
+
+### 9.3 Read-only DEV identity inventory, 2026-11-03
+
+Run against DEV `btfprhticjgeihcngpif` with the existing admin service-role key.
+Read-only: `GET /rest/v1/...` only, zero writes, no enrolment function called.
+Numbers masked to their last three digits; no ids or records reproduced.
+
+| stamped slot | `users` row exists |
+|---|---|
+| ...101 | yes |
+| ...102 | **no — free** |
+| ...103 | yes |
+| ...104 | **no — free** |
+
+Two of the four are unused. The premise that no identity was available was
+false.
+
+**The enrolment holds themselves could not be inventoried, and that is correct
+behaviour.** All five A2.3 registry tables answer `403 / SQLSTATE 42501` to the
+service role, because `20260923000000_a23_device_registry.sql:329-333` revokes
+them from `public, anon, authenticated, service_role`. They are reachable only
+through `SECURITY DEFINER` functions. So `...101`'s hold is inferred from the
+`MU070` refusal — which is sound, since `MU070` is unreachable without one —
+and not read directly.
+
+H-5's server-side data was confirmed intact in the same pass: owner row active,
+not deleted, shop present, 7 sales rows server-side. The device clear never put
+it at risk.
+
+### 9.4 Account enumeration: assessed, none found
+
+Reviewed without further probing. The login and recovery paths are deliberately
+non-enumerating, and the evidence is in the code, not in a claim:
+
+- `deviceLogin.ts` returns one `GENERIC_FAILURE` for unknown phone and wrong
+  PIN alike, compares against a `DUMMY_HASH` when no user is found so the
+  bcrypt timing does not differ, and uses the *same* message for the phone
+  rate-limit branch specifically so a lockout cannot confirm an account.
+- `recoverPin.ts` collapses every disqualifying case into one
+  `RECOVERY_REFUSED`.
+- The phone step makes no server call at all.
+
+The one response that does distinguish is `MU043` ->
+`409 phone_already_registered` at registration. It is not an enumeration
+oracle: `bindOnboardingOwnerPhone` refuses unless the OTP-verified phone
+matches the number being registered, so a caller can only test numbers whose
+SMS they can already receive.
+
+**Severity: none / informational.** No change recommended.
+
+### 9.5 Retained finding: logout does not unbind the device
+
+Signing out returns to a PIN pad bound to the previous owner, with only
+"forgot PIN" as a route onward. The only on-device way to a different owner is
+clearing app data. Recorded as product behaviour, not a defect.
+
+### 9.6 What Part B still needs
+
+One OTP on an unused identity. Registration is a single OTP:
+`register.tsx:35` `sendOtp` -> `otp-verify` `verifyOtp` -> shop created ->
+`pin-setup`. A new shop has no hold, so the gate that blocked the last attempt
+is not on this path.
+
+The separate production concern this surfaced — a sole Owner who revokes their
+only installation — is written up for independent review in
+`a23-single-owner-device-recovery-concern-2026-11-03.md`. It does not block
+Part B.
