@@ -172,10 +172,14 @@ export function countLabel(
  * failure is never hidden behind fake progress. Routing those screens through
  * the plain mapper threw that diagnostic away.
  *
- * A PLAN refusal is still translated, because PlanAccessError IS mapped: the
- * mapper answers with a plan label, which is not the fallback. So this keeps
- * the detail the tests want while refusing to leak "Upgrade to Pro or Ultra to
- * use this feature." into a Bengali UI.
+ * A PLAN refusal is still translated, because PlanAccessError IS mapped, and
+ * `mappedErrorKey` reports that fact directly rather than it being inferred
+ * from the rendered text. The first version compared the mapped string against
+ * `t(fallback)` and treated equality as "unmapped" -- so a caller passing a
+ * plan key as its own fallback (say `planNotCoveredLabel`) would have had the
+ * translation replaced by the error's raw English, which is the exact leak
+ * this function exists to prevent. Two different keys whose translations
+ * happen to match would have collided the same way.
  *
  * The residual gap is deliberate and recorded: an unmapped operational error
  * still reaches the owner in English. Translating those means mapping each one
@@ -187,18 +191,29 @@ export function userFacingErrorKeepingDetail(
   fallback: CatalogKey,
   t: Translate,
 ): string {
-  const mapped = userFacingError(error, fallback, t);
-  if (mapped !== t(fallback)) return mapped;
-  return error instanceof Error && error.message ? error.message : mapped;
+  const key = mappedErrorKey(error);
+  if (key) return t(key);
+  return error instanceof Error && error.message ? error.message : t(fallback);
 }
 
 export function userFacingError(error: unknown, fallback: CatalogKey, t: Translate): string {
-  if (!(error instanceof Error)) return t(fallback);
+  return t(mappedErrorKey(error) ?? fallback);
+}
+
+/**
+ * The catalog key this error resolves to, or `undefined` when nothing matches.
+ *
+ * Single source of truth for both public helpers: whether the mapper
+ * recognised an error is a fact about the lookup, never something to recover
+ * by comparing two rendered strings.
+ */
+function mappedErrorKey(error: unknown): CatalogKey | undefined {
+  if (!(error instanceof Error)) return undefined;
 
   // Own-property check: `error.name` is caller-assignable, so an error named
   // 'constructor' would otherwise resolve a function off Object.prototype.
   const named = ownKey(ERROR_NAME_KEYS, error.name);
-  if (named) return t(named);
+  if (named) return named;
 
   // Read the discriminant off the error rather than mapping the name in
   // ERROR_NAME_KEYS: PlanAccessError carries several unrelated meanings -- a
@@ -236,19 +251,19 @@ export function userFacingError(error: unknown, fallback: CatalogKey, t: Transla
     // A seat limit is not a locked feature. Its limit is read off
     // `effectiveTier` too (db/commercial.ts:321), so it inherits the same
     // degradation and must not promise an upgrade either.
-    if (feature === 'staff_limit') return t('planStaffLimitReachedLabel');
+    if (feature === 'staff_limit') return 'planStaffLimitReachedLabel';
     // `commercial_write` is thrown for an archived or inactive shop
     // (db/commercial.ts:305) as well as for the plan's shop-count limit
     // (db/commercial.ts:312). Upgrading corrects only the second, so this
     // branch must not promise it -- an owner cannot buy their way out of an
     // archived shop. Neutral wording covers both.
-    if (feature === 'commercial_write') return t('planShopWriteBlockedLabel');
-    return t('planNotCoveredLabel');
+    if (feature === 'commercial_write') return 'planShopWriteBlockedLabel';
+    return 'planNotCoveredLabel';
   }
 
   if (error.name === 'PurchaseNotVoidableError') {
     const reason = (error as Error & { reason?: string }).reason;
-    return t(reason === 'has_payment' ? 'purchaseHasPaymentErrorLabel' : 'purchaseHasStockErrorLabel');
+    return reason === 'has_payment' ? 'purchaseHasPaymentErrorLabel' : 'purchaseHasStockErrorLabel';
   }
 
   const byMessage: Record<string, CatalogKey> = {
@@ -266,6 +281,10 @@ export function userFacingError(error: unknown, fallback: CatalogKey, t: Transla
     'Purchase line does not belong to this purchase': 'purchaseLineMissingErrorLabel',
     'Batch must have zero stock, no oversell, and no active promotion': 'medicineArchiveRequirementsLabel',
     'Medicine not found': 'medicineMissingLabel',
+    // db/staff.ts:304. Worth keeping specific: it tells a manager exactly
+    // what they may do. The neighbouring role error (:309) is deliberately
+    // NOT mapped -- it embeds a shop UUID and belongs in the generic bucket.
+    'Managers may add Cashiers with the Cashier preset only': 'managerCashierPresetOnlyLabel',
   };
-  return t(ownKey(byMessage, error.message) ?? fallback);
+  return ownKey(byMessage, error.message);
 }

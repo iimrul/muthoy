@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BatchExpiryMismatchError, PurchaseNotVoidableError, SupplierPayableOutstandingError } from '../db/errors';
 import { catalog, type CatalogKey } from './catalog';
-import { countLabel, fillTemplate, localizeValidationMessage, paymentMethodLabel, returnReasonLabel, userFacingError } from './display';
+import { countLabel, fillTemplate, localizeValidationMessage, paymentMethodLabel, returnReasonLabel, userFacingError, userFacingErrorKeepingDetail } from './display';
 
 const bn = (key: CatalogKey) => catalog.bn[key];
 
@@ -70,6 +70,43 @@ describe('B3 user-facing localization', () => {
       expect(catalog.bn[key], `${key} (bn) must not imply paying is the only remedy`)
         .toContain('ইন্টারনেটে');
     }
+  });
+
+  it('keeps a plan refusal translated even when the fallback IS a plan key', () => {
+    // The first version of userFacingErrorKeepingDetail decided "the mapper
+    // did not know this" by comparing its answer to t(fallback). Pass a plan
+    // key as the fallback and that comparison is true for a PlanAccessError,
+    // so the owner got the error's own English -- the exact leak the helper
+    // exists to prevent. Mapping status is now returned, not inferred.
+    const planError = Object.assign(
+      new Error('Upgrade to Pro or Ultra to use this feature.'),
+      { name: 'PlanAccessError', feature: 'export' },
+    );
+    const shown = userFacingErrorKeepingDetail(planError, 'planNotCoveredLabel', bn);
+    expect(shown).toBe(catalog.bn.planNotCoveredLabel);
+    expect(shown).not.toContain('Upgrade to Pro or Ultra');
+  });
+
+  it('keeps an unmapped failure verbatim, and falls back when it has nothing to say', () => {
+    // reports-final-fixes.test.tsx pins that a real failure reaches the user.
+    expect(userFacingErrorKeepingDetail(new Error('disk full'), 'exportFailedLabel', bn))
+      .toBe('disk full');
+    // An empty message is not detail; it must not blank the dialog.
+    expect(userFacingErrorKeepingDetail(new Error(''), 'exportFailedLabel', bn))
+      .toBe(catalog.bn.exportFailedLabel);
+    // A non-Error must never have `.message` read off it.
+    expect(userFacingErrorKeepingDetail('not an error', 'exportFailedLabel', bn))
+      .toBe(catalog.bn.exportFailedLabel);
+  });
+
+  it('maps the manager Cashier-preset restriction instead of dropping it', () => {
+    // db/staff.ts:304 throws a plain Error whose sentence is genuinely useful.
+    // Collapsing the Add Staff catch into one mapper call would have made it
+    // generic, so it is mapped by message rather than lost.
+    expect(userFacingError(
+      new Error('Managers may add Cashiers with the Cashier preset only'),
+      'staffAddFailedLabel', bn,
+    )).toBe(catalog.bn.managerCashierPresetOnlyLabel);
   });
 
   it('never exposes an unknown raw database message', () => {

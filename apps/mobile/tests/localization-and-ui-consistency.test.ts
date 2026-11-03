@@ -530,11 +530,11 @@ describe('W3-08 — every dynamic value a screen renders has a translation', () 
 // ── Source hygiene: a regex that cannot match what it claims ───────────
 // -- A plan refusal must reach the owner as plan language --------------------
 /**
- * Six screens caught a refusal and told the owner something else. Two discarded
- * it in a bare `catch {}`; End of Day reported it as an **unknown printer
- * error**, sending the owner to check hardware for something only their plan
- * could fix; and four rendered `cause.message` -- the plan's own English
- * sentence, "Upgrade to Pro or Ultra to use this feature." -- into a Bengali UI.
+ * Seven screen/component files caught a refusal and told the owner something
+ * else. Two discarded it in a bare `catch {}`; End of Day reported it as an
+ * **unknown printer error**, sending them to check hardware for something
+ * only their plan could fix; and four rendered `cause.message` -- the plan's
+ * own English sentence -- into a Bengali UI.
  *
  * Asserted at the exact call sites rather than file-wide, because these same
  * files still use `cause.message` on paths a plan refusal cannot reach (report
