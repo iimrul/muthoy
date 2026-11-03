@@ -114,19 +114,28 @@ export default defineConfig({
   },
   test: {
     server: { deps: { inline: ["expo-sqlite", "expo-crypto"] } },
-    // 301 files, many spinning up real SQLite or PGlite databases and one
-    // (tests/eas-archive.test.ts) taking ~130s on its own. On vitest's default
-    // of one worker per core this suite oversubscribes the CPU: the collect
-    // phase alone burned 990s on an 8-core machine, and tests then lost the
-    // 5s default timeout non-deterministically. Three full runs produced three
-    // DIFFERENT failing sets -- 6, 16 and 5 tests -- and every one of them
-    // passed when re-run in isolation. The failures all read
-    // `Test timed out in 5000ms`, never an assertion.
+    // 301 files, many opening real SQLite or PGlite databases and one
+    // (tests/eas-archive.test.ts) taking ~130s on its own. Vitest 3's run-mode
+    // default is max(cores - 1, 1) workers -- seven here on eight cores --
+    // which this suite oversubscribes: three full runs produced three
+    // DIFFERENT failing sets (6, 16 and 5 tests), every one of which passed
+    // when re-run in isolation, and every failure read
+    // `Test timed out in 5000ms` rather than an assertion.
     //
-    // Halving the pool fixes the cause: two consecutive runs went 301/301
-    // files and 7122/7122 tests with ZERO timeouts, and collect fell to
-    // ~357-548s. This caps oversubscription; it deliberately does NOT raise a
-    // timeout or skip anything, so a genuinely slow test still fails.
+    // Halving the pool removed them: three consecutive runs at 301/301 files
+    // and 7122/7122 tests with ZERO timeouts, and the config run exited 0,
+    // which no earlier green run had done -- the reporter RPC timeout was
+    // itself a symptom.
+    //
+    // Two honest caveats, from independent review. The summary's `collect`
+    // figure is summed across files, not elapsed wall time, so it measures
+    // aggregate work rather than a 990s phase; contention is well evidenced
+    // but CPU-only causation is not strictly proven. And while this raises no
+    // timeout and skips nothing, less contention can also keep a genuinely
+    // slower test under the unchanged limit -- so it reduces scheduling
+    // pressure, it does not guarantee a slow regression still trips.
+    //
+    // Rounding, minimum one: 2/3/4/8 cores -> 1/2/2/4 workers.
     maxWorkers: "50%",
     include: [
       "apps/mobile/db/environment-binding.test.ts",

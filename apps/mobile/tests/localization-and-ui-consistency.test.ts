@@ -580,6 +580,19 @@ describe('a plan refusal reaches the owner as plan language', () => {
       .not.toContain('"Staff could not be created"');
   });
 
+  it('the Cashier-preset sentence the mapper keys on still exists at its source', () => {
+    // display.ts maps this error by its English TEXT, because db/staff.ts:304
+    // throws a plain Error with no name to key on. Reword it there and the
+    // mapping silently degrades to the generic staff failure -- and
+    // display.test.ts would stay green, because it repeats the literal rather
+    // than importing it. This is the only thing tying the two together.
+    const sentence = 'Managers may add Cashiers with the Cashier preset only';
+    expect(code(read('db/staff.ts')), 'db/staff.ts no longer throws this sentence')
+      .toContain(sentence);
+    expect(code(read('i18n/display.ts')), 'display.ts no longer maps this sentence')
+      .toContain(sentence);
+  });
+
   it("Settings' refund window is not hardcoded English", () => {
     const source = code(read('app/settings/settings.tsx'));
     expect(source).not.toContain('label="Refund window"');
