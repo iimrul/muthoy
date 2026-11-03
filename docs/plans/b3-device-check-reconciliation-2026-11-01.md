@@ -50,16 +50,16 @@ coincidence, and it is recorded as a derivation rather than a discovery.
 | 3.4 | Totals match after the drain | §3.3 case 3 | **PASS** (client-side) |
 | 3.5 | Same, with the app killed during the sync window | §3.3 case 3 | **PASS** (client-side) |
 | 3.6 | No sync conflicts are produced | §3.3 case 3 | **PASS** |
-| 4.1 | A refund for a sale from another day lands in that day's period | §3.3 case 4 | NOT RUN |
+| 4.1 | A refund is recorded on its **own** processing business date, and the original sale stays on its own | §3.3 case 4 | **PASS** (2026-11-03) |
 | 5.1 | Opening cash defaults to 0 | CLAUDE.md r5 | **PASS** |
-| 5.2 | The user can set opening cash | CLAUDE.md r5 | NOT RUN |
-| 5.3 | It resets at midnight and never inherits yesterday | CLAUDE.md r5 | NOT RUN |
+| 5.2 | The user can set opening cash | CLAUDE.md r5 | **PASS** (2026-11-03) |
+| 5.3 | It resets at midnight and never inherits yesterday | CLAUDE.md r5 | **PASS** (2026-11-03) |
 | 6.1 | The expiry day-count is correct for the day it is read | CLAUDE.md r3 | **PASS** |
 | 6.2 | Ordering uses the real expiry date, not a stored day-count | CLAUDE.md r3 | **PASS** (2026-11-02, re-run) |
 | 6.3 | The earliest-expiring batch **within one medicine** is selected | CLAUDE.md r3 | **PASS** (2026-11-02, re-run) |
 | 6.4 | A sale larger than one batch spills to the next by expiry | CLAUDE.md r3 | **PASS** (2026-11-02, re-run) |
 
-**11 PASS, 9 NOT RUN.** (An earlier draft of this line said 10 and 10, which
+**14 PASS, 6 NOT RUN.** (An earlier draft said 10 and 10, and before that 11 and 9, which
 did not match the rows above it.)
 
 The † qualification these three carried is **withdrawn**: the second run of
@@ -131,8 +131,8 @@ still in the shop — see §6.
 |---|---|
 | 1.1–1.3 | Requires registering a second owner, i.e. signing out of the only configured test shop. Those credentials are the founder's. |
 | 2.1–2.3 | Requires a second physical handset. One is attached. |
-| 4.1 | Requires a sale dated to a **previous business day**. Sales history was empty at the start of the run, and the device clock is not settable without root — which is prohibited. |
-| 5.2–5.3 | Same clock limitation: no day boundary can be crossed, and this shop has no prior-day cash session to inherit from. |
+| 4.1 | ~~Requires a sale dated to a previous business day.~~ **Retired 2026-11-03**: a real midnight boundary passed between sessions, leaving sales dated 2026-11-01 and 2026-11-02 refundable from 2026-11-03. No clock was altered. |
+| 5.2–5.3 | ~~Same clock limitation.~~ **Retired 2026-11-03** by the same real rollover: the shop carried a 2026-11-02 drawer of ৳93.00 into a new business day. |
 | 6.3–6.4 | **Closed 2026-11-02** — see §2.1. |
 
 ## 4. Caveat on the six that did pass
@@ -428,6 +428,108 @@ An ADB foreground-package guard ran before every automated interaction. When a
 BACK press dropped the app to the Samsung launcher, the guard **refused** the
 next tap rather than sending it to a home-screen icon — the Truecaller-class
 incident, prevented automatically rather than noticed afterwards.
+
+## 8. Third run, 2026-11-03
+
+### 8.1 Opening cash across a real midnight boundary (5.1, 5.2, 5.3 — PASS)
+
+No clock was altered and the device was never rooted. A genuine business-day
+boundary passed between the 2026-11-02 and 2026-11-03 sessions, which is the
+one thing these three checks needed and the one thing a session cannot
+manufacture.
+
+| Observation | Value |
+|---|---|
+| 2026-11-02 closing drawer | ৳93.00, 5 transactions |
+| 2026-11-03 on open | sales ৳0.00, **0 transactions**, drawer **৳0.00** |
+| Prompt shown unprompted | "আজকে ড্রয়ারে কত টাকা দিয়ে দোকান শুরু করছেন?" |
+| After setting ৳500 | drawer **৳500.00** |
+
+Yesterday's ৳93.00 was **not** inherited (5.3), the default before any entry
+was zero (5.1), and the owner could set it (5.2) — CLAUDE.md rule 5 in full.
+
+As a by-product the expiry day-counts stepped 74/405/240 -> 73/404/239 across
+the same boundary, which re-proves rule 3's "recompute at read time" against a
+real date change rather than against a single reading.
+
+### 8.2 Refund accounting (4.1) — the contradiction, and the contract
+
+The check as originally written said a refund "lands in that day's period",
+meaning the original sale's day. **That wording was wrong**, and it
+contradicted this product's own architecture.
+
+Observed on device: refunding INV-2026-000002, a **2026-11-01** sale of
+৳9.00, posted -৳9.00 to the **2026-11-03** period and moved that day's drawer
+৳500.00 -> ৳491.00. Stock returned correctly to the originating batch
+(FEFO-EARLY 44 -> 47). The original sale row was not rewritten; it is still
+dated 2026-11-01 and simply shows as ফেরত.
+
+That is what the code does (`db/refunds.ts:251` takes
+`dhakaBusinessDate(new Date())`) and what
+`muthoy-batch-3-gate-7-handoff-2026-10-30.md:87` already stated as
+architecture: *"refunds are bucketed by their own business date"*, a property
+that handoff relies on to argue a month is final only once every device has
+synced.
+
+**Agreed contract, recorded here as the single source of truth:**
+
+- a refund is recorded on its **own** processing business date;
+- the **original sale stays on its original business date** and is never
+  rewritten;
+- the cash drawer therefore falls on the day the money physically leaves.
+
+The check row above is reworded to that contract and passes. Nothing in the
+code changed.
+
+**One presentation issue is left open, deliberately.** With the contract above,
+2026-11-03 displays *"today's sales -৳9.00"* alongside *"0 transactions"*.
+Sales and refunds are being summed into one figure, so a day with no sales
+reads as negative sales. Separating a day's sales count from its refunds, and
+from refund-net sales, is a change to money presentation and therefore needs a
+scoped CLAUDE.md rule 10 plan and approval before any edit. It is recorded, not
+taken.
+
+### 8.3 The 2026-11-02 restoration, reconciled as far as the evidence allows
+
+The founder has confirmed logging into Preview personally on **2026-11-03**,
+which explains the shop being present at the start of this session. That part
+is closed.
+
+It does **not** explain the 2026-11-02 observation, which sat inside a
+five-minute window of this session's own ADB activity: clear -> first-run ->
+phone entered -> PIN pad left empty -> app backgrounded to the launcher ->
+relaunch -> fully populated shop.
+
+Everything testable is excluded. `recoverDatabaseFromServer` takes
+`(phone, pin)` and proves credentials with the server as its first
+state-changing step, pinned by `sync/databaseRecovery.test.ts:65,88`;
+`allowBackup=false` is confirmed in the **installed** APK's manifest alongside
+explicit `fullBackupContent` and `dataExtractionRules`; the session lives in
+MMKV holding only shop/user/role and is wiped by `pm clear`; there is no
+`expo-secure-store` anywhere. Two deliberate reproductions - one force-stop
+variant, one BACK variant - both returned first-run.
+
+**No bypass mechanism has been identified, and none is claimed.** The precise
+residual concern is narrow: one unattributable, unreproducible restoration.
+
+**Why it cannot be settled retrospectively, which is itself worth fixing:**
+`audit_logs` records settings-shaped actions (`pin_changed`, `sale_voided`,
+`discount_given`) and **does not record logins or session establishment**. The
+device therefore holds no timestamp evidence either way. An auditable
+login/session event would have closed this in one query.
+
+### 8.4 The eight CI skips, identified
+
+Both are environment-conditional and intentional; neither is a coverage gap
+that can be closed by enabling the test unconditionally.
+
+| Where | Count | Gate | Why CI skips |
+|---|---|---|---|
+| `tests/eas-archive.test.ts:213-306` | **7** | `describe.skipIf(!pinnedEas)` | Needs the EAS CLI installed at **exactly** `PINNED_EAS_CLI_VERSION` = `21.8.0` (`scripts/validate-mobile-environment.mjs:14`), resolved from `$EAS_CLI_PATH`, a local `require.resolve('eas-cli/bin/run')`, or `%APPDATA%/npm/...`. `eas-cli` is **not** a workspace dependency, so `pnpm install --frozen-lockfile` never provides it. These tests drive EAS's own copy/workflow code; without the pinned CLI they would test nothing. |
+| `pgtest/h9-environment-parity.pgtest.ts:460-462` | **1** | runtime `server_version_num < 170000` | CI runs PostgreSQL 16; migration 32 requires 17+. Correctly recorded as a `skipReason` rather than passing silently. |
+
+Actionable only by provisioning the environment (a pinned EAS CLI, a PG17
+service). Enabling either unconditionally would fake coverage.
 
 ### Left in the shop, for the founder to remove or keep
 
