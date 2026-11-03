@@ -114,6 +114,20 @@ export default defineConfig({
   },
   test: {
     server: { deps: { inline: ["expo-sqlite", "expo-crypto"] } },
+    // 301 files, many spinning up real SQLite or PGlite databases and one
+    // (tests/eas-archive.test.ts) taking ~130s on its own. On vitest's default
+    // of one worker per core this suite oversubscribes the CPU: the collect
+    // phase alone burned 990s on an 8-core machine, and tests then lost the
+    // 5s default timeout non-deterministically. Three full runs produced three
+    // DIFFERENT failing sets -- 6, 16 and 5 tests -- and every one of them
+    // passed when re-run in isolation. The failures all read
+    // `Test timed out in 5000ms`, never an assertion.
+    //
+    // Halving the pool fixes the cause: two consecutive runs went 301/301
+    // files and 7122/7122 tests with ZERO timeouts, and collect fell to
+    // ~357-548s. This caps oversubscription; it deliberately does NOT raise a
+    // timeout or skip anything, so a genuinely slow test still fails.
+    maxWorkers: "50%",
     include: [
       "apps/mobile/db/environment-binding.test.ts",
       "apps/mobile/db/medicine-catalog.sqlite.test.ts",
