@@ -127,40 +127,26 @@ version of this drill would have passed.
     the at-risk rows, and each affected `operation_group_id` with its
     `operation_expected_count` and the number of its rows actually present.
 
-    **`Q_at_risk` is an upper bound, not measured loss.** The outbox is
-    at-least-once by design: `apps/mobile/sync/push.ts:258` completes the server
-    call and only then marks rows sent individually (`:306`, `:313`), so a lost
-    response or a crash between those two steps leaves an **already-applied**
-    row `pending`, and eventually `failed`. Such a row is at risk on the device
-    and present on the server. Only reconciling the row identities against the
-    server turns the bound into a measurement — step 14(a).
+    Three things no queue figure can tell you on its own. Each is why step 14
+    exists, and none is a restatement of the others:
 
-    **`Q_total` is not the loss either.** A successful push sets `status='sent'`
-    and deletes nothing (`apps/mobile/db/sync-helpers.ts:1804-1809`); the only
-    production delete is the conflict `take_remote` path
-    (`apps/mobile/db/conflicts.ts:362-383`). So `sent` rows accumulate for the
-    life of the installation. See the 2026-11-04 addendum for the original
-    wording and why it was corrected.
+    - **`Q_at_risk` is an upper bound, not measured loss.** The outbox is
+      at-least-once by design: `apps/mobile/sync/push.ts:258` completes the
+      server call and only then marks rows sent individually (`:306`, `:313`),
+      so a lost response or a crash between those two steps leaves an
+      **already-applied** row `pending`, and eventually `failed`. Reconciling
+      the row identities against the server is what turns the bound into a
+      measurement — step 14(a).
+    - **`Q_sent` is not proof the server kept the value.** An equal `updated_at`
+      makes `sync_apply_row`'s strict `<` predicate write nothing while still
+      answering `applied` (`apps/mobile/db/sync-helpers.ts:828-845`). The row is
+      recorded in `conflict_queue`, so it is detectable — step 14(c).
+    - **`Q_total` grows for the life of the installation, so it overstates loss
+      by the whole synced history.** A successful push sets `status='sent'` and
+      deletes nothing (`sync-helpers.ts:1804-1809`); the only production delete
+      is the conflict `take_remote` path (`apps/mobile/db/conflicts.ts:362-383`).
+      The 2026-11-04 addendum records the original wording and why it changed.
 
-    Note also that `sent` is not proof the server KEPT the value: an equal
-    `updated_at` makes `sync_apply_row`'s strict `<` predicate write nothing
-    while still answering `applied` (`sync-helpers.ts:828-845`). Such a row is
-    recorded in `conflict_queue`, so it is detectable — which is why step 14
-    checks that table too.
-
-    **`Q_total` is not the loss.** A successful push sets `status='sent'` and
-    deletes nothing (`apps/mobile/db/sync-helpers.ts:1804-1809`); the only
-    production delete is the conflict `take_remote` path
-    (`apps/mobile/db/conflicts.ts:362-383`). So `sent` rows accumulate for the
-    life of the installation, and a total count overstates loss by the whole
-    synced history. See the 2026-11-04 addendum for the original wording and why
-    it was corrected.
-
-    Note also that `sent` is not proof the server KEPT the value: an equal
-    `updated_at` makes `sync_apply_row`'s strict `<` predicate write nothing
-    while still answering `applied` (`sync-helpers.ts:828-845`). Such a row is
-    recorded in `conflict_queue`, so it is detectable — which is why step 14
-    checks that table too.
 12. **Destroy the device database.** Clear app data. This is the realistic
     failure: a corrupt database, a failed key unwrap, a reinstall.
 13. **Recover.** Relaunch, sign in with phone + PIN, and let
@@ -197,23 +183,86 @@ version of this drill would have passed.
       server's staging state for the affected groups — a group can be fully
       applied with every local row still `pending`, and the reverse.
 
-    ### Two verdicts, never one
+    ### Two verdicts, never one, and never combined
 
     The drill's stated objective is *"a restore-from-backup drill completes with
-    **no irreversible loss**"*. A revision of step 14 that called a lost
-    `cash_drawer` update a PASS because the server's older value came back would
-    report success after confirmed business-value loss. So Part B reports two
-    things, and the second governs:
+    **no irreversible loss**"*. Part B therefore reports **two independent
+    verdicts**, and neither may be averaged into the other:
 
-    | Verdict | Meaning |
-    |---|---|
-    | **Recovery integrity** | Everything the server held came back correctly, and every device-side difference is explained by a row in step 11's at-risk set. |
-    | **Known local value loss** | The set of rows whose local value is gone. |
+    | Verdict | Question it answers | PASS condition |
+    |---|---|---|
+    | **Recovery integrity** | Did everything the server held come back correctly? | Every value the server held is restored exactly, and every device-side difference is explained by a row in step 11's at-risk set |
+    | **Irreversible loss** | Did any business value cease to exist? | The irreversible-loss set is **EMPTY** |
 
-    **The drill's no-irreversible-loss objective is PASS only when the known
-    local value loss set is EMPTY.** A non-empty set may still be an acceptable
-    product outcome — that is the founder's call, per CLAUDE.md's review
-    workflow — but it is recorded as loss, not as a pass.
+    **The irreversible-loss set is every business value that existed on the
+    device and does not exist on the server**, and it has four kinds of member:
+
+    - a lost `insert` — an entire offline sale, expense or adjustment that never
+      reached the server and is now gone;
+    - a lost `update` — the row came back at the server's older value, so the
+      offline edit is destroyed even though every row count matches;
+    - a lost `delete` — a row the operator deleted offline is back;
+    - **a `sent` but SUPERSEDED local value**, and the `conflict_queue` row that
+      recorded it. This one is not in the at-risk set at all, which is why an
+      earlier revision missed it: the push was acknowledged, so the row is
+      `sent`, but `sync_apply_row`'s strict `<` predicate wrote nothing and the
+      only surviving record of what this device meant to send is the local
+      `sync_queue.payload` plus `conflict_queue.local_value`
+      (`apps/mobile/db/schema.ts`'s `conflict_queue`). The clear destroys both.
+
+    Two earlier revisions got this set wrong — the first counted only lost
+    updates, the second added inserts and deletes but still scoped the set to
+    at-risk rows. **Scoping it to `pending`/`failed` is the error**: it permits
+    "irreversible loss: EMPTY" after a real, acknowledged-but-discarded value
+    has been destroyed.
+
+    **Recovery integrity PASS does not imply zero loss, and must never be
+    reported as if it did.** A run can legitimately report *recovery integrity:
+    PASS* and *irreversible loss: 7 rows* — that is a correct result, and it is
+    **not** a pass of the no-irreversible-loss objective. A non-empty set may
+    still be an acceptable product outcome; per CLAUDE.md's review workflow that
+    is the founder's call, not engineering's, and it is recorded as loss either
+    way.
+
+    ### The Pre-RC gate, and why no arrangement of runs can pass it today
+
+    The Pre-RC criterion is not "the restore path loses nothing". It is
+    **"no irreversible data loss in any tested path"**
+    (`docs/plans/pre-rc-master-plan.md:383`, BACKUP / RECOVERY, CRITICAL).
+
+    Steps 10-12 are a tested path, and on the current product they destroy
+    unsynced business work by construction: the `sync_queue` rows never reached
+    the server, and the clear removes the only copy. **So the gate is FAILED for
+    that path, and no reporting arrangement changes that.**
+
+    A previous revision of this section proposed two runs and declared the
+    second one — the same workload pushed to completion first — sufficient for
+    the objective. **That was redefining the tested path to obtain a PASS, and
+    it is withdrawn.** It is recorded here because it is exactly the move the
+    founder's instruction forbade ("Do not weaken the no-irreversible-loss
+    objective to obtain PASS"), and because the next person to hit this gate
+    will be tempted by it.
+
+    Both runs are still worth executing, but **neither is a pass of the gate**:
+
+    | | **Run Z — drained queue** | **Run L — offline work** |
+    |---|---|---|
+    | Order | **FIRST** | second |
+    | Setup | clean baseline, full step-10 workload **online**, pushed to completion | clean baseline, aeroplane mode, full step-10 workload |
+    | Before clearing | `Q_at_risk` measured 0; capture business-row identities and fingerprints anyway | `Q_at_risk > 0`; capture the at-risk identity set AND the superseded-value set |
+    | Measures | whether the restore machinery itself is sound | what an offline window actually costs |
+    | Pre-RC gate | **not evidence of a pass** — it tests a path with nothing at risk | **FAIL, by construction** |
+
+    Run Z goes first on purpose: if recovery is broken, that is discovered
+    before Run L deliberately destroys local-only work. Each run needs its own
+    app-data clear, so executing both needs **two** separately approved clears.
+
+    **What would actually close the gate** is a product change, not a drill
+    change — unsynced business work surviving a device reset, or being
+    exportable before one. That is a founder decision with a cost, and it
+    belongs in the Pre-RC plan rather than here. Until it is made, H-11 C5
+    cannot report a Part B pass of the no-irreversible-loss criterion, and this
+    file must not imply otherwise.
 
     **Units, stated once so they are never conflated again:** step 11's figures
     count QUEUE ROWS (operations); step (a) compares BUSINESS-ROW IDENTITIES.
@@ -264,7 +313,11 @@ version of this drill would have passed.
 | Row identities reconciled (14a) | set comparison; every difference explained | _not run_ |
 | Values returned (14b) | every non-at-risk fingerprint matches exactly | _not run_ |
 | Operation-group + conflict integrity (14c) | no partial group; `conflict_queue` dumped and accounted | _not run_ |
-| **Known local value loss** | **EMPTY for the no-irreversible-loss objective** | _not run_ |
+| Run Z (first) — `Q_at_risk` measured 0 before clearing | zero | _not run_ |
+| Run Z — recovery integrity | PASS | _not run_ |
+| Run L — recovery integrity | PASS | _not run_ |
+| Run L — irreversible loss | measured, and equal to the predicted set exactly | _not run_ |
+| **Pre-RC: no irreversible data loss in any tested path** | **cannot pass while a clear destroys unsynced work — founder decision, see step 14** | _not run_ |
 | Money/stock reconciliation after restore | exact | _not run_ |
 | Device-local stores reset (step 16) | as listed, shop id unchanged | _not run_ |
 | Encryption migration, 21.8 MiB | — (record it) | _not run_ |
@@ -389,8 +442,14 @@ Two independent defects, both verified in source:
    `status='sent'` and deletes nothing (`sync-helpers.ts:1804-1809`), and no
    purge exists anywhere — the single production delete is the conflict
    `take_remote` path (`conflicts.ts:362-383`). So the queue retains the whole
-   synced history, and `Q_total` counts rows that are safely on the server.
-   Only `pending + failed` is unrecoverable.
+   synced history, and `Q_total` counts rows that are mostly on the server.
+   `pending + failed` is an **upper bound** on what is unrecoverable — not the
+   loss itself, because `push.ts:258` completes the server call before marking
+   rows sent (`:306`, `:313`), so an already-applied row can sit `pending`. And
+   it is not a **lower** bound either: a `sent` row whose value the server
+   discarded under its strict `<` predicate is also destroyed by the clear. Two
+   earlier versions of this addendum asserted "only `pending + failed` is
+   unrecoverable" in different words; both were wrong in both directions.
 2. **Step 14 compared unlike units, so it was non-diagnostic.** Step 11's figure
    counts QUEUE ROWS; step 14's difference counts BUSINESS-TABLE ROWS. One
    business event emits several queue rows — `sales.ts:685-692` computes
@@ -407,14 +466,19 @@ Two independent defects, both verified in source:
    that it is **non-diagnostic** — it is incompatible with the grouped workload
    step 10 prescribes, and passing it proves nothing.
 
-**What the correction preserves, and where it is now STRICTER.** Step 11's
-original sentence is right about `pending` and `failed` and wrong only about
-`sent`. But a first draft of this correction was itself rejected for being
-*weaker* than the original: it declared a lost `cash_drawer` update a PASS
-because the server's older value came back, which would report success after
-confirmed business-value loss — something the original's blunt count-based rule
-would mechanically have rejected. That is why step 14 now reports **two
-verdicts**, and why the no-irreversible-loss objective passes only when the
+**Three attempts at this correction were rejected, each for being weaker than
+it looked.** The first declared a lost `cash_drawer` update a PASS because the
+server's older value came back — reporting success after confirmed
+business-value loss, which the original's blunt count rule would mechanically
+have rejected. The second scoped the irreversible-loss set to `pending`/`failed`
+rows, which permits "loss: EMPTY" after an acknowledged-but-discarded value is
+destroyed. The third proposed a drained-queue run and called it sufficient for
+the Pre-RC objective, which redefines the tested path to obtain a PASS. Each
+was caught by independent review; none was caught by me. That is why step 14
+now reports **two verdicts**, why the loss set has four kinds of member, and why
+the no-irreversible-loss objective is recorded as **failed pending a product
+decision** rather than passed. The surviving rule: the no-irreversible-loss
+objective passes only when the
 known local value loss set is empty. The lesson is the same one as the run
 itself: making a criterion *measurable* must not quietly make it *weaker*.
 
@@ -425,7 +489,7 @@ report that it is ill-defined, not to quietly replace it.
 
 ### Required acceptance evidence for a Part B PASS
 
-All eleven, or it is not a pass:
+All thirteen, or it is not a pass:
 
 1. **Clean queue baseline** recorded before aeroplane mode — zero `pending` and
    zero `failed`, plus the `Q_sent` high-water mark.
@@ -440,14 +504,40 @@ All eleven, or it is not a pass:
 6. Value-level fingerprints, both sides of the clear, and **proof of their
    validity**: untruncated, row-addressable, covering every affected table, and
    stating which columns were hashed. A `null` or partial fingerprint is not
-   evidence.
+   evidence. Plus the **WAL-safe snapshot evidence** from step 11's note — which
+   method was used, and the row-count cross-check against the app's UI.
+6b. **The server's row-addressed extract** for every table in item 5, so a lost
+   `update` or `delete` can be classified by comparing the recovered local value
+   against the server's. Local fingerprints alone cannot do this: they prove two
+   device states differ, not which side is authoritative.
+6c. **The superseded-value set**: `sync_queue` rows that are `sent` but whose
+   payload the server discarded, with the matching `conflict_queue` rows,
+   captured BEFORE the clear. `conflict_queue` detection is fail-soft —
+   `sync-helpers.ts:852` reports and returns rather than recording when a
+   payload will not parse — so an empty conflict dump is **not** proof of no
+   supersession. The fingerprints remain authoritative; the dump is corroboration.
 7. **Server staging state** for every affected `operation_group_id`, and a full
    `conflict_queue` dump with every row accounted for.
 8. Exact money and stock reconciliation (step 15).
 9. Auth / session / device-local reset checks (step 16), shop id unchanged.
 10. Measured recovery duration (step 13), wall-clock.
-11. **The known local value loss set**, explicitly — empty or enumerated. An
-    absent item 11 is not an empty item 11.
+11. **The irreversible-loss set**, explicitly — empty or enumerated, with each
+    member classified as a lost insert, update or delete. An absent item 11 is
+    not an empty item 11.
+12. **Both runs, Run Z first.** Items 1-11 for each, reported separately and
+    never merged. For Run Z the at-risk set is empty by design, so item 4 is
+    satisfied by capturing the **business-row identities and group ids of the
+    workload that was just pushed** — otherwise the run records no identities at
+    all and 14(a) has nothing to compare. Each run also states the attribution
+    source for its server staging evidence (which query, against which project,
+    at what time).
+13. **Reproducible transcripts**: timestamps for the workload, the clear and the
+    recovery, so the duration in item 10 and the ordering of items 4-7 can be
+    checked by someone who was not present.
+
+**Neither run is evidence of a Pre-RC pass.** See step 14: the criterion is "no
+irreversible data loss in any tested path", and a clear that destroys unsynced
+work fails it regardless of how these items come out.
 
 ### How the census is taken — corrected 2026-11-04, and simpler than it looked
 
@@ -468,7 +558,15 @@ On a **debuggable** build — which is exactly what Part B and Part C require �
 that plaintext is readable by an attached debugger. So the route is:
 
 1. Attach to the debuggable DEV package and read the cached key hex.
-2. `adb shell run-as <pkg> cat files/SQLite/<db>` to copy the ciphertext off.
+2. **Quiesce, then copy the whole database — not just the main file.** The
+   device database runs in **WAL** mode, so the newest committed rows, which
+   on this drill means precisely the step-10 workload and its queue rows, may
+   live only in `-wal`. Copying `muthoy.enc.db` alone can silently omit them
+   and understate `Q_at_risk`. Either force-stop the app first so SQLite
+   checkpoints and removes the sidecars, or copy `muthoy.enc.db`,
+   `muthoy.enc.db-wal` and `muthoy.enc.db-shm` together and open them as a set.
+   **Record which method was used, and verify the copy's row counts against the
+   app's own UI before trusting it.**
 3. Open the copy off-device with SQLCipher and query it with full SQL.
 
 That yields **exactly** what the revised steps 11 and 14 need and what a
