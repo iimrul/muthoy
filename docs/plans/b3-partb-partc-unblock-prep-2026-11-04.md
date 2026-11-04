@@ -702,11 +702,112 @@ failed to find the one that existed.
 
 Not re-reviewed after remediation. `restore-drill.test.ts` passes 22/22.
 
-### A3 — NOT STARTED, correctly
+### Round 2, 2026-11-04 later — A2 re-review, A3 build, measurement proofs
 
-The condition was *"Build only after the reviewed instrumentation and native
-changes are accepted."* A1 was not accepted; it was withdrawn. So no prebuild,
-no Gradle build, no install, no worktree. The device was touched only by
-read-only queries all session. §2.6's build sequence stands unchanged except
-that **step 3's census flag is no longer needed** — there is no census to
-compile in.
+**A2 re-review: REJECT**, 2 BLOCKING + 4 MAJOR + 3 MINOR. All accepted, all
+remediated in `8c8ffee` (CI SUCCESS). The lead finding is the important one:
+my two-run proposal declared a drained-queue run sufficient for the Pre-RC
+objective, but `docs/plans/pre-rc-master-plan.md:383` requires *"no irreversible
+data loss in **any tested path**"*, and the offline-work path is a tested path
+that destroys unsynced work. **That was redefining the tested path to obtain a
+PASS** — exactly what the founder's instruction forbade. Withdrawn; the drill
+now records the gate as FAILED pending a product decision. Full list of the
+nine fixes is in that commit's message.
+
+**Measurement proven host-side; the procedure is not.** See
+`b3-partb-measurement-procedure-2026-11-04.md`. Against the real 21.87 MiB
+fixture (97,105 rows, 56 tables): 16/16 census tables measured; two runs
+byte-identical (stable digest `03e3a14c6509f440…`); one `expenses.amount` +1
+moved **only** that fingerprint with the row count unchanged at 53 — the
+step-14(b) property; and garbage / non-Muthoy / missing files all **refuse**
+with exit 1 rather than reporting an empty database. The independent reviewer
+**reproduced all of that on its own** before running out of credits, so there is
+corroboration but **no verdict** — the review is re-runnable and is not being
+counted as an ACCEPT.
+
+**Part C fixture: 22,933,504 bytes (21.87 MiB), exit 0**, plain SQLite, WAL —
+the correct input state for H-3's copy-verify-swap. One real compatibility gap:
+no `__drizzle_migrations` table and `user_version = 0`, because
+`scripts/generate-history-fixture.mjs:82-87` applies each migration's SQL
+without writing Drizzle's bookkeeping, while `apps/mobile/db/init.ts:88` runs
+`migrate()` on every boot. **Step 18's timing is unaffected; step 19's relaunch
+would fail** on the first `CREATE TABLE`. Flagged, not fixed.
+
+**Two blockers outside my reach.** The handset is physically detached — `adb`
+lists nothing and Windows reports no Samsung device — so every device-side item
+of §3 and §4 is unrunnable. And this host has **no SQLCipher tooling at all**
+(no CLI, no `sqlcipher3`/`pysqlcipher3`, no `better-sqlite3-multiple-ciphers`),
+so the decryption step cannot run even with the device. Obtaining one is a
+dependency decision, not something to do silently. The measurement tool needs
+none of it — it reads plain SQLite — which is why its proofs stand regardless.
+
+### A3 — isolated worktree build
+
+Round 1: not started, correctly — the condition was *"Build only after the
+reviewed instrumentation and native changes are accepted"*, and A1 was withdrawn
+rather than accepted.
+
+Round 2, under the founder's approval to proceed: executed in an isolated
+worktree. **No census flag is needed any more** — there is no census to compile
+in, which simplifies §2.6's sequence by one step.
+
+| Step | Result |
+|---|---|
+| Worktree `D:\Muthoy-PartB-Build`, detached at `22f1775` | created; `apps/mobile/android` absent there, so the main tree's native project is untouched and still `com.muthoy.pos.h3scratch` |
+| `apps/mobile/.env` copied in (gitignored, needed for the DEV URL/key) | sha256-identical to the main tree's |
+| `APP_VARIANT=development npx expo prebuild --platform android` | **`applicationId 'com.muthoy.pos.dev'`** and matching `namespace`, straight from `app.config.js` — **no hand edit needed for the identity** |
+| `allowBackup` | **`android:allowBackup="false"` preserved** by `withAndroidBackupProtection`, with `fullBackupContent` and `dataExtractionRules` |
+| One hand edit: `debuggable true` on the **release** build type | applied, commented as a test artifact only |
+
+**Three build attempts, two diagnosed failures.** Recorded because each cost
+real time and each is a durable environment fact:
+
+1. **SDK location not found.** A fresh worktree has no
+   `android/local.properties`, prebuild does not write one, and `ANDROID_HOME`
+   is unset. Fixed by writing `sdk.dir=…/Android/Sdk`.
+2. **JDK 25 breaks `expo-sqlite`'s CMake step.** Android Studio's JBR is
+   **OpenJDK 25**, and
+   `:expo-sqlite:configureCMakeRelWithDebInfo[arm64-v8a]` fails with *"A
+   restricted method in java.lang.System has been called"* — JDK 25's JNI
+   restriction. 13 minutes lost. Fixed by using the Gradle-provisioned Temurin
+   **17.0.20.1** already cached at
+   `C:/Users/Imrul/.gradle/jdks/eclipse_adoptium-17-amd64-windows.2` (that
+   directory IS the `JAVA_HOME`).
+3. **`ninja: error: manifest 'build.ninja' still dirty after 100 tries`**, two
+   failures, on `react-native-nitro-modules` and `react-native-worklets`, both
+   looping on *"Re-checking globbed directories"*.
+4. **Same error again at a short path — so my first two diagnoses of it were
+   both wrong, and are withdrawn.** I first attributed it to the
+   `--ignore-scripts` install; `pnpm` then reported "Already up to date", so no
+   postinstall re-ran and that hypothesis was never actually tested. I then
+   attributed it to Windows path length, on the strength of CMake's own warning
+   (*"object file directory has 192 characters … maximum is 250 … the build may
+   not work correctly"*), and rebuilt in a fresh worktree at `D:\mb` — **5
+   characters against `D:\Muthoy-PartB-Build`'s 21, and shorter than the main
+   tree's own `D:\Muthoy`**. It failed identically.
+
+   **What the evidence actually says.** The failing modules are *different every
+   run* — `nitro-modules` + `worklets` at one path, `mmkv` + `reanimated` at the
+   other — while the error, and the count of two failures, stay the same. A
+   defect in a specific module would not move. That is the signature of a race
+   between concurrently configuring CMake projects, and
+   `android/gradle.properties:18` sets `org.gradle.parallel=true`.
+
+   **Untested next step:** serialise the native build — `--no-parallel`, or
+   `org.gradle.workers.max=1`. Stated as a hypothesis, not a fix: the previous
+   two hypotheses in this same list were also plausible and both wrong, and the
+   honest status of attempt 5 is unknown until it runs.
+
+**No APK was produced.** Four attempts, roughly 55 minutes of build time. The
+`com.muthoy.pos.dev` identity, the `debuggable true` edit and the preserved
+`allowBackup="false"` are all verified in the *generated project* at both
+worktrees, and the prebuild step is reproducible across them — but the artifact
+itself does not exist, so none of §2's APK validations (package identity in the
+built manifest, Hermes bundle, native dependency set, startup behaviour,
+`run-as`) has been performed. Nothing is claimed about them.
+
+**A note on reading build results.** Two task notifications in this session
+reported "exit code 0" while Gradle had failed, because the shell command ended
+with `echo`/`tail` rather than with the build. Gradle's own
+`BUILD SUCCESSFUL`/`BUILD FAILED` line in the log is the only verdict worth
+reading, and both failures were caught that way.
