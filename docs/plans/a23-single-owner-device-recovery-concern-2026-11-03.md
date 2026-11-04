@@ -1,9 +1,18 @@
 # A2.3 production-readiness concern: recovery for a shop with one Owner device
 
-Raised 2026-11-03, out of H-11 Part B. **Revision 3, 2026-11-04**, after a
-second independent security/architecture review returned **REJECT** on revision
-2. Revision 1's Option A is retained below only as a rejected option, with the
+Raised 2026-11-03, out of H-11 Part B. **Revision 4, 2026-11-04**, after a
+THIRD independent security/architecture review returned **REJECT** on revision
+3. Revision 1's Option A is retained below only as a rejected option, with the
 reasons, because the reasons are the useful part.
+
+**Three rejections, and the pattern is mine.** Each revision got the *boundary*
+wrong in a different way: revision 1 by narrating an impossible sequence,
+revision 2 by enumerating two states and calling them exhaustive, revision 3 by
+replacing the enumeration with an invariant that was itself false. So revision 4
+does not offer a fourth formulation of my own. **The predicate in §3 is the
+reviewer's, derived from the SQL, and I verified every clause of it against the
+source before adopting it.** Where earlier revisions reasoned from the shape of
+the system, the text below cites the line that decides each claim.
 
 **What each review changed.** Review 1 rejected revision 1's *recommended
 option*: the concern was valid, the fix was not. Review 2 accepted that
@@ -72,12 +81,23 @@ to how earlier revisions worded it:
   which requires a device public id. The new-shop conclusion survives, because
   every current client supplies one; the wording did not.
 
-Note also that the constraints this document reasons about were later
-canonicalised by `20261008000000_h9_enrollment_hold_constraint_normalization.sql`,
-which replaces the consumption CHECK with a verified-equivalent copy (`:73`) and
-proves the approval CHECK is unchanged and singular (`:141`). Revisions 1 and 2
-did not cite it. It matters here specifically because Option D depends on
-one-shot atomic consumption, which is the rule that migration normalised.
+Note also `20261008000000_h9_enrollment_hold_constraint_normalization.sql`,
+which revisions 1 and 2 did not cite. **Revision 3 cited it but described it
+wrongly**, and review 3 corrected that. What it actually does: creates a
+temporary comparison probe (`:73`), keeps an already-correct canonical
+constraint, creates one only if absent, drops the known equivalent duplicate
+(`:93`), and proves the approval CHECK is singular (`:141`).
+
+**And the correction matters more than the wording.** Revision 3 linked that
+CHECK to "one-shot atomic consumption". It is not the concurrency guarantee —
+it only enforces field consistency. One-shot consumption comes from the **hold
+row lock**: `select * into v_hold from device_enrollment_holds … for update`
+followed by the consumed-state test and a transactional update
+(`20260923000000:922-930`), pinned by
+`a23-device-registry.pgtest.ts:522`, *"admits at most one concurrent consumer of
+an exact approval"*. Any Option D design must build on that lock, not on the
+CHECK — treating a consistency constraint as a compare-and-consume guarantee is
+how a future revision would reintroduce a race.
 
 So a brand-new Owner registering a brand-new shop is unaffected, and so is any
 shop/actor pair that has never been revoked. `a23-device-registry.pgtest.ts`
@@ -87,22 +107,59 @@ available"* asserts `allowed: true, held: false`.
 ## 3. The actual dead end — corrected
 
 Revision 1 narrated: owner loses phone, revokes it, cannot enrol a replacement.
-**That sequence is largely impossible, and the narrative was wrong** (review
-finding 7). Revoking is a guarded action requiring a bound session, so an owner
-whose only handset is gone cannot revoke anything. In the ordinary lost-phone
-case they sign in on the replacement first — no hold exists, so it enrols —
-and revoke the lost installation afterwards, from the replacement.
+The narrative was wrong, but **revisions 2 and 3 over-corrected it** and review
+3 caught that too.
 
-But the states that ARE unrecoverable must be stated as an invariant, not as a
-list. Revision 2 listed two and called them exhaustive; review 2 found a third
-and was right. Enumerating is what produced both errors, so:
+What is true: in the ordinary lost-phone case the owner signs in on the
+replacement first — no hold exists, so it enrols — and revokes the lost
+installation afterwards, from the replacement. That remains the correct
+sequence for a current client.
 
-> **Recovery is impossible whenever a hold exists for `(shop_id,
-> actor_user_id)` and no accessible, active, session-bound Owner/Manager
-> installation other than the hold's `source_device_id` remains.**
+What revisions 2 and 3 wrongly stated as a general property: *"revoking is a
+guarded action requiring a bound session."* It is not. **Neither revoke RPC
+takes a session id**, and each asserts only administrator role —
+`a23_revoke_binding` at `:1208` and `a23_revoke_device` at `:1340`, both
+`perform a23_assert_device_admin(...)` and nothing more. At the transport layer,
+an **unbound legacy session is admitted while the shop has not enforced**:
+`deviceRegistryPolicy.ts:392` is literally
+`return facts.enforced ? refuse("device_session_unbound") : { allowed: true };`
+So on a shop with `devices_enforced_at is null`, revocation by an unbound caller
+is reachable, and the threat model must include it.
 
-That is the whole dead end. Every case below is an instance of it, and the list
-is illustrative, not a boundary:
+### The predicate
+
+Revision 3 wrote: *"Recovery is impossible whenever a hold exists for
+`(shop_id, actor_user_id)` and no accessible, active, session-bound
+Owner/Manager installation other than the hold's `source_device_id` remains."*
+**That was false**, and review 3 supplied the counterexample. Verified against
+source:
+
+`a23_prepare_enrollment` returns `allowed: true, held: true, approved: true`
+when `approved_device_public_id = p_device_public_id and approved_at is not null
+and consumed_at is null` — `20260926000000:71-78` — and it **consults the
+approver not at all**. `a23_enroll_device` applies the same three-part test
+(`:134-140`, and the internal copy at `20260923000000:922-930`). So once a
+different installation has approved the exact replacement, that replacement
+enrols **even if the approver is subsequently revoked, lost or destroyed**.
+Revision 3's predicate classified that working recovery as impossible.
+
+And because a hold row **persists after consumption**, "a hold exists" does not
+mean "enrolment is currently blocked" — which revision 2 had already noted and
+revision 3's own predicate then ignored.
+
+The correct predicate, from review 3 and verified clause by clause:
+
+> **Recovery through current A2.3 paths is unavailable when the exact
+> replacement lacks a valid unconsumed approval, AND no live Owner/Manager can
+> present an eligible session mapped to an active device and an active binding
+> OF THEIR OWN on a device different from the hold's `source_device_id`.**
+
+Both halves are load-bearing. The first is what `20260926000000:71-78` tests;
+the second is what `a23_approve_enrollment` requires at
+`20260923000000:1480-1489`.
+
+The cases below are instances, **each qualified by "and no valid unconsumed
+exact-device approval exists"**. The list is illustrative, not a boundary:
 
 1. **Self-revocation of the last installation** (`a23_revoke_device`). Hold
    created, device revoked.
@@ -120,6 +177,14 @@ is illustrative, not a boundary:
    precisely what was just revoked. The still-active device cannot approve.
 3. **Loss, clearing, or key-unwrap failure of the last remaining installation
    while a hold is outstanding** from an earlier revocation.
+4. **A Manager revokes an Owner's binding on their sole SHARED installation** —
+   added by review 3. The Manager's own binding stays active, so there IS a live
+   admin with an active binding; but that installation is the hold's
+   `source_device_id`, and `a23_approve_enrollment` refuses an approver whose
+   device is the hold source (`:1506`). So the shop has an administrator, an
+   active device and an active binding, and still cannot approve. This is the
+   case that most clearly shows why the predicate has to name
+   `source_device_id` rather than "an active installation".
 
 Case 1 is already encoded in the test suite by name:
 `a23-device-registry.pgtest.ts:579`, *"leaves a sole-admin revoked-device case
@@ -230,23 +295,42 @@ answering them is design work that needs its own scoped rule 10 approval.
    credential-proving binding path — `deviceLogin.ts`, `recoverPin.ts`,
    `linkDevice.ts` and the shared SQL gate — not only the two OTP-bearing ones
    this document previously named.
-4. **No notification design.** §4 constraint 5 demands recovery be contestable
-   by a legitimate owner who did not initiate it, and Option D provides no way
-   to contest anything. Theft of the code would allow a silent takeover plus
-   credential rotation. Notification must reach the primary number but **never
-   only** it: also every active administrator installation, at least one
-   independently verified secondary address or designee, and support/audit
-   monitoring. Provisioning, replacement, rotation, successful redemption and
-   failed-abuse thresholds should all notify, and a contact change must notify
-   both the old and the new address.
+4. **No notification design — and notification is not contestability.**
+   Revision 3 answered this with a delivery list and review 3 called that
+   incomplete, correctly. **Notification DETECTS fraud; it does not make a
+   recovery reversible.** Option D still specifies no repudiation response: no
+   grant suspension, no rollback or rebinding procedure, no session
+   termination, no service level, and no named authority able to reverse a
+   fraudulent recovery. NIST requires that a notification carry instructions
+   for repudiating the event, not merely that it be delivered. Delivery must
+   still reach the primary number and **never only** it — also every active
+   administrator installation, at least one independently reachable secondary
+   address, and support/audit monitoring — for provisioning, replacement,
+   rotation, successful redemption and failed-abuse thresholds, with a contact
+   change notifying both the old and the new address.
 
-Finding 4 is the uncomfortable one, because it partly re-imports Option C.
-Option D needs an independently verified second contact to be contestable, and
-§5's Option C says a second contact is only viable with verified independent
-control, consent and revalidation. So D and C are not alternatives: **D needs
-C's contact machinery for its notification half**, even though a second contact
-grants no approval authority on its own. Revision 2 presented them as separate
-options and that was wrong.
+Five further gaps, all still open:
+
+- Who may issue, replace, rotate, revoke or reissue the code, and what step-up
+  proof each of those operations requires.
+- **How a compromised active handset is prevented from replacing the legitimate
+  offline code before self-revoking.** This is the sharpest one: it would turn
+  the recovery credential into the attacker's tool.
+- The concrete response when a notification is repudiated.
+- The PostgreSQL-versus-GoTrue transaction boundary, and compensation plus
+  idempotency when session minting happens outside the recovery-grant
+  transaction.
+- An explicit recovery assurance classification and the accepted factor
+  combination.
+
+**Correction to revision 3's "D needs C" claim.** Revision 3 said Option D
+needs Option C's machinery for its notification half. Review 3 found that
+**overstated**, and it is: Option D needs *managed, independently reachable
+notification addresses*. A recovery **contact** is a separate recovery
+*authority*, and NIST treats notification addresses and recovery contacts as
+different things. C-like consent and revalidation are required only if a
+designee is actually given authority. So D and C are neither alternatives nor
+a package — D needs addresses, not a second approver.
 
 ### Option A — delayed self-approval with notification (REJECTED)
 
@@ -292,24 +376,64 @@ changes, and a further fallback.
 
 ### Recommendation
 
-**D as the preferred direction once it owes nothing above, carrying C's
-verified-contact machinery for its notification half; B as the only path for
-owners already locked out today. A is withdrawn.**
+**D as the preferred direction once it owes nothing above, with managed
+independent notification addresses (NOT Option C's approval authority); B as the
+only path for owners already locked out today. A is withdrawn.**
 
 Two things this document should stop implying. It is not a menu of four
-independent options — the viable shape is D+C together, with B as the
-human fallback. And none of it is a design yet: the four requirements above are
-unanswered, so there is nothing here anyone could implement from.
+independent options — the viable shape is D with managed notification
+addresses, and B as the human fallback. And none of it is a design yet: the
+four requirements and five gaps above are unanswered, so there is nothing here
+anyone could implement from.
 
-Independent of any recovery policy, two cheaper changes stand on their own and
-would each shrink the problem. Both are proposals, not decisions:
+**The first decision is not an option at all.** Per review 3: settle the
+compromise-versus-availability policy and the recovery assurance target before
+choosing a mechanism. Every option above trades those two against each other,
+and the trade has never been stated, let alone decided.
 
-- **A last-admin / self-target guard on `a23_revoke_binding` and
-  `a23_revoke_device`.** Refusing the call that strands the shop is far simpler
-  than building a way back from it, and today nothing refuses it (`:1196`).
-  This narrows cases 1 and 2 of §3 to "cannot happen" rather than "needs
-  recovery". It does not help case 3.
-- **A test pinning case 2's lockout**, which nothing currently asserts.
+**Revision 3 said the revocation guard was "a much smaller change than any
+recovery mechanism" and should be "decided first, independently". Review 3
+refuted that, and I accept the refutation.** It is recorded here because the
+reasons generalise:
+
+- **`p_target_actor_user_id = p_caller_user_id` is not a safe self-target
+  test.** It would block an Owner, standing on a replacement device, from
+  revoking their own binding on the stolen old one — the exact action the
+  correct lost-phone sequence depends on.
+- **`a23_revoke_device` cannot identify the caller's current device.** Its
+  signature carries no `auth_session_id` (`:1330-1334`), so "am I revoking the
+  device I am standing on?" is unanswerable without a signature change plus
+  session validation equivalent to approval's.
+- **"Last admin" must mean post-operation recovery CAPACITY**, not last admin
+  person: at least one live Owner/Manager holding an active binding on an
+  active device other than the target, computed after the operation. A
+  person-based test is the wrong unit.
+- **The schema cannot know what is physically reachable.** A structurally
+  active binding may sit on a handset that is lost or whose key material no
+  longer unwraps, so a guard can be satisfied by an installation nobody can use.
+- **It is not race-free as proposed.** Both revocations lock only the TARGET
+  device row — `select * into v_device from shop_devices … for update` at
+  `:1210` and `:1342` — so two concurrent revocations of *different* devices
+  each observe the other as still active and both proceed, racing the shop to
+  zero recovery-capable installations. Race freedom needs a shop-scoped lock and
+  a post-state computation, and every role-change and deactivation path would
+  have to adopt the same protocol.
+- `devices_enforced_at` must NOT enter the calculation. Holds and approval
+  restrictions apply either way; that flag only decides whether an unbound
+  legacy caller reaches the operation at all.
+
+**And the trade may be the wrong way round.** A guard strong enough to prevent
+case 1 would also refuse *immediate containment of a compromised sole device* —
+leaving a suspected attacker authorised in order to preserve availability.
+NIST SP 800-63B-4 treats failure to invalidate a compromised authenticator as
+generally more serious than an erroneous invalidation denial-of-service. So:
+
+> **Decide the compromise-versus-availability policy and the recovery assurance
+> target FIRST. Then add a guard as defence in depth. The guard does not
+> replace recovery, and it must not be sequenced ahead of it.**
+
+What does stand on its own, and is cheap: **a test pinning cases 2 and 4**,
+which nothing currently asserts.
 
 ## 6. Relationship to H-11 Part B
 
@@ -340,19 +464,26 @@ blocks the re-run.
 |---|---|---|
 | 1 | **REJECT** | Replace elapsed silence as an approval authority with an independent credential or an independently verified approval |
 | 2 | **REJECT** | Correct the lockout boundary: state the invariant, and add self-revocation of the last *binding* |
-| 3 | not yet reviewed | — |
+| 3 | **REJECT** | The invariant is still false — an already-approved, unconsumed exact replacement enrols without the approver |
+| 4 | not yet reviewed | — |
 
-Revision 3 fixes revision 2's factual error and records the four Option D
-requirements. It does **not** answer them, so a third review would be reviewing
-a corrected problem statement, not a finished design.
+Revision 4 adopts the reviewer's predicate, adds the fourth lockout state,
+withdraws the "decide the guard first" advice and the "D needs C" claim, and
+corrects the H-9 description. It answers **none** of Option D's requirements, so
+a fourth review would again be reviewing a corrected problem statement, not a
+design.
 
 **Nothing has been implemented.** No credential exists, no hold policy changed,
 no migration written or deployed. Any of it needs its own scoped rule 10
 approval.
 
-Still open:
+Still open, in order:
 
-1. The four Option D requirements above — the substantive design work.
+0. **The compromise-versus-availability policy and the recovery assurance
+   target.** Review 3's sequencing point: this precedes every option, and
+   nothing below can be decided without it.
+1. The four Option D requirements and five gaps above — the substantive design
+   work.
 2. Does Option D's credential need to survive a shop that has never had a
    second installation, and what is the provisioning moment — onboarding, or
    first sync?
@@ -361,29 +492,45 @@ Still open:
 4. Does the pending-request state belong in a new table, given constraint 3?
 5. Should provisioning a recovery credential be P0 for Batch 4 onboarding? It
    prevents new instances but does nothing for the existing field population.
-6. Should the cheap guard on `a23_revoke_binding` / `a23_revoke_device` be
-   decided **first**, independently? It is a much smaller change than any
-   recovery mechanism and removes two of the three §3 cases. Deciding recovery
-   policy first risks building a way back from a state that should simply be
-   refused.
+6. ~~Should the guard be decided first, independently?~~ **Answered: no.**
+   Review 3 showed it is neither cheap nor independent, and that sequencing it
+   ahead of recovery risks refusing urgent containment of a stolen sole device.
+   See §5. What remains open is the guard's *definition* once question 0 is
+   settled: specifically the post-operation recovery-capacity rule, the
+   shop-scoped lock, and whether `a23_revoke_device` gains an
+   `auth_session_id`.
+7. A test pinning §3 cases 2 and 4, which nothing currently asserts. This is
+   the one item here that needs no policy decision first.
 
 ---
 
 ## 8. Review provenance
 
-| | Review 1 | Review 2 |
-|---|---|---|
-| Subject | revision 1 | revision 2 |
-| Date | 2026-11-03 | 2026-11-04 |
-| Verdict | REJECT | REJECT |
-| Findings | 2 BLOCKING, 3 claims spot-checked | 1 BLOCKING, 4 MAJOR, 2 MINOR |
-| Reviewer | independent agent, read-only, source-checked | independent agent, read-only, source-checked |
+| | Review 1 | Review 2 | Review 3 |
+|---|---|---|---|
+| Subject | revision 1 | revision 2 | revision 3 |
+| Date | 2026-11-03 | 2026-11-04 | 2026-11-04 |
+| Verdict | REJECT | REJECT | REJECT |
+| Findings | 2 BLOCKING, 3 claims spot-checked | 1 BLOCKING, 4 MAJOR, 2 MINOR | 1 BLOCKING, 3 MAJOR, 1 MINOR |
+| Reviewer | independent agent, read-only, source-checked | as before | as before |
 
-Every finding of review 2 that rests on a file and line was re-verified against
-that file before being written into this revision: the hold-creator set, the
-missing self-target and last-admin guards (`:1208`), the approver's
-own-active-binding requirement (`:1480-1489`), the `allowed: not v_enforced`
-branch (`20260926000000:49-56`), the preflight rewrite (`20260926000000:80`),
-the uncharged successful attempt (`deviceLogin.ts:187-201`), the H-9
-normalisation (`:73`, `:141`), and `pgtest:338`. All held. No finding was
-accepted on the reviewer's authority alone, and none was discarded.
+Every finding of reviews 2 and 3 that rests on a file and line was re-verified
+against that file before being written into this revision. Review 2: the
+hold-creator set, the missing self-target and last-admin guards (`:1208`), the
+approver's own-active-binding requirement (`:1480-1489`), the
+`allowed: not v_enforced` branch (`20260926000000:49-56`), the preflight rewrite
+(`20260926000000:80`), the uncharged successful attempt
+(`deviceLogin.ts:187-201`), the H-9 normalisation (`:73`, `:141`), `pgtest:338`.
+Review 3: the already-approved enrolment path (`20260926000000:71-78`,
+`:134-140`, `20260923000000:922-930`), the `source_device_id` approver exclusion
+(`:1506`), `a23_revoke_device`'s admin-only assert and absent session id
+(`:1330-1334`, `:1340`), the per-device-only revocation locks (`:1210`,
+`:1342`), the unbound-legacy admission
+(`deviceRegistryPolicy.ts:392`), and `pgtest:522`. **All held.**
+
+No finding was accepted on the reviewer's authority alone, and none was
+discarded. Three of the four substantive errors across these revisions were
+mine asserting a boundary the source does not support; the fourth was asserting
+a concurrency guarantee from a consistency constraint. Both are the same
+mistake in different clothing — reasoning from the shape of the system instead
+of from the line that decides it.

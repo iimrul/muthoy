@@ -105,18 +105,123 @@ version of this drill would have passed.
 10. **Populate a device and go offline.** Sign in, put the handset in aeroplane
    mode, then do real work: a cash sale, a credit sale, a stock adjustment, an
    expense. Record exactly what was done.
-11. **Count the outbox before losing it.** Read the `sync_queue` row count. This
-   is the number Part B exists to measure — everything in it is what a device
-   restore cannot return.
+11. **Census the outbox before losing it.** First, **before** aeroplane mode in
+    step 10, record a baseline: push until the queue holds no `pending` or
+    `failed` row for this shop, and record `Q_sent` as the high-water mark. A
+    census taken without that baseline cannot attribute a `pending` row to this
+    offline window.
+
+    Then capture, for this shop:
+
+    | Symbol | Query | Meaning |
+    |---|---|---|
+    | `Q_pending` | `count(*) where status='pending'` | not marked sent |
+    | `Q_failed` | `count(*) where status='failed'` | gave up retrying |
+    | `Q_sent` | `count(*) where status='sent'` | acknowledged — NOT loss |
+    | `Q_total` | all three | queue HISTORY, not loss |
+    | **`Q_at_risk`** | **`Q_pending + Q_failed`** | **an UPPER BOUND on lost operations** |
+    | `G_at_risk` | `count(distinct operation_group_id)` over those rows | business events affected |
+
+    plus, and this is the part step 14 cannot work without, the **row identity
+    set**: every `(table_name, row_id, op, status, operation_group_id)` among
+    the at-risk rows, and each affected `operation_group_id` with its
+    `operation_expected_count` and the number of its rows actually present.
+
+    **`Q_at_risk` is an upper bound, not measured loss.** The outbox is
+    at-least-once by design: `apps/mobile/sync/push.ts:258` completes the server
+    call and only then marks rows sent individually (`:306`, `:313`), so a lost
+    response or a crash between those two steps leaves an **already-applied**
+    row `pending`, and eventually `failed`. Such a row is at risk on the device
+    and present on the server. Only reconciling the row identities against the
+    server turns the bound into a measurement — step 14(a).
+
+    **`Q_total` is not the loss either.** A successful push sets `status='sent'`
+    and deletes nothing (`apps/mobile/db/sync-helpers.ts:1804-1809`); the only
+    production delete is the conflict `take_remote` path
+    (`apps/mobile/db/conflicts.ts:362-383`). So `sent` rows accumulate for the
+    life of the installation. See the 2026-11-04 addendum for the original
+    wording and why it was corrected.
+
+    Note also that `sent` is not proof the server KEPT the value: an equal
+    `updated_at` makes `sync_apply_row`'s strict `<` predicate write nothing
+    while still answering `applied` (`sync-helpers.ts:828-845`). Such a row is
+    recorded in `conflict_queue`, so it is detectable — which is why step 14
+    checks that table too.
+
+    **`Q_total` is not the loss.** A successful push sets `status='sent'` and
+    deletes nothing (`apps/mobile/db/sync-helpers.ts:1804-1809`); the only
+    production delete is the conflict `take_remote` path
+    (`apps/mobile/db/conflicts.ts:362-383`). So `sent` rows accumulate for the
+    life of the installation, and a total count overstates loss by the whole
+    synced history. See the 2026-11-04 addendum for the original wording and why
+    it was corrected.
+
+    Note also that `sent` is not proof the server KEPT the value: an equal
+    `updated_at` makes `sync_apply_row`'s strict `<` predicate write nothing
+    while still answering `applied` (`sync-helpers.ts:828-845`). Such a row is
+    recorded in `conflict_queue`, so it is detectable — which is why step 14
+    checks that table too.
 12. **Destroy the device database.** Clear app data. This is the realistic
     failure: a corrupt database, a failed key unwrap, a reinstall.
 13. **Recover.** Relaunch, sign in with phone + PIN, and let
     `recoverDatabaseFromServer` run its full `pullChanges(shopId, null)`. Record
     wall-clock time from launch to a usable dashboard.
-14. **Count what came back.** Compare per-table row counts against step 10's
-    device state. The difference must equal exactly the step 11 outbox count — no
-    more. Anything beyond that is loss outside the known offline window, and a
-    blocker.
+14. **Reconcile what came back — three checks, never one.** The old single
+    equality compared unlike units and could not be satisfied; see the
+    2026-11-04 addendum. **No equality between unlike units may be used as a
+    PASS criterion.**
+
+    - **(a) Row IDENTITIES, not counts.** For each table, compute the SET of
+      `(table_name, row_id)` present before the clear and after recovery. Every
+      identity that is missing afterwards must appear in step 11's at-risk
+      identity set with `op='insert'`, and every at-risk `insert` identity must
+      be either missing (lost) or present (it had already reached the server —
+      the at-least-once case). **Compare sets, never counts.** `sync_queue` has
+      no uniqueness constraint tying one queue row to one business row
+      (`apps/mobile/db/schema.ts:1366-1395`), so a retry can enqueue the same
+      `row_id` twice and any count-to-count equality is wrong. A missing
+      identity that is NOT in the at-risk set is loss outside the known offline
+      window, and a blocker.
+    - **(b) Values, row-addressed.** Every row whose identity is NOT in the
+      at-risk set must match its pre-clear fingerprint exactly. For a row named
+      by an at-risk `update` or `delete`, compare against the server: if the
+      recovered value equals the server's, **recovery worked and the local edit
+      is gone.** Record that as `recovery integrity: PASS` **and** add the row
+      to the **known local value loss** set. It is not a pass of the drill's
+      objective — see "Two verdicts" below.
+    - **(c) Operation-group and conflict integrity.** No
+      `operation_group_id` may be partially applied server-side;
+      `apps/mobile/sync/push.ts:144-165` enforces `operation_expected_count`, so
+      a half-landed group is a defect to report, not acceptable loss. Dump
+      `conflict_queue` in full and account for every row. Also record the
+      server's staging state for the affected groups — a group can be fully
+      applied with every local row still `pending`, and the reverse.
+
+    ### Two verdicts, never one
+
+    The drill's stated objective is *"a restore-from-backup drill completes with
+    **no irreversible loss**"*. A revision of step 14 that called a lost
+    `cash_drawer` update a PASS because the server's older value came back would
+    report success after confirmed business-value loss. So Part B reports two
+    things, and the second governs:
+
+    | Verdict | Meaning |
+    |---|---|
+    | **Recovery integrity** | Everything the server held came back correctly, and every device-side difference is explained by a row in step 11's at-risk set. |
+    | **Known local value loss** | The set of rows whose local value is gone. |
+
+    **The drill's no-irreversible-loss objective is PASS only when the known
+    local value loss set is EMPTY.** A non-empty set may still be an acceptable
+    product outcome — that is the founder's call, per CLAUDE.md's review
+    workflow — but it is recorded as loss, not as a pass.
+
+    **Units, stated once so they are never conflated again:** step 11's figures
+    count QUEUE ROWS (operations); step (a) compares BUSINESS-ROW IDENTITIES.
+    One business event produces several queue rows —
+    `apps/mobile/db/sales.ts:685-692` computes the group size, and a one-item
+    cash sale is 5-6 queue rows against 4-5 inserted business rows. The two are
+    related only through the row identity set captured in step 11, which is why
+    that set is mandatory rather than a convenience.
 15. **Reconcile money and stock.** `SUM(inventory_movements.change_qty)` per
     batch must equal `batches.stock`; the cash drawer's seven-term figure must
     match the server's view of the same day. Exact, not approximate.
@@ -154,8 +259,14 @@ version of this drill would have passed.
 | `ledger_invariant.sql` after restore | PASS | _not run_ |
 | Auth hook still selected after restore | yes | _not run_ |
 | Device recovery time | — (record it) | _not run_ |
-| Rows lost on device restore | exactly the step 11 outbox count | _not run_ |
+| Clean queue baseline before aeroplane mode (step 11) | zero pending/failed | _not run_ |
+| Outbox census + row identity set (step 11) | all figures + every at-risk identity | _not run_ |
+| Row identities reconciled (14a) | set comparison; every difference explained | _not run_ |
+| Values returned (14b) | every non-at-risk fingerprint matches exactly | _not run_ |
+| Operation-group + conflict integrity (14c) | no partial group; `conflict_queue` dumped and accounted | _not run_ |
+| **Known local value loss** | **EMPTY for the no-irreversible-loss objective** | _not run_ |
 | Money/stock reconciliation after restore | exact | _not run_ |
+| Device-local stores reset (step 16) | as listed, shop id unchanged | _not run_ |
 | Encryption migration, 21.8 MiB | — (record it) | _not run_ |
 | Mid-migration kill | fails closed, no loss | _not run_ |
 
@@ -245,3 +356,133 @@ Metro route above - it was never about the dates alone.
 The alternative - approving the replacement of the Preview app's database - is
 not recommended: it destroys the test shop that the Batch 3 device evidence
 rests on.
+
+---
+
+## Addendum, 2026-11-04 — steps 11 and 14 corrected; every row above is still *not run*
+
+Part B was executed on 2026-11-04 and is **NOT PASS**. In writing that up it
+became clear that **steps 11 and 14 could not both be satisfied as written**.
+The steps are corrected above under a scoped founder approval. No code, schema
+or sync semantics were changed to suit the test. **No result row is marked
+passed by this addendum.**
+
+### The original signed text, verbatim
+
+> 11. **Count the outbox before losing it.** Read the `sync_queue` row count. This
+>    is the number Part B exists to measure — everything in it is what a device
+>    restore cannot return.
+
+> 14. **Count what came back.** Compare per-table row counts against step 10's
+>     device state. The difference must equal exactly the step 11 outbox count — no
+>     more. Anything beyond that is loss outside the known offline window, and a
+>     blocker.
+
+Result-table row, as signed: `| Rows lost on device restore | exactly the step
+11 outbox count | _not run_ |`.
+
+### Why it was wrong
+
+Two independent defects, both verified in source:
+
+1. **Step 11's "row count" overstates loss.** `markSyncRowSent` sets
+   `status='sent'` and deletes nothing (`sync-helpers.ts:1804-1809`), and no
+   purge exists anywhere — the single production delete is the conflict
+   `take_remote` path (`conflicts.ts:362-383`). So the queue retains the whole
+   synced history, and `Q_total` counts rows that are safely on the server.
+   Only `pending + failed` is unrecoverable.
+2. **Step 14 compared unlike units, so it was non-diagnostic.** Step 11's figure
+   counts QUEUE ROWS; step 14's difference counts BUSINESS-TABLE ROWS. One
+   business event emits several queue rows — `sales.ts:685-692` computes
+   `1 + items×2 + credit + customer + attachment + drawer + 1`, so a one-item
+   cash sale is 5-6 queue rows against 4-5 inserted business rows. Worse,
+   `update` and `delete` operations emit a queue row and change **no** row
+   count, so a lost edit leaves every count identical while a value is wrong —
+   exactly the failure Part A was rewritten to catch ("The drill proves VALUES
+   return, not that row counts match").
+
+   An earlier version of this addendum called that equality "unsatisfiable" and
+   said "no choice of arithmetic makes one number equal the other". **That was
+   overstated:** the equality *can* hold by coincidence. The accurate claim is
+   that it is **non-diagnostic** — it is incompatible with the grouped workload
+   step 10 prescribes, and passing it proves nothing.
+
+**What the correction preserves, and where it is now STRICTER.** Step 11's
+original sentence is right about `pending` and `failed` and wrong only about
+`sent`. But a first draft of this correction was itself rejected for being
+*weaker* than the original: it declared a lost `cash_drawer` update a PASS
+because the server's older value came back, which would report success after
+confirmed business-value loss — something the original's blunt count-based rule
+would mechanically have rejected. That is why step 14 now reports **two
+verdicts**, and why the no-irreversible-loss objective passes only when the
+known local value loss set is empty. The lesson is the same one as the run
+itself: making a criterion *measurable* must not quietly make it *weaker*.
+
+**The failure this came out of was mine, not the spec's.** The 2026-11-04 run
+substituted "unsynced sale headers" for step 11's number and defended the
+substitution. The right response to an ill-defined required measurement is to
+report that it is ill-defined, not to quietly replace it.
+
+### Required acceptance evidence for a Part B PASS
+
+All eleven, or it is not a pass:
+
+1. **Clean queue baseline** recorded before aeroplane mode — zero `pending` and
+   zero `failed`, plus the `Q_sent` high-water mark.
+2. Verified pre-clear device baseline (step 10 workload recorded: cash sale,
+   credit sale, stock adjustment, expense).
+3. Status-wise queue census — every figure in step 11's table.
+4. The **row identity set**: every `(table_name, row_id, op, status,
+   operation_group_id)` among the at-risk rows. Without this, 14(a) and 14(b)
+   are not executable at all.
+5. Post-recovery **set** comparison of row identities, per table, with every
+   difference explained by item 4.
+6. Value-level fingerprints, both sides of the clear, and **proof of their
+   validity**: untruncated, row-addressable, covering every affected table, and
+   stating which columns were hashed. A `null` or partial fingerprint is not
+   evidence.
+7. **Server staging state** for every affected `operation_group_id`, and a full
+   `conflict_queue` dump with every row accounted for.
+8. Exact money and stock reconciliation (step 15).
+9. Auth / session / device-local reset checks (step 16), shop id unchanged.
+10. Measured recovery duration (step 13), wall-clock.
+11. **The known local value loss set**, explicitly — empty or enumerated. An
+    absent item 11 is not an empty item 11.
+
+### How the census is taken — corrected 2026-11-04, and simpler than it looked
+
+An earlier version of this section claimed `sync_queue` "cannot be read from
+outside the app process at any privilege" because `modules/muthoy-db-key` wraps
+the SQLCipher key with a non-exportable AndroidKeyStore key, and concluded that
+in-app instrumentation was therefore mandatory. **That claim was false for the
+build Part B actually uses, and the instrumentation built on it was withdrawn.**
+
+The Keystore protects the **wrapping** key. It does not protect the plaintext
+the app legitimately derives from it. `MuthoyDbKeyModule.kt:20` says so in its
+own words — the key *"never leaves this module **except as the hex string**"* —
+`getOrCreateDatabaseKeyHexAsync` returns 64 hex characters to JavaScript
+(`:104-110`), and `apps/mobile/db/databaseKey.ts:30,110` caches that plaintext
+in module memory for the life of the process.
+
+On a **debuggable** build — which is exactly what Part B and Part C require —
+that plaintext is readable by an attached debugger. So the route is:
+
+1. Attach to the debuggable DEV package and read the cached key hex.
+2. `adb shell run-as <pkg> cat files/SQLite/<db>` to copy the ciphertext off.
+3. Open the copy off-device with SQLCipher and query it with full SQL.
+
+That yields **exactly** what the revised steps 11 and 14 need and what a
+counts-only in-app census could not give: the complete
+`(table_name, row_id, op, status, operation_group_id)` identity set, per-row
+values, and arbitrary joins — with **zero application code**, no production
+bytes, no new gate and no new attack surface. It is also why 14(a) can compare
+identity sets rather than counts.
+
+Two notes on scope. This route only works because the test APK is deliberately
+debuggable; it is **not** a weakness of the shipped release, where the same
+extraction needs a rooted device. And the key must be treated as a live
+credential for the DEV test shop: it is never logged, pasted into a document,
+or committed.
+
+Still outstanding: the debuggable DEV APK, and a second founder-approved
+app-data clear.

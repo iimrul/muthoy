@@ -599,3 +599,114 @@ a proposal only.
 **No Part B PASS is claimed.** Nothing in this document is acceptance evidence
 for any drill row; every row of `restore_drill.md`'s result table still reads
 *not run* or NOT PASS.
+
+---
+
+## 10. Execution under the founder's A0-A3 approval, 2026-11-04
+
+### A0 — COMPLETE
+
+`0e4640c` inspected: 3 files, all `docs/plans/*.md`, 867 added lines, **0 hits
+across 9 secret patterns** (both Supabase key prefixes, JWT shapes, private
+keys, 64-hex, BD phone shapes in two forms, assigned passwords, service-role
+keys).
+Pushed `70e60b8..0e4640c`. **CI run 41807262172 = SUCCESS.**
+
+**The PIN inconsistency was a representation artifact, not a credential
+problem.** `packages/validation/src/auth.ts:15` requires `/^\d{4}$/`. The stored
+value is **4 digits**; the fifth byte is a carriage return, because the secrets
+file is CRLF and my earlier length check stripped quotes but not `\r`. Verified
+by byte class without printing the value —
+`['DIGIT','DIGIT','DIGIT','DIGIT','CR']` — and the stripped value matches
+`^\d{4}$`. The credential is valid.
+
+### A1 — IMPLEMENTED, REVIEWED **REJECT**, and **WITHDRAWN**
+
+I built the census (`dev/queueCensus.ts` + 20 tests, a two-gate design, a
+bundle verifier, and artifact-level evidence that both gates constant-fold to
+`false` in a preview build). Independent review returned **REJECT** with five
+BLOCKING findings. **The first invalidates the premise**, so the right response
+was withdrawal, not remediation:
+
+> **The "no route to `sync_queue` from outside the app process" claim is false
+> for a debuggable build.** The Keystore protects the *wrapping* key, not the
+> plaintext derived from it. `MuthoyDbKeyModule.kt:20` states it outright — the
+> key *"never leaves this module **except as the hex string**"* —
+> `getOrCreateDatabaseKeyHexAsync` returns 64 hex characters to JavaScript
+> (`:104-110`), and `db/databaseKey.ts:30,110` caches that plaintext in module
+> memory for the process lifetime. A debugger attached to a debuggable process
+> reads it; `run-as` copies the ciphertext; it decrypts off-device. No rooting.
+
+I had read that comment block earlier in the session, quoted its "cannot be
+exported" sentence, and skipped the "except as the hex string" clause six lines
+above it. **That is the fourth time in this engagement I asserted a boundary
+narrower than the source supports.**
+
+The debugger route is also *better* on every axis: zero application code, no
+production bytes, no `dev/` pin change, no gate whose claim could be wrong, no
+Metro cache hazard — and it yields the **row-level identity sets** that the
+corrected step 14 needs and that a counts-only census structurally could not
+produce.
+
+**Withdrawn cleanly.** `dev/` is back to its pinned five files; `dashboard.tsx`
+and `dev-production-safety.test.ts` are byte-identical to `0e4640c`; the three
+new files are deleted. 119/119 tests pass across the seven affected suites. The
+withdrawn code is preserved outside the repo, in this session's scratchpad under
+`withdrawn-a1\`, in case the founder disagrees with the withdrawal.
+
+**The other four BLOCKING findings, recorded because the lessons outlive the
+code.** The founder's byte-exclusion condition was genuinely unmet and I
+substituted a weaker requirement of my own ("unreachability") instead of asking
+— and the reviewer named two mechanisms I had wrongly ruled out (a separate
+`androidTest` APK, a Gradle product flavour), neither needing the forbidden
+Metro resolver swap. My bundle verifier had a **demonstrated false PASS**: it
+treated "no regex match" as proof of absence and returned exit 0 for the
+TypeScript source file and for an opaque Hermes bundle — the same defect class
+as the H-9 capture executor that was deleted for being able to mis-attribute.
+The dashboard trigger could **miss the pre-clear census entirely**, because
+`useEffect` on `[session?.shopId]` does not re-run on tab focus and the
+dashboard stays mounted. And my claimed "unforgeable signed native application
+id" gate **called the wrong function**: `readEnvironmentConfiguration()` checks
+only the embedded Expo config, while the real `expo-application` check lives in
+`verifyEnvironmentIdentity()`.
+
+One finding I did catch myself, via the positive control, worth keeping:
+**Metro's transform cache key excludes `EXPO_PUBLIC_*`**, so a flag-gated build
+run after another build silently reuses the earlier transform. Two bundles built
+with different flag values came out byte-identical (sha256 `c865ba50…`,
+5,674,860 bytes); only `--reset-cache` produced the flagged build (`7eb6b572…`,
+5,674,943 bytes). Any future transform-time flag in this repo faces the same
+hazard.
+
+### A2 — IMPLEMENTED, REVIEWED **REJECT**, REMEDIATED
+
+Four BLOCKING findings, all accepted and all fixed in
+`backend/supabase/checks/restore_drill.md`:
+
+| Finding | Fix |
+|---|---|
+| `pending + failed` is **not** measured loss — `push.ts:258` sends before marking (`:306`, `:313`), so a lost response leaves an **applied** row pending | Renamed `Q_lost` → **`Q_at_risk`**, stated as an upper bound; step 11 now requires a **clean queue baseline before aeroplane mode** |
+| 14(a) still equated unlike units — `sync_queue` has no uniqueness tying one queue row to one business row (`schema.ts:1366-1395`), so retries break any count equality | 14(a) now compares **SETS of `(table_name, row_id)`**, never counts |
+| **The revision was WEAKER than the original**: it called a lost `cash_drawer` update a PASS because the server's older value returned — the original's blunt count rule would have rejected it | Step 14 now reports **two verdicts**; the no-irreversible-loss objective passes only when the **known local value loss set is EMPTY** |
+| 14(b) was not executable with the approved evidence — no row ids were emitted | Step 11 now mandates the **row identity set**; the debugger route supplies it |
+
+Plus: 14(c) now requires a full `conflict_queue` dump and the server's staging
+state; the evidence list went from 8 items to **11**, adding fingerprint
+*validity* proof; and my "unsatisfiable / no choice of arithmetic" claim is
+corrected to **non-diagnostic** — the equality can hold by coincidence.
+
+The third finding is the one that matters most as a lesson: **making a criterion
+measurable must not quietly make it weaker.** I was explicitly asked to look for
+a scenario the revised contract would pass and the original would catch, and I
+failed to find the one that existed.
+
+Not re-reviewed after remediation. `restore-drill.test.ts` passes 22/22.
+
+### A3 — NOT STARTED, correctly
+
+The condition was *"Build only after the reviewed instrumentation and native
+changes are accepted."* A1 was not accepted; it was withdrawn. So no prebuild,
+no Gradle build, no install, no worktree. The device was touched only by
+read-only queries all session. §2.6's build sequence stands unchanged except
+that **step 3's census flag is no longer needed** — there is no census to
+compile in.
