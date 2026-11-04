@@ -1,153 +1,212 @@
 # A2.3 production-readiness concern: recovery for a shop with one Owner device
 
-Raised 2026-11-03, out of H-11 Part B. **This is a proposal for independent
-review, not an implementation.** Nothing here has been built, and the fix it
-describes touches the database and the device registry, so CLAUDE.md rule 10
-applies: it needs an approved plan before any code is written.
+Raised 2026-11-03, out of H-11 Part B. **Revision 2, 2026-11-04**, after an
+independent security/architecture review returned **REJECT** on revision 1's
+recommended option. The underlying concern was confirmed valid; the proposed
+fix was not. Revision 1's Option A is retained below only as a rejected option,
+with the reasons, because the reasons are the useful part.
 
-No bypass is proposed. Every option below *satisfies* the enrolment hold
-through a new, auditable path; none of them skips it, and none weakens
-`a23_prepare_enrollment`, `a23_enroll_device` or `a23_approve_enrollment`.
+**This is a proposal for independent review, not an implementation.** Nothing
+here has been built. It touches the database and the device registry, so
+CLAUDE.md rule 10 applies, and the founder's standing instruction is explicit:
+no recovery-policy change without a new scoped rule 10 approval.
 
-## 1. The concern, stated precisely
+No bypass is proposed. Any option must *satisfy* the enrolment hold through a
+new, auditable authority; none may skip `a23_prepare_enrollment`,
+`a23_enroll_device` or `a23_approve_enrollment`.
 
-A2.3 holds a revoked actor out of self-service re-enrolment. The hold is
-cleared by exactly one function, and that function requires a *second*,
-currently-bound administrator installation:
+## 1. The control, stated precisely
 
-- `a23_enroll_device` raises `MU070` whenever an unconsumed hold row exists for
-  `(shop_id, actor_user_id)` that is not already approved for this exact
-  `device_public_id` — `20260923000000_a23_device_registry.sql`, and the
-  corrected definition in `20260926000000_a23_persistent_enrollment_holds.sql`.
+A2.3 holds a revoked actor out of self-service re-enrolment:
+
+- `a23_enroll_device` raises `MU070` unless an existing hold is already
+  approved for this exact `device_public_id` **and not yet consumed** —
+  `20260926000000_a23_persistent_enrollment_holds.sql:134`.
 - `a23_approve_enrollment` is, in its own words, *"the only A2.3 path that can
   satisfy an enrolment hold. Manual account recovery remains deliberately out
   of scope."*
-- It requires a caller who is a device admin **and** has a live row in
+- It requires a caller who is a device admin **and** holds a live row in
   `auth_session_devices` joined to an `active` device and an `active` binding.
   Role alone is refused with `MU071`.
-- It also refuses when `v_hold.source_device_id = v_approver_device_id` — the
-  approving installation must be a *different* one from the installation that
-  caused the hold.
+- It refuses when `v_hold.source_device_id = v_approver_device_id`: the
+  approving installation must differ from the one that caused the hold.
 
-So the approval requires a second installation that is active, bound, and not
-the one that triggered the hold.
+**Approval is consumed, not cleared** (review finding 8). Enrolling consumes
+the approval and the hold row remains, so a later enrolment — even reusing the
+same replacement id — needs a fresh approval. Revision 1 said the hold was
+"cleared". That was wrong.
 
-## 2. What is NOT affected — this bounds the concern sharply
+Note also that the approving installation need not belong to a different
+*person*: the same Owner may approve from a second installation of their own.
+The control is a second **installation**, not a second human.
 
-A hold row is created in exactly two places, both of them deliberate
-administrative revocations: `a23_revoke_binding` and `a23_revoke_device`.
+## 2. What is NOT affected — the bounding claim, confirmed
+
+Hold rows are **created** in exactly two places, both deliberate administrative
+revocations: `a23_revoke_binding` (`:1238`) and `a23_revoke_device` (`:1374`).
 Nothing in registration, login, PIN recovery or app-data clearing creates one,
-and `a23_prepare_enrollment` returns `allowed: true` when no hold row exists.
+and `a23_prepare_enrollment` returns `allowed: true` when none exists.
 
-Therefore:
+Independent review confirmed this boundary against the SQL. Two corrections to
+how revision 1 worded it:
 
-- **A brand-new Owner registering a brand-new shop is unaffected.** First
-  enrolment never consults a hold that does not exist.
-- **A single-owner shop that has never revoked a device is unaffected.** The
-  owner can move to a new handset with phone + PIN.
+- They are the only **creators**, not the only **writers**: prepare, enrol and
+  approve all update an existing hold row.
+- "Never revoked" must include *binding* revocation, and the boundary is per
+  `(shop_id, actor_user_id)`, not per shop.
 
-The exposure is narrower, and sharper, than "single-owner shops cannot
-recover".
+So a brand-new Owner registering a brand-new shop is unaffected, and so is any
+shop/actor pair that has never been revoked. `a23-device-registry.pgtest.ts`
+pins this directly: *"keeps normal non-revoked strong-auth enrolment
+available"* asserts `allowed: true, held: false`.
 
-## 3. The actual sharp edge
+## 3. The actual dead end — corrected
 
-> A sole Owner loses their phone. They do the responsible thing and revoke the
-> lost installation. That revocation writes the hold. They now cannot enrol
-> their replacement handset, because satisfying the hold requires an active
-> bound administrator installation — and the only one they ever had is the
-> device they just revoked.
+Revision 1 narrated: owner loses phone, revokes it, cannot enrol a replacement.
+**That sequence is largely impossible, and the narrative was wrong** (review
+finding 7). Revoking is a guarded action requiring a bound session, so an owner
+whose only handset is gone cannot revoke anything. In the ordinary lost-phone
+case they sign in on the replacement first — no hold exists, so it enrols —
+and revoke the lost installation afterwards, from the replacement.
 
-The owner is locked out by following the security advice. Their data is intact
-on the server and unreachable from any new device. For a one-pharmacist shop
-with no Manager, there is no in-product way back.
+The genuinely unrecoverable states are narrower:
 
-Severity: **HIGH for production**, LOW for Batch 3 acceptance (it blocks a test
-drill, not a shipped user — see §6). It is a design gap, not a defect: every
-individual control is behaving as specified.
+1. **Self-revocation of the last installation.** The owner revokes the very
+   installation they are using, leaving a hold and no active installation.
+2. **Loss of the last remaining installation while a hold is outstanding** from
+   an earlier revocation.
+
+Case 1 is already encoded in the test suite, by name:
+`backend/supabase/pgtest/a23-device-registry.pgtest.ts:579`, *"leaves a
+sole-admin revoked-device case blocked pending manual recovery"* — approval
+refused `MU071`, enrolment refused `MU070`. The product knows about this state
+and has no route out of it.
+
+Severity: **HIGH for production availability**, LOW for Batch 3 acceptance,
+where a fresh identity avoids it. Review agreed with both, with the caveat that
+the Batch 3 rating is about fixture obstruction and is not evidence that the
+blocked drill passed.
 
 ## 4. Constraints any fix must respect
 
-1. An attacker who has stolen the handset may also know the PIN. Phone + PIN
-   alone must therefore **not** be sufficient to satisfy a hold — that is the
-   whole reason the hold exists.
-2. Recovery must be **auditable**: who asked, from which installation, when,
-   what was approved, and by what authority — in `device_registry_events`, the
-   table the rest of A2.3 already writes to.
-3. Recovery must be **reversible or contestable** by a legitimate owner who did
+1. An attacker holding the stolen handset may also know the PIN and may be able
+   to receive its SMS. Phone + PIN + anything derived from that same phone must
+   therefore **not** be sufficient. This is the whole reason the hold exists.
+2. **The schema will not accept a non-user approval as it stands.** The CHECK
+   at `20260923000000_a23_device_registry.sql:298` requires `approved_at`,
+   `approved_by_user_id`, `approved_by_device_id` and
+   `approved_device_public_id` to be non-null *together*, and both approver
+   columns are UUID foreign keys. A provenance meaning "no user approved this"
+   cannot be expressed: nulls fail the CHECK, invented UUIDs fail the FKs, and
+   borrowing a real user/device id would falsify the audit record. Any new
+   authority needs an explicit schema change and its own provenance column.
+3. The primary key is `(shop_id, actor_user_id)` — one hold per actor. A
+   durable pending-request history, or concurrent requests, needs a separate
+   table rather than more columns on the hold.
+4. `device_registry_events` has a CHECK on its event vocabulary (`:195`) with
+   no pending-recovery, cancellation or notification event types. Auditing a
+   new flow means extending it.
+5. Recovery must be auditable, and contestable by a legitimate owner who did
    not initiate it.
-4. No service-role or support path may call `a23_enroll_device` with the hold
-   bypassed. A new satisfying path must be as explicit as
-   `a23_approve_enrollment`.
+6. Any new capability must be evaluated at **both** OTP-bearing entry points —
+   `recoverPin.ts` and `linkDevice.ts` — not just the one being designed for.
 
-## 5. Proposed options
+## 5. Options
 
-### Option A — delayed self-approval with notification (recommended)
+### Option D — pre-issued independent recovery credential (RECOMMENDED)
 
-The owner proves phone (OTP) + PIN on the new installation. Instead of
-enrolling, the request enters a pending state with a mandatory waiting period
-(proposed: 72 hours). During the window:
+From the independent review, and now the recommendation.
 
-- every known contact point for the shop is notified that a replacement device
-  is pending, including the number on file;
-- any active administrator installation, if one later appears, can cancel it
-  immediately;
-- the window and every transition are written to `device_registry_events`.
+At provisioning, while the owner still has trusted access, issue a
+high-entropy single-use recovery code to be stored **off the handset**. The
+server stores only a verifier. Redemption is rate-limited, bound to the exact
+shop, actor, recovery request and replacement installation, consumed
+atomically, and rotated afterwards. The hold persists; recovery provenance is
+recorded explicitly rather than borrowed from a user id.
 
-If the window closes uncancelled, the hold is satisfied for that exact
-`device_public_id` only — reusing the existing `approved_device_public_id`
-machinery, with a new `approved_by` provenance meaning "elapsed, uncontested"
-rather than a user id.
+Why this and not a timer: it introduces evidence the handset-plus-PIN attacker
+does not have. Everything in Option A — OTP, PIN, notification — flows through
+the one phone that is assumed compromised. A recovery code is the only proposal
+here that breaks that single channel. It is also a recognised account-recovery
+method rather than an invention (NIST SP 800-63B, account recovery).
 
-Why this is not a bypass: it does not remove the second-party check, it
-replaces a *synchronous* second party with a *time-plus-notification* one. A
-thief holding phone and PIN gains access only after 72 hours of visible,
-cancellable warning, which converts a silent takeover into a detectable one.
-A genuine sole owner waits three days — bad, but not permanent.
+Limits, stated plainly: it only helps owners who were provisioned **before**
+loss. Owners already locked out need a separately approved identity-proofing
+process, which is Option B and is not solved by this.
 
-Open question for review: 72 hours is a guess. The right number is a product
-decision informed by how fast a Bangladeshi pharmacist would notice.
+### Option A — delayed self-approval with notification (REJECTED)
 
-### Option B — support-assisted approval under dual control
+Revision 1's recommendation: OTP + PIN on the new installation, then a 72-hour
+notified, cancellable window after which the hold is satisfied. Review verdict:
+**FAIL, BLOCKING.** Recorded here with the reasons:
 
-An operator action in the Admin Panel that approves a specific pending
-`device_public_id`, requiring two distinct operator identities and recorded
-append-only with the evidence relied on.
+- A thief with handset, PIN and SMS possesses every proposed proof; clearing
+  app data supplies the new installation id. The timer only delays them.
+- The notification goes to the number on the stolen handset — it warns the
+  attacker, not the owner, in exactly the case it exists for.
+- Cancellation is offered only to an active admin installation, which by
+  definition the locked-out owner does not have. "If one later appears" is
+  circular: the hold is what stops one appearing.
+- It does not fit the schema (see constraint 2 above).
+- `a23_prepare_enrollment` rewrites `requested_at` on every retry, so a naive
+  timer restarts on each request — indefinite lockout for the owner, or a
+  stale deadline authorising a substituted installation.
+- 72 hours had no security basis. It was a guess, and a longer delay cannot
+  compensate for an owner who never receives the warning.
 
-Stronger against the thief case, far weaker operationally: it needs a staffed
-support function, an identity-proofing policy, and it introduces an insider
-path that does not exist today. Recommended only as a fallback behind Option A,
-never as the primary route.
+The general lesson: elapsed silence is not an approval authority.
 
-### Option C — pre-registered recovery contact at onboarding (prevention)
+### Option B — support-assisted approval under dual control (FALLBACK ONLY)
 
-Capture a second trusted number at shop creation, so a sole owner has a second
-party from day one. Cheap, and it removes the problem for new shops — but it
-does nothing for shops already in the field, so it is a complement to A, not a
-substitute.
+Two distinct operator identities, append-only record, documented evidence.
+Necessary for owners already locked out with no pre-issued credential; it is
+the only option that can help them. But it is worth having only if the
+operators' evidence is genuinely stronger than the same compromised phone
+channel — otherwise it is a slower version of the same mistake, with an
+insider path added.
+
+### Option C — pre-registered recovery contact (CONDITIONAL, not sufficient)
+
+Revision 1 called this cheap and said it "removes the problem for new shops".
+Review found that unsupported. A second number alone grants no authority under
+`a23_approve_enrollment`; it needs a defined approval or contest mechanism to
+mean anything. It also degrades badly: a stale number reaches a stranger, a
+hostile contact can assist a takeover or block a legitimate recovery, and a
+second number on the same handset shares the compromise. Viable only with
+verified independent control, consent, periodic revalidation, protected
+changes, and a further fallback.
 
 ### Recommendation
 
-**C for prevention on new shops, A for recovery on all shops, B only if a
-staffed support function exists and wants it.** A alone closes the gap; C alone
-does not.
+**D as the primary route, B as the only path for owners already locked out, C
+only if it is built into a real approval mechanism. A is withdrawn.**
 
 ## 6. Relationship to H-11 Part B
 
-This concern was found because Part B hit the gate while attempting a recovery
-drill on a DEV identity that already carried a hold from earlier A2.3 testing.
-That was the control working correctly on an unsuitable identity, not a defect,
-and Part B remains BLOCKED rather than FAILED. See §9 of
+Found while Part B hit this gate on a DEV identity that already carried a hold
+from earlier A2.3 testing — the control working correctly on an unsuitable
+identity, not a defect. Part B remains BLOCKED rather than FAILED. See §9 of
 `b3-device-check-reconciliation-2026-11-01.md`.
 
-Part B itself does **not** need this fix: it can run on a genuinely new
-synthetic shop, which never touches a hold.
+Part B does **not** need this fix. A genuinely new synthetic shop has no hold,
+so `a23_prepare_enrollment` returns `allowed: true`. Note that the gate is
+still *invoked* on that path, via `linkDevice.ts:128` after the Owner row is
+created — it passes, it is not absent.
 
-## 7. What review is asked to decide
+## 7. Status and what remains open
 
-1. Is the §2 bounding correct — are `a23_revoke_binding` and `a23_revoke_device`
-   genuinely the only writers of `device_enrollment_holds`?
-2. Is Option A's delayed, notified, cancellable approval acceptable as a
-   *satisfying* path, or does it count as weakening the control?
-3. Is 72 hours the right order of magnitude?
-4. Should Option C be treated as P0 for Batch 4 onboarding, given it is cheap
-   and prevents new instances of the problem?
+Review verdict on revision 1: **REJECT**, with the single most important fix
+being to replace elapsed silence as an approval authority with an independent
+recovery credential or an independently verified approval. Revision 2 adopts
+that.
+
+Still open, for the next review:
+
+1. Does Option D's credential need to survive a shop that has never had a
+   second installation, and what is the provisioning moment — onboarding, or
+   first sync?
+2. What identity-proofing standard should Option B require, given it is the
+   only route for owners already locked out today?
+3. Does the pending-request state belong in a new table, given constraint 3?
+4. Should provisioning a recovery credential be P0 for Batch 4 onboarding? It
+   prevents new instances but does nothing for the existing field population.
