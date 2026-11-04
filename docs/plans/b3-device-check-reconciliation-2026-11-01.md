@@ -732,3 +732,46 @@ authorized clear, device-side per-table counts both sides of it, the step-15
 ledger reconciliation, and the step-16 local-reset checks. Server-side reads of
 `inventory_movements`, `batches` and the cash tables also need a credential
 that can see them; the admin service-role key cannot.
+
+---
+
+## 11. Unblock preparation, 2026-11-04 — §10.3's diagnosis was incomplete
+
+Full design, evidence and approval gates:
+[`b3-partb-partc-unblock-prep-2026-11-04.md`](b3-partb-partc-unblock-prep-2026-11-04.md).
+Part B remains **NOT PASS**. Three corrections to the section above.
+
+**"Part B needs a debuggable build" is necessary but NOT sufficient.** The
+device database is SQLCipher-encrypted, and
+`modules/muthoy-db-key/android/src/main/java/com/muthoy/dbkey/MuthoyDbKeyModule.kt`
+wraps the key with an AndroidKeyStore key that **cannot be exported**. `run-as`
+on a debuggable build can read the wrapped blob, the IV and the `.db` file, and
+none of it can be decrypted off the device. So no shell or PC route to
+`sync_queue` exists at any privilege level short of rooting the handset. The
+census must run **inside the app process**, which means new instrumentation, not
+just a different build. That is now the blocker for both Parts B and C.
+
+**Steps 11 and 14 cannot both be satisfied as written.** Step 11's number counts
+*queue rows*; step 14's is a difference of *business-table row counts*. One
+one-item cash sale produces 5-6 queue rows against 4-5 business rows
+(`db/sales.ts:685-692`), and `update`/`delete` operations produce a queue row
+while changing no count at all. The total queue count is also not loss:
+`sent` rows are never purged (`db/sync-helpers.ts:1804-1809`; the only
+production delete is the conflict path at `db/conflicts.ts:362-383`), so the
+lost quantity is `pending + failed`. A corrected, satisfiable interpretation is
+proposed in §1.3 of the prep document and needs approval before
+`restore_drill.md` is touched.
+
+**The server-side credential gap has a least-privilege answer that needs no new
+capability.** `backend/supabase/checks/restore_baseline.sql` already fingerprints
+`batches`, `cash_drawer`, `credits`, `expenses`, `inventory_movements`,
+`sale_items`, `sale_refunds` and `sales`, and
+`backend/supabase/checks/ledger_invariant.sql:29` already computes
+`batches.stock` against `sum(inventory_movements.change_qty)`. Both are
+SELECT-only and safe to re-run. They need a database session, whose password is
+the founder's by this project's own rule — so this is a founder-executed step,
+not a widened grant.
+
+The build itself turned out not to be the hard part: it is zero-cost, local, and
+needs no environment-policy change or new application ID. See §2 and §3 of the
+prep document.
