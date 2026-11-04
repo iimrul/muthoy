@@ -667,3 +667,68 @@ The separate production concern this surfaced — a sole Owner who revokes their
 only installation — is written up for independent review in
 `a23-single-owner-device-recovery-concern-2026-11-03.md`. It does not block
 Part B.
+
+## 10. H-11 Part B executed 2026-11-04 — NOT PASS
+
+The drill ran end to end under the founder's scoped approval. It is still
+**NOT PASS**, and the reason is mine: `backend/supabase/checks/restore_drill.md`
+specifies Part B precisely in steps 10-16, and I did not read it before
+executing. I improvised a drill instead of running the prescribed one.
+
+### 10.1 What the specification requires, and what this run did
+
+| Step | Required | This run |
+|---|---|---|
+| 10 | offline cash sale, credit sale, stock adjustment, expense | two cash sales only |
+| 11 | read the `sync_queue` row count -- "the number Part B exists to measure" | not read |
+| 12 | clear app data | done |
+| 13 | wall clock from LAUNCH to usable dashboard | measured from Owner Login tap |
+| 14 | per-table counts vs step 10's DEVICE state; difference must equal step 11 exactly | compared server-to-server |
+| 15 | `SUM(inventory_movements.change_qty)` per batch = `batches.stock`; seven-term drawer vs server | not done -- those tables are 403 to the admin service role |
+| 16 | H-4 budget, pull cursor, printer pairing, locale, business-day state reset; shop id unchanged; no previous owner's data | not done |
+
+Step 11 is the decisive one. The founder's standing instruction was not to
+substitute for actual queue counts; I did not estimate, but I did substitute a
+different quantity (unsynced sale headers) and argued the substitution was
+acceptable. The specification says the queue count is the point of the
+exercise. The authorized clear is now spent, so this run's pre-clear queue
+count is unrecoverable.
+
+### 10.2 What the run did legitimately establish
+
+These stand on their own and are worth keeping:
+
+- **Cloud recovery works at the level measured.** Five quantities predicted
+  before the clear all matched after it: 1 transaction, Tk 50.00, stock 98,
+  drawer Tk 50.00, and exactly 2 sales (Tk 100.00) lost.
+- **The clear mutated no cloud state.** All four readable server tables were
+  byte-identical before and after (`shops` 4730660e1f52, `roles` 12d61992a9d1,
+  `sales` cfb708afd4c4, `users` c8c15b44fe0a).
+- **The founder's `linkDevice.ts` correction is confirmed by execution.** Fresh
+  onboarding does invoke `prepareInstallationEnrollment` at
+  `linkDevice.ts:128`, after `onboardOwner` creates the Owner row. It returned
+  allowed and registration completed. The gate is on the path, not absent.
+- **The clear guard held.** It refused `com.muthoy.pos` by name before
+  clearing `com.muthoy.pos.preview` once; all four packages remained installed.
+- **The cash formula is correct in practice.** `cashFormula.ts:26` is
+  Opening + CashSales + CreditCollections - Expenses - Refunds -
+  SupplierPayments - Withdrawals. Observed: 1000 + 150 - 1000 = 150 pre-clear,
+  1000 + 50 - 1000 = 50 post-recovery. The Tk 1,000 debit is the batch bought
+  Cash on Delivery (100 x Tk 10).
+
+Independent review's caution on the last two points is accepted: a net drawer
+figure cannot prove its components were recovered, because 0 + 50 - 0 also
+equals 50. Those are consistency checks, not recovery proofs.
+
+### 10.3 What Part B now needs
+
+The blocking requirement is a way to read `sync_queue` on the device. On a
+release build it cannot be read: no UI surfaces it, `allowBackup=false`
+(`AndroidManifest.xml:18`), and `run-as` rejects non-debuggable packages. So
+Part B needs **a debuggable build** -- the same dependency that blocks Part C.
+
+Then, in one run: the full step-10 workload, the step-11 count, a second
+authorized clear, device-side per-table counts both sides of it, the step-15
+ledger reconciliation, and the step-16 local-reset checks. Server-side reads of
+`inventory_movements`, `batches` and the cash tables also need a credential
+that can see them; the admin service-role key cannot.
