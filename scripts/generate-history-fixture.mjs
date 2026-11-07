@@ -40,7 +40,6 @@
 //        --sales-per-day 40 --medicines 600 --seed 7
 
 import { DatabaseSync } from 'node:sqlite';
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
@@ -117,9 +116,20 @@ function applyMigrations(db) {
  * assumed:
  *
  *   - `hash` is NOT NULL so it must be written, but it is never consulted for
- *     the skip decision. It is set to the sha256 of the newest migration's own
- *     .sql, so the value is derived and re-checkable, not invented.
+ *     the skip decision. **The app itself writes the empty string** —
+ *     `drizzle-orm/expo-sqlite/migrations.cjs` builds every migration with
+ *     `hash: ""` (`expo-sqlite/migrator.cjs:42`) — so that is what a real
+ *     device's rows contain, and that is what is written here. An earlier
+ *     revision put a sha256 of the migration SQL in this column; it was valid
+ *     but made the fixture differ from every real device for no benefit, since
+ *     nothing reads it.
  *   - ONE row suffices, carrying the journal's greatest `when`.
+ *
+ * The journal's `when` values must be strictly unique, and this refuses to run
+ * if they are not. The whole one-row scheme rests on an unambiguous maximum: if
+ * two entries shared a timestamp, the newer one's `folderMillis` would not be
+ * strictly greater than the recorded `created_at`, the migrator would skip it,
+ * and the fixture would silently lack that migration's schema.
  *
  * WHAT THIS DELIBERATELY IS NOT. A real device has 34 rows with 34 real hashes
  * and timestamps. This is one row, sufficient for the skip decision and nothing
@@ -132,22 +142,103 @@ function applyMigrations(db) {
  * CREATE TABLE IF NOT EXISTS is a no-op rather than a conflicting definition.
  */
 function recordMigrationMetadata(db, journal) {
-  if (!Array.isArray(journal.entries) || journal.entries.length === 0) {
-    throw new Error('migration journal has no entries; refusing to write bookkeeping');
-  }
-  const newest = journal.entries.reduce((a, b) => (b.when > a.when ? b : a));
-  if (!Number.isFinite(newest.when)) {
-    throw new Error(`journal entry ${newest.tag} has a non-numeric "when": ${newest.when}`);
-  }
-  const sql = readFileSync(resolve(MIGRATIONS_DIR, `${newest.tag}.sql`), 'utf8');
-  const hash = createHash('sha256').update(sql).digest('hex');
+  const newest = newestJournalEntry(journal);
   db.exec(
     'CREATE TABLE IF NOT EXISTS `__drizzle_migrations` ('
     + 'id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)',
   );
+  // Column list and values exactly as the migrator's own insert
+  // (dialect.cjs:686): ("hash", "created_at"), so `id` is left NULL as it is on
+  // a real device, and `hash` is the empty string the app writes.
   db.prepare('INSERT INTO `__drizzle_migrations` (`hash`, `created_at`) VALUES (?, ?)')
-    .run(hash, newest.when);
-  return { tag: newest.tag, when: newest.when, hash };
+    .run('', newest.when);
+  return { tag: newest.tag, when: newest.when };
+}
+
+/**
+ * The journal's newest entry, refusing every input that would make the one-row
+ * scheme unsound rather than guessing.
+ */
+export function newestJournalEntry(journal) {
+  if (!Array.isArray(journal.entries) || journal.entries.length === 0) {
+    throw new Error('migration journal has no entries; refusing to write bookkeeping');
+  }
+  for (const entry of journal.entries) {
+    if (!Number.isSafeInteger(entry.when)) {
+      throw new Error(
+        `journal entry ${entry.tag} has a "when" that is not a safe integer: ${entry.when}`,
+      );
+    }
+  }
+  const seen = new Map();
+  for (const entry of journal.entries) {
+    if (seen.has(entry.when)) {
+      throw new Error(
+        `journal entries ${seen.get(entry.when)} and ${entry.tag} share "when" ${entry.when}. `
+        + 'The fixture records a single newest timestamp, and the migrator re-applies only '
+        + 'when created_at < when, so a tie would make one of these migrations skip and the '
+        + 'fixture would silently lack its schema.',
+      );
+    }
+    seen.set(entry.when, entry.tag);
+  }
+  return journal.entries.reduce((a, b) => (b.when > a.when ? b : a));
+}
+
+/**
+ * Does the fixture's recorded metadata still match the migrations that exist
+ * NOW? This is the check that rejects a STALE ARTIFACT, and it is deliberately
+ * separate from the generator: a fixture file written weeks ago is still on
+ * disk, still passes every SQL invariant, and is still used by the drill — but
+ * once a new migration lands, its recorded `created_at` is no longer the
+ * journal maximum and the app would re-apply migrations onto tables that
+ * already exist.
+ *
+ * Returns the failures rather than throwing so it reads like the SQL
+ * invariants alongside it.
+ */
+function migrationMetadataFailures(db) {
+  const present = db.prepare(
+    "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'",
+  ).get();
+  if (Number(present?.n ?? 0) === 0) {
+    return ['__drizzle_migrations is absent, so the app would re-apply every migration on boot'];
+  }
+  const row = db.prepare(
+    'SELECT `created_at`, typeof(`created_at`) AS storage FROM `__drizzle_migrations` '
+    + 'ORDER BY `created_at` DESC LIMIT 1',
+  ).get();
+  if (!row) {
+    return ['__drizzle_migrations exists but is empty, so the app would re-apply every migration'];
+  }
+  // The migrator does Number(created_at). Anything but an integer risks NaN, or
+  // text sorting above numbers in the ORDER BY and hiding the real newest row.
+  if (row.storage !== 'integer') {
+    return [
+      `__drizzle_migrations.created_at is stored as ${row.storage}, not integer; `
+      + 'the migrator coerces it with Number() and would compare against NaN',
+    ];
+  }
+  const journal = JSON.parse(readFileSync(resolve(MIGRATIONS_DIR, 'meta/_journal.json'), 'utf8'));
+  const newest = newestJournalEntry(journal);
+  const recorded = Number(row.created_at);
+  // The migrator's own predicate (dialect.cjs:679), applied to every migration.
+  const reapplied = journal.entries.filter((entry) => recorded < entry.when);
+  if (reapplied.length > 0) {
+    return [
+      `migration metadata is stale: created_at ${recorded} is older than `
+      + `${reapplied.length} migration(s) (${reapplied.map((e) => e.tag).join(', ')}), `
+      + 'so the installed migrator would re-apply them against a database that already '
+      + 'has their tables and the app would fail to boot',
+    ];
+  }
+  if (recorded !== newest.when) {
+    return [
+      `migration metadata records created_at ${recorded}, which is not the journal maximum `
+      + `${newest.when} (${newest.tag})`,
+    ];
+  }
+  return [];
 }
 
 /** Asia/Dhaka calendar date for an instant, matching migration 0024's rule. */
@@ -293,6 +384,9 @@ export function validateHistoryFixture(db) {
       failures.push(`${invariant.name}: ${offenders.length} offending row(s)`);
     }
   }
+  // Not a SQL invariant, because it compares the file against the migrations
+  // that exist on disk right now rather than against itself.
+  failures.push(...migrationMetadataFailures(db));
   if (failures.length > 0) {
     throw new Error(`Fixture is invalid:\n  - ${failures.join('\n  - ')}`);
   }

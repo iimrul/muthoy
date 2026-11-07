@@ -1,11 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { copyFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { validateHistoryFixture } from '../../../scripts/generate-history-fixture.mjs';
+import type { SQL } from 'drizzle-orm';
+import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core';
+// The exact module the app boots through (apps/mobile/db/init.ts:1).
+import { migrate } from 'drizzle-orm/expo-sqlite/migrator';
+import {
+  newestJournalEntry,
+  validateHistoryFixture,
+} from '../../../scripts/generate-history-fixture.mjs';
 
 // H-11 C2. The fixture the restore drill is run against.
 //
@@ -261,11 +267,6 @@ describe('the fixture carries Drizzle bookkeeping, so a restored device boots', 
     + 'ORDER BY `created_at` DESC LIMIT 1',
   );
 
-  // The migrator's own predicate: dialect.cjs:679. `folderMillis` is the
-  // journal entry's `when` (drizzle-orm/expo-sqlite/migrator.cjs:40).
-  const wouldReapply = (createdAt: unknown, folderMillis: number): boolean =>
-    Number(createdAt) < folderMillis;
-
   it('writes exactly the one row the migrator reads, with its three columns', () => {
     expect(count('__drizzle_migrations')).toBe(1);
     expect(rows("SELECT `name` FROM pragma_table_info('__drizzle_migrations')")
@@ -273,35 +274,170 @@ describe('the fixture carries Drizzle bookkeeping, so a restored device boots', 
       .toEqual(['id', 'hash', 'created_at']);
   });
 
-  it('skips all 34 journal migrations, which is what lets the app boot', () => {
-    const createdAt = newestRow().created_at;
-    const reapplied = journal.entries
-      .filter((e) => wouldReapply(createdAt, e.when))
-      .map((e) => e.tag);
-    expect(reapplied).toEqual([]);
-    expect(journal.entries.length).toBeGreaterThan(0);
+  it('records a timestamp that covers every migration in the journal', () => {
+    // Stated so it does not depend on HOW the maximum is chosen. An earlier
+    // revision asserted equality with a reduction identical to the generator's,
+    // so a shared assumption about ties would have satisfied both sides.
+    const recorded = Number(newestRow().created_at);
+    expect(journal.entries.every((e) => e.when <= recorded)).toBe(true);
+    expect(journal.entries.some((e) => e.when === recorded)).toBe(true);
+    expect(one('SELECT typeof(`created_at`) AS t FROM `__drizzle_migrations`').t)
+      .toBe('integer');
   });
 
-  it('pins created_at to the journal maximum, so a new migration invalidates it', () => {
-    // The stale-metadata guard. Add migration 0034 and forget to regenerate the
-    // fixture, and THIS fails here — instead of step 19 breaking on a device
-    // with no indication why.
-    expect(Number(newestRow().created_at)).toBe(newest.when);
+  it('writes the hash the app itself writes, not a value of its own', () => {
+    // drizzle-orm/expo-sqlite/migrator.cjs:42 builds every migration with
+    // `hash: ""`, so that is what a real device's rows contain. An earlier
+    // revision stored a sha256 here: valid, never read, and unlike any device.
+    expect(newestRow().hash).toBe('');
   });
 
-  it('is not a vacuous skip: a migration newer than the row would re-apply', () => {
-    // Without this, a bug that made every migration skip unconditionally (or a
-    // predicate that never fires) would pass the two tests above.
-    expect(wouldReapply(newestRow().created_at, newest.when + 1)).toBe(true);
-    expect(wouldReapply(newestRow().created_at, newest.when)).toBe(false);
+  it('refuses a journal whose timestamps are ambiguous', () => {
+    // A tie would make the newer migration skip, because the predicate is
+    // strict `<`. The generator must not silently produce such a fixture.
+    const tied = { ...newest, idx: newest.idx + 1, tag: '0034_tied' };
+    expect(() => newestJournalEntry({ entries: [...journal.entries, tied] }))
+      .toThrow(/share "when"/);
+    // ...and the real journal is accepted, so the guard is not blanket-refusing.
+    expect(newestJournalEntry(journal).when).toBe(newest.when);
+  });
+});
+
+describe('the REAL installed migrator, run against the generated fixture', () => {
+  // Re-implementing the predicate in a test only proves the re-implementation.
+  // These run drizzle's actual migrate() — the code that runs on the device —
+  // against a copy of the fixture. This is what catches a bookkeeping table
+  // that satisfies the column names but not the migrator, e.g. an `id` column
+  // with a DEFAULT that collides on the next real insert.
+  const journal = JSON.parse(
+    readFileSync(resolve('apps/mobile/db/migrations/meta/_journal.json'), 'utf8'),
+  ) as { entries: JournalEntry[] };
+  const maxWhen = Math.max(...journal.entries.map((e) => e.when));
+
+  const realMigrations = (entries: JournalEntry[]): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const e of entries) {
+      out[`m${String(e.idx).padStart(4, '0')}`] = readFileSync(
+        resolve(`apps/mobile/db/migrations/${e.tag}.sql`), 'utf8',
+      );
+    }
+    return out;
+  };
+
+  const openCopy = (): DatabaseSync => {
+    const copy = join(OUT_DIR, `migrator-${Math.random().toString(36).slice(2)}.db`);
+    copyFileSync(OUT, copy);
+    return new DatabaseSync(copy);
+  };
+
+  // drizzle's session shape, over node:sqlite.
+  const driverFor = (target: DatabaseSync) => {
+    const dialect = new SQLiteSyncDialect();
+    return {
+      dialect,
+      session: {
+        run(query: SQL<unknown>) {
+          const q = dialect.sqlToQuery(query);
+          return target.prepare(q.sql).run(...(q.params as never[]));
+        },
+        values(query: SQL<unknown>) {
+          const q = dialect.sqlToQuery(query);
+          return target.prepare(q.sql).all(...(q.params as never[])).map(Object.values);
+        },
+      },
+    };
+  };
+
+  const tableNames = (target: DatabaseSync): string[] =>
+    (target.prepare("SELECT `name` FROM sqlite_master WHERE type='table' ORDER BY `name`")
+      .all() as { name: string }[]).map((r) => r.name);
+
+  it('applies NOTHING and leaves the schema untouched — the app boots', async () => {
+    const target = openCopy();
+    try {
+      const before = tableNames(target);
+      const rowsBefore = Number((target
+        .prepare('SELECT COUNT(*) AS n FROM `__drizzle_migrations`').get() as { n: number }).n);
+
+      await migrate(driverFor(target) as never, {
+        journal, migrations: realMigrations(journal.entries),
+      } as never);
+
+      expect(tableNames(target)).toEqual(before);
+      expect(Number((target
+        .prepare('SELECT COUNT(*) AS n FROM `__drizzle_migrations`').get() as { n: number }).n))
+        .toBe(rowsBefore);
+    } finally {
+      target.close();
+    }
   });
 
-  it('derives hash from the newest migration SQL rather than inventing one', () => {
-    // `hash` is NOT NULL but is never read for the skip decision, so it would
-    // be easy to fill with a placeholder. A derived value stays checkable.
-    const sql = readFileSync(
-      resolve(`apps/mobile/db/migrations/${newest.tag}.sql`), 'utf8',
-    );
-    expect(newestRow().hash).toBe(createHash('sha256').update(sql).digest('hex'));
+  it('still applies a genuinely newer migration, and can insert its own row', async () => {
+    // The non-vacuous half, run for real. It also exercises the migrator's own
+    // INSERT into the table this fixture created, which is where a wrong DDL
+    // (an `id` default colliding with the NULL row) actually fails.
+    const target = openCopy();
+    try {
+      const probe: JournalEntry = { idx: 9999, when: maxWhen + 1, tag: '0034_probe' };
+      await migrate(driverFor(target) as never, {
+        journal: { entries: [probe] },
+        migrations: { m9999: 'CREATE TABLE probe_applied (n INTEGER);' },
+      } as never);
+
+      expect(tableNames(target)).toContain('probe_applied');
+      expect(Number((target
+        .prepare('SELECT COUNT(*) AS n FROM `__drizzle_migrations`').get() as { n: number }).n))
+        .toBe(2);
+    } finally {
+      target.close();
+    }
+  });
+});
+
+describe('validation rejects a STALE fixture artifact, not just a bad generator', () => {
+  // The gap an independent review found: every test above regenerates the
+  // fixture first, so they check fresh output. A fixture FILE on disk goes
+  // stale when a migration lands later, and validateHistoryFixture is what the
+  // drill trusts to say "this file is usable".
+  it('fails validation when recorded metadata predates a migration', () => {
+    const copy = join(OUT_DIR, 'stale.db');
+    copyFileSync(OUT, copy);
+    const stale = new DatabaseSync(copy);
+    try {
+      stale.exec('UPDATE `__drizzle_migrations` SET `created_at` = `created_at` - 1');
+      expect(() => validateHistoryFixture(stale)).toThrow(/metadata is stale/);
+    } finally {
+      stale.close();
+    }
+  });
+
+  it('fails validation when the bookkeeping table is missing entirely', () => {
+    const copy = join(OUT_DIR, 'nometa.db');
+    copyFileSync(OUT, copy);
+    const bare = new DatabaseSync(copy);
+    try {
+      bare.exec('DROP TABLE `__drizzle_migrations`');
+      expect(() => validateHistoryFixture(bare)).toThrow(/__drizzle_migrations is absent/);
+    } finally {
+      bare.close();
+    }
+  });
+
+  it('fails validation when created_at is not stored as an integer', () => {
+    // Non-numeric text sorts above integers in the ORDER BY, so it can hide the
+    // real newest row and make Number() produce NaN, which silently skips.
+    const copy = join(OUT_DIR, 'texty.db');
+    copyFileSync(OUT, copy);
+    const texty = new DatabaseSync(copy);
+    try {
+      texty.exec("UPDATE `__drizzle_migrations` SET `created_at` = 'garbage'");
+      expect(() => validateHistoryFixture(texty)).toThrow(/not integer/);
+    } finally {
+      texty.close();
+    }
+  });
+
+  it('accepts the fixture as generated', () => {
+    expect(() => validateHistoryFixture(db)).not.toThrow();
   });
 });

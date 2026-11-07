@@ -252,31 +252,84 @@ approval, and this is what was then written.
 
 #### What was actually written, and the evidence it works
 
-`scripts/generate-history-fixture.mjs` — one new private function
-`recordMigrationMetadata(db, journal)`, called at the end of `applyMigrations`.
-`+60` lines, no change to either export (`INVARIANTS`,
-`validateHistoryFixture`), no change to production migrations, hosted
-databases, sync or money logic. The DDL is copied verbatim from the migrator so
-its own `CREATE TABLE IF NOT EXISTS` stays a no-op.
+**Revised 2026-11-07 after an independent Codex review returned REVISE with
+three findings, all of which were real.** What that review caught, and what
+changed, is in the next sub-section; this describes the result.
 
-Five focused tests in `apps/mobile/tests/history-fixture.test.ts`. **47/47 pass**
-(`npx vitest run apps/mobile/tests/history-fixture.test.ts`), `tsc --noEmit`
-clean in `apps/mobile`.
+`scripts/generate-history-fixture.mjs` — three new private functions,
+`recordMigrationMetadata` (called at the end of `applyMigrations`),
+`newestJournalEntry` (exported, so its refusals are testable) and
+`migrationMetadataFailures` (wired into `validateHistoryFixture`). No change to
+production migrations, hosted databases, sync or money logic. The DDL and the
+insert's column list are copied verbatim from the migrator, so its own
+`CREATE TABLE IF NOT EXISTS` stays a no-op and the row looks like a device's.
 
-A passing test proves nothing on its own — the withdrawn bundle verifier passed
-while unable to read its input — so each test was checked against a mutation
-that should kill it:
+The row written: `{ id: null, hash: '', created_at: 1791417600000 }`. **`hash` is
+the empty string because that is what the app itself writes** —
+`drizzle-orm/expo-sqlite/migrator.cjs:42` builds every migration with
+`hash: ""`. The first revision stored a sha256 of the migration SQL here, which
+was valid and never read, but made the fixture unlike every real device for no
+benefit.
 
-| Mutation of the generator | Tests failed |
+**52/52 pass**, `vitest` exit 0; `tsc --noEmit` exit 0 in `apps/mobile`; the two
+encryption suites that touch this table pass 36/36. Full fixture regenerates:
+97,106 rows / 21.88 MiB / 34 migrations / 19 invariants.
+
+A passing test proves nothing on its own, so every guard was checked against a
+mutation that should kill it — **including the wrong-but-passing implementation
+the reviewer found**:
+
+| Mutation of the generator | Result |
 |---|---|
-| `recordMigrationMetadata` call removed entirely | **5** of 47 |
-| `created_at` pinned to a stale constant (the "forgot to regenerate" case) | **3** of 47 |
-| `hash` replaced with a placeholder string | **1** of 47 |
-| restored | **0** — 47 pass |
+| `id SERIAL PRIMARY KEY **DEFAULT 0**` — the reviewer's case, which passed all 47 tests before this revision | **killed**: the real-migrator test fails on the next insert |
+| metadata check removed from `validateHistoryFixture` | **killed**: 3 stale-artifact tests fail |
+| duplicate-timestamp guard disabled | **killed**: the ambiguous-journal test fails |
+| `hash` set to a sha256 instead of `''` | **killed**: the hash-fidelity test fails |
+| `recordMigrationMetadata` call removed entirely | **killed harder**: the generator now REFUSES to emit the fixture, and `vitest` exits **1** |
+| restored | 52 pass, exit 0 |
 
-The second row is the one the founder asked for: *stale metadata rejection* is
-detected, not assumed. The fourth confirms the suite is green only with the fix
-present.
+The last row's exit code was measured without a pipeline. An earlier attempt
+read `$?` after piping vitest through `sed` and so reported the exit status of
+`sed` — the same mistake that previously made a failing Gradle build look like a
+success.
+
+#### What the independent review caught
+
+Three findings, each reproduced by the reviewer, each a genuine gap:
+
+1. **Stale-metadata rejection was not actually tested.** Every test regenerated
+   the fixture first, so they all checked *fresh* output. The real risk is a
+   fixture **file** on disk that goes stale when a migration lands later, and
+   `validateHistoryFixture` — the function the drill trusts to say "this file is
+   usable" — did not look at migration metadata at all. **Fixed** by making
+   `validateHistoryFixture` compare the artifact's recorded `created_at` against
+   the journal as it exists now, so a stale file fails validation instead of
+   failing at boot. It also rejects a missing table and a non-integer
+   `created_at` (text sorts above integers in the migrator's `ORDER BY`, which
+   could hide the real newest row and make `Number()` yield `NaN`).
+2. **The test and the generator shared an assumption.** Both picked the newest
+   entry with the same reduction, so independent *execution* was not independent
+   *reasoning*: with two journal entries sharing a `when`, the reduction keeps
+   the older one, the strict `<` predicate skips the newer migration, and the
+   fixture silently lacks its schema — with all assertions still passing.
+   **Fixed** two ways: the generator now refuses a journal with duplicate or
+   non-safe-integer `when` values, and the test's expectation no longer depends
+   on how the maximum is chosen (it asserts the recorded value is ≥ every entry
+   and equal to one of them).
+3. **The tests re-implemented the migrator instead of running it.** They
+   reproduced the predicate, which proves the reproduction. Changing the DDL to
+   `id SERIAL PRIMARY KEY DEFAULT 0` passed all 47 tests and then broke a real
+   upgrade with `UNIQUE constraint failed: __drizzle_migrations.id`. **Fixed** by
+   running drizzle's actual `migrate()` — imported from the same module the app
+   boots through (`apps/mobile/db/init.ts:1`) — against a copy of the generated
+   fixture: it must apply nothing and leave the schema identical, and a
+   synthetic newer migration must still apply and insert its own row.
+
+The reviewer also confirmed the one-row scheme itself matches the installed
+contract, that the NULL `id` is safe (verified independently here: SQLite
+accepts multiple NULLs in that non-rowid PRIMARY KEY, and `ORDER BY id` survives
+a logical copy — tested with 34 NULL-id rows), and that nothing in the change
+touches production migrations, hosted operations, sync or money.
 
 **Measured effect on the fixture.** Default run after the change: **97,106 rows,
 22,941,696 bytes (21.88 MiB), 57 tables** (27 populated), 34 migrations applied,
