@@ -42,19 +42,64 @@ recorded either way.
 
 ### Host-side tooling: what will actually open the copy
 
-The earlier finding that this host has **no SQLCipher tooling** stands. The same
-sources name the usable options, and the choice matters because a GUI cannot be
-scripted into repeatable evidence:
+The earlier finding that this host has **no SQLCipher tooling** stands. Nothing
+has been installed. What follows is the identification the founder asked for —
+licensing, version and integrity verified first — and a request, not an action.
 
-- **`sqlcipher` CLI** — scriptable, the natural fit as the measurement tool's
-  input stage; not installed.
-- **DB Browser for SQLite** — documented as supporting SQLCipher, but a GUI;
-  acceptable for a one-off look, not for repeatable evidence.
-- **A language binding** (`better-sqlite3-multiple-ciphers`, `sqlcipher3`) —
-  scriptable, and would make decrypt-and-measure a single command.
+**What the tool has to match**, read from the app rather than assumed:
 
-Obtaining one is a dependency decision, listed in §6 rather than taken
-unilaterally.
+| Property | Value | Source |
+|---|---|---|
+| SQLCipher version | **4.7.0 community** | `CIPHER_VERSION_NUMBER` / `CIPHER_VERSION_BUILD` in expo-sqlite's vendored amalgamation |
+| Underlying SQLite | 3.49.1 | same file, `SQLITE_VERSION` |
+| Crypto provider | OpenSSL | `-DSQLCIPHER_CRYPTO_OPENSSL` in expo-sqlite's `android/build.gradle:34` |
+| Key form | **raw**: `PRAGMA key = "x'<64 hex>'"` | `apps/mobile/db/databaseKey.ts:62` |
+| KDF | **skipped** — the raw form bypasses key derivation | `databaseKey.ts:51` |
+| Cipher parameters | **defaults** (4096-byte pages, HMAC-SHA512) | no `cipher_page_size` / `kdf_iter` / `cipher_hmac_algorithm` / `cipher_compatibility` pragma anywhere under `apps/mobile/db/` |
+
+So the requirement is specific: read the **SQLCipher 4** format with a **raw**
+64-hex key. A tool that only accepts passphrases is useless here, and a GUI
+cannot be scripted into repeatable evidence.
+
+**Candidates, with registry metadata read without installing anything**
+(`npm view`, which fetches metadata only):
+
+| Package | Version | License | Integrity (npm `dist.integrity`) |
+|---|---|---|---|
+| **`@journeyapps/sqlcipher`** | 6.0.0 | **BSD-3-Clause** | `sha512-YmWSQIR4cnv+5L38lYJoS/dIF/+bEZBaACATbeTyq4XKjMHcxdIlFnElBLiIqa9rwseOIimIYjudgOOCovud3Q==` |
+| `better-sqlite3-multiple-ciphers` | 13.0.3 | **MIT** | `sha512-UYabM82r1J84TLWc/SszoHs6XopWpl/2HCg3Nui1JUaFXg/VLswzkPowYiRhK/4CftI8dgtikwyZQecMldrGxQ==` |
+
+`node-sqlite3-wasm` was considered and **rejected**: it is plain SQLite with no
+SQLCipher support. SQLCipher itself (the `sqlcipher` CLI) is BSD-style licensed
+and permits commercial use provided the copyright notice and disclaimer are
+reproduced; 4.7.0 was released 2025-03-25. Note the upstream licence pages
+disagree on the copyright year (2008-2023 vs 2008-2024), so the `LICENSE` file
+of whatever is actually fetched is the authority.
+
+**Preference, and why.** `@journeyapps/sqlcipher` links *real* SQLCipher, so the
+format and the raw-key behaviour are correct by construction rather than by
+emulation — which matters when the whole point is to read a file the app wrote.
+Its cost is a native build on Windows. `better-sqlite3-multiple-ciphers` is
+lighter but reimplements the scheme via SQLite3MultipleCiphers, whose official
+pragma documentation does confirm the `x'...'` raw form and states that only the
+sqleet and SQLCipher AES-256 schemes support raw keys, with the first 32 bytes
+as key and the next 16 as salt — our 64-hex value supplies the key and leaves
+SQLCipher to take the salt from the file header, as on device.
+
+**What integrity does and does not prove.** The `sha512` above is what the
+registry serves and what the package manager verifies on install, and the
+lockfile pins it. That proves the tarball matches the registry record. It does
+**not** prove the code is benign, so if approved: install into an isolated
+directory outside the repository, never into `apps/mobile`.
+
+**The one property still unverified, and how it gets verified.** Neither
+candidate's raw-key + SQLCipher-4 behaviour has been tested against a real file,
+because that needs the tool installed. It can be settled with **no device and no
+real key**: create a throwaway SQLCipher-4 database with a known random 64-hex
+raw key, write a handful of rows, close it, re-open it with the tool, and confirm
+the rows read back and that a wrong key fails. Only after that round-trip passes
+should the tool ever be pointed at anything real. That test is the acceptance
+condition for the install request in §6.
 
 ## 2. The key-assisted route, if it is needed
 
@@ -143,8 +188,9 @@ matching the documented 21.8 MiB. 56 tables, **97,105 rows**, plain SQLite
 (opens with no key), WAL journal mode. That is the correct *input* state for
 H-3's plain → SQLCipher copy-verify-swap.
 
-**One compatibility gap found, and it affects step 19 rather than step 18.** The
-fixture has **no `__drizzle_migrations` table** and `user_version = 0`:
+**One compatibility gap was found; it is now FIXED** — see the applied record
+below. It affected step 19 rather than step 18. As generated before 2026-11-07 the
+fixture had **no `__drizzle_migrations` table** and `user_version = 0`:
 `scripts/generate-history-fixture.mjs:82-87` applies each migration's SQL
 directly without writing Drizzle's bookkeeping. But `apps/mobile/db/init.ts:88`
 runs `migrate(db, migrations)` on every boot and skips only what
@@ -156,7 +202,7 @@ Consequence: step 18 (timing the encryption migration) is a file-level
 copy-verify-swap and is unaffected. **Step 19 (SIGKILL mid-migration, then
 relaunch) needs the app to boot afterwards, and it would not.**
 
-### Scoped Rule 10 plan for the fixture's migration metadata — PROPOSAL, not applied
+### Scoped Rule 10 fix for the fixture's migration metadata — APPLIED 2026-11-07
 
 **The mechanics, read from the installed migrator** rather than assumed
 (`drizzle-orm/sqlite-core/dialect.cjs:665-690`):
@@ -200,8 +246,61 @@ upgrade history, that is a different change. `apps/mobile/db/encryptionVerify.ts
 compares `__drizzle_migrations` rows and hashes across the encryption copy, which
 stays self-consistent either way because both sides are the same file.
 
-**Why Rule 10 applies:** it changes a tool that produces database input for a
-money-and-stock acceptance drill. Approval is requested before writing it.
+**Why Rule 10 applied:** it changes a tool that produces database input for a
+money-and-stock acceptance drill. The founder granted a scoped, generator-only
+approval, and this is what was then written.
+
+#### What was actually written, and the evidence it works
+
+`scripts/generate-history-fixture.mjs` — one new private function
+`recordMigrationMetadata(db, journal)`, called at the end of `applyMigrations`.
+`+60` lines, no change to either export (`INVARIANTS`,
+`validateHistoryFixture`), no change to production migrations, hosted
+databases, sync or money logic. The DDL is copied verbatim from the migrator so
+its own `CREATE TABLE IF NOT EXISTS` stays a no-op.
+
+Five focused tests in `apps/mobile/tests/history-fixture.test.ts`. **47/47 pass**
+(`npx vitest run apps/mobile/tests/history-fixture.test.ts`), `tsc --noEmit`
+clean in `apps/mobile`.
+
+A passing test proves nothing on its own — the withdrawn bundle verifier passed
+while unable to read its input — so each test was checked against a mutation
+that should kill it:
+
+| Mutation of the generator | Tests failed |
+|---|---|
+| `recordMigrationMetadata` call removed entirely | **5** of 47 |
+| `created_at` pinned to a stale constant (the "forgot to regenerate" case) | **3** of 47 |
+| `hash` replaced with a placeholder string | **1** of 47 |
+| restored | **0** — 47 pass |
+
+The second row is the one the founder asked for: *stale metadata rejection* is
+detected, not assumed. The fourth confirms the suite is green only with the fix
+present.
+
+**Measured effect on the fixture.** Default run after the change: **97,106 rows,
+22,941,696 bytes (21.88 MiB), 57 tables** (27 populated), 34 migrations applied,
+19 invariants pass. Before the change: 97,105 rows / 22,933,504 bytes / 56
+tables. The delta is exactly the one bookkeeping row and its table.
+
+The row itself: `created_at = 1791417600000` (the journal maximum, entry
+`0033_medicine_search_key`), `hash` = the 64-hex sha256 of that migration's
+`.sql`, and `id = NULL`. The NULL id is not a defect: `id SERIAL PRIMARY KEY` is
+not an INTEGER-PRIMARY-KEY rowid alias in SQLite, so it does not autoincrement,
+and the migrator's own insert names only `("hash", "created_at")` — a real
+device's rows are written the same way. SQLite permits NULL in a non-rowid
+PRIMARY KEY, and NULLs are distinct in a UNIQUE index, which is why real devices
+accumulate many such rows without conflict.
+
+**One consequence worth stating.** `apps/mobile/db/encryptionVerify.ts`
+excludes only `sqlite_*` and FTS shadow tables (`isInternalTable`, `:43-45`), so
+`__drizzle_migrations` is now inside H-3's copy-verify comparison. That is
+strictly more verification, not less, and it is deterministic: one row, ordered
+by its primary key, with both sides being the same copied file.
+
+**Still not claimed.** This is one row, not a 34-row upgrade history, and the
+fixture has only ever been proven to *generate*. Whether a device boots from it
+is step 19, and step 19 needs the handset.
 
 ## 6. What is NOT proven, and why
 
@@ -217,11 +316,13 @@ reports no Samsung device, so none of the following has been executed:
 - any Part B prerequisite that needs login, sync or a measurement.
 
 **There is also no SQLCipher tooling on this host.** No `sqlcipher` CLI, no
-`sqlcipher3` / `pysqlcipher3`, no `better-sqlite3-multiple-ciphers`. The
-decryption step of §2 therefore cannot run until such a tool is obtained, and
-obtaining one is a dependency decision rather than something to do silently. The
-measurement tool itself needs none of it — it reads plain SQLite — which is why
-§4's proofs stand regardless.
+`sqlcipher3` / `pysqlcipher3`, no `better-sqlite3-multiple-ciphers`. Two
+candidates are now identified with their licence, version and integrity hash in
+§1, together with the exact SQLCipher 4.7.0 raw-key requirement they have to
+meet and the key-free round-trip test that must pass before either touches
+anything real. **Nothing is installed, and installation is not authorized** —
+that request is what §1 ends with. The measurement tool itself needs none of it
+— it reads plain SQLite — which is why §4's proofs stand regardless.
 
 So §4 proves the measurement is correct and repeatable; §2 remains an
 **untested procedure**. Those are different claims, and this document does not

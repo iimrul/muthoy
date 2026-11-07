@@ -64,8 +64,9 @@ error; it is a day's takings.
 Today the app has **one** sync surface, and it is the wrong one for this risk:
 
 - **Exists:** Settings → *Sync conflicts* (`apps/mobile/app/sync-conflicts.tsx`,
-  reached from `settings.tsx:219-221`), which lists `conflict_queue` rows and
-  lets the owner resolve them.
+  reached from `apps/mobile/app/settings/settings.tsx:221` — corrected
+  2026-11-07; the path first recorded here, `settings.tsx:219-221`, does not
+  exist), which lists `conflict_queue` rows and lets the owner resolve them.
 - **Does not exist anywhere:** any indication of **how much unsynced work is at
   risk**. `countFailedSyncRows` (`apps/mobile/db/sync-helpers.ts:1842`) is
   implemented and **surfaced nowhere**; no screen, banner or badge reads the
