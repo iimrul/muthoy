@@ -24,13 +24,37 @@ avoids exporting the plaintext key**. Three candidates, assessed honestly:
 
 | Candidate | Status |
 |---|---|
-| **Android Studio Database Inspector** (App Inspection) | **UNVERIFIED — needs the device.** It inspects databases opened through the Android framework / AndroidX SQLite. This app opens its database through `expo-sqlite`'s own bundled SQLCipher (`lib/arm64-v8a/libexpo-sqlite.so`), not the framework, so the inspector is **expected** not to attach. That expectation has NOT been tested and must be tested first — if it works it is strictly better than everything below, because no key leaves the device. |
-| **Hermes JS debugger, evaluating a query in-process** | **Expected unavailable on a release build.** React Native's Hermes inspector is gated on dev support, which a `release` variant does not ship even with `android:debuggable=true`. Also unverified. |
+| **Android Studio Database Inspector** (App Inspection) | **RULED OUT — verified 2026-11-07, no device needed.** It cannot read a SQLCipher database at all. This is not an `expo-sqlite` quirk: a plain SQLite client does not understand SQLCipher's encryption scheme, so neither Database Inspector nor **Android's own on-device `sqlite3` binary** can open one. Corroborated by CommonsWare's SQLCipher-for-Android reference, a community Room+SQLCipher sample reporting the same, and a Stack Overflow report of the database always showing as "closed". **This replaces the earlier "expected not to attach, unverified" entry** — the expectation was right for the wrong reason, and the real reason is stronger and needs no hardware. |
+| **Android's on-device `sqlite3`** | **RULED OUT**, same reason, same sources. |
+| **Hermes JS debugger, evaluating a query in-process** | **Still unverified, and needs the device.** React Native's Hermes inspector is gated on dev support, which a `release` variant does not ship even with `android:debuggable=true`. If it did work it would be the only key-free route, because the query would run inside the process that already holds the key. |
 | **JDWP (Java/Kotlin debugger) breakpoint on the key accessor** | Available: `android:debuggable=true` enables JDWP regardless of build type. This is the key-assisted route below. |
 
-**So the order of attempts is: Database Inspector first, Hermes second,
-key-assisted third.** Only if the first two genuinely fail does the key leave
-the module, and that outcome must be recorded rather than assumed.
+**So the honest conclusion is narrower than the founder's preference allows.**
+The instruction was to *"prefer in-process read-only inspection that avoids
+exporting the plaintext encryption key"*. Two of the in-process candidates are
+now ruled out on verified grounds, and the third (Hermes) is unlikely on a
+release build and untestable while the handset is detached. **Unless Hermes
+works, key-assisted decryption is not a third preference — it is the only
+route**, which is the case the founder's fallback clause anticipated.
+
+Hermes is still attempted first when the device returns, and the outcome is
+recorded either way.
+
+### Host-side tooling: what will actually open the copy
+
+The earlier finding that this host has **no SQLCipher tooling** stands. The same
+sources name the usable options, and the choice matters because a GUI cannot be
+scripted into repeatable evidence:
+
+- **`sqlcipher` CLI** — scriptable, the natural fit as the measurement tool's
+  input stage; not installed.
+- **DB Browser for SQLite** — documented as supporting SQLCipher, but a GUI;
+  acceptable for a one-off look, not for repeatable evidence.
+- **A language binding** (`better-sqlite3-multiple-ciphers`, `sqlcipher3`) —
+  scriptable, and would make decrypt-and-measure a single command.
+
+Obtaining one is a dependency decision, listed in §6 rather than taken
+unilaterally.
 
 ## 2. The key-assisted route, if it is needed
 
@@ -130,18 +154,63 @@ fail on the first `CREATE TABLE`.
 
 Consequence: step 18 (timing the encryption migration) is a file-level
 copy-verify-swap and is unaffected. **Step 19 (SIGKILL mid-migration, then
-relaunch) needs the app to boot afterwards, and it would not.** Closing this
-needs either the generator to write the bookkeeping rows or the procedure to
-insert them before loading — a small change, but it is a change, so it is
-flagged rather than made.
+relaunch) needs the app to boot afterwards, and it would not.**
+
+### Scoped Rule 10 plan for the fixture's migration metadata — PROPOSAL, not applied
+
+**The mechanics, read from the installed migrator** rather than assumed
+(`drizzle-orm/sqlite-core/dialect.cjs:665-690`):
+
+```sql
+CREATE TABLE IF NOT EXISTS __drizzle_migrations (
+  id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric
+)
+```
+
+It then reads **only the newest row** —
+`SELECT id, hash, created_at … ORDER BY created_at DESC LIMIT 1` — and applies a
+migration when `!lastDbMigration || Number(lastDbMigration[2]) < migration.folderMillis`.
+
+Two consequences that make the fix smaller and more certain than it first looked:
+
+- **`hash` is never consulted for the skip decision.** It is written, not read.
+  `apps/mobile/db/migrations/migrations.js` carries no precomputed hashes
+  either — it imports the journal and the raw `.sql` files.
+- **One row suffices.** `created_at` set to the journal's maximum `when`
+  (**`1791417600000`**, entry `0033_medicine_search_key`, 34 entries total) makes
+  every migration skip.
+
+**Proposed change** — `scripts/generate-history-fixture.mjs`, which already
+reads `meta/_journal.json` at `:82`:
+
+1. Create `__drizzle_migrations` with the DDL above.
+2. Insert **one** row: `created_at = max(entry.when)` from the journal, and
+   `hash` set to the sha256 of that migration's `.sql` content — a real,
+   derivable value rather than a placeholder, so nothing in the fixture is
+   fabricated.
+3. Add a test asserting the generated fixture's `max(created_at)` equals the
+   journal's `max(when)`. **This is the part that matters:** without it, adding
+   migration `0034` would silently re-break step 19, exactly as today.
+
+**What this deliberately does NOT claim.** One row is not a faithful
+reconstruction of a real device's migration history — a real device has 34 rows
+with real hashes and real timestamps. It is sufficient for the *skip* decision
+and nothing more. If a future drill needs the fixture to look like a genuine
+upgrade history, that is a different change. `apps/mobile/db/encryptionVerify.ts:175`
+compares `__drizzle_migrations` rows and hashes across the encryption copy, which
+stays self-consistent either way because both sides are the same file.
+
+**Why Rule 10 applies:** it changes a tool that produces database input for a
+money-and-stock acceptance drill. Approval is requested before writing it.
 
 ## 6. What is NOT proven, and why
 
 **The handset is physically detached.** `adb devices` lists nothing and Windows
 reports no Samsung device, so none of the following has been executed:
 
-- whether the Database Inspector can attach to an `expo-sqlite` SQLCipher
-  database — the question that decides whether the key is exported at all;
+- whether the **Hermes** inspector is reachable on a release build — now the
+  only remaining key-free candidate, since Database Inspector and the on-device
+  `sqlite3` are ruled out (§1);
 - whether the key-assisted route works end to end;
 - `run-as` availability on the new package;
 - the APK's startup behaviour and environment resolution;
