@@ -372,24 +372,60 @@ describe('the REAL installed migrator, run against the generated fixture', () =>
     }
   });
 
-  it('still applies a genuinely newer migration, and can insert its own row', async () => {
-    // The non-vacuous half, run for real. It also exercises the migrator's own
-    // INSERT into the table this fixture created, which is where a wrong DDL
-    // (an `id` default colliding with the NULL row) actually fails.
+  it('survives TWO successive upgrades, each inserting its own row', async () => {
+    // The non-vacuous half, run for real, TWICE. One upgrade is not enough: a
+    // bookkeeping table declared `id SERIAL PRIMARY KEY DEFAULT 0` whose first
+    // row is an explicit NULL passes a single upgrade (the first insert takes
+    // id=0) and only collides on the second with
+    // `UNIQUE constraint failed: __drizzle_migrations.id`. An independent
+    // reviewer found exactly that surviving implementation.
     const target = openCopy();
     try {
-      const probe: JournalEntry = { idx: 9999, when: maxWhen + 1, tag: '0034_probe' };
-      await migrate(driverFor(target) as never, {
-        journal: { entries: [probe] },
-        migrations: { m9999: 'CREATE TABLE probe_applied (n INTEGER);' },
-      } as never);
-
-      expect(tableNames(target)).toContain('probe_applied');
-      expect(Number((target
-        .prepare('SELECT COUNT(*) AS n FROM `__drizzle_migrations`').get() as { n: number }).n))
-        .toBe(2);
+      for (const [i, name] of ['probe_one', 'probe_two'].entries()) {
+        const probe: JournalEntry = { idx: 9990 + i, when: maxWhen + 1 + i, tag: `003${4 + i}_${name}` };
+        await migrate(driverFor(target) as never, {
+          journal: { entries: [probe] },
+          migrations: { [`m${String(9990 + i).padStart(4, '0')}`]: `CREATE TABLE ${name} (n INTEGER);` },
+        } as never);
+        expect(tableNames(target)).toContain(name);
+        expect(Number((target
+          .prepare('SELECT COUNT(*) AS n FROM `__drizzle_migrations`').get() as { n: number }).n))
+          .toBe(2 + i);
+      }
     } finally {
       target.close();
+    }
+  });
+
+  it('has exactly the schema real Drizzle builds from an empty database', async () => {
+    // Every other test compares the fixture against ITSELF, so a generator that
+    // SKIPPED a migration while still recording the journal maximum would pass
+    // all of them: migrate() suppresses the missing migration, the before/after
+    // table lists match, and the fixture silently lacks that migration's
+    // columns. The second finding of the same review. The only honest reference
+    // is an empty database migrated independently through the real migrator.
+    const ref = new DatabaseSync(join(OUT_DIR, `reference-${Math.random().toString(36).slice(2)}.db`));
+    try {
+      await migrate(driverFor(ref) as never, {
+        journal, migrations: realMigrations(journal.entries),
+      } as never);
+
+      // Bookkeeping is excluded because it is NOT produced by a migration: the
+      // migrator creates it for itself, and its stored DDL text differs from the
+      // fixture's by identifier quoting. Its contents are asserted by the tests
+      // above, so nothing here is left unchecked.
+      const schemaOf = (t: DatabaseSync): string[] =>
+        (t.prepare(
+          "SELECT type, name, tbl_name, sql FROM sqlite_master "
+          + "WHERE name NOT LIKE 'sqlite_%' AND tbl_name <> '__drizzle_migrations' "
+          + 'ORDER BY type, name',
+        ).all() as { type: string; name: string; tbl_name: string; sql: string | null }[])
+          .map((r) => `${r.type}|${r.name}|${r.tbl_name}|${(r.sql ?? '').replace(/\s+/g, ' ').trim()}`);
+
+      // Tables, columns, indexes and triggers, all of them.
+      expect(schemaOf(db)).toEqual(schemaOf(ref));
+    } finally {
+      ref.close();
     }
   });
 });
