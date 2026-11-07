@@ -143,9 +143,18 @@ function applyMigrations(db) {
  */
 function recordMigrationMetadata(db, journal) {
   const newest = newestJournalEntry(journal);
+  // BYTE-IDENTICAL to the migrator's own DDL (dialect.cjs:665-670), including
+  // its indentation, so `sqlite_master.sql` matches a database the migrator
+  // created and the fixture's bookkeeping schema can be compared against a real
+  // reference instead of being excluded from comparison. SQLite stores the
+  // statement with `IF NOT EXISTS` and leading whitespace removed, which is why
+  // the two agree despite that clause. Do not reformat this string.
   db.exec(
-    'CREATE TABLE IF NOT EXISTS `__drizzle_migrations` ('
-    + 'id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)',
+    'CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (\n'
+    + '\t\t\t\tid SERIAL PRIMARY KEY,\n'
+    + '\t\t\t\thash text NOT NULL,\n'
+    + '\t\t\t\tcreated_at numeric\n'
+    + '\t\t\t)',
   );
   // Column list and values exactly as the migrator's own insert
   // (dialect.cjs:686): ("hash", "created_at"), so `id` is left NULL as it is on

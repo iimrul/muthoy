@@ -410,17 +410,20 @@ describe('the REAL installed migrator, run against the generated fixture', () =>
         journal, migrations: realMigrations(journal.entries),
       } as never);
 
-      // Bookkeeping is excluded because it is NOT produced by a migration: the
-      // migrator creates it for itself, and its stored DDL text differs from the
-      // fixture's by identifier quoting. Its contents are asserted by the tests
-      // above, so nothing here is left unchecked.
+      // `__drizzle_migrations` is INCLUDED. An earlier revision excluded it
+      // because the generator's DDL text differed from the migrator's by
+      // identifier quoting — and a reviewer showed that hole let
+      // `id INTEGER PRIMARY KEY CHECK (id <= 3)` pass everything, failing only
+      // on a third upgrade. Adding a third probe would just move the boundary
+      // to N=4, so the generator now emits byte-identical DDL and the table is
+      // compared like any other. Whitespace is NOT normalised here, so a
+      // reformatted DDL is caught too.
       const schemaOf = (t: DatabaseSync): string[] =>
         (t.prepare(
-          "SELECT type, name, tbl_name, sql FROM sqlite_master "
-          + "WHERE name NOT LIKE 'sqlite_%' AND tbl_name <> '__drizzle_migrations' "
-          + 'ORDER BY type, name',
+          'SELECT type, name, tbl_name, sql FROM sqlite_master '
+          + "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
         ).all() as { type: string; name: string; tbl_name: string; sql: string | null }[])
-          .map((r) => `${r.type}|${r.name}|${r.tbl_name}|${(r.sql ?? '').replace(/\s+/g, ' ').trim()}`);
+          .map((r) => `${r.type}|${r.name}|${r.tbl_name}|${r.sql ?? ''}`);
 
       // Tables, columns, indexes and triggers, all of them.
       expect(schemaOf(db)).toEqual(schemaOf(ref));
