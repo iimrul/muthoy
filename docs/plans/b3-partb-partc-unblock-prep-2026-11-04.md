@@ -793,10 +793,52 @@ real time and each is a durable environment fact:
    between concurrently configuring CMake projects, and
    `android/gradle.properties:18` sets `org.gradle.parallel=true`.
 
-   **Untested next step:** serialise the native build — `--no-parallel`, or
-   `org.gradle.workers.max=1`. Stated as a hypothesis, not a fix: the previous
-   two hypotheses in this same list were also plausible and both wrong, and the
-   honest status of attempt 5 is unknown until it runs.
+5. **Serialised — `--no-parallel --max-workers=1` — and it FAILED THE SAME WAY.**
+   15m12s, Gradle exit 1 (the command ended on `gradlew`, so that exit code is
+   Gradle's own). One failing module this time,
+   `react-native-reanimated:buildCMakeRelWithDebInfo[arm64-v8a]`, down from two.
+   **So the parallel-race hypothesis is disproven, and that is three wrong
+   diagnoses of this one error from me.** Serialisation changed how many modules
+   hit it, not whether they do.
+
+### The fourth hypothesis, and why it is only a hypothesis
+
+New evidence, present in the failing builds and not previously noticed:
+
+> `Hard link from 'C:\Users\Imrul\.gradle\caches\…\react-android-0.86.2-release\prefab\modules\reactnative\libs\…\libreactnative.so'`
+> `to 'D:\mb\node_modules\.pnpm\…\android\build\intermediates\cxx\…\libreactnative.so' failed. Doing a slower copy instead.`
+
+**Hard links cannot cross volumes.** The Gradle cache is on **C:** and every
+worktree is on **D:**, so Gradle falls back to copying each prefab `.so`. A copy
+gets a fresh mtime; `build.ninja` depends on those artifacts; so CMake re-runs,
+which re-copies, which re-dirties — and `ninja: error: manifest 'build.ninja'
+still dirty after 100 tries` is literally ninja giving up after re-running CMake
+a hundred times. The mechanism would also explain why the failing modules vary
+between runs: whichever prefab copy lands mid-check is the one that loses.
+
+Occurrences per failing build: **2, 42, 8.** Present in all three.
+
+**Why this is still not proven, stated plainly because the last three
+hypotheses each looked this good:** "present in every failure" is weak without a
+*successful* build to compare against, and there is no successful build log of
+this project in hand — the main tree's September build predates this session, so
+the correlation may be incidental.
+
+**Two mutually exclusive next tests**, neither run:
+
+| Test | Removes the variable by | Cost / risk |
+|---|---|---|
+| Worktree on **C:**, same volume as the cache | eliminating the cross-volume copy entirely | **C: has only 13 GB free**; node_modules plus build outputs make that tight, and filling the system volume is a worse outcome than a failed build |
+| `GRADLE_USER_HOME` on **D:** for this build only | moving the cache to the project's volume | cold cache, so a large re-download and a longer build; D: has 76 GB, so no space risk |
+
+The second is the safer experiment and the one I would run, but it is a
+substantial download, and I am not starting it unannounced after five attempts
+and roughly 70 minutes of build time.
+
+**Still no APK.** Everything in the generated project remains verified —
+`com.muthoy.pos.dev`, the single `debuggable true` edit, `allowBackup="false"`
+preserved, prebuild reproducible across two worktrees — and none of §2's
+artifact validations has been performed, because there is no artifact.
 
 **No APK was produced.** Four attempts, roughly 55 minutes of build time. The
 `com.muthoy.pos.dev` identity, the `debuggable true` edit and the preserved
