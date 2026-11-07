@@ -61,45 +61,86 @@ So the requirement is specific: read the **SQLCipher 4** format with a **raw**
 64-hex key. A tool that only accepts passphrases is useless here, and a GUI
 cannot be scripted into repeatable evidence.
 
-**Candidates, with registry metadata read without installing anything**
-(`npm view`, which fetches metadata only):
+#### Recommendation CORRECTED 2026-11-07
 
-| Package | Version | License | Integrity (npm `dist.integrity`) |
-|---|---|---|---|
-| **`@journeyapps/sqlcipher`** | 6.0.0 | **BSD-3-Clause** | `sha512-YmWSQIR4cnv+5L38lYJoS/dIF/+bEZBaACATbeTyq4XKjMHcxdIlFnElBLiIqa9rwseOIimIYjudgOOCovud3Q==` |
-| `better-sqlite3-multiple-ciphers` | 13.0.3 | **MIT** | `sha512-UYabM82r1J84TLWc/SszoHs6XopWpl/2HCg3Nui1JUaFXg/VLswzkPowYiRhK/4CftI8dgtikwyZQecMldrGxQ==` |
+**My first recommendation, `@journeyapps/sqlcipher` 6.0.0, was wrong and is
+withdrawn.** The founder flagged that its upstream release dropped Windows
+support, and the package metadata confirms it at the strongest possible level:
 
-`node-sqlite3-wasm` was considered and **rejected**: it is plain SQLite with no
-SQLCipher support. SQLCipher itself (the `sqlcipher` CLI) is BSD-style licensed
-and permits commercial use provided the copyright notice and disclaimer are
-reproduced; 4.7.0 was released 2025-03-25. Note the upstream licence pages
-disagree on the copyright year (2008-2023 vs 2008-2024), so the `LICENSE` file
-of whatever is actually fetched is the authority.
+```
+npm view @journeyapps/sqlcipher@6.0.0 os   ->   [ 'darwin', 'linux' ]
+```
 
-**Preference, and why.** `@journeyapps/sqlcipher` links *real* SQLCipher, so the
-format and the raw-key behaviour are correct by construction rather than by
-emulation — which matters when the whole point is to read a file the app wrote.
-Its cost is a native build on Windows. `better-sqlite3-multiple-ciphers` is
-lighter but reimplements the scheme via SQLite3MultipleCiphers, whose official
-pragma documentation does confirm the `x'...'` raw form and states that only the
-sqleet and SQLCipher AES-256 schemes support raw keys, with the first 32 bytes
-as key and the next 16 as salt — our 64-hex value supplies the key and leaves
-SQLCipher to take the salt from the file header, as on device.
+An `os` field excluding `win32` means a Windows install is refused outright
+(`EBADPLATFORM`), not merely awkward. The 6.0.0 release notes also remove
+node-pre-gyp, prebuilt binary publishing and the vendored Windows OpenSSL
+toolchain. I had reasoned about the package's *design* (it links real SQLCipher,
+so raw keys are correct by construction) and never checked whether it runs on
+this machine's platform at all — the right property, the wrong question.
 
-**What integrity does and does not prove.** The `sha512` above is what the
-registry serves and what the package manager verifies on install, and the
-lockfile pins it. That proves the tarball matches the registry record. It does
-**not** prove the code is benign, so if approved: install into an isolated
-directory outside the repository, never into `apps/mobile`.
+**The recommendation is now `better-sqlite3-multiple-ciphers`**, verified against
+each property the founder asked for:
 
-**The one property still unverified, and how it gets verified.** Neither
-candidate's raw-key + SQLCipher-4 behaviour has been tested against a real file,
-because that needs the tool installed. It can be settled with **no device and no
-real key**: create a throwaway SQLCipher-4 database with a known random 64-hex
-raw key, write a handful of rows, close it, re-open it with the tool, and confirm
-the rows read back and that a wrong key fails. Only after that round-trip passes
-should the tool ever be pointed at anything real. That test is the acceptance
-condition for the install request in §6.
+| Property | Finding | How established |
+|---|---|---|
+| Version | **13.0.3** | `npm view` |
+| License | **MIT** | `npm view` |
+| Node compatibility | `engines.node >= 22`; this host runs **v22.22.2** | `npm view` + `node --version` |
+| Integrity | `sha512-UYabM82r1J84TLWc/SszoHs6XopWpl/2HCg3Nui1JUaFXg/VLswzkPowYiRhK/4CftI8dgtikwyZQecMldrGxQ==` | `npm view dist.integrity` |
+| **Windows binaries** | **`prebuilds/win32-x64.node` (2.3 MB)** and `win32-arm64.node` ship inside the tarball; no `os`/`cpu` restriction | jsDelivr file listing of the published package |
+| Compiler needed? | **No** — which matters, because `cl.exe` is **absent** on this host | the bundled prebuild above |
+| Raw-key support | `PRAGMA key = "x'<hex>'"` is supported, and **only** the sqleet and SQLCipher AES-256 schemes accept raw keys; first 32 bytes are the key, next 16 the salt | SQLite3MultipleCiphers official pragma documentation |
+
+Our key is 64 hex = 32 bytes, so it supplies the key and leaves SQLCipher to
+read the salt from the file header, exactly as on device. The scheme must be
+selected explicitly: `cipher='sqlcipher'` and `legacy=4` for the SQLCipher 4
+format, *before* the key pragma.
+
+**Also rejected**, with reasons: `node-sqlite3-wasm` and every other WASM build
+on npm — plain SQLite, no SQLCipher (`sqlite3mc` is not published to npm, so
+there is no compiler-free WASM route); the `sqlcipher` CLI — BSD-style licensed
+and fine in principle, but Zetetic publishes no Windows community binary, so it
+would need an OpenSSL + MSVC source build on a host with no compiler.
+
+#### Proposed isolated installation — NOT performed, approval required
+
+1. A directory **outside the repository**, in the session scratchpad, with its
+   own `package.json`. Nothing enters the repo's dependency tree, `pnpm-lock.yaml`
+   or `apps/mobile`, and the repo's committed `.npmrc` is untouched.
+2. Install with the integrity hash above pinned, and
+   `--ignore-scripts` — the package needs no install script, because the Windows
+   prebuild is already in the tarball, so nothing from the package should be
+   allowed to execute at install time.
+3. The decrypted database and the key never leave a session-scoped temporary
+   directory, per §3.
+
+**What integrity does and does not prove.** The `sha512` is what the registry
+serves and what the package manager verifies. It proves the tarball matches the
+registry record. It does **not** prove the code is benign — hence the isolated
+directory and `--ignore-scripts`.
+
+#### The key-free round-trip test, and what it will NOT prove
+
+No real database, no device key, no credential. Using a freshly generated random
+64-hex key:
+
+1. Create a database with `cipher='sqlcipher'`, `legacy=4`, then
+   `PRAGMA key = "x'<random 64 hex>'"`; write a few rows; close.
+2. Re-open with the same key and confirm the rows read back.
+3. Re-open with a **different** random key and confirm it fails rather than
+   returning an empty database — the same fail-closed property the measurement
+   tool already has.
+4. Confirm the file is not readable as plain SQLite.
+
+**The honest limit:** this proves the tool round-trips its *own* output and
+handles raw keys. It does **not** prove it can read a file written by
+expo-sqlite's vendored SQLCipher **4.7.0**, because establishing that needs
+either a device-written file or a local build of that amalgamation, and this host
+has no compiler. Cross-compatibility is *likely* — same cipher scheme, same
+default parameters, `legacy=4` selecting the v4 format — but it stays **unproven
+until there is a real encrypted file to open**, and that is gated on the handset.
+I am not going to record "verified" for a property that only the device can
+settle.
 
 ## 2. The key-assisted route, if it is needed
 

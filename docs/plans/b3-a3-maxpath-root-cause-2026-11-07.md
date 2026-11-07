@@ -165,6 +165,75 @@ Option B is the one I would run, and it is the only one I am asking for.
 - The `subst` experiment and every probe in §1–§3 were read-only, apart from
   CMake regenerating its own `.cxx` build directory, which any build does.
 
+## 7a. The approved workaround was attempted and is BLOCKED — 2026-11-07
+
+The founder approved the `virtual-store-dir` short-path workaround followed by
+one build. **No build was run**, because the install that the build depends on
+could not be made to take effect. The step-5 survey gate was therefore never
+satisfied, and building anyway would have tested nothing.
+
+**What was tried, and what each attempt actually did:**
+
+| Attempt | Result |
+|---|---|
+| `pnpm install --frozen-lockfile --virtual-store-dir D:/v` | "Already up to date" in 4.1s. `D:\v` **empty**. |
+| same, after deleting `node_modules/.modules.yaml` | "Already up to date". `.modules.yaml` **not even recreated**. |
+| same, plus `--force` | "Already up to date" in 3.3s. |
+| same, with `.modules.yaml` restored so a mismatch was visible | "Already up to date". |
+| env-var form, `npm_config_virtual_store_dir=D:/v` | "Already up to date". |
+| `--loglevel debug` | **five lines of output**, no explanation. |
+
+Each run was confirmed to execute in `D:\mb` (the cwd was echoed), so this is
+not a case of operating on the wrong tree.
+
+**The flag itself is not broken.** In a throwaway project outside the repo it
+works exactly as documented: the store landed in `D:\vtest` and
+`.modules.yaml` recorded `"virtualStoreDir": "D:/vtest"`. So the finding is
+specific: **pnpm 11.20.0 does not treat a changed `virtual-store-dir` as a
+reason to re-link an existing workspace install.** (The worktree runs
+corepack-pinned 11.20.0; the probe ran 11.24.0.)
+
+**The remaining lever is blocked by Windows.** Forcing a relink means moving the
+existing store aside, and that is denied:
+
+- `mv node_modules` → `Permission denied`
+- `cmd /c move node_modules\.pnpm` → `Access is denied` (while still exiting 0 —
+  another reminder that a wrapper's exit code is not the result)
+- `Rename-Item` from a cwd entirely outside `D:\mb` → `IOException: Access to the
+  path 'D:\mb\node_modules\.pnpm' is denied`
+
+It is narrowly scoped, which rules out a permissions problem: creating and
+removing directories *inside* `node_modules` works, renaming a **leaf** package
+directory inside `.pnpm` works, and neither directory is a reparse point. So an
+open handle is held on those two directories specifically. The only `node`/`java`
+processes on the machine are session infrastructure — three `chrome-devtools-mcp`
+servers, the ECC hook runner, and a path-resolution helper — none of them a stale
+artifact of these attempts, and **no Gradle daemon is running at all**. I did not
+kill any of them.
+
+**Everything was restored.** Eight workspace `node_modules` were renamed during
+one attempt and all eight were renamed back; the worktree's `git status` is
+empty, all nine `node_modules` are present, no `.old` or `pnpm-old` directories
+remain, dependency resolution still works, and the approved isolation edits
+(`applicationId 'com.muthoy.pos.dev'`, `debuggable true`) are intact. `D:\v`
+exists and is **empty**, as the approved dedicated directory. The main repository,
+the content store at `D:\.pnpm-store\v11`, every lockfile and the prototype-web
+changes are untouched.
+
+**What would unblock it**, in order of preference:
+
+1. **Release the handle**, then re-run the approved sequence unchanged. A reboot,
+   or closing whatever holds `D:\mb\node_modules`, is the whole fix. This needs
+   no new approval — the workaround is already approved; only the lock is in the
+   way.
+2. **`node-linker=hoisted`** instead. The repo's own `.npmrc` already documents it
+   as a supported fallback, and it removes the `.pnpm\_<hash>\node_modules\`
+   layer entirely: **53 characters saved** against the 20 from
+   `virtual-store-dir`, taking the worst path from 268 to **215**. It would
+   change dependency resolution semantics for the worktree, which is why I am
+   not substituting it on my own initiative — it is a **different mechanism from
+   the one approved**, and that choice is the founder's.
+
 ## 7. Approval requested
 
 One change and one build: add a worktree-local `.npmrc` setting
