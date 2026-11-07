@@ -117,8 +117,8 @@ function applyMigrations(db) {
  *
  *   - `hash` is NOT NULL so it must be written, but it is never consulted for
  *     the skip decision. **The app itself writes the empty string** —
- *     `drizzle-orm/expo-sqlite/migrations.cjs` builds every migration with
- *     `hash: ""` (`expo-sqlite/migrator.cjs:42`) — so that is what a real
+ *     `drizzle-orm/expo-sqlite/migrator.cjs:42` builds every migration with
+ *     `hash: ""` — so that is what a real
  *     device's rows contain, and that is what is written here. An earlier
  *     revision put a sha256 of the migration SQL in this column; it was valid
  *     but made the fixture differ from every real device for no benefit, since

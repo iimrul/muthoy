@@ -229,14 +229,25 @@ Two consequences that make the fix smaller and more certain than it first looked
 **Proposed change** — `scripts/generate-history-fixture.mjs`, which already
 reads `meta/_journal.json` at `:82`:
 
+> **HISTORICAL — this is the plan as proposed on 2026-11-04, kept for the
+> record. Two of its three steps were superseded by what was actually built;
+> see "What was actually written" below for the current behaviour.**
+
 1. Create `__drizzle_migrations` with the DDL above.
 2. Insert **one** row: `created_at = max(entry.when)` from the journal, and
    `hash` set to the sha256 of that migration's `.sql` content — a real,
    derivable value rather than a placeholder, so nothing in the fixture is
    fabricated.
+   **SUPERSEDED 2026-11-07:** `hash` is the **empty string**, because that is
+   what the app itself writes (`expo-sqlite/migrator.cjs:42`). The sha256 was
+   valid and never read, but made the fixture unlike every real device.
 3. Add a test asserting the generated fixture's `max(created_at)` equals the
    journal's `max(when)`. **This is the part that matters:** without it, adding
    migration `0034` would silently re-break step 19, exactly as today.
+   **SUPERSEDED 2026-11-07:** that test was necessary but not sufficient — it
+   regenerates the fixture first, so it only proves the *generator* tracks the
+   journal, never that a stale fixture *file* is rejected. The rejection now
+   lives in `validateHistoryFixture`.
 
 **What this deliberately does NOT claim.** One row is not a faithful
 reconstruction of a real device's migration history — a real device has 34 rows
@@ -337,12 +348,13 @@ touches production migrations, hosted operations, sync or money.
 tables. The delta is exactly the one bookkeeping row and its table.
 
 The row itself: `created_at = 1791417600000` (the journal maximum, entry
-`0033_medicine_search_key`), `hash` = the 64-hex sha256 of that migration's
-`.sql`, and `id = NULL`. The NULL id is not a defect: `id SERIAL PRIMARY KEY` is
-not an INTEGER-PRIMARY-KEY rowid alias in SQLite, so it does not autoincrement,
-and the migrator's own insert names only `("hash", "created_at")` — a real
-device's rows are written the same way. SQLite permits NULL in a non-rowid
-PRIMARY KEY, and NULLs are distinct in a UNIQUE index, which is why real devices
+`0033_medicine_search_key`), `hash = ''` — the empty string the app itself
+writes (`expo-sqlite/migrator.cjs:42`) — and `id = NULL`. The NULL id is not a
+defect: `id SERIAL PRIMARY KEY` is not an INTEGER-PRIMARY-KEY rowid alias in
+SQLite, so it does not autoincrement, and the migrator's own insert names only
+`("hash", "created_at")` — a real device's rows are written the same way.
+SQLite permits NULL in a non-rowid PRIMARY KEY, and NULLs are distinct in a
+UNIQUE index, which is why real devices
 accumulate many such rows without conflict.
 
 **One consequence worth stating.** `apps/mobile/db/encryptionVerify.ts`
