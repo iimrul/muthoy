@@ -42,7 +42,7 @@ The drill's output is two numbers and one verdict:
 | 1 | A backup capability decision on the Supabase project | The free tier's retention may not support a point-in-time restore. **Founder decision** — the drill cannot be designed around a capability the project does not have |
 | 2 | A second Android device, or willingness to wipe the current one | "Restore onto a new device" is the case that matters |
 | 3 | A DEV/staging Supabase project | This drill never runs against a project holding a real pharmacy's data |
-| 4 | The year-of-history fixture | `node scripts/generate-history-fixture.mjs --out ./history.db` — default run: 97,165 rows / 21.8 MiB across 24 tables |
+| 4 | The year-of-history fixture | `node scripts/generate-history-fixture.mjs --out ./history.db` — default run measured 2026-11-07: 97,106 rows / 21.88 MiB (22,941,696 bytes) across 27 populated tables, carrying one `__drizzle_migrations` row so the app can boot at step 19. The figure previously recorded here (97,165 rows / 24 tables) does not reproduce and is superseded; only the fixture generator changed, not this drill's criteria |
 
 **Rule: no step in this document is ever executed against production.** Every
 command below assumes a disposable project and a disposable device.

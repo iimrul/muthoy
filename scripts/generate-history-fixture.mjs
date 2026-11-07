@@ -40,6 +40,7 @@
 //        --sales-per-day 40 --medicines 600 --seed 7
 
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
@@ -87,7 +88,66 @@ function applyMigrations(db) {
       if (trimmed) db.exec(trimmed);
     }
   }
+  recordMigrationMetadata(db, journal);
   return journal.entries.length;
+}
+
+/**
+ * Drizzle's own bookkeeping, written the way the INSTALLED migrator reads it.
+ *
+ * Without this the fixture cannot serve restore_drill.md step 19. The SQL above
+ * creates all 56 tables but leaves no `__drizzle_migrations` row, and
+ * `apps/mobile/db/init.ts:88` runs `migrate(db, migrations)` on every boot. The
+ * migrator (drizzle-orm/sqlite-core/dialect.cjs:672-679) reads ONLY the newest
+ * row:
+ *
+ *     SELECT id, hash, created_at FROM __drizzle_migrations
+ *       ORDER BY created_at DESC LIMIT 1
+ *
+ * and re-applies a migration when
+ *
+ *     !lastDbMigration || Number(lastDbMigration[2]) < migration.folderMillis
+ *
+ * where `folderMillis` is the journal entry's `when`
+ * (drizzle-orm/expo-sqlite/migrator.cjs:40). With no row, every migration
+ * re-runs against a database that already has every table, so the app dies on
+ * the first CREATE TABLE instead of booting.
+ *
+ * Two properties of that predicate, read from the installed code rather than
+ * assumed:
+ *
+ *   - `hash` is NOT NULL so it must be written, but it is never consulted for
+ *     the skip decision. It is set to the sha256 of the newest migration's own
+ *     .sql, so the value is derived and re-checkable, not invented.
+ *   - ONE row suffices, carrying the journal's greatest `when`.
+ *
+ * WHAT THIS DELIBERATELY IS NOT. A real device has 34 rows with 34 real hashes
+ * and timestamps. This is one row, sufficient for the skip decision and nothing
+ * else. It is not a reconstructed upgrade history, and a future drill needing
+ * one must say so explicitly. `apps/mobile/db/encryptionVerify.ts:175` compares
+ * these rows across the encryption copy, which stays self-consistent either way
+ * because both sides are the same file.
+ *
+ * The DDL is copied verbatim from the migrator so its own
+ * CREATE TABLE IF NOT EXISTS is a no-op rather than a conflicting definition.
+ */
+function recordMigrationMetadata(db, journal) {
+  if (!Array.isArray(journal.entries) || journal.entries.length === 0) {
+    throw new Error('migration journal has no entries; refusing to write bookkeeping');
+  }
+  const newest = journal.entries.reduce((a, b) => (b.when > a.when ? b : a));
+  if (!Number.isFinite(newest.when)) {
+    throw new Error(`journal entry ${newest.tag} has a non-numeric "when": ${newest.when}`);
+  }
+  const sql = readFileSync(resolve(MIGRATIONS_DIR, `${newest.tag}.sql`), 'utf8');
+  const hash = createHash('sha256').update(sql).digest('hex');
+  db.exec(
+    'CREATE TABLE IF NOT EXISTS `__drizzle_migrations` ('
+    + 'id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)',
+  );
+  db.prepare('INSERT INTO `__drizzle_migrations` (`hash`, `created_at`) VALUES (?, ?)')
+    .run(hash, newest.when);
+  return { tag: newest.tag, when: newest.when, hash };
 }
 
 /** Asia/Dhaka calendar date for an instant, matching migration 0024's rule. */

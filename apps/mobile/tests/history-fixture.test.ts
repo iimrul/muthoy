@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -230,5 +231,77 @@ describe('money, credit, cash and stock invariants hold in the generated file', 
       + "UNION ALL SELECT `id` FROM `payments` WHERE typeof(`amount`) <> 'integer' "
       + "UNION ALL SELECT `id` FROM `credits` WHERE typeof(`balance`) <> 'integer'",
     )).toEqual([]);
+  });
+});
+
+interface JournalEntry {
+  idx: number;
+  when: number;
+  tag: string;
+}
+
+describe('the fixture carries Drizzle bookkeeping, so a restored device boots', () => {
+  // restore_drill.md step 19 SIGKILLs mid-migration and relaunches. That needs
+  // the app to boot off the fixture, and `apps/mobile/db/init.ts:88` runs
+  // `migrate(db, migrations)` on every boot. With no `__drizzle_migrations`
+  // row the migrator re-applies all 34 migrations to a database that already
+  // has all 56 tables, and dies on the first CREATE TABLE.
+  //
+  // Everything below is derived from the journal and from the INSTALLED
+  // migrator, deliberately NOT from a helper shared with the generator: one
+  // shared implementation would let a single bug satisfy both sides.
+  const journal = JSON.parse(
+    readFileSync(resolve('apps/mobile/db/migrations/meta/_journal.json'), 'utf8'),
+  ) as { entries: JournalEntry[] };
+  const newest = journal.entries.reduce((a, b) => (b.when > a.when ? b : a));
+
+  // The migrator's own read: drizzle-orm/sqlite-core/dialect.cjs:672-673.
+  const newestRow = (): Record<string, unknown> => one(
+    'SELECT `id`, `hash`, `created_at` FROM `__drizzle_migrations` '
+    + 'ORDER BY `created_at` DESC LIMIT 1',
+  );
+
+  // The migrator's own predicate: dialect.cjs:679. `folderMillis` is the
+  // journal entry's `when` (drizzle-orm/expo-sqlite/migrator.cjs:40).
+  const wouldReapply = (createdAt: unknown, folderMillis: number): boolean =>
+    Number(createdAt) < folderMillis;
+
+  it('writes exactly the one row the migrator reads, with its three columns', () => {
+    expect(count('__drizzle_migrations')).toBe(1);
+    expect(rows("SELECT `name` FROM pragma_table_info('__drizzle_migrations')")
+      .map((r) => r.name))
+      .toEqual(['id', 'hash', 'created_at']);
+  });
+
+  it('skips all 34 journal migrations, which is what lets the app boot', () => {
+    const createdAt = newestRow().created_at;
+    const reapplied = journal.entries
+      .filter((e) => wouldReapply(createdAt, e.when))
+      .map((e) => e.tag);
+    expect(reapplied).toEqual([]);
+    expect(journal.entries.length).toBeGreaterThan(0);
+  });
+
+  it('pins created_at to the journal maximum, so a new migration invalidates it', () => {
+    // The stale-metadata guard. Add migration 0034 and forget to regenerate the
+    // fixture, and THIS fails here — instead of step 19 breaking on a device
+    // with no indication why.
+    expect(Number(newestRow().created_at)).toBe(newest.when);
+  });
+
+  it('is not a vacuous skip: a migration newer than the row would re-apply', () => {
+    // Without this, a bug that made every migration skip unconditionally (or a
+    // predicate that never fires) would pass the two tests above.
+    expect(wouldReapply(newestRow().created_at, newest.when + 1)).toBe(true);
+    expect(wouldReapply(newestRow().created_at, newest.when)).toBe(false);
+  });
+
+  it('derives hash from the newest migration SQL rather than inventing one', () => {
+    // `hash` is NOT NULL but is never read for the skip decision, so it would
+    // be easy to fill with a placeholder. A derived value stays checkable.
+    const sql = readFileSync(
+      resolve(`apps/mobile/db/migrations/${newest.tag}.sql`), 'utf8',
+    );
+    expect(newestRow().hash).toBe(createHash('sha256').update(sql).digest('hex'));
   });
 });
