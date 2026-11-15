@@ -87,6 +87,7 @@ export const E4_MIGRATIONS = Object.freeze([
   // Migration 37, E11. Also NOT applied to any hosted project, and declared
   // here for the same reason: an undeclared file makes this refusal lie.
   '20261031000000_e11_entitlement_verification.sql',
+  '20261115172840_staff_sale_credit_reconciliation.sql',
 ]);
 // The chain, pinned by NAME rather than by count.
 //

@@ -6,7 +6,7 @@ import {
   type PendingSyncRow,
 } from "../db/sync-helpers";
 import { getDeviceId } from "../native/deviceId";
-import { computeBackoffMs, MAX_SYNC_ATTEMPTS } from "./backoff";
+import { computeBackoffMs } from "./backoff";
 import { invokeSyncWithClaimRefresh } from "./invoke";
 import { isSupabaseConfigured } from "./supabaseClient";
 
@@ -100,13 +100,9 @@ function markTransient(
   error: string,
   previousAttempts: number,
 ): void {
-  const attempts = previousAttempts + 1;
-  markSyncRowTransientFailure(queueId, error, MAX_SYNC_ATTEMPTS);
-  if (attempts < MAX_SYNC_ATTEMPTS) {
-    scheduleRetry(queueId, attempts);
-  } else {
-    retryNotBefore.delete(queueId);
-  }
+  const attempts = Math.min(previousAttempts + 1, Number.MAX_SAFE_INTEGER);
+  markSyncRowTransientFailure(queueId, error);
+  scheduleRetry(queueId, attempts);
 }
 
 function stableOperationHash(

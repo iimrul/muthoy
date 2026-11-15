@@ -1818,21 +1818,20 @@ export function markSyncRowPermanentFailure(id: string, error: string): void {
 export function markSyncRowTransientFailure(
   id: string,
   error: string,
-  maxAttempts = 8,
 ): void {
   db.transaction((tx) => {
     const row = tx
-      .select({ attempts: syncQueue.attempts })
+      .select({ attempts: syncQueue.attempts, status: syncQueue.status })
       .from(syncQueue)
       .where(eq(syncQueue.id, id))
       .get();
-    if (!row) return;
-    const attempts = row.attempts + 1;
+    if (!row || row.status !== "pending") return;
+    // An outage cannot retire durable work; only an ACK or permanent refusal can.
+    const attempts = Math.min(row.attempts + 1, Number.MAX_SAFE_INTEGER);
     tx.update(syncQueue)
       .set({
         attempts,
         lastError: error,
-        status: attempts >= maxAttempts ? "failed" : "pending",
       })
       .where(eq(syncQueue.id, id))
       .run();

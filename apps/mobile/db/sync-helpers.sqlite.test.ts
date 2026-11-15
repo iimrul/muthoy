@@ -147,21 +147,30 @@ describe("sync helper behavior on real SQLite", () => {
     expect(listPendingSyncRows(SHOP_ID, 10).slice(-2).map((row) => row.seq)).toEqual([previousSeq + 1, previousSeq + 2]);
   });
 
-  it("tracks sent, transient retry budget, permanent failure, and failed count", () => {
+  it("keeps transient outages retryable and never revives sent or permanently denied rows", () => {
     const [sent, retry] = listPendingSyncRows(SHOP_ID, 10);
     expect(sent && retry).toBeTruthy();
     markSyncRowSent(sent!.id);
-    for (let attempt = 0; attempt < 8; attempt += 1) markSyncRowTransientFailure(retry!.id, "offline", 8);
-    expect(countFailedSyncRows(SHOP_ID)).toBe(1);
+    for (let attempt = 0; attempt < 10; attempt += 1) markSyncRowTransientFailure(retry!.id, "offline");
+    expect(listPendingSyncRows(SHOP_ID, 10).find((row) => row.id === retry!.id)).toMatchObject({ attempts: 10 });
+    expect(countFailedSyncRows(SHOP_ID)).toBe(0);
+    sqlite.prepare("UPDATE sync_queue SET attempts = ? WHERE id = ?").run(Number.MAX_SAFE_INTEGER, retry!.id);
+    markSyncRowTransientFailure(retry!.id, "still offline");
+    expect(listPendingSyncRows(SHOP_ID, 10).find((row) => row.id === retry!.id)).toMatchObject({ attempts: Number.MAX_SAFE_INTEGER });
 
+    const permanentId = "10000000-0000-4000-8000-000000000005";
     db.transaction((tx) => {
-      const id = "10000000-0000-4000-8000-000000000005";
+      const id = permanentId;
       tx.insert(customers).values({ id, shopId: SHOP_ID, name: "Permanent", createdAt: NOW, updatedAt: NOW }).run();
       recordChange(tx, { shopId: SHOP_ID, table: "customers", rowId: id, op: "insert", payload: {} });
     });
-    const pending = listPendingSyncRows(SHOP_ID, 10);
-    markSyncRowPermanentFailure(pending[0]!.id, "unique violation");
-    expect(countFailedSyncRows(SHOP_ID)).toBe(2);
+    const permanent = listPendingSyncRows(SHOP_ID, 10).find((row) => row.rowId === permanentId)!;
+    markSyncRowPermanentFailure(permanent.id, "unique violation");
+    markSyncRowTransientFailure(permanent.id, "late transport failure");
+    markSyncRowTransientFailure(sent!.id, "late transport failure");
+    expect(queueRows().find((row) => row.id === permanent.id)).toMatchObject({ status: "failed", attempts: 0 });
+    expect(queueRows().find((row) => row.id === sent!.id)).toMatchObject({ status: "sent", attempts: 0 });
+    expect(countFailedSyncRows(SHOP_ID)).toBe(1);
   });
 
   it("applies strict LWW, preserves audit logs, and never enqueues pulled rows", () => {

@@ -82,6 +82,7 @@ export const POST_E4_MIGRATIONS: readonly string[] = Object.freeze([
   // nothing; it now refuses to attest a premium claim no payment evidence
   // backs. Class B, and applied to no hosted project.
   '20261031000000_e11_entitlement_verification.sql',
+  '20261115172840_staff_sale_credit_reconciliation.sql',
 ]);
 
 /**

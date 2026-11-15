@@ -5095,3 +5095,28 @@ an earlier draft of this list failed to carry through), three cash sales totalli
 claimed as defects: an expiry notification for `FEFO-C` timestamped before that
 batch existed, and a Tk -82.00 expected drawer for 2026-11-01, which may simply
 be yesterday's COD purchases against an opening of 0.
+
+## 2026-11-15 — Offline sale retry and Staff credit authorization repairs
+
+Founder approved the current-source Dev/Metro device plan and separately approved
+R1 and R2 source repairs in chat. R1 removes the eight-transient-error terminal
+cutoff: durable pending rows remain retryable with existing capped backoff; only
+acknowledgement or a permanent refusal retires them. Explicit permanent failures
+are not automatically revived. Ten lost-response/replay and outage regressions
+cover unchanged operation identity and no duplicate writes.
+
+Physical tests passed Owner cash on historical installed Preview and current-source
+Dev, plus Staff cash/restart/reconnect. Staff split checkout exposed a separate
+server defect: the validated grouped sale's reconciliation exception was rejected
+again by the ordinary B2 writer. Seven original queue/business rows remain intact.
+R2 adds a guarded forward patch only at the validated sale dispatch boundary;
+standalone credit-management permissions and every later wrapper remain intact.
+Sales-only Staff cannot clear quarantined history or change existing verifier proof.
+
+R2's DEV31 and full-chain candidate passed 42 PostgreSQL checks after six intended
+pre-fix failures. Founder approved DEV activation and the exact seven-row requeue. Hosted migration
+20261115172840 changed only the intended function; catalog/ACL/business-state checks
+passed. The original split synced once after status-only queue recovery. Details:
+docs/plans/offline-sales-2026-11-15/PLAN.md. No unrelated hosted migration is part
+of this repair. GitHub publication is authorized for task changes only; unrelated
+integrated source remains preserved. Final evidence/status belongs to REPORT.md.

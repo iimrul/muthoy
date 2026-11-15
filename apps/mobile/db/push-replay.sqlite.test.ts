@@ -28,7 +28,7 @@ vi.mock('../sync/invoke', () => ({ invokeSyncWithClaimRefresh: mocks.invoke }));
 vi.mock('../native/deviceId', () => ({ getDeviceId: () => 'device-replay' }));
 // Backoff would hold the retried row back inside one test run; the delay is
 // proven in sync/backoff.test.ts and is not what this file is about.
-vi.mock('../sync/backoff', () => ({ computeBackoffMs: () => 0, MAX_SYNC_ATTEMPTS: 8 }));
+vi.mock('../sync/backoff', () => ({ computeBackoffMs: () => 0 }));
 
 const { pushPendingRows } = await import('../sync/push');
 const { db } = await import('./client');
@@ -111,7 +111,7 @@ beforeEach(() => {
 });
 
 describe('a push whose response is lost is replayed, and applied exactly once', () => {
-  it('commits server-side, loses the response, retries, and leaves ONE record', async () => {
+  it('survives ten lost responses after server commit, then acknowledges ONE record', async () => {
     for (const name of allMigrations()) {
       sqlite.exec(readFileSync(resolve('apps/mobile/db/migrations', name), 'utf8'));
     }
@@ -139,20 +139,25 @@ describe('a push whose response is lost is replayed, and applied exactly once', 
 
     // ATTEMPT 1 — the server commits, then the response is lost. This is the
     // hazard: the device has no way to know the write landed.
-    mocks.invoke.mockImplementationOnce(async (body: { rows: never[] }) => {
+    mocks.invoke.mockImplementation(async (body: { rows: never[] }) => {
       server.requests.push(JSON.stringify(body));
       server.apply(body.rows);
       return { data: null, error: { message: 'network timeout after commit' } };
     });
-    await expect(pushPendingRows(SHOP)).resolves.toBe(false);
+    for (let attempt = 1; attempt <= 10; attempt += 1) {
+      await expect(pushPendingRows(SHOP)).resolves.toBe(false);
+      expect(listPendingSyncRows(SHOP, 100)).toHaveLength(1);
+      expect(listPendingSyncRows(SHOP, 100)[0]?.attempts).toBe(attempt);
+      expect(countFailedSyncRows(SHOP)).toBe(0);
+    }
 
     // The server has it; the device does not know, so the row stays queued.
     expect(server.inserts).toBe(1);
-    expect(server.noops).toBe(0);
+    expect(server.noops).toBe(9);
     expect(listPendingSyncRows(SHOP, 100)).toHaveLength(1);
     expect(countFailedSyncRows(SHOP)).toBe(0);
 
-    // ATTEMPT 2 — the same bytes arrive again and the response gets through.
+    // ATTEMPT 11 — the same bytes arrive again and the response gets through.
     mocks.invoke.mockImplementationOnce(
       async (body: { rows: { queueId: string }[] }) => {
         server.requests.push(JSON.stringify(body));
@@ -168,19 +173,19 @@ describe('a push whose response is lost is replayed, and applied exactly once', 
     await expect(pushPendingRows(SHOP)).resolves.toBe(true);
 
     // THE POINT: the replay changed nothing. One insert from the first
-    // delivery, and a NO-OP from the second — because sync_apply_row's
+    // delivery, and NO-OPs from every replay — because sync_apply_row's
     // predicate is a strict `<` on updated_at and the bytes are identical.
     // An append-style apply would show inserts === 2 here.
     expect(server.inserts).toBe(1);
     expect(server.updates).toBe(0);
-    expect(server.noops).toBe(1);
+    expect(server.noops).toBe(10);
     // store.size alone would prove only that a Map is a Map, so the counters
     // above carry the claim and this is a consistency check.
     expect(server.store.size).toBe(1);
     // And the retry really was a retry: the ENTIRE request body is identical,
     // not merely the rows — the action, shop and any device field too.
-    expect(server.requests).toHaveLength(2);
-    expect(server.requests[0]).toBe(server.requests[1]);
+    expect(server.requests).toHaveLength(11);
+    expect(new Set(server.requests).size).toBe(1);
 
     // And the device has retired the row exactly once, with nothing failed.
     expect(listPendingSyncRows(SHOP, 100)).toHaveLength(0);

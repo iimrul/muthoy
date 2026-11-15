@@ -1,5 +1,3 @@
-export const MAX_SYNC_ATTEMPTS = 8;
-
 const BASE_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 300_000;
 
