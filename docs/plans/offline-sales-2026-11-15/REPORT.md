@@ -52,6 +52,7 @@ Counts overlap; they are separate runs, not a claim of unique test totals.
 | Corrected integrated migration/history gates | 3 files / 115 PASS |
 | Final isolated HEAD-plus-task candidate | 9 files / 201 PASS |
 | Mobile `tsc --noEmit` | PASS on integrated source and isolated candidate |
+| Strict TypeScript check of the new backend fixture | PASS; emitted JavaScript identical after type-only correction |
 | ESLint for seven R1 source/test files | PASS |
 | Generated rollback docs and successor manifest checks | PASS |
 | Isolated frozen lockfile validation, scripts disabled | PASS; existing dependencies preserved |
@@ -61,6 +62,7 @@ Final candidate command:
 ```powershell
 node node_modules/vitest/vitest.mjs run apps/mobile/db/sync-helpers.sqlite.test.ts apps/mobile/db/core-workflow-regression.sqlite.test.ts apps/mobile/db/push-replay.sqlite.test.ts apps/mobile/sync/push.test.ts apps/mobile/sync/backoff.test.ts backend/supabase/pgtest/staff-sale-credit.pgtest.ts apps/mobile/tests/migration-rollback-classification.test.ts backend/supabase/pgtest/live-chain-succession.pgtest.ts apps/mobile/tests/e4-evidence-manifest.test.ts --maxWorkers=1
 node apps/mobile/node_modules/typescript/bin/tsc --noEmit -p apps/mobile/tsconfig.json
+node node_modules/typescript/bin/tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --types node --skipLibCheck backend/supabase/pgtest/staff-sale-credit.pgtest.ts
 node scripts/render-rollback-docs.mjs --check
 node scripts/post-e4-evidence-manifest.mjs --check
 pnpm install --lockfile-only --frozen-lockfile --offline --ignore-scripts

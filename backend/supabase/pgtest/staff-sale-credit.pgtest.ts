@@ -12,6 +12,12 @@ const CUSTOMER=id(1), MED=id(2), BATCH=id(3), SALE=id(4),
   CREDIT=id(6), RECON=id(7);
 const NOW="2026-11-15T10:00:00.000Z";
 let h: Harness;
+type OperationRow = {
+  tableName: string;
+  rowId: string;
+  op: "insert" | "update";
+  payload: Record<string, unknown>;
+};
 
 async function setup(dev31: boolean) {
   h=dev31 ? await createBareHarness() : await createHarness();
@@ -39,7 +45,7 @@ async function setup(dev31: boolean) {
 
 function rows(cash=100) {
   const base={shop_id:SHOP_A,created_at:NOW,updated_at:NOW,is_deleted:false,deleted_at:null,deleted_by:null};
-  const row=(tableName:string,n:number,payload:Record<string,unknown>,op="insert")=>({tableName,rowId:id(n),op,payload:{...base,id:id(n),...payload}});
+  const row=(tableName:string,n:number,payload:Record<string,unknown>,op:OperationRow["op"]="insert"):OperationRow=>({tableName,rowId:id(n),op,payload:{...base,id:id(n),...payload}});
   return [
     row("credit_reconciliation_states",7,{customer_id:CUSTOMER,status:"verified",canonical_hash:null,verified_by:STAFF_A,verified_at:NOW}),
     row("sales",4,{invoice_no:"SYNTH-STAFF-SPLIT",business_date:"2026-11-15",staff_id:STAFF_A,customer_id:CUSTOMER,subtotal:300,total:300,paid:cash,change:0,discount_type:null,discount_value:null,discount_amount:0,payment_type:cash?"split":"credit",cash_applied:cash,credit_amount:300-cash,free_reason:null,tax_rate_bp:0,tax_amount:0,tax_label:null}),
