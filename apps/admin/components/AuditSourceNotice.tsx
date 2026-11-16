@@ -33,7 +33,7 @@ export default function AuditSourceNotice({ unavailable }: AuditSourceNoticeProp
   return (
     <p
       role="status"
-      className="mt-2 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] p-3 text-sm text-[#92400E]"
+      className="mt-2 rounded-xl border border-warning/30 bg-warningBg p-3 text-sm text-warning"
     >
       <strong>Not the full history.</strong> {unavailable}
     </p>

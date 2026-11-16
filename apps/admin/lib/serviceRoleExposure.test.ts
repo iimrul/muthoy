@@ -65,6 +65,10 @@ describe('service-role key exposure guards', () => {
   // if a client file reaches it. The assertions below are what make the
   // narrower rule stronger than the blanket one it replaces.
   const ALLOWED_CLIENT_FILES: readonly string[] = [
+    // 2026-11-16: the System/Day/Night buttons. Presentational: they write one
+    // display cookie and two <html> attributes, and import only
+    // theme/appearance.ts. The transitive server-only walk below still runs on it.
+    'components/AppearanceControls.tsx',
     'components/charts/ChartLoader.tsx',
     'components/charts/PlatformCharts.tsx',
     'components/map/MapCanvas.tsx',
@@ -75,7 +79,7 @@ describe('service-role key exposure guards', () => {
     return SOURCE_FILES.filter((file) => /^\s*['"]use client['"]/m.test(file.contents));
   }
 
-  test('only the four presentational chart and map components are client components', () => {
+  test('only the allowlisted presentational components are client components', () => {
     expect(
       clientFiles()
         .map((file) => file.path)

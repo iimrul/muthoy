@@ -172,12 +172,12 @@ function LifecycleNotice() {
   return (
     <section
       aria-labelledby="lifecycle-overrides"
-      className="mt-6 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] p-4"
+      className="mt-6 rounded-xl border border-warning/30 bg-warningBg p-4"
     >
-      <h2 id="lifecycle-overrides" className="text-base font-semibold text-[#92400E]">
+      <h2 id="lifecycle-overrides" className="text-base font-semibold text-warning">
         Lifecycle overrides are unavailable
       </h2>
-      <p className="mt-1 text-sm text-[#92400E]">{LIFECYCLE_OVERRIDE_UNAVAILABLE}</p>
+      <p className="mt-1 text-sm text-warning">{LIFECYCLE_OVERRIDE_UNAVAILABLE}</p>
     </section>
   );
 }

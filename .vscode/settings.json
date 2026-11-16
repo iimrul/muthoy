@@ -9,5 +9,6 @@
     "**/.expo": true,
     "**/.turbo": true,
     "apps/prototype-web/**": true
-  }
+  },
+  "python.terminal.useEnvFile": true
 }

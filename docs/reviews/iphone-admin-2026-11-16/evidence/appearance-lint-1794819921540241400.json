@@ -1,0 +1,15 @@
+{
+  "task": "lint",
+  "command": [
+    "node",
+    "D:\\Muthoy\\apps\\admin\\node_modules\\eslint\\bin\\eslint.js",
+    "."
+  ],
+  "startUTC": "2026-11-16T09:05:21.541284+00:00",
+  "endUTC": "2026-11-16T09:05:28.532791+00:00",
+  "exitCode": 2,
+  "log": "appearance-lint-1794819921540241400.log",
+  "logSha256": "648e0d8fbac0b7ad12f6a8ecf549455441ebefb93a1e79a7fb5d2060682743d5",
+  "scratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-appearance-lint-1794819921540241400",
+  "scope": "Synthetic loopback only; private env and hosted networking refused"
+}

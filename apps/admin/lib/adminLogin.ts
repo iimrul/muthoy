@@ -41,6 +41,7 @@ import { constantTimeEquals } from './basicAuth';
 import { recordAdminAction, type AdminAuditSink } from './adminAudit';
 import { durableAuditSinks, recordAdminActionDurably } from './adminAuditStore';
 import { loadAdminIdentity, type AdminAccount } from './adminIdentity';
+import { clientSource, hasAllowedOrigin } from './adminOrigin';
 import { parseAdminRoles } from './adminRoles';
 import { revokeRoleAssignmentSessions, type AdminIdentityStoreDeps } from './adminIdentityStore';
 import {
@@ -140,31 +141,9 @@ export function derivePasswordHash(password: string, saltHex: string): string {
   ).toString('hex');
 }
 
-export function clientSource(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  const firstHop = forwarded?.split(',')[0]?.trim();
-  if (firstHop) return firstHop;
-  return request.headers.get('cf-connecting-ip')?.trim() || 'unknown';
-}
-
-/** The origins a browser may legitimately post this form from. */
-function allowedOrigins(request: Request, env: AdminEnvironment): Set<string> {
-  const configured = env.ADMIN_ORIGIN?.trim();
-  if (configured) return new Set([configured.replace(/\/$/, '')]);
-
-  const origins = new Set<string>();
-  try {
-    origins.add(new URL(request.url).origin);
-  } catch {
-    // An unparseable request URL leaves the forwarded host as the only source.
-  }
-  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
-  if (forwardedHost) {
-    const scheme = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || 'https';
-    origins.add(scheme + '://' + forwardedHost);
-  }
-  return origins;
-}
+// Moved to lib/adminOrigin.ts with the Origin check; re-exported so existing
+// importers keep working.
+export { clientSource };
 
 function consumeSourceBudget(throttles: LoginThrottles, source: string, now: number): boolean {
   const bucket = throttles.bySource.get(source);
@@ -338,8 +317,7 @@ export async function handleAdminSessionRequest(
 
   // CSRF: this route cannot rely on a session cookie it has not issued yet,
   //    so the Origin header is the check. A missing Origin is a rejection.
-  const origin = request.headers.get('origin');
-  if (!origin || !allowedOrigins(request, env).has(origin.replace(/\/$/, ''))) {
+  if (!hasAllowedOrigin(request, env)) {
     audit({ actor: 'unknown', action: 'login.bad_origin', outcome: 'failure', now, meta: { source } }, sinks);
     return plain(403, 'Request origin is not allowed.\n');
   }

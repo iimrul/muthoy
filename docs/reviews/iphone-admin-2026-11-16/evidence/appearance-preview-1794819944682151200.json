@@ -1,0 +1,15 @@
+{
+  "task": "preview",
+  "command": [
+    "node",
+    "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\appearance-check.mjs",
+    "--preview"
+  ],
+  "startUTC": "2026-11-16T09:05:44.682873+00:00",
+  "endUTC": "2026-11-16T09:06:12.846167+00:00",
+  "exitCode": 1,
+  "log": "appearance-preview-1794819944682151200.log",
+  "logSha256": "82b96831e4b0eaae245090dad84e6a44f755baea79239a36e2bdc051a0a3096e",
+  "scratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-appearance-preview-1794819944682151200",
+  "scope": "Synthetic loopback only; private env and hosted networking refused"
+}

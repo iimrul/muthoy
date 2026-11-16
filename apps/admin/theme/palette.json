@@ -1,0 +1,16 @@
+{
+  "day": {
+    "canvas": "#F4F8F6", "surface": "#FFFFFF", "subtle": "#F5F8F7",
+    "ink": "#111827", "muted": "#626C79", "line": "#111827",
+    "accent": "#065F46", "green": "#059669", "soft": "#ECFDF5",
+    "primary": "#065F46", "success": "#047857", "error": "#DC2626",
+    "errorBg": "#FEF2F2", "warning": "#92400E", "warningBg": "#FEF3C7", "info": "#2563EB"
+  },
+  "night": {
+    "canvas": "#101916", "surface": "#192520", "subtle": "#21312B",
+    "ink": "#E7F0EB", "muted": "#ACBCB2", "line": "#DAE8DF",
+    "accent": "#8DE4B8", "green": "#6AD9A4", "soft": "#243E32",
+    "primary": "#096747", "success": "#78DEAA", "error": "#FFAEAA",
+    "errorBg": "#402525", "warning": "#F5D58C", "warningBg": "#3D3322", "info": "#9CC6FF"
+  }
+}

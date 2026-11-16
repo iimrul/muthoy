@@ -4,7 +4,7 @@ import { formatMoney } from '@muthoy/utils';
 import { requireAdminPermission } from '../../lib/adminAuthz';
 import { outcomeNote } from '../../lib/adminOutcomes';
 import ActionButton from '../../components/ActionButton';
-import { expireOrderAction } from '../adminFormActions';
+import { ADMIN_FORM_PATHS } from '../../lib/adminFormPaths';
 import { listPaymentOrderSummaries } from '../../lib/adminQueries';
 import {
   billingCycleLabel,
@@ -70,7 +70,7 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
           cell: (row) =>
             row.isStaleOpen ? (
               <ActionButton
-                action={expireOrderAction}
+                action={ADMIN_FORM_PATHS.expireOrder}
                 fieldName="orderId"
                 fieldValue={row.id}
                 label="Mark expired"
@@ -89,7 +89,7 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
         Read-only, newest first. Every order ever created, including expired and failed
         ones — the amount is what the order was for, not a settled total.
       </p>
-      <p className="mt-2 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] p-4 text-sm text-[#92400E]">
+      <p className="mt-2 rounded-xl border border-warning/30 bg-warningBg p-4 text-sm text-warning">
         New subscription payments are retired (W4-10): no provider is active, so no new
         order can be created. These are historical records and any callback still in
         flight for them is still settled by the webhook.
