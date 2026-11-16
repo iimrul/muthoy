@@ -1,13 +1,9 @@
+import { RecoveryBackupSetup } from "../../components/recovery/RecoveryBackupSetup";
+import { SyncExposureStatus } from "../../components/sync/SyncExposureStatus";
 import { useCallback, useState, type ComponentProps } from "react";
 import Feather from "@expo/vector-icons/Feather";
-import {
-  Modal,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router, useFocusEffect } from "expo-router";
 import Constants from "expo-constants";
 import { z } from "zod";
@@ -196,6 +192,8 @@ export default function SettingsScreen() {
     <View className="flex-1 bg-brand-softGreen pb-20">
       <StandardHeader title={t("settings")} onBackPress={() => router.back()} />
       <ScrollView contentContainerClassName="gap-4 p-4 pb-28">
+        <SyncExposureStatus key={session.shopId + ":" + session.userId} session={session} />
+        <RecoveryBackupSetup key={"recovery:" + session.shopId + ":" + session.userId} session={session} />
         {error ? <Text className="text-error">{error}</Text> : null}
         <View className="rounded-xl bg-white px-4">
           <Row

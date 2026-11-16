@@ -1,3 +1,5 @@
+import { usePlan } from "../../state/usePlan";
+import { canUseFeature } from "../../domain/entitlements";
 import { useCallback, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -7,8 +9,7 @@ import { getMedicine, listBatchesForMedicine, type BatchDetailRow, type Medicine
 import { usePermission } from "../../state/usePermission";
 import { useI18n } from "../../state/localeStore";
 
-// Every receipt goes through the supplier purchase ledger, including deep links
-// to this legacy batch-list route. No stock-only restocking form remains here.
+// Receipt-less additions and supplier receipts remain explicit separate paths.
 export default function BatchDetailScreen() {
   const { medicineId } = useLocalSearchParams<{ medicineId: string }>();
   const { session } = usePermission("inventory_edit");
@@ -21,6 +22,8 @@ function BatchDetailContent() {
   const { medicineId } = useLocalSearchParams<{ medicineId: string }>();
   const { session, isAllowed: canEdit } = usePermission("inventory_edit");
   const { isAllowed: canAdd } = usePermission("inventory_add");
+  const plan = usePlan();
+  const canReceive = canAdd && session?.role === "owner" && !plan.loading && canUseFeature(plan.effectiveTier, "supplier_invoices");
   const [medicine, setMedicine] = useState<MedicineDetail | null>(null);
   const [batches, setBatches] = useState<BatchDetailRow[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -41,8 +44,12 @@ function BatchDetailContent() {
         accessibilityRole="button" accessibilityLabel={t("editMedicineTitle")} className="rounded-lg bg-white p-3">
         <Text className="font-sans-semibold text-brand-green">{t("editMedicineTitle")}</Text>
       </Pressable> : null}
+        {canReceive ? <Pressable onPress={() => router.push({ pathname: "/inventory/add-batch" as never, params: { medicineId, mode: "receipt" } })}
+          accessibilityRole="button" accessibilityLabel={t("supplierReceiptLabel")} className="rounded-xl bg-white p-4">
+          <Text className="font-sans-semibold text-brand-green">{t("supplierReceiptLabel")}</Text>
+        </Pressable> : null}
       {batches.map((batch) => <BatchRow key={batch.id} batch={batch} onEdit={canEdit ? () => router.push({ pathname: "/inventory/edit-batch" as never, params: { medicineId, batchId: batch.id } }) : undefined} />)}
-      {canAdd ? <Pressable onPress={() => router.push({ pathname: "/inventory/add-batch" as never, params: { medicineId } })}
+      {canEdit ? <Pressable onPress={() => router.push({ pathname: "/inventory/add-batch" as never, params: { medicineId } })}
         accessibilityRole="button" accessibilityLabel={t("addBatchLabel")} className="rounded-lg bg-brand-green p-4">
         <Text className="font-sans-semibold text-white">{t("addBatchLabel")}</Text>
       </Pressable> : null}

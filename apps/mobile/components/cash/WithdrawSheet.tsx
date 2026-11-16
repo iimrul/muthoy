@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Modal, Pressable, Text, TextInput, View } from "react-native";
 import { fromTaka, type Paisa } from "@muthoy/types";
-import { withdrawalFormSchema } from "@muthoy/validation";
+import { withdrawalFormSchema, hasExcessMoneyDecimals, moneyDraftValue } from "@muthoy/validation";
 import { useI18n } from "../../state/localeStore";
 
 // The prototype's withdrawal sheet (CH-14) — amount + optional note.
@@ -30,7 +30,7 @@ export function WithdrawSheet({ visible, onClose, onSubmit }: WithdrawSheetProps
   };
 
   const parsed = withdrawalFormSchema.safeParse({
-    amountTaka: Number(amount.trim()),
+    amountTaka: moneyDraftValue(amount.trim()),
     note,
   });
   const canSave = amount.trim().length > 0 && parsed.success && !isSaving;
@@ -79,6 +79,8 @@ export function WithdrawSheet({ visible, onClose, onSubmit }: WithdrawSheetProps
             accessibilityLabel={t("notePlaceholder")}
             className="rounded-2xl border border-midGray/40 px-4 py-3 font-sans text-sm text-richBlack"
           />
+
+          {hasExcessMoneyDecimals(amount) ? <Text accessibilityRole="alert" className="font-sans text-sm text-error">{t("moneyPrecisionLabel")}</Text> : null}
 
           {error ? (
             <Text accessibilityRole="alert" className="font-sans text-sm text-error">

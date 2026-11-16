@@ -4,6 +4,7 @@ import {
   Linking,
   Modal,
   Pressable,
+  StatusBar,
   Text,
   View,
 } from "react-native";
@@ -201,7 +202,7 @@ export function MedicineTextScanner({
         reportEvent("scan.capture_cleanup.failed");
       }
     }
-  }, [captureOnly, keepOpenOnResult, onImageCaptured, onTextRecognized, resetAndClose, t]);
+  }, [captureOnly, keepOpenOnResult, onCaptureRecognition, onImageCaptured, onTextRecognized, resetAndClose, t]);
 
   const handleBarcode = useCallback(
     async ({ data, type }: { data: string; type: string }) => {
@@ -241,11 +242,15 @@ export function MedicineTextScanner({
   return (
     <Modal
       visible
+      statusBarTranslucent
       presentationStyle="fullScreen"
       animationType="slide"
       onRequestClose={resetAndClose}
     >
-      <View className="flex-1 bg-richBlack">
+      <View className="flex-1 bg-white">
+        <View testID="scanner-status-surface" pointerEvents="none" className="bg-white"
+          style={{ height: StatusBar?.currentHeight ?? 0 }} />
+        <View className="flex-1 bg-richBlack">
         <ScannerCamera
           key={cameraInstanceKey}
           ref={cameraRef}
@@ -417,6 +422,7 @@ export function MedicineTextScanner({
               </Pressable>
             ) : null}
           </View>
+        </View>
         </View>
       </View>
     </Modal>

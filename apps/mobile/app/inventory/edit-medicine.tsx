@@ -1,13 +1,8 @@
+import { usePlan } from "../../state/usePlan";
+import { canUseFeature } from "../../domain/entitlements";
 import { useCallback, useState } from "react";
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  Switch,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { medicineMetadataSchema } from "@muthoy/validation";
 import Feather from "@expo/vector-icons/Feather";
@@ -29,6 +24,8 @@ export default function EditMedicineScreen() {
   const { medicineId } = useLocalSearchParams<{ medicineId: string }>();
   const { session, isAllowed } = usePermission("inventory_edit");
   const { isAllowed: canAdd } = usePermission("inventory_add");
+  const plan = usePlan();
+  const canReceive = canAdd && session?.role === "owner" && !plan.loading && canUseFeature(plan.effectiveTier, "supplier_invoices");
   const { t, formatDate, formatMoney, formatNumber } = useI18n();
   const [name, setName] = useState("");
   const [generic, setGeneric] = useState("");
@@ -118,9 +115,13 @@ export default function EditMedicineScreen() {
         onBackPress={() => router.back()}
       />
       <ScrollView contentContainerClassName="gap-4 p-4 pb-32">
-        {canAdd ? <Pressable onPress={() => router.push({ pathname: "/inventory/add-batch" as never, params: { medicineId } })}
+        {isAllowed ? <Pressable onPress={() => router.push({ pathname: "/inventory/add-batch" as never, params: { medicineId } })}
           accessibilityRole="button" accessibilityLabel={t("addBatchLabel")} className="rounded-xl bg-brand-green p-4">
           <Text className="font-sans-semibold text-white">{t("addBatchLabel")}</Text>
+        </Pressable> : null}
+        {canReceive ? <Pressable onPress={() => router.push({ pathname: "/inventory/add-batch" as never, params: { medicineId, mode: "receipt" } })}
+          accessibilityRole="button" accessibilityLabel={t("supplierReceiptLabel")} className="rounded-xl bg-white p-4">
+          <Text className="font-sans-semibold text-brand-green">{t("supplierReceiptLabel")}</Text>
         </Pressable> : null}
         <View className="gap-4 rounded-2xl bg-white p-4 shadow-sm">
           <View className="flex-row items-center gap-2">

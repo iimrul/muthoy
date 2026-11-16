@@ -17,6 +17,8 @@ export default defineConfig({
   // runtime is the automatic one, so this states at TEST time what the apps
   // already do at build time. It changes nothing about `next build`.
   esbuild: { jsx: 'automatic' },
+  // JSDOM tests run in Node and use the real SQLite harness, not a browser shim.
+  environments: { client: { consumer: "server", resolve: { builtins: ["node:sqlite"] } } },
   resolve: {
     alias: {
       "expo-constants": resolve(process.cwd(), "apps/mobile/db/test/expo-constants.ts"),
@@ -113,6 +115,8 @@ export default defineConfig({
     },
   },
   test: {
+    // Preserve the existing acceptance suites' mock-history semantics under Vitest 5.
+    clearMocks: false,
     server: { deps: { inline: ["expo-sqlite", "expo-crypto"] } },
     // 301 files, many opening real SQLite or PGlite databases and one
     // (tests/eas-archive.test.ts) taking ~130s on its own. Vitest 3's run-mode
@@ -138,6 +142,22 @@ export default defineConfig({
     // Rounding, minimum one: 2/3/4/8 cores -> 1/2/2/4 workers.
     maxWorkers: "50%",
     include: [
+      "backend/supabase/pgtest/recovery-storage-contract.pgtest.ts",
+      "apps/mobile/tests/recovery-archive.sqlite.test.ts",
+      "apps/mobile/db/recovery-custody.sqlite.test.ts",
+      "apps/mobile/sync/recoveryCoordinator.test.ts",
+      "apps/mobile/tests/recovery-backup-setup.test.tsx",
+      "apps/mobile/domain/recoveryArchive.test.ts",
+      "apps/mobile/tests/ios-native-compatibility.test.ts",
+      "backend/supabase/pgtest/dev-role-switch-prerequisites.pgtest.ts",
+      "apps/mobile/db/role-switch-rehydration.sqlite.test.ts",
+      "apps/mobile/tests/cash-input-precision.test.tsx",
+      "apps/mobile/db/transaction-atomicity.sqlite.test.ts",
+      "apps/mobile/tests/windows-text-portability.test.ts",
+      "apps/mobile/tests/android-system-bars.test.ts",
+      "apps/mobile/components/inventory/receiptless-batch.test.tsx",
+      "apps/mobile/components/sync/sync-exposure.test.tsx",
+      "apps/mobile/db/receiptless-restock.sqlite.test.ts",
       "apps/mobile/db/environment-binding.test.ts",
       "apps/mobile/db/medicine-catalog.sqlite.test.ts",
       // W2-03: the folded-key migration, its backfill and the union query,
@@ -175,6 +195,7 @@ export default defineConfig({
       // screens previously each re-implemented, tested on the behaviour those
       // copies disagreed about rather than on their markup.
       "apps/mobile/components/ui/ui-primitives.test.tsx",
+      "apps/mobile/components/ui/standard-header.test.tsx",
       "apps/mobile/components/expenses/*.test.ts",
       "apps/mobile/components/expenses/*.test.tsx",
       "apps/mobile/components/suppliers/*.test.tsx",
@@ -385,6 +406,7 @@ export default defineConfig({
       // stock invariant before a drill is run against it, and the restore
       // baseline must fingerprint the VALUES the drill corrupts.
       "apps/mobile/tests/history-fixture.test.ts",
+      "apps/mobile/tests/cash-presentation.test.ts",
       "apps/mobile/tests/restore-drill.test.ts",
       "apps/mobile/tests/reports-final-fixes.test.tsx",
       "apps/mobile/tests/app-layout.test.tsx",
@@ -418,7 +440,10 @@ export default defineConfig({
       "backend/supabase/pgtest/migration.pgtest.ts",
       "backend/supabase/pgtest/security.pgtest.ts",
       "backend/supabase/pgtest/b2.pgtest.ts",
+      "backend/supabase/pgtest/staff-sale-credit.pgtest.ts",
       "backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts",
+      "backend/supabase/pgtest/receiptless-restock.pgtest.ts",
+      "backend/supabase/pgtest/role-switch-credit-contract.pgtest.ts",
       "backend/supabase/pgtest/b3-group2.pgtest.ts",
       "backend/supabase/pgtest/b3-group3.pgtest.ts",
       "backend/supabase/pgtest/b3-groups456-sync.pgtest.ts",
@@ -458,6 +483,9 @@ export default defineConfig({
       // W4-05. Both barriers proven INDEPENDENTLY — the owner gate with the pin
       // bypassed, the pin with the gate bypassed — plus the seven working paths.
       "backend/supabase/pgtest/w405-shop-identity.pgtest.ts",
+      // M1, migration 40. A Staff sale's reconciliation clock is bounded by
+      // server time, so a handset reading 2999 cannot freeze the Owner out.
+      "backend/supabase/pgtest/staff-reconciliation-clock.pgtest.ts",
       // One onboarding function for BOTH the real OTP flow and DEV Skip-OTP,
       // proving they reach the same rows and the same token claims — plus the
       // Multi-Shop rename/archive path that had the identical 42501.

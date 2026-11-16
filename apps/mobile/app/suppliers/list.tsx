@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { AppTextInput as TextInput } from '../../components/ui/AppTextInput';
 import { router, useFocusEffect } from 'expo-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -129,7 +130,7 @@ export default function SupplierListScreen() {
               <View className="flex-1 gap-1">
                 <Text className="font-sans-semibold text-base text-richBlack">{supplier.name}</Text>
                 {supplier.manufacturer ? <Text className="font-sans-medium text-xs text-brand-green">{supplier.manufacturer}</Text> : null}
-                {supplier.phone ? <Text className="font-mono text-sm text-midGray">{supplier.phone}</Text> : null}
+                {supplier.phone ? <Text className="font-sans text-sm text-midGray">{supplier.phone}</Text> : null}
               </View>
               {supplier.payable > ZERO_PAISA ? (
                 <Text className="font-mono text-base font-bold text-error">{formatMoney(supplier.payable)} {t('dueSlashLabel').toLowerCase()}</Text>

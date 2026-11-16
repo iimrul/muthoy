@@ -11,6 +11,8 @@ interface StubProps {
   accessibilityLabel?: string;
 }
 
+const route = vi.hoisted(() => ({ pathname: "/dashboard" }));
+
 const animated = vi.hoisted(() => ({
   loop: vi.fn((animation: unknown) => ({
     animation,
@@ -38,6 +40,7 @@ vi.mock("react-native", () => {
       ),
     Modal: ({ children, visible }: StubProps) =>
       visible ? createElement("div", null, children) : null,
+    StatusBar: { setBarStyle: vi.fn() },
     Alert: { alert: vi.fn() },
     BackHandler: { addEventListener: vi.fn(() => ({ remove: vi.fn() })) },
     Animated: {
@@ -62,7 +65,7 @@ vi.mock("@expo/vector-icons/MaterialCommunityIcons", () => ({
 
 vi.mock("expo-router", () => ({
   router: { replace: vi.fn(), push: vi.fn() },
-  usePathname: () => "/dashboard",
+  usePathname: () => route.pathname,
 }));
 vi.mock("../domain/permissions", () => ({ resolvePermission: () => true }));
 // The relink banner ends the shift through navigation/endShift.ts, which
@@ -102,11 +105,29 @@ vi.mock("../state/sessionStore", () => ({
     }),
 }));
 
+const { StatusBar: awaitedStatusBar } = await import("react-native");
 const { AppNavigationShell } = await import(
   "../components/navigation/AppNavigationShell"
 );
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  route.pathname = "/dashboard";
+  vi.clearAllMocks();
+});
+
+describe("status icons follow the header surface", () => {
+  it.each([
+    ["/staff-home", "light-content"],
+    ["/inventory", "dark-content"],
+    ["/dashboard", "light-content"],
+    ["/role-select", "light-content"],
+  ])("uses %s: %s", (pathname, style) => {
+    route.pathname = pathname!;
+    render(createElement(AppNavigationShell, null, createElement("main", null, "content")));
+    expect(awaitedStatusBar.setBarStyle).toHaveBeenLastCalledWith(style);
+  });
+});
 
 describe("prototype bottom navigation", () => {
   it("uses the prototype stroke icons and starts the two-second scan pulse", () => {
@@ -124,6 +145,8 @@ describe("prototype bottom navigation", () => {
     expect(screen.getByTestId("material-line-scan")).toBeTruthy();
     expect(screen.getByLabelText("Scan")).toBeTruthy();
     expect(animated.loop).toHaveBeenCalledTimes(1);
+    // The dashboard hero has a dark green surface.
+    expect(awaitedStatusBar.setBarStyle).toHaveBeenCalledWith("light-content");
     expect(animated.timing).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ duration: 1000, useNativeDriver: true }),

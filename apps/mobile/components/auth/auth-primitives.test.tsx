@@ -254,6 +254,17 @@ describe('LogoutConfirmSheet', () => {
 });
 
 describe('AuthShell', () => {
+  it('uses light status icons on the hero and dark icons on light auth screens', async () => {
+    const { StatusBar } = await import('react-native');
+    const style = vi.spyOn(StatusBar, 'setBarStyle');
+    for (const variant of ['hero', 'brand', 'secure'] as const) {
+      render(createElement(AuthShell, { variant } as AuthShellProps, null));
+      expect(style).toHaveBeenLastCalledWith(variant === 'hero' ? 'light-content' : 'dark-content');
+      cleanup();
+    }
+    style.mockRestore();
+  });
+
   it('renders header, content and the bottom-anchored footer in every variant', () => {
     for (const variant of ['brand', 'secure', 'hero'] as const) {
       const props: Omit<AuthShellProps, 'children'> = {

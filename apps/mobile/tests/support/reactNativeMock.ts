@@ -103,6 +103,7 @@ export function createReactNativeMock() {
   });
 
   return {
+    StatusBar: { setBarStyle: () => undefined },
     View: box('div'),
     Text: box('span'),
     ScrollView: box('div'),

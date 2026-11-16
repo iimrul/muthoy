@@ -294,3 +294,41 @@ describe('pushPendingRows honours the device-handover kill switch', () => {
     expect(mocks.markSyncRowSent).toHaveBeenCalledTimes(52);
   });
 });
+
+describe('prolonged transient outages', () => {
+  it('keeps a complete group behind capped backoff after eight failures, then resends identical bytes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-15T00:00:00.000Z'));
+    const rows = queueRows('long-outage-', 3).map((row, index) => ({
+      ...row,
+      attempts: 8,
+      operationGroupId: '10000000-0000-4000-8000-000000000099',
+      operationKind: 'sale',
+      operationSequence: index,
+      operationExpectedCount: 3,
+    }));
+    const sent = new Set<string>();
+    mocks.listPendingSyncRows.mockImplementation(() => rows.filter((row) => !sent.has(row.id)));
+    mocks.markSyncRowSent.mockImplementation((id: string) => sent.add(id));
+    mocks.invoke
+      .mockResolvedValueOnce({ data: null, error: { message: 'server temporarily unavailable' } })
+      .mockResolvedValueOnce(applied(rows));
+    try {
+      await expect(pushPendingRows(SHOP)).resolves.toBe(false);
+      expect(mocks.markSyncRowPermanentFailure).not.toHaveBeenCalled();
+      expect(mocks.markSyncRowSent).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(299_999);
+      await expect(pushPendingRows(SHOP)).resolves.toBe(false);
+      expect(mocks.invoke).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      await expect(pushPendingRows(SHOP)).resolves.toBe(true);
+      expect(mocks.invoke).toHaveBeenCalledTimes(2);
+      expect(mocks.invoke.mock.calls[0]?.[1]).toEqual(mocks.invoke.mock.calls[1]?.[1]);
+      expect(sent.size).toBe(3);
+    } finally {
+      vi.useRealTimers();
+      mocks.listPendingSyncRows.mockReset();
+      mocks.markSyncRowSent.mockReset();
+    }
+  });
+});

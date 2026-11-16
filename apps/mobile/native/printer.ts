@@ -25,7 +25,9 @@ function markValidated(printer: PairedPrinter): void {
 }
 
 async function requestPermissions(): Promise<void> {
-  if (Platform.OS !== 'android') throw new PrinterError('unsupported', 'BLE thermal printing is Android-only in Beta');
+  // CoreBluetooth requests authorization natively when its manager starts.
+  if (Platform.OS === 'ios') return;
+  if (Platform.OS !== 'android') throw new PrinterError('unsupported', 'BLE thermal printing is unavailable on this platform');
   const permissions = Platform.Version >= 31
     ? [PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN, PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT]
     : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];

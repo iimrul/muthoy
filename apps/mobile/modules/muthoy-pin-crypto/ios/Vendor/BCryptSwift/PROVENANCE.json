@@ -1,0 +1,34 @@
+{
+  "repository": "https://github.com/wisetail/BCryptSwift",
+  "commit": "7cebf3c0d9b507912f572a0ad9b4d6af764d8b1a",
+  "files": {
+    "BCryptConfiguration.swift": {
+      "gitBlobSha1": "68e8397d22b6857a43b3dd06ad1c812d16173bd9",
+      "sha256": "d3fcc776d9fc0e977b1d6854821b9821162cf2ff2acfb6af81a8524d6b5d299d"
+    },
+    "BCryptConstants.swift": {
+      "gitBlobSha1": "88b0a6eeaff3526e8a6991f9b117a63c6f432106",
+      "sha256": "706cdfc433bed6f9b2ebaae37ddcfd5e4b571c14957dd6ef034ba9a98b629662"
+    },
+    "BCryptError.swift": {
+      "gitBlobSha1": "f297a2b0a806ebf3a4e9afc818e890b2f0709ab2",
+      "sha256": "bd9e276415e22534ae758c30216ad61b270ca6330a33f0a8affc5bc76ecb009b"
+    },
+    "BCryptSwift.swift": {
+      "gitBlobSha1": "30b5e83e5a60c9925c263b1c44ed6bb964209de6",
+      "sha256": "c50cdc3e5b803a1e7b3ad147317bc75c89b8484bc1ada47e41b69d21fdb5e343"
+    },
+    "BCryptSwiftModern.swift": {
+      "gitBlobSha1": "012e77b79ca9cc02b71dca8d7084b5792ec2c3db",
+      "sha256": "7918fb67c9dbead0f1f4889ee8dd96136f630dd6dda24a967043a97a2c128c4e"
+    },
+    "BCryptSwiftRandom.swift": {
+      "gitBlobSha1": "6193eddc1931948e7470a44280aa918508c3a07b",
+      "sha256": "0f9bda6a8387bccbd516b490d0fb81266ca11cb582d95065ceb888ad9f2901a8"
+    },
+    "LICENSE": {
+      "gitBlobSha1": "e28fd496bf8259f622e0ffb1e1900dded46b5d2a",
+      "sha256": "96f2ba4d0b05490e1cc558cda4d23ea215a4afb77b66ea42737d14ad08f6ee95"
+    }
+  }
+}

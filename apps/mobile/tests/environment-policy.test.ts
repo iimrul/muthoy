@@ -152,3 +152,43 @@ describe('actual native identity and runtime fingerprint checks', () => {
     await expect(module.verifyEnvironmentIdentity()).rejects.toMatchObject({ code: 'configuration-invalid' });
   });
 });
+
+describe("Metro native build watcher boundary", () => {
+  test.each(["single", "array", "absent"])("preserves %s defaults and excludes temporary native trees", async shape => {
+    const { runInNewContext } = await import("node:vm");
+    const path = await import("node:path");
+    const root = path.resolve("metro-config-fixture", "apps", "mobile");
+    const prior = /already-blocked/;
+    const resolver = { blockList: shape === "single" ? prior : shape === "array" ? [prior] : undefined, sourceExts: ["js"] };
+    const fakeRequire = Object.assign((id: string) => {
+      if (id === "expo/metro-config") return { getDefaultConfig: () => ({ resolver }) };
+      if (id === "nativewind/metro") return { withNativeWind: (config: unknown) => config };
+      if (id === "path") return path;
+      throw new Error("Unexpected Metro config dependency: " + id);
+    }, { resolve: () => path.join(root, "node_modules", "expo", "package.json") });
+    const entry = { exports: {} as { resolver: { blockList: RegExp[] } } };
+    runInNewContext(readFileSync("apps/mobile/metro.config.js", "utf8"), {
+      require: fakeRequire, module: entry, __dirname: root,
+    });
+    const patterns = entry.exports.resolver.blockList;
+    // Expo combines these patterns and refuses mismatched flags at startup.
+    expect(new Set(patterns.map(pattern => pattern.flags))).toEqual(new Set([""]));
+    if (shape !== "absent") expect(patterns.some(pattern => pattern.test("already-blocked"))).toBe(true);
+    for (const directory of [
+      "D:/v/package/node_modules/expo-modules-core/android/.cxx",
+      "D:/v/package/node_modules/expo-modules-core/android/.cxx/Debug/CMakeFiles/CMakeTmp",
+      "D:/md/apps/mobile/android/app/build",
+      "D:/md/apps/mobile/modules/muthoy-db-key/android/build/generated",
+    ]) {
+      for (const nativePath of [directory, directory.replaceAll("/", String.fromCharCode(92))]) {
+        expect(patterns.some(pattern => pattern.test(nativePath))).toBe(true);
+      }
+    }
+    for (const source of [
+      "D:/md/apps/mobile/components/ui/StandardHeader.tsx",
+      "D:/v/package/node_modules/expo-modules-core/android/src/main/Module.kt",
+      "D:/v/package/node_modules/build/index.js",
+      "D:/md/apps/mobile/android/app/build.gradle",
+    ]) expect(patterns.some(pattern => pattern.test(source))).toBe(false);
+  });
+});

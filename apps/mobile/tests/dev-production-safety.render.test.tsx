@@ -28,6 +28,7 @@ interface StubProps {
 }
 
 vi.mock('react-native', () => ({
+  StatusBar: { setBarStyle: vi.fn() },
   Alert: { alert: deps.alert },
   ActivityIndicator: () => createElement('span', null, 'spinner'),
   View: ({ children, className }: StubProps) => createElement('div', { className }, children),

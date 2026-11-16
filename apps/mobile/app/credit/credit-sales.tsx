@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, Text, View } from 'react-native';
+import { AppTextInput as TextInput } from '../../components/ui/AppTextInput';
 import { router } from 'expo-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -282,7 +283,7 @@ export default function CreditSalesScreen() {
             <View className="flex-row items-start justify-between">
               <View className="flex-1 gap-1">
                 <Text className="font-sans-semibold text-base text-richBlack">{customer.name}</Text>
-                {customer.phone ? <Text className="font-mono text-sm text-midGray">{customer.phone}</Text> : null}
+                {customer.phone ? <Text className="font-sans text-sm text-midGray">{customer.phone}</Text> : null}
                 {customer.lastTransactionAt ? (
                   <Text className="font-sans text-xs text-midGray">
                     {t('lastTransactionLabel')}: {formatDate(customer.lastTransactionAt)}

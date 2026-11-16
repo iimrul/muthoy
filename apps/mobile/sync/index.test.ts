@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   nudgeBilling: vi.fn(),
   uploadAttachments: vi.fn(),
   notify: vi.fn(),
+  resolveHealthy: vi.fn(),
   notifyHalted: vi.fn(),
   enforceRevocation: vi.fn(),
   addEventListener: vi.fn(),
@@ -64,6 +65,7 @@ vi.mock("./scheduler", () => ({ startForegroundScheduler: mocks.startForegroundS
 vi.mock("./stuckNotification", () => ({
   notifyIfSyncIsStuck: mocks.notify,
   notifySyncHalted: mocks.notifyHalted,
+  resolveSyncAlertIfHealthy: mocks.resolveHealthy,
 }));
 vi.mock("./revocation", () => ({
   enforceAuthoritativeRevocation: mocks.enforceRevocation,
@@ -133,6 +135,7 @@ function resetEngine(): void {
   useSessionStore.getState().clearActiveUser();
   mocks.online.mockResolvedValue(true);
   mocks.notify.mockResolvedValue(undefined);
+  mocks.resolveHealthy.mockResolvedValue(undefined);
   mocks.notifyHalted.mockResolvedValue(undefined);
   mocks.enforceRevocation.mockResolvedValue(false);
   // A2.3. No device objection by default: the ordinary shop, where the
@@ -436,6 +439,21 @@ describe("sync cycle orchestration", () => {
     await vi.waitFor(() => expect(mocks.notify).toHaveBeenCalled());
 
     expect(mocks.pull).not.toHaveBeenCalled();
+  });
+
+  it("re-arms the Owner's sync warning after a completed cycle", async () => {
+    mocks.push.mockResolvedValue(true);
+    loginTo("shop-rearm");
+    startSyncEngine("shop-rearm");
+    await vi.waitFor(() => expect(mocks.resolveHealthy).toHaveBeenCalledWith("shop-rearm"));
+  });
+
+  it("never clears a warning from a cycle that halted", async () => {
+    mocks.push.mockRejectedValue(new SyncHaltedError("Authentication hook is not configured", "hook_not_configured"));
+    loginTo("shop-halted-rearm");
+    startSyncEngine("shop-halted-rearm");
+    await vi.waitFor(() => expect(mocks.notifyHalted).toHaveBeenCalled());
+    expect(mocks.resolveHealthy).not.toHaveBeenCalled();
   });
 
   it("surfaces a hook failure without continuing to pull", async () => {

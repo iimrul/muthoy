@@ -1,6 +1,19 @@
 {
-  "platforms": ["android"],
+  "platforms": [
+    "android",
+    "apple"
+  ],
   "android": {
-    "modules": ["com.muthoy.dbkey.MuthoyDbKeyModule"]
+    "modules": [
+      "com.muthoy.dbkey.MuthoyDbKeyModule"
+    ]
+  },
+  "apple": {
+    "modules": [
+      "MuthoyDbKeyModule"
+    ],
+    "appDelegateSubscribers": [
+      "MuthoyDataProtectionSubscriber"
+    ]
   }
 }

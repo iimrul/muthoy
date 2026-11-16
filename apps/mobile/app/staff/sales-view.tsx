@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { FlatList, Pressable, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router } from "expo-router";
 import { formatMoney } from "@muthoy/utils";
 import { AccessDenied } from "../../components/ui/AccessDenied";
@@ -11,10 +12,13 @@ import {
   type StaffSaleEvent,
   type StaffSalesSummary,
 } from "../../db/saleHistory";
+import { userFacingError } from "../../i18n/display";
+import { useI18n } from "../../state/localeStore";
 import { useOwnerAccess } from "../../state/usePermission";
 
 export default function StaffSalesViewScreen() {
   const { session, isAllowed } = useOwnerAccess();
+  const { t, formatNumber } = useI18n();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [rows, setRows] = useState<StaffSalesSummary[]>([]);
@@ -22,6 +26,8 @@ export default function StaffSalesViewScreen() {
   const [query, setQuery] = useState("");
   const [action, setAction] = useState<StaffSaleEvent["action"] | undefined>();
   const [error, setError] = useState<string | null>(null);
+  const actionLabel = (value: StaffSaleEvent["action"] | undefined) =>
+    t(value === undefined ? "staffSalesAll" : value === "sale" ? "staffSalesSale" : value === "discount" ? "staffSalesDiscount" : "staffSalesRefund");
   const reload = useCallback(async () => {
     if (!session || !isAllowed) return;
     try {
@@ -43,13 +49,9 @@ export default function StaffSalesViewScreen() {
       setEvents(audit);
       setError(null);
     } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Could not load staff sales.",
-      );
+      setError(userFacingError(caught, "staffSalesLoadFailed", t));
     }
-  }, [action, from, isAllowed, query, session, to]);
+  }, [action, from, isAllowed, query, session, t, to]);
   useEffect(() => {
     const timer = setTimeout(() => void reload(), 0);
     return () => clearTimeout(timer);
@@ -57,26 +59,26 @@ export default function StaffSalesViewScreen() {
   if (!session || !isAllowed) return <AccessDenied />;
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader title="Staff sales" onBackPress={() => router.back()} />
+      <StandardHeader title={t("staffSales")} onBackPress={() => router.back()} />
       <View className="gap-3 p-4 pb-0">
         <View className="flex-row gap-3">
           <TextInput
             value={from}
             onChangeText={setFrom}
-            placeholder="From YYYY-MM-DD"
+            placeholder={t("staffSalesFromDate")}
             className="flex-1 rounded border border-midGray bg-white p-3"
           />
           <TextInput
             value={to}
             onChangeText={setTo}
-            placeholder="To YYYY-MM-DD"
+            placeholder={t("staffSalesToDate")}
             className="flex-1 rounded border border-midGray bg-white p-3"
           />
         </View>
         <TextInput
           value={query}
           onChangeText={setQuery}
-          placeholder="Invoice or staff"
+          placeholder={t("staffSalesSearch")}
           className="rounded border border-midGray bg-white p-3"
         />
         <View className="flex-row gap-2">
@@ -87,7 +89,7 @@ export default function StaffSalesViewScreen() {
               className={`rounded-full px-3 py-2 ${action === value ? "bg-brand-green" : "bg-white"}`}
             >
               <Text className={action === value ? "text-white" : ""}>
-                {value ?? "all"}
+                {actionLabel(value)}
               </Text>
             </Pressable>
           ))}
@@ -108,7 +110,7 @@ export default function StaffSalesViewScreen() {
                 className="flex-row justify-between rounded bg-white p-3"
               >
                 <Text>
-                  {event.businessDate} · {event.actorName} · {event.action}
+                  {event.businessDate} · {event.actorName} · {actionLabel(event.action)}
                 </Text>
                 <Text className="font-mono">{formatMoney(event.amount)}</Text>
               </View>
@@ -117,30 +119,30 @@ export default function StaffSalesViewScreen() {
         }
         ListEmptyComponent={
           <EmptyState
-            title="No staff sales"
-            message="No attributed sales in this period."
+            title={t("noStaffSales")}
+            message={t("staffSalesEmptyPeriod")}
           />
         }
         renderItem={({ item }) => (
           <View className="gap-2 rounded-lg bg-white p-4">
             <View className="flex-row justify-between">
               <Text className="font-sans-semibold">{item.staffName}</Text>
-              <Text>{item.saleCount} sales</Text>
+              <Text>{formatNumber(item.saleCount)} {t("staffSalesCount")}</Text>
             </View>
             <View className="flex-row justify-between">
-              <Text>Gross</Text>
+              <Text>{t("staffSalesGross")}</Text>
               <Text>{formatMoney(item.grossSales)}</Text>
             </View>
             <View className="flex-row justify-between">
-              <Text>Discounts</Text>
+              <Text>{t("staffSalesDiscounts")}</Text>
               <Text>-{formatMoney(item.discounts)}</Text>
             </View>
             <View className="flex-row justify-between">
-              <Text>Refunds</Text>
+              <Text>{t("staffSalesRefunds")}</Text>
               <Text>-{formatMoney(item.refunds)}</Text>
             </View>
             <View className="flex-row justify-between">
-              <Text className="font-sans-semibold">Net</Text>
+              <Text className="font-sans-semibold">{t("staffSalesNet")}</Text>
               <Text className="font-mono text-brand-green">
                 {formatMoney(item.netSales)}
               </Text>

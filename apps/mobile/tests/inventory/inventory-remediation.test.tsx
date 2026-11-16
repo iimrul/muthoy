@@ -124,11 +124,13 @@ vi.mock("react-native", () => ({
 }));
 
 const routerMock = vi.hoisted(() => ({ push: vi.fn(), back: vi.fn() }));
+const routeFixture = vi.hoisted(() => ({ mode: undefined as string | undefined }));
+vi.mock("../../state/usePlan", () => ({ usePlan: () => ({effectiveTier:"pro",loading:false}) }));
 vi.mock("expo-router", () => ({
   router: routerMock,
   useFocusEffect: (callback: () => void | (() => void)) =>
     useEffect(callback, [callback]),
-  useLocalSearchParams: () => ({ medicineId: "medicine-1", batchId: "batch-1" }),
+  useLocalSearchParams: () => ({ medicineId: "medicine-1", batchId: "batch-1", mode: routeFixture.mode }),
 }));
 vi.mock("../../components/ui/StandardHeader", () => ({
   StandardHeader: ({ title }: { title: string }) =>
@@ -242,6 +244,7 @@ const SESSION = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  routeFixture.mode = undefined;
   useLocaleStore.getState().setLocale("en");
   useSessionStore.setState({ session: SESSION });
   deps.listSupplierPickerOptions.mockResolvedValue([
@@ -492,7 +495,8 @@ describe("Explicit restocking", () => {
     deps.getMedicine.mockResolvedValue(LOCAL_MEDICINE);
   });
 
-  it("opens Add Batch for the route's explicit medicine id and keeps identity read-only", async () => {
+  it("opens the separate supplier-receipt mode for the route's explicit medicine id and keeps identity read-only", async () => {
+    routeFixture.mode = "receipt";
     const AddBatchScreen = (await import("../../app/inventory/add-batch")).default;
     render(createElement(AddBatchScreen));
     await screen.findByText("This is the same medicine: Progut MUPS");

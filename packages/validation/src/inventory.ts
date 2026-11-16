@@ -1,3 +1,4 @@
+import { moneyAmountSchema } from './money';
 import { z } from "zod";
 
 // Volume 0 Day 8: Add Medicine (name, generic, manufacturer, strength,
@@ -53,8 +54,8 @@ export const batchFieldsSchema = z.object({
     .number()
     .int("Quantity must be a whole number")
     .min(0, "Quantity cannot be negative"),
-  purchasePrice: z.number().min(0, "Purchase price cannot be negative"),
-  salePrice: z.number().min(0, "Sale price cannot be negative"),
+  purchasePrice: moneyAmountSchema.min(0, "Purchase price cannot be negative"),
+  salePrice: moneyAmountSchema.min(0, "Sale price cannot be negative"),
 });
 
 export const addBatchSchema = batchFieldsSchema;

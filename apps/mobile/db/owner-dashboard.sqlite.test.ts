@@ -103,6 +103,8 @@ function migrate(name: string): void {
 
 beforeAll(() => {
   for (const name of MIGRATIONS) migrate(name);
+  // Current writers require the additive atomic recovery journal.
+  migrate('0034_recovery_journal.sql');
 });
 
 beforeEach(() => {

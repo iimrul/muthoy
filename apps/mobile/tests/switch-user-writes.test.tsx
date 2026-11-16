@@ -327,6 +327,7 @@ const ZERO_CASH_BREAKDOWN = {
   },
   creditCollections: { total: asPaisa(0), details: [] },
   expenses: { total: asPaisa(0), details: [] },
+  refunds: { total: asPaisa(0) },
   withdrawals: { total: asPaisa(0) },
   supplierPayments: { total: asPaisa(0) },
   expectedCash: asPaisa(0),

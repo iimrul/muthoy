@@ -1,7 +1,8 @@
 import Feather from '@expo/vector-icons/Feather';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { AppTextInput as TextInput } from '../../components/ui/AppTextInput';
 import { AccessDenied } from '../../components/ui/AccessDenied';
 import { PremiumLock } from '../../components/ui/PremiumLock';
 import { listOwnerShops, readShopSummaries, subscribeCommercialCache } from '../../db/commercial';

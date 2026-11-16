@@ -227,10 +227,10 @@ export async function createSupplier(
     address: supplier.address ?? null, email: supplier.email ?? null,
     contactPerson: supplier.contactPerson ?? null, manufacturer: supplier.manufacturer ?? null,
     notes: supplier.notes ?? null, createdAt: now, updatedAt: now };
-  await db.transaction(async (tx) => {
-    // Async callback — checked at both ends. See db/errors.ts.
+  await db.transaction((tx) => {
+    // Both session checks run inside the synchronous transaction.
     assertSessionLive(isStillActive);
-    await tx.insert(suppliers).values(values);
+    tx.insert(suppliers).values(values).run();
     recordChange(tx, { shopId, table: 'suppliers', rowId: id, op: 'insert', payload: values });
     assertSessionLive(isStillActive);
   });
@@ -250,7 +250,7 @@ export interface UpdateSupplierInput {
 // called).
 export async function updateSupplier(input: UpdateSupplierInput): Promise<void> {
   await requireOwner(input.shopId, input.actorUserId);
-  await db.transaction(async (tx) => {
+  await db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
     const values = stampUpdatedAt({
       name: input.fields.name,
@@ -262,10 +262,10 @@ export async function updateSupplier(input: UpdateSupplierInput): Promise<void> 
       notes: input.fields.notes ?? null,
       isDirty: true,
     });
-    const result = await tx
+    const result = tx
       .update(suppliers)
       .set(values)
-      .where(and(eq(suppliers.id, input.supplierId), eq(suppliers.shopId, input.shopId), eq(suppliers.isDeleted, false)));
+      .where(and(eq(suppliers.id, input.supplierId), eq(suppliers.shopId, input.shopId), eq(suppliers.isDeleted, false))).run();
     if (result.changes !== 1) {
       throw new Error('Supplier does not belong to this shop');
     }
@@ -289,9 +289,9 @@ export interface ArchiveSupplierInput {
 // amount(s) blocking the action.
 export async function archiveSupplier(input: ArchiveSupplierInput): Promise<void> {
   await requireOwner(input.shopId, input.actorUserId);
-  await db.transaction(async (tx) => {
+  await db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
-    const supplier = await tx
+    const supplier = tx
       .select({ id: suppliers.id, archivedAt: suppliers.archivedAt })
       .from(suppliers)
       .where(and(eq(suppliers.id, input.supplierId), eq(suppliers.shopId, input.shopId), eq(suppliers.isDeleted, false)))
@@ -308,10 +308,10 @@ export async function archiveSupplier(input: ArchiveSupplierInput): Promise<void
     }
     const now = new Date().toISOString();
     const values = stampUpdatedAt({ archivedAt: now, archivedBy: input.actorUserId, isDirty: true });
-    await tx
+    tx
       .update(suppliers)
       .set(values)
-      .where(and(eq(suppliers.id, input.supplierId), eq(suppliers.shopId, input.shopId)));
+      .where(and(eq(suppliers.id, input.supplierId), eq(suppliers.shopId, input.shopId))).run();
     recordChange(tx, { shopId: input.shopId, table: 'suppliers', rowId: input.supplierId, op: 'update', payload: values });
     assertSessionLive(input.isStillActive);
   });

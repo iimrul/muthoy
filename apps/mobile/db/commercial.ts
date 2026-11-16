@@ -202,8 +202,8 @@ export async function getEffectiveEntitlementForShop(
   now = new Date(),
 ): Promise<EffectiveEntitlement | null> {
   if (!commercialSchemaInstalled()) return null;
-  return db.transaction(async (tx) => {
-    const row = await tx.select({
+  return db.transaction((tx) => {
+    const row = tx.select({
       billingAccountId: entitlementCache.billingAccountId,
       tier: entitlementCache.tier,
       status: entitlementCache.status,
@@ -221,8 +221,8 @@ export async function getEffectiveEntitlementForShop(
     const highWater = Date.parse(row.lastObservedAt);
     const effectiveNow = new Date(Math.max(now.getTime(), Number.isFinite(highWater) ? highWater : now.getTime()));
     if (effectiveNow.getTime() > highWater) {
-      await tx.update(entitlementCache).set({ lastObservedAt: effectiveNow.toISOString() })
-        .where(eq(entitlementCache.billingAccountId, row.billingAccountId));
+      tx.update(entitlementCache).set({ lastObservedAt: effectiveNow.toISOString() })
+        .where(eq(entitlementCache.billingAccountId, row.billingAccountId)).run();
     }
     return resolveEntitlement(row, effectiveNow, 'offline');
   });
@@ -410,19 +410,19 @@ export async function cacheShopSummaries(
   verifiedAt: string,
   rows: ShopSummarySnapshot[],
 ): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.delete(shopSummaryCache).where(and(
+  await db.transaction((tx) => {
+    tx.delete(shopSummaryCache).where(and(
       eq(shopSummaryCache.billingAccountId, billingAccountId),
       eq(shopSummaryCache.businessDate, businessDate),
-    ));
-    if (rows.length) await tx.insert(shopSummaryCache).values(rows.map((row) => ({
+    )).run();
+    if (rows.length) tx.insert(shopSummaryCache).values(rows.map((row) => ({
       billingAccountId, businessDate, shopId: row.shop_id,
       salesPaisa: row.sales_paisa as Paisa,
       outstandingCreditPaisa: row.outstanding_credit_paisa as Paisa,
       lowStockCount: row.low_stock_count, expiringCount: row.expiring_count,
       transactionCount: row.transaction_count,
       averageSalePaisa: row.average_sale_paisa as Paisa, verifiedAt,
-    })));
+    }))).run();
   });
 }
 

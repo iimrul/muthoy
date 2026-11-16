@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  FlatList,
-  Modal,
-  Pressable,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { FlatList, Modal, Pressable, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router, useLocalSearchParams } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { asPaisa } from "@muthoy/types";

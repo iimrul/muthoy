@@ -369,6 +369,8 @@ beforeAll(() => {
   applyMigration("0028_shop_scoped_pin_lookup.sql");
   applyMigration("0029_pin_reserved_while_inactive.sql");
   applyMigration("0033_medicine_search_key.sql");
+  // Current writers require the additive atomic recovery journal.
+  applyMigration('0034_recovery_journal.sql');
 });
 
 describe("expense recording and its cash impact", () => {
@@ -1539,6 +1541,33 @@ describe("reconcileCashDrawer — mid-day count, distinct from close (D-2, B3 Gr
 });
 
 describe("getCashBreakdown (B3 Group 2)", () => {
+  it("projects cash refunds without leaking another shop or counting non-cash tenders", async () => {
+    const fixture = seedShop();
+    const other = seedShop();
+    seedSale(fixture, "930", "cash", 2000, 1000);
+    seedSale(other, "931", "cash", 2000, 1000);
+    await setOpeningCash({ shopId: fixture.shopId, businessDate: BUSINESS_DATE,
+      openingCash: asPaisa(10000), staffId: fixture.ownerId, isStillActive: ALWAYS_LIVE });
+    for (const [shop, suffix] of [[fixture, "930"], [other, "931"]] as const) {
+      const saleId = shop.shopId.slice(0, 8) + "-0000-4000-9000-" + suffix.padStart(12, "0");
+      const refundId = "projection-refund-" + suffix;
+      const stamp = new Date().toISOString();
+      sqlite.prepare("INSERT INTO sale_refunds (id,shop_id,sale_id,claim_id,claim_token,reason,total_amount,business_date,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+        .run(refundId, shop.shopId, saleId, "synthetic-claim", "synthetic-token", "Projection fixture", 2000, BUSINESS_DATE, shop.ownerId, stamp, stamp);
+      for (const [kind, method, amount] of [
+        ["cash", "cash", 500], ["collection_refund", "cash", 300], ["collection_refund", "card", 700],
+      ] as const) {
+        sqlite.prepare("INSERT INTO refund_tenders (id,shop_id,refund_id,kind,method,amount,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)")
+          .run(refundId + kind + method, shop.shopId, refundId, kind, method, amount, stamp, stamp);
+      }
+    }
+    const breakdown = await getCashBreakdown(fixture.shopId, fixture.ownerId, BUSINESS_DATE);
+    expect(breakdown.refunds.total).toBe(800);
+    expect(breakdown.expectedCash).toBe(11200);
+    const empty = seedShop();
+    expect((await getCashBreakdown(empty.shopId, empty.ownerId, BUSINESS_DATE)).refunds.total).toBe(0);
+  });
+
   it("splits cash sales between owner and staff, summing exactly to the total", async () => {
     const fixture = seedShop();
     const shopLabel = shopCounter;

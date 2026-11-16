@@ -50,3 +50,51 @@ export function setLastPulledCursor(shopId: string, cursor: PullCursor): void {
 export function clearLastPulledCursor(shopId: string): void {
   cursorStorage.remove(cursorKey(shopId));
 }
+
+/** Which server-authorized mirror the watermark actually represents. */
+export interface MaterializedAccess {
+  actorUserId: string;
+  saleHistoryScope: "all" | "own";
+  readableTables: SyncTableName[];
+}
+
+function parseMaterializedAccess(value: unknown): MaterializedAccess | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Partial<MaterializedAccess>;
+  if (
+    typeof row.actorUserId !== "string" ||
+    !row.actorUserId.trim() ||
+    (row.saleHistoryScope !== "all" && row.saleHistoryScope !== "own") ||
+    !Array.isArray(row.readableTables) ||
+    row.readableTables.length === 0 ||
+    row.readableTables.some(
+      (table) => typeof table !== "string" || !SYNC_TABLE_NAMES.has(table),
+    ) ||
+    new Set(row.readableTables).size !== row.readableTables.length
+  )
+    return null;
+  return {
+    actorUserId: row.actorUserId,
+    saleHistoryScope: row.saleHistoryScope,
+    readableTables: [...row.readableTables].sort(),
+  };
+}
+
+export function getLastPulledAccess(shopId: string): MaterializedAccess | null {
+  const serialized = cursorStorage.getString(`materialized-access:${shopId}`);
+  if (!serialized) return null;
+  try {
+    return parseMaterializedAccess(JSON.parse(serialized));
+  } catch {
+    return null;
+  }
+}
+
+export function setLastPulledAccess(
+  shopId: string,
+  access: MaterializedAccess,
+): void {
+  const parsed = parseMaterializedAccess(access);
+  if (!parsed) throw new Error("Invalid materialized sync access");
+  cursorStorage.set(`materialized-access:${shopId}`, JSON.stringify(parsed));
+}

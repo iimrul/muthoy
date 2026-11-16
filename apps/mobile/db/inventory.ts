@@ -239,11 +239,8 @@ export async function createMedicineWithBatch(
   const medicineId = generateId();
   const batchId = generateId();
 
-  await db.transaction(async (tx) => {
-    // This callback AWAITS between writes, so unlike the synchronous ones in
-    // cash/customers/purchases/sales a handover can land mid-transaction.
-    // Checked at both ends: the trailing check turns a mid-flight switch into
-    // a throw, which rolls the whole transaction back.
+  await db.transaction((tx) => {
+    // The synchronous callback keeps all writes and both session checks in one commit.
     assertSessionLive(input.isStillActive);
     const now = new Date().toISOString();
     const medicineValues = {
@@ -266,7 +263,7 @@ export async function createMedicineWithBatch(
       createdAt: now,
       updatedAt: now,
     };
-    await tx.insert(medicines).values(medicineValues);
+    tx.insert(medicines).values(medicineValues).run();
     recordChange(tx, {
       shopId: input.shopId,
       table: "medicines",
@@ -289,7 +286,7 @@ export async function createMedicineWithBatch(
       createdAt: now,
       updatedAt: now,
     };
-    await tx.insert(batches).values(batchValues);
+    tx.insert(batches).values(batchValues).run();
     recordChange(tx, {
       shopId: input.shopId,
       table: "batches",
@@ -579,7 +576,7 @@ export async function createMedicineOnly(
 ): Promise<{ medicineId: string }> {
   await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("inventoryEdit"));
   const medicineId = generateId();
-  await db.transaction(async (tx) => {
+  await db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
     const now = new Date().toISOString();
     const medicineValues = {
@@ -596,7 +593,7 @@ export async function createMedicineOnly(
       createdAt: now,
       updatedAt: now,
     };
-    await tx.insert(medicines).values(medicineValues);
+    tx.insert(medicines).values(medicineValues).run();
     recordChange(tx, {
       shopId: input.shopId,
       table: "medicines",
@@ -634,10 +631,15 @@ export async function addBatchToMedicine(
 
   const batchId = generateId();
   try {
-    await db.transaction(async (tx) => {
-      // Async callback — checked at both ends. See createMedicineWithBatch.
+    db.transaction((tx) => {
+      // Expo SQLite transactions are synchronous; async callbacks commit before awaiting.
       assertSessionLive(input.isStillActive);
-      const existing = await tx
+      const medicine = tx.select({ id: medicines.id }).from(medicines).where(and(
+        eq(medicines.id, input.medicineId), eq(medicines.shopId, input.shopId),
+        eq(medicines.isDeleted, false),
+      )).get();
+      if (!medicine) throw new NotAuthorizedError();
+      const existing = tx
         .select({ id: batches.id })
         .from(batches)
         .where(
@@ -665,7 +667,7 @@ export async function addBatchToMedicine(
         createdAt: now,
         updatedAt: now,
       };
-      await tx.insert(batches).values(values);
+      tx.insert(batches).values(values).run();
       recordChange(tx, {
         shopId: input.shopId,
         table: "batches",

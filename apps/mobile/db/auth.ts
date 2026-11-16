@@ -508,7 +508,7 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
     throw new Error('Enter a valid Bangladeshi mobile number');
   }
 
-  await db.transaction(async (tx) => {
+  await db.transaction((tx) => {
     const timestamp = new Date().toISOString();
     // shops.owner_id is intentionally NOT a foreign key (same reason as
     // base.deletedBy — avoids a shops<->users creation cycle), so it can be
@@ -523,7 +523,7 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    await tx.insert(shops).values(shopValues);
+    tx.insert(shops).values(shopValues).run();
     recordChange(tx, { shopId, table: 'shops', rowId: shopId, op: 'insert', payload: shopValues });
 
     const b2SettingsValues = {
@@ -536,7 +536,7 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    await tx.insert(shopB2Settings).values(b2SettingsValues);
+    tx.insert(shopB2Settings).values(b2SettingsValues).run();
     recordChange(tx, { shopId, table: 'shop_b2_settings', rowId: b2SettingsValues.id, op: 'insert', payload: b2SettingsValues });
 
     // All three system roles are created now, even though Manager is unused
@@ -547,7 +547,7 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
       { id: managerRoleId, shopId, name: 'manager' as const, isSystem: true, createdAt: timestamp, updatedAt: timestamp },
       { id: staffRoleId, shopId, name: 'staff' as const, isSystem: true, createdAt: timestamp, updatedAt: timestamp },
     ];
-    await tx.insert(roles).values(roleValues);
+    tx.insert(roles).values(roleValues).run();
     roleValues.forEach((role) => recordChange(tx, { shopId, table: 'roles', rowId: role.id, op: 'insert', payload: role }));
 
     const userValues = stampUpdatedAt({
@@ -563,7 +563,7 @@ export async function createShopAndOwner(input: RegisterShopInput): Promise<{ sh
       isActive: true,
     });
     const completeUserValues = { ...userValues, createdAt: userValues.updatedAt };
-    await tx.insert(users).values(completeUserValues);
+    tx.insert(users).values(completeUserValues).run();
     recordChange(tx, { shopId, table: 'users', rowId: userId, op: 'insert', payload: completeUserValues });
   });
 
@@ -585,8 +585,8 @@ export async function setOwnerPin(userId: string, rawPin: string): Promise<void>
     pinLookupTag,
     pinLookupPinSetAt: pinSetAt,
   });
-  await db.transaction(async (tx) => {
-    await tx.update(users).set(values).where(eq(users.id, userId));
+  await db.transaction((tx) => {
+    tx.update(users).set(values).where(eq(users.id, userId)).run();
     recordChange(tx, { shopId: user.shopId, table: 'users', rowId: userId, op: 'update', payload: values });
   });
 }
@@ -698,8 +698,8 @@ export async function recordSuccessfulLogin(session: LocalPinSession): Promise<v
   const b4 = commercialSchemaInstalled();
   const commercial = b4 ? await db.select({ status: shopDirectory.commercialStatus, archivedAt: shopDirectory.archivedAt })
     .from(shopDirectory).where(eq(shopDirectory.shopId, session.shopId)).get() : undefined;
-  await db.transaction(async (tx) => {
-    await tx.insert(auditLogs).values(values);
+  await db.transaction((tx) => {
+    tx.insert(auditLogs).values(values).run();
     // A commercially read-only shop must remain login/viewable. Keep this
     // device-local audit, but do not create an outbox write the server must
     // reject. Every business mutation remains blocked by recordChange.

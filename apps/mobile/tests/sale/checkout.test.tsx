@@ -124,7 +124,8 @@ vi.mock('../../domain/fefo', async (importOriginal) => ({
   deduct: () => [{ batchId: BATCH_ID, quantityDeducted: 1 }],
 }));
 
-const { StaleSessionError } = await import('../../db/errors');
+const { DayClosedError, StaleSessionError } = await import('../../db/errors');
+const { catalog } = await import('../../i18n/catalog');
 const { useLocaleStore } = await import('../../state/localeStore');
 const { useSessionStore } = await import('../../state/sessionStore');
 type Session = import('../../state/sessionStore').Session;
@@ -366,6 +367,27 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
 });
 
 describe('checkout remediation', () => {
+  it.each(['en', 'bn'] as const)('explains a closed day in %s and retains the unsold cart', async (locale) => {
+    useLocaleStore.getState().setLocale(locale);
+    deps.createSaleTransaction.mockRejectedValueOnce(new DayClosedError('2026-11-10'));
+    useSessionStore.getState().login(OWNER);
+    fillCart();
+    render(createElement(CheckoutScreen));
+    await waitFor(() => expect(deps.getActiveBatchForMedicine).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText(catalog[locale].amountTenderedLabel), {
+      target: { value: '100' },
+    });
+    fireEvent.click(screen.getByLabelText(catalog[locale].confirmSaleLabel));
+
+    expect(await screen.findByText(catalog[locale].dayClosedErrorLabel)).toBeTruthy();
+    expect(screen.queryByText(catalog[locale].checkoutFailedUnchangedLabel)).toBeNull();
+    expect(useCartStore.getState().items).toHaveLength(1);
+    expect(useCartStore.getState().items[0]?.quantity).toBe(1);
+    expect(deps.createSaleTransaction).toHaveBeenCalledTimes(1);
+    expect(routerMock.replace).not.toHaveBeenCalled();
+    expect(deps.triggerSyncNow).not.toHaveBeenCalled();
+  });
+
   it('requires stale-quote reconfirmation again after any cart edit', async () => {
     deps.createSaleTransaction
       .mockRejectedValueOnce(new SaleQuoteChangedError(asPaisa(1_100), []))

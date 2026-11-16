@@ -10,9 +10,10 @@ import { useI18n } from "../../state/localeStore";
 // SAME number the fixed formula in domain/cashFormula.ts already summed;
 // this component only lays them out and expands detail rows.
 //
-// Row order matches the prototype exactly (CH-5): Opening Cash, Cash Sales
+// Founder-approved T23 seven-term order (F-13, 2026-11-10): Opening Cash, Cash Sales
 // (owner/staff split when present), Credit Collections, Expenses,
-// Withdrawals, Supplier Payments (only when > 0), footer Expected in Drawer.
+// Cash Refunds, Supplier Payments, Withdrawals, footer Expected in Drawer.
+// All terms stay visible at zero, including Supplier Payments. Presentation only.
 
 type Tone = "in" | "out" | "neutral";
 
@@ -116,7 +117,9 @@ function CashSalesRow({ cashSales }: CashSalesRowProps) {
   const hasSplit = cashSales.owner > ZERO_PAISA || cashSales.staff > ZERO_PAISA;
 
   if (!hasSplit) {
-    return <RowCard label={t("cashSales")} amount={cashSales.total} tone="in" />;
+    return (
+      <RowCard label={t("cashSales")} amount={cashSales.total} tone="in" />
+    );
   }
 
   return (
@@ -205,7 +208,11 @@ export function CashSummarySheet({ breakdown }: CashSummarySheetProps) {
 
   return (
     <View className="gap-3">
-      <RowCard label={t("openingCash")} amount={breakdown.openingCash} tone="neutral" />
+      <RowCard
+        label={t("openingCash")}
+        amount={breakdown.openingCash}
+        tone="neutral"
+      />
 
       <CashSalesRow cashSales={breakdown.cashSales} />
 
@@ -223,15 +230,21 @@ export function CashSummarySheet({ breakdown }: CashSummarySheetProps) {
         details={breakdown.expenses.details}
       />
 
-      <RowCard label={t("withdrawals")} amount={breakdown.withdrawals.total} tone="out" />
-
-      {breakdown.supplierPayments.total > ZERO_PAISA ? (
-        <RowCard
-          label={t("supplierPayments")}
-          amount={breakdown.supplierPayments.total}
-          tone="out"
-        />
-      ) : null}
+      <RowCard
+        label={t("cashRefunds")}
+        amount={breakdown.refunds.total}
+        tone="out"
+      />
+      <RowCard
+        label={t("supplierPayments")}
+        amount={breakdown.supplierPayments.total}
+        tone="out"
+      />
+      <RowCard
+        label={t("withdrawals")}
+        amount={breakdown.withdrawals.total}
+        tone="out"
+      />
 
       <View className="flex-row items-center justify-between rounded-xl border-2 border-brand-green bg-brand-softGreen p-4">
         <Text className="font-sans-bold text-sm text-richBlack">

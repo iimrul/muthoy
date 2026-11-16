@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { FlatList, Pressable, Text, TextInput, View } from "react-native";
+import { FlatList, Pressable, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { daysUntilExpiry } from "@muthoy/utils";

@@ -12,7 +12,7 @@ import {
 } from './revocation';
 import { startInventoryRealtime, stopInventoryRealtime } from './realtime';
 import { startForegroundScheduler } from './scheduler';
-import { notifyIfSyncIsStuck, notifySyncHalted } from './stuckNotification';
+import { notifyIfSyncIsStuck, notifySyncHalted, resolveSyncAlertIfHealthy } from './stuckNotification';
 import { isSupabaseConfigured } from './supabaseClient';
 import { recordSuccessfulSync } from './statusStore';
 import { reportError } from '../monitoring';
@@ -215,6 +215,13 @@ async function runCycle(
     recordSuccessfulSync(shopId, completedAt);
     // A cycle that got all the way here is bound; any earlier re-link prompt is stale.
     clearDeviceRelinkRequired();
+    // Only a completed cycle may re-arm the Owner's sync warning; a halted one
+    // must keep the warning it just raised.
+    try {
+      await resolveSyncAlertIfHealthy(shopId);
+    } catch (error) {
+      console.warn('Sync warning re-arm failed', error);
+    }
     await notifySyncCompletion(shopId, completedAt);
     return { status: 'completed', completedAt };
   } catch (error) {
@@ -325,6 +332,17 @@ export function triggerSyncNow(shopId: string): Promise<SyncCycleResult> {
       } satisfies SyncCycleResult;
     })
     .finally(() => {
+      // C5 status/custody integration only. Coordinator has NO default network runtime.
+      const state = useSessionStore.getState();
+      const actor = state.session;
+      if (generation === startedAt && actor?.shopId === shopId && actor.role === 'owner') {
+        const epoch = state.epoch;
+        const live = () => generation === startedAt && useSessionStore.getState().epoch === epoch
+          && useSessionStore.getState().session?.userId === actor.userId;
+        void Promise.all([import('./recoveryCoordinator'), import('../native/deviceId')])
+          .then(([backup, device]) => live() ? backup.runOwnerRecoveryBackup({shopId,ownerId:actor.userId,isStillActive:live},device.getDeviceId()) : undefined)
+          .catch(() => { /* No exception/key material enters logs. */ });
+      }
       if (cycles.get(shopId) === cycle) {
         cycles.delete(shopId);
       }

@@ -43,6 +43,7 @@ const FULLY_LOCALIZED_SCREENS = [
   'app/inventory/batches.tsx',
   'app/inventory/expiry.tsx',
   'app/sale/held.tsx',
+  'app/staff/sales-view.tsx',
 ] as const;
 
 /**
@@ -540,7 +541,7 @@ describe('W3-08 — every dynamic value a screen renders has a translation', () 
  * files still use `cause.message` on paths a plan refusal cannot reach (report
  * load, day close). A file-wide ban would read stricter than the code is.
  */
-const PLAN_REFUSAL_SITES: ReadonlyArray<[string, string]> = [
+const PLAN_REFUSAL_SITES: readonly [string, string][] = [
   ['components/expenses/QuickLogTab.tsx', "userFacingError(cause, 'expenseWriteFailed', t)"],
   ['components/expenses/LedgerTab.tsx', "userFacingError(cause, 'expenseDeleteFailed', t)"],
   ['app/end-of-day.tsx', "userFacingError(cause, 'printFailedLabel', t)"],
@@ -620,6 +621,7 @@ describe('no test in this suite carries a control byte', () => {
       'app/inventory/batches.tsx',
       'app/inventory/expiry.tsx',
       'app/sale/held.tsx',
+  'app/staff/sales-view.tsx',
       'app/reports/sales-history.tsx',
       'i18n/catalog.ts',
     ]) {

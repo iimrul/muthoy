@@ -1,0 +1,4 @@
+# Preserve fixed upstream bytes and their provenance across clones.
+*.swift text eol=lf
+LICENSE text eol=lf
+PROVENANCE.json text eol=lf

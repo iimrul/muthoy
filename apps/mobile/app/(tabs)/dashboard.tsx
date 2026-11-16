@@ -1,3 +1,4 @@
+import { SyncExposureStatus } from "../../components/sync/SyncExposureStatus";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -419,7 +420,6 @@ export default function MorningDashboardScreen() {
 
   return (
     <View className="flex-1 bg-[#F5F5F5]">
-      <ScrollView contentContainerClassName="pb-28">
         {/* Header */}
         <View
           className="flex-row items-center justify-between bg-auth-heroEnd px-4"
@@ -472,6 +472,7 @@ export default function MorningDashboardScreen() {
           </View>
         </View>
 
+      <ScrollView contentContainerClassName="pb-28">
         {/* Hero: greeting + plan badge, date, shop switcher, KPI carousel.
             Prototype MorningDashboard order — the badge sits inline with the
             greeting and the shop pill sits under the date, both inside the
@@ -580,6 +581,7 @@ export default function MorningDashboardScreen() {
             straight over a banner rendered as an earlier sibling. */}
         <View className="-mt-16 gap-3 px-4 pb-6">
           <TrialBanner plan={plan} />
+          <SyncExposureStatus key={session.shopId + ":" + session.userId} session={session} />
           {showReturnToPrimaryShop ? (
             <View className="items-center gap-2 rounded-2xl border border-[#FDE68A] bg-[#FEF3C7] p-4">
               <Feather name="corner-up-left" size={20} color="#92400E" />
@@ -833,13 +835,20 @@ export default function MorningDashboardScreen() {
       <Modal
         visible={menuOpen}
         transparent
+        statusBarTranslucent
         animationType="fade"
         onRequestClose={() => setMenuOpen(false)}
       >
         <Pressable
           onPress={() => setMenuOpen(false)}
           className="flex-1 bg-black/30"
+          style={{ paddingTop: topInset }}
         >
+          <View
+            pointerEvents="none"
+            className="absolute left-0 right-0 top-0 bg-white"
+            style={{ height: topInset }}
+          />
           <Pressable className="h-full w-4/5 bg-white p-5">
             <Text className="mb-4 font-sans-bold text-xl text-brand-green">
               {t("quickAccess")}

@@ -229,6 +229,8 @@ beforeAll(() => {
     '0028_shop_scoped_pin_lookup.sql',
     '0029_pin_reserved_while_inactive.sql'
   ]) sqlite.exec(migrationSql(fileName));
+  // Current writers require the additive atomic recovery journal.
+  sqlite.exec(migrationSql('0034_recovery_journal.sql'));
 });
 
 describe('the fixture really is pre-ledger data', () => {

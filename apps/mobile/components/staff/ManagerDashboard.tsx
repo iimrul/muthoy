@@ -4,13 +4,13 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
+import { AppTextInput as TextInput } from "../ui/AppTextInput";
 import { router, useFocusEffect } from "expo-router";
 import { formatMoney } from "@muthoy/utils";
 import { fromTaka } from "@muthoy/types";
-import { openingCashFormSchema } from "@muthoy/validation";
+import { openingCashFormSchema, hasExcessMoneyDecimals, moneyDraftValue } from "@muthoy/validation";
 import { LanguageToggle } from "../ui/LanguageToggle";
 import { DashboardLoadState } from "./DashboardLoadState";
 import {
@@ -198,11 +198,12 @@ export function ManagerDashboard() {
         : t("allGood");
 
   const handleSaveOpening = async () => {
+    if (!openingText.trim()) {setError(t("openingCashInvalid"));return;}
     const parsed = openingCashFormSchema.safeParse({
-      openingCashTaka: Number(openingText.trim()),
+      openingCashTaka: moneyDraftValue(openingText.trim()),
     });
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? "Invalid amount");
+      setError(hasExcessMoneyDecimals(openingText) ? t("moneyPrecisionLabel") : parsed.error.issues[0]?.message ?? "Invalid amount");
       return;
     }
     const guard = captureSessionFor(session);
@@ -564,10 +565,13 @@ export function ManagerDashboard() {
             <Text className="font-sans-bold text-lg">{t("cashDrawer")}</Text>
             <TextInput
               value={openingText}
+              accessibilityLabel={t("openingCash")}
               onChangeText={setOpeningText}
               keyboardType="decimal-pad"
               className="rounded-xl border border-midGray p-3 font-mono"
             />
+            {!openingText.trim() ? <Text accessibilityRole="alert" className="font-sans text-sm text-error">{t("openingCashInvalid")}</Text> : null}
+            {hasExcessMoneyDecimals(openingText) ? <Text accessibilityRole="alert" className="font-sans text-sm text-error">{t("moneyPrecisionLabel")}</Text> : null}
             <View className="flex-row gap-3">
               <Pressable
                 onPress={() => setOpeningOpen(false)}
@@ -577,6 +581,8 @@ export function ManagerDashboard() {
               </Pressable>
               <Pressable
                 onPress={() => void handleSaveOpening()}
+                disabled={!openingText.trim()}
+                accessibilityState={{disabled:!openingText.trim()}}
                 className="flex-1 items-center rounded-xl bg-brand-green py-3"
               >
                 <Text className="text-white">{t("save")}</Text>

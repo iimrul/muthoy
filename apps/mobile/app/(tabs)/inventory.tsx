@@ -1,14 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { createLatestRequestGuard } from "../../domain/latestRequestGuard";
-import {
-  Alert,
-  FlatList,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Alert, FlatList, Pressable, ScrollView, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router, useFocusEffect } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { daysUntilExpiry } from "@muthoy/utils";

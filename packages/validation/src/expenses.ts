@@ -1,3 +1,4 @@
+import { hasMoneyPrecision, MONEY_PRECISION_MESSAGE } from './money';
 import { z } from 'zod';
 
 const optionalText = z.string().trim().transform((value) => (value === '' ? undefined : value)).optional();
@@ -39,11 +40,11 @@ export function canonicalizeExpenseCategory(value: unknown): ExpenseCategory {
   return expenseCategorySchema.parse(mapped);
 }
 
-// Taka at the form boundary; db/cash.ts converts once via fromTaka(). Rounding
-// is allowed only in that conversion (packages/types/src/money.ts).
+// Taka at the form boundary; reject sub-paisa precision before the existing
+// fromTaka conversion. Accounting and integer-paisa conversion are unchanged.
 // The `error` override matters: without it a non-numeric field reaches the
 // shopkeeper as Zod's "expected number, received NaN".
-const takaAmount = z.number({ error: 'Enter a valid amount' }).finite('Enter a valid amount');
+const takaAmount = z.number({ error: 'Enter a valid amount' }).finite('Enter a valid amount').refine(hasMoneyPrecision, MONEY_PRECISION_MESSAGE);
 
 export const expenseFormSchema = z.object({
   category: expenseCategorySchema,

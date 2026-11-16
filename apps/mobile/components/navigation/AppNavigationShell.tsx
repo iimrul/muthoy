@@ -6,11 +6,13 @@ import {
   Easing,
   Modal,
   Pressable,
+  StatusBar,
   Text,
   View,
 } from "react-native";
 import { router, usePathname } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
+import { colors } from "@muthoy/constants";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { resolvePermission } from "../../domain/permissions";
 import { useI18n } from "../../state/localeStore";
@@ -18,6 +20,17 @@ import { useSessionStore } from "../../state/sessionStore";
 import { useMultiShopAccess } from "../../state/useMultiShopAccess";
 import { authenticatedHome, visibleMoreRoutes } from "../../navigation/routes";
 import { DeviceRelinkBanner } from "../auth/DeviceRelinkBanner";
+
+const MORE_ICONS: Readonly<Record<string, ComponentProps<typeof Feather>["name"]>> = {
+  history: "clock", expiry: "calendar", cash: "dollar-sign", eod: "sunset",
+  report: "bar-chart-2", expense: "credit-card", invoices: "file-text",
+  suppliers: "truck", staff: "users", "staff-sales": "trending-up",
+  "multi-shop": "grid", devices: "smartphone", "sync-conflicts": "alert-triangle",
+};
+
+export const LIGHT_STATUS_ROUTES: ReadonlySet<string> = new Set([
+  "/role-select", "/dashboard", "/staff-home",
+]);
 
 function NavButton({
   label,
@@ -175,6 +188,9 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
   const session = useSessionStore((state) => state.session);
   const multiShop = useMultiShopAccess();
   const pathname = usePathname();
+  useEffect(() => {
+    StatusBar?.setBarStyle(LIGHT_STATUS_ROUTES.has(pathname) ? "light-content" : "dark-content");
+  }, [pathname]);
   const { t } = useI18n();
   const [moreContext, setMoreContext] = useState<{
     pathname: string;
@@ -255,6 +271,7 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
       <Modal
         visible={moreOpen}
         transparent
+        statusBarTranslucent
         animationType="fade"
         onRequestClose={() => setMoreContext(null)}
       >
@@ -262,6 +279,11 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
           onPress={() => setMoreContext(null)}
           className="flex-1 bg-black/25"
         >
+          <View
+            pointerEvents="none"
+            className="absolute left-0 right-0 top-0 bg-white"
+            style={{ height: StatusBar?.currentHeight ?? 0 }}
+          />
           <View className="absolute bottom-20 right-3 w-72 rounded-2xl bg-white p-4">
             <Text className="mb-3 font-sans-semibold text-xs uppercase text-midGray">
               {t("moreOptions")}
@@ -271,14 +293,16 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
                 <Pressable
                   key={item.key}
                   onPress={() => openMoreRoute(item.href)}
-                  className="w-1/4 items-center gap-1 p-2"
+                  accessibilityRole="button"
+                  accessibilityLabel={t(item.labelKey)}
+                  className="w-1/3 items-center gap-1 p-2"
                 >
                   <View className="h-11 w-11 items-center justify-center rounded-xl bg-brand-softGreen">
-                    <Text>•</Text>
+                    <Feather name={MORE_ICONS[item.key] ?? "grid"} size={21} color={colors.deepGreen} />
                   </View>
                   <Text
-                    numberOfLines={2}
-                    className="text-center font-sans text-[10px] text-richBlack"
+                    numberOfLines={3}
+                    className="text-center font-sans text-xs text-richBlack"
                   >
                     {t(item.labelKey)}
                   </Text>

@@ -75,6 +75,7 @@ vi.mock('react-native', () => ({
   ScrollView: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   KeyboardAvoidingView: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
   ActivityIndicator: () => createElement('div'),
+  StatusBar: { setBarStyle: vi.fn() },
   Alert: { alert: vi.fn() },
 }));
 

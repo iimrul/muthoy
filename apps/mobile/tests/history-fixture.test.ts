@@ -10,6 +10,7 @@ import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core';
 import { migrate } from 'drizzle-orm/expo-sqlite/migrator';
 import {
   newestJournalEntry,
+  failingHistoryInvariantNames,
   validateHistoryFixture,
 } from '../../../scripts/generate-history-fixture.mjs';
 
@@ -140,7 +141,8 @@ describe('money, credit, cash and stock invariants hold in the generated file', 
     expect(rows(
       'SELECT c.`id` FROM `credits` c WHERE c.`balance` <> c.`amount` - COALESCE('
       + '(SELECT SUM(a.`amount`) FROM `credit_payment_allocations` a '
-      + 'WHERE a.`credit_id` = c.`id`), 0)',
+      + 'WHERE a.`credit_id` = c.`id`), 0) - COALESCE('
+      + "(SELECT SUM(t.amount) FROM refund_tenders t JOIN sale_refunds r ON r.id=t.refund_id WHERE r.sale_id=c.sale_id AND r.shop_id=c.shop_id AND t.kind='credit_cancel' AND t.is_deleted=0),0)",
     )).toEqual([]);
   });
 
@@ -478,5 +480,141 @@ describe('validation rejects a STALE fixture artifact, not just a bad generator'
 
   it('accepts the fixture as generated', () => {
     expect(() => validateHistoryFixture(db)).not.toThrow();
+  });
+});
+
+describe("independent sale/movement oracle", () => {
+  it.each([["positive sign","UPDATE inventory_movements SET change_qty=abs(change_qty) WHERE id=(SELECT id FROM inventory_movements WHERE reason='sale' LIMIT 1)"],["wrong quantity","UPDATE inventory_movements SET change_qty=change_qty-1 WHERE id=(SELECT id FROM inventory_movements WHERE reason='sale' LIMIT 1)"],["missing movement","DELETE FROM inventory_movements WHERE id=(SELECT id FROM inventory_movements WHERE reason='sale' LIMIT 1)"],["orphan sale","UPDATE inventory_movements SET ref_id='missing-sale' WHERE id=(SELECT id FROM inventory_movements WHERE reason='sale' LIMIT 1)"],["wrong batch","UPDATE inventory_movements SET batch_id=(SELECT id FROM batches WHERE id<>inventory_movements.batch_id LIMIT 1) WHERE id=(SELECT id FROM inventory_movements WHERE reason='sale' LIMIT 1)"],["wrong shop","INSERT INTO shops (id,owner_id,name,phone) SELECT 'different-synthetic-shop',owner_id,'Other synthetic shop',phone FROM shops LIMIT 1; UPDATE inventory_movements SET shop_id='different-synthetic-shop' WHERE id=(SELECT id FROM inventory_movements WHERE reason='sale' LIMIT 1)"],["wrong medicine identity","UPDATE sale_items SET medicine_id=(SELECT id FROM medicines WHERE id<>sale_items.medicine_id LIMIT 1) WHERE id=(SELECT id FROM sale_items LIMIT 1)"],["wrong reason","UPDATE inventory_movements SET reason='adjustment' WHERE id=(SELECT id FROM inventory_movements WHERE reason='sale' LIMIT 1)"],["duplicate movement","INSERT INTO inventory_movements (id,shop_id,batch_id,change_qty,reason,ref_id,created_by,created_at,updated_at) SELECT 'duplicate-synthetic-movement',shop_id,batch_id,change_qty,reason,ref_id,created_by,created_at,updated_at FROM inventory_movements WHERE reason='sale' LIMIT 1"]])("rejects %s even while stock equals its movement sum", (_label, mutation) => {
+    const copy = join(mkdtempSync(join(tmpdir(), "muthoy-oracle-")), "mutation.db");
+    copyFileSync(OUT, copy);
+    const synthetic = new DatabaseSync(copy);
+    try {
+      // Deliberately corrupt only a new disposable synthetic copy. Preserve
+      // the stock guard: a self-consistent wrong ledger must still be caught.
+      synthetic.exec("DROP TRIGGER inventory_movement_is_immutable; DROP TRIGGER inventory_movement_is_undeletable;");
+      synthetic.exec(mutation);
+      synthetic.exec("UPDATE batches SET stock=COALESCE((SELECT SUM(change_qty) FROM inventory_movements m WHERE m.batch_id=batches.id),0)");
+      expect(synthetic.prepare("SELECT id FROM batches WHERE stock<>COALESCE((SELECT SUM(change_qty) FROM inventory_movements m WHERE m.batch_id=batches.id),0)").all()).toEqual([]);
+      const sign = "sale movements have negative quantities and valid same-shop parents";
+      const oracle = "sale movement quantities independently match sale items in both directions";
+      const identity = "sale items preserve sale batch medicine and shop identities";
+      const expected = _label === "wrong medicine identity" ? [identity]
+        : ["positive sign", "orphan sale", "wrong shop"].includes(_label) ? [sign, oracle] : [oracle];
+      expect(failingHistoryInvariantNames(synthetic)).toEqual(expected);
+      expect(() => validateHistoryFixture(synthetic)).toThrow(oracle === expected.at(-1) ? oracle : identity);
+    } finally {
+      synthetic.close();
+    }
+  });
+});
+
+describe("deterministic recovery branches", () => {
+  it("reconciles cash, credit and collected-credit refunds by hand", () => {
+    expect(rows("SELECT kind,SUM(amount) amount FROM refund_tenders WHERE id LIKE 'accept-%' GROUP BY kind ORDER BY kind"))
+      .toEqual([{kind:"cash",amount:2000},{kind:"collection_refund",amount:700},{kind:"credit_cancel",amount:3300}]);
+    expect(one("SELECT SUM(total_amount) amount FROM sale_refunds WHERE id LIKE 'accept-%'").amount).toBe(6000);
+    expect(one("SELECT SUM(balance) balance FROM credits WHERE id LIKE 'accept-%'").balance).toBe(0);
+    expect(one("SELECT amount FROM credit_payment_allocations WHERE id='accept-allocation'").amount).toBe(700);
+    expect(one("SELECT refund_amount FROM sales_returns WHERE id='accept-legacy-return'").refund_amount).toBe(1000);
+  });
+  it("consumes 400 supplier credit without inventing a cash payment", () => {
+    expect(rows("SELECT id,total,paid_amount FROM purchases WHERE supplier_id='accept-supplier' ORDER BY id"))
+      .toEqual([{id:"accept-purchase-new",total:600,paid_amount:200},{id:"accept-purchase-old",total:1000,paid_amount:1000}]);
+    expect(one("SELECT credit_amount FROM purchase_returns WHERE id='accept-credit-return'").credit_amount).toBe(400);
+    expect(one("SELECT SUM(amount) paid FROM payments WHERE party_id='accept-supplier'").paid).toBe(1200);
+    expect(rows("SELECT id,stock FROM batches WHERE id LIKE 'accept-batch-%' ORDER BY id"))
+      .toEqual([{id:"accept-batch-new",stock:6},{id:"accept-batch-old",stock:6}]);
+  });
+  it("retains sent supersession and both unresolved/resolved conflict evidence", () => {
+    expect(one("SELECT status FROM sync_queue WHERE id='accept-sent-superseded'").status).toBe("sent");
+    expect(one("SELECT resolved FROM conflict_queue WHERE id='accept-conflict'").resolved).toBe(0);
+    const resolved = one("SELECT resolved,resolution,superseded_payloads FROM conflict_queue WHERE id='accept-resolved-conflict'");
+    expect(resolved.resolved).toBe(1);
+    expect(resolved.resolution).toBe("keep_remote");
+    expect(JSON.parse(String(resolved.superseded_payloads))).toEqual([expect.objectContaining({id:"accept-superseded-pending",seq:101})]);
+    const members = rows("SELECT operation_sequence,operation_expected_count,status FROM sync_queue WHERE operation_group_id='accept-refund' ORDER BY operation_sequence");
+
+    const drawerMember = one("SELECT payload FROM sync_queue WHERE operation_group_id='accept-refund' AND table_name='cash_drawer'");
+    const payload = JSON.parse(String(drawerMember.payload));
+    expect(Object.keys(payload).sort()).toEqual(rows("PRAGMA table_info(cash_drawer)").map(column => column.name).sort());
+    expect(payload.is_dirty).toBe(true);
+    expect(payload.updated_at).toBe(one("SELECT created_at FROM sale_refunds WHERE id='accept-refund'").created_at);
+    expect(failingHistoryInvariantNames(db)).toEqual([]);
+    // The later legacy refund (1000), later cash sale/refund net zero,
+    // and later supplier cash payments (1200) reduce final cash by 2200.
+    const drawer = one("SELECT d.closing_expected FROM cash_drawer d JOIN sync_queue q ON q.row_id=d.id WHERE q.operation_group_id='accept-refund' AND q.table_name='cash_drawer'");
+    expect(payload.closing_expected).toBe(Number(drawer.closing_expected) + 2200);
+    expect(members).toHaveLength(9);
+    expect(members.map(row=>row.operation_sequence)).toEqual([0,1,2,3,4,5,6,7,8]);
+    expect(members.every(row=>row.operation_expected_count===9 && row.status==="sent")).toBe(true);
+  });
+  it.each([
+    ["refund tender", "UPDATE refund_tenders SET amount=amount+1 WHERE id='accept-tender-cash'", /refund tenders exactly/],
+    ["allocation", "UPDATE credit_payment_allocations SET amount=amount+1 WHERE id='accept-allocation'", /credit balance|allocations never exceed/],
+    ["return movement", "UPDATE sales_returns SET qty=2 WHERE id='accept-legacy-return'", /return movement quantities/],
+    ["group payload", "UPDATE sync_queue SET payload='{\"id\":\"missing\",\"closingExpected\":0}' WHERE operation_group_id='accept-refund' AND table_name='cash_drawer'", /refund operation payload/],
+    ["group member", "DELETE FROM sync_queue WHERE id='accept-group-0'", /operation groups retain/],
+  ] as const)("detects lost or changed %s values", (_name, mutation, error) => {
+    const copy = join(mkdtempSync(join(tmpdir(), "muthoy-branch-")), "mutation.db");
+    copyFileSync(OUT, copy);
+    const synthetic = new DatabaseSync(copy);
+    try {
+      synthetic.exec(mutation);
+      expect(() => validateHistoryFixture(synthetic)).toThrow(error);
+    } finally { synthetic.close(); }
+  });
+});
+
+describe("legitimate repeated batch lines", () => {
+  it("accepts two original item rows sharing a batch with the same total demand", () => {
+    const copy = join(mkdtempSync(join(tmpdir(), "muthoy-repeated-line-")), "valid.db");
+    copyFileSync(OUT, copy);
+    const synthetic = new DatabaseSync(copy);
+    try {
+      const original = synthetic.prepare("SELECT * FROM sale_items WHERE qty>=2 AND discount_amount=0 LIMIT 1").get() as Record<string, string | number | null> & { id: string; qty: number; unit_price: number; cogs: number };
+      const unitCost = Number(original.cogs) / Number(original.qty);
+      synthetic.prepare("UPDATE sale_items SET qty=qty-1,line_total=line_total-unit_price,cogs=cogs-? WHERE id=?").run(unitCost, original.id);
+      const line = { ...original, id: "synthetic-repeated-batch-line", qty: 1, line_total: original.unit_price, cogs: unitCost };
+      const keys = Object.keys(line);
+      synthetic.prepare("INSERT INTO sale_items (" + keys.join(",") + ") VALUES (" + keys.map(()=>"?").join(",") + ")").run(...Object.values(line));
+      expect(() => validateHistoryFixture(synthetic)).not.toThrow();
+    } finally { synthetic.close(); }
+  });
+});
+
+
+describe("independent line and production-shaped refund controls", () => {
+  it.each([
+    ["sale-side quantity", "UPDATE sale_items SET qty=qty+1 WHERE id='accept-item-cash'", ["sale line COGS equals quantity times original batch cost", "sale line total equals quantity times unit price minus line discount", "sale movement quantities independently match sale items in both directions", "refund return quantities and identities match original items"]],
+    ["COGS", "UPDATE sale_items SET cogs=cogs+1 WHERE id='accept-item-cash'", ["sale line COGS equals quantity times original batch cost"]],
+    ["line total", "UPDATE sale_items SET line_total=line_total+1 WHERE id=(SELECT id FROM sale_items WHERE id NOT LIKE 'accept-%' LIMIT 1)", ["sale line total equals quantity times unit price minus line discount", "sale line totals sum to the sale subtotal"]],
+    ["refund amount", "UPDATE sync_queue SET payload=json_set(payload,'$.closing_expected',json_extract(payload,'$.closing_expected')+1) WHERE id='accept-group-8'", ["refund operation payload preserves refund-time drawer projection"]],
+    ["refund extra key", "UPDATE sync_queue SET payload=json_set(payload,'$.extra','unexpected') WHERE id='accept-group-8'", ["refund operation payload preserves refund-time drawer projection"]],
+    ["refund missing key", "UPDATE sync_queue SET payload=json_remove(payload,'$.is_dirty') WHERE id='accept-group-8'", ["refund operation payload preserves refund-time drawer projection"]],
+    ["refund wrong drawer", "UPDATE sync_queue SET row_id='missing-drawer' WHERE id='accept-group-8'", ["refund operation payload preserves refund-time drawer projection"]],
+    ["refund wrong shop", "UPDATE sync_queue SET shop_id='other-synthetic' WHERE id='accept-group-8'", ["refund operation payload preserves refund-time drawer projection", "operation groups retain complete unique ordered members"]],
+    ["refund wrong time", "UPDATE sync_queue SET payload=json_set(payload,'$.updated_at','2099-01-01T00:00:00.000Z') WHERE id='accept-group-8'", ["refund operation payload preserves refund-time drawer projection"]],
+    ["post-close snapshot", "UPDATE sync_queue SET payload=json_set(payload,'$.closing_expected',(SELECT closing_expected FROM cash_drawer WHERE id=sync_queue.row_id)) WHERE id='accept-group-8'", ["refund operation payload preserves refund-time drawer projection"]],
+  ] as const)("attributes %s to its exact oracle", (_name, mutation, expected) => {
+    const copy = join(mkdtempSync(join(tmpdir(), "muthoy-specific-oracle-")), "mutation.db");
+    copyFileSync(OUT, copy);
+    const synthetic = new DatabaseSync(copy);
+    try {
+      synthetic.exec(mutation);
+      expect(failingHistoryInvariantNames(synthetic).sort()).toEqual([...expected].sort());
+    } finally { synthetic.close(); }
+  });
+});
+
+
+describe("refund writer timestamp and complete-row controls", () => {
+  it("permits real writer timestamp lag after the refund header without rewriting the cash snapshot", () => {
+    const copy=join(mkdtempSync(join(tmpdir(),"muthoy-refund-lag-")),"valid.db");copyFileSync(OUT,copy);const synthetic=new DatabaseSync(copy);
+    try {
+      const row=synthetic.prepare("SELECT payload FROM sync_queue WHERE id='accept-group-8'").get() as {payload:string};
+      const payload=JSON.parse(row.payload);payload.updated_at=new Date(Date.parse(payload.updated_at)+5).toISOString();
+      synthetic.prepare("UPDATE sync_queue SET payload=? WHERE id='accept-group-8'").run(JSON.stringify(payload));
+      expect(failingHistoryInvariantNames(synthetic)).toEqual([]);
+    } finally { synthetic.close(); }
   });
 });
