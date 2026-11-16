@@ -280,7 +280,7 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
           {AUDIT_READ_LIMIT} entries. The structured stderr line remains the record of account.
         </p>
       ) : (
-        <p className="mt-2 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] p-4 text-sm text-[#92400E]">
+        <p className="mt-2 rounded-xl border border-warning/30 bg-warningBg p-4 text-sm text-warning">
           <strong>This view is not the record.</strong> {history.unavailable} The durable record
           is the structured line written to stderr, kept by the host platform&apos;s log
           retention.

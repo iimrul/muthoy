@@ -37,8 +37,14 @@ export interface ChartProps {
   valueLabel: string;
 }
 
-const AXIS_STYLE = { fontSize: 12 };
-const BRAND_GREEN = '#0F766E';
+const AXIS_STYLE = { fontSize: 12, fill: 'rgb(var(--admin-muted))' };
+const BRAND_GREEN = 'rgb(var(--admin-accent))';
+const GRID_COLOR = 'rgb(var(--admin-line) / 0.12)';
+const TOOLTIP_STYLE = {
+  backgroundColor: 'rgb(var(--admin-surface))',
+  color: 'rgb(var(--admin-ink))',
+  borderColor: GRID_COLOR,
+};
 const CHART_HEIGHT = 260;
 
 /**
@@ -69,13 +75,13 @@ export function TrendChart({ points, valueLabel }: ChartProps) {
   return (
     <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
       <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.08)" />
+        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} />
         <XAxis dataKey="label" tick={AXIS_STYLE} />
         <YAxis tick={AXIS_STYLE} />
         {/* Recharts hands the formatter `ValueType | undefined`, so the
             parameter is not typed as a number here. An absent value is
             rendered as the em dash rather than as 0. */}
-        <Tooltip formatter={(value) => [formatTooltipValue(value), valueLabel]} />
+        <Tooltip contentStyle={TOOLTIP_STYLE} itemStyle={{ color: BRAND_GREEN }} formatter={(value) => [formatTooltipValue(value), valueLabel]} />
         <Line
           type="monotone"
           dataKey="value"
@@ -98,13 +104,13 @@ export function DistributionChart({ points, valueLabel }: ChartProps) {
   return (
     <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
       <BarChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.08)" vertical={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} vertical={false} />
         <XAxis dataKey="label" tick={AXIS_STYLE} />
         <YAxis tick={AXIS_STYLE} allowDecimals={false} />
         {/* Recharts hands the formatter `ValueType | undefined`, so the
             parameter is not typed as a number here. An absent value is
             rendered as the em dash rather than as 0. */}
-        <Tooltip formatter={(value) => [formatTooltipValue(value), valueLabel]} />
+        <Tooltip contentStyle={TOOLTIP_STYLE} itemStyle={{ color: BRAND_GREEN }} formatter={(value) => [formatTooltipValue(value), valueLabel]} />
         <Bar dataKey="value" name={valueLabel} fill={BRAND_GREEN} isAnimationActive={false} />
       </BarChart>
     </ResponsiveContainer>

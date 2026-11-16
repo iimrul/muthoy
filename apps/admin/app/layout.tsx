@@ -1,10 +1,13 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { cookies } from 'next/headers';
 import { DM_Mono, Plus_Jakarta_Sans } from 'next/font/google';
 import Link from 'next/link';
 import './globals.css';
 import { currentAdminSession } from '../lib/adminAuthz';
 import AdminNavigation from '../components/AdminNavigation';
+import AppearanceControls from '../components/AppearanceControls';
+import { APPEARANCE_COOKIE, appearanceAttributes, parseAppearance } from '../theme/appearance';
 
 // W4-06. The shell shows WHO is signed in and offers the sign-out the shared
 // Basic Auth credential never had (a browser cannot be told to forget one).
@@ -96,10 +99,13 @@ interface RootLayoutProps {
 
 export default async function RootLayout({ children }: RootLayoutProps) {
   const signedIn = await signedInAs();
+  // The saved appearance is applied HERE, on the server: see theme/appearance.ts
+  // for why there is no inline script any more.
+  const appearance = parseAppearance((await cookies()).get(APPEARANCE_COOKIE)?.value);
 
   return (
-    <html lang="en" className={`${plusJakartaSans.variable} ${dmMono.variable}`}>
-      <body className="min-h-screen bg-brand-softGreen/30 font-sans text-richBlack antialiased">
+    <html lang="en" {...appearanceAttributes(appearance)} className={`${plusJakartaSans.variable} ${dmMono.variable}`}>
+      <body className="min-h-screen bg-canvas font-sans text-richBlack antialiased">
         <a href="#main-content" className="admin-skip-link">Skip to content</a>
         <div className={signedIn ? 'admin-shell' : 'admin-public-shell'}>
           <aside className="admin-sidebar" aria-label="Platform console">
@@ -119,6 +125,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
             {signedIn ? (
               <header className="admin-topbar">
                 <p className="text-sm font-medium text-brand-deepGreen">Administration</p>
+                <AppearanceControls initial={appearance} />
                 <div className="admin-account">
                   <div className="min-w-0 text-right">
                     <p className="break-words text-sm font-semibold">{signedIn.username}</p>
@@ -134,6 +141,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
                 </div>
               </header>
             ) : null}
+            {!signedIn ? <div className="admin-public-appearance"><AppearanceControls initial={appearance} /></div> : null}
             <main id="main-content" tabIndex={-1} className="admin-content">{children}</main>
           </div>
         </div>

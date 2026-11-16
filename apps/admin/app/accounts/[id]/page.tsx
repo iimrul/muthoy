@@ -112,7 +112,7 @@ export default async function AccountDetailPage({ params, searchParams }: Accoun
       {/* E11. The "Refresh entitlement snapshot" button was here. It is gone,
           along with its server action and its POST endpoint — not disabled, which
           would have left the capability live behind a greyed-out control. */}
-      <p className="mt-6 rounded-xl border border-[#FDE68A] bg-[#FFFBEB] p-4 text-sm text-[#92400E]">
+      <p className="mt-6 rounded-xl border border-warning/30 bg-warningBg p-4 text-sm text-warning">
         <strong>Entitlement refresh is not an admin action.</strong>{' '}
         It stamped <code>verified_at</code>, which is the anchor of a device&apos;s
         offline grace window — so pressing it asserted &ldquo;this account was

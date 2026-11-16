@@ -142,7 +142,7 @@ async function readBody(req) {
 
 /**
  * @param {{ port: number, tables: Record<string, object[]>, rpcs?: Record<string, (args: object) => unknown>,
- *           requestLog?: string, failTables?: string[] }} options
+ *           requestLog?: string, failTables?: string[], defaults?: Record<string, object> }} options
  */
 export function startMockSupabase(options) {
   const tables = new Map(Object.entries(options.tables).map(([name, rows]) => [name, rows.map((r) => ({ ...r }))]));
@@ -200,6 +200,7 @@ export function startMockSupabase(options) {
       const created = incoming.map((row) => ({
         id: randomUUID(),
         created_at: new Date().toISOString(),
+        ...options.defaults?.[name],
         ...row,
       }));
       rows.push(...created);

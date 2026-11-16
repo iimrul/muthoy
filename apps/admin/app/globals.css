@@ -29,13 +29,22 @@
   .admin-sidebar-footer { @apply mt-auto hidden border-t border-black/5 px-6 py-5 text-xs text-midGray lg:block; }
   .admin-topbar { @apply flex flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-white/90 px-4 py-3 sm:px-8; }
   .admin-account { @apply ml-auto flex min-w-0 max-w-full items-center gap-3; }
+  .admin-appearance { @apply inline-flex max-w-full gap-1 rounded-xl border border-black/15 bg-offWhite p-1; }
+  .admin-appearance button { @apply min-w-[3.5rem] rounded-lg px-3 text-xs font-semibold text-midGray hover:bg-brand-softGreen hover:text-brand-deepGreen; }
+  [data-appearance='system'] [data-appearance-choice='system'],
+  [data-appearance='day'] [data-appearance-choice='day'],
+  [data-appearance='night'] [data-appearance-choice='night'] { @apply bg-white text-brand-deepGreen shadow-sm; }
+  .admin-public-appearance { @apply flex justify-center border-x border-black/10 bg-white px-4 pb-4; }
   .admin-sign-out { @apply shrink-0 whitespace-nowrap rounded-lg border border-black/15 bg-white px-3 py-2 text-xs font-semibold text-richBlack hover:bg-brand-softGreen; }
   .admin-content { @apply mx-auto min-w-0 max-w-[100rem] px-4 py-6 sm:px-8 sm:py-8; }
   .admin-content h1 { @apply text-2xl font-bold tracking-tight text-brand-deepGreen sm:text-3xl; }
   .admin-content h2 { @apply tracking-tight; }
   .admin-content input:not([type='hidden']):not([type='checkbox']):not([type='radio']), .admin-content select, .admin-content textarea { @apply text-base; }
   .admin-public-shell { @apply mx-auto max-w-lg px-4 py-8 sm:py-16; }
-  .admin-public-shell .admin-sidebar { @apply rounded-t-2xl border border-b-0 border-black/10; }
+  /* The signed-in sidebar is a full-height sticky column from lg up. On the
+     sign-in card that made the brand header 100vh tall and sticky, covering the
+     form at every scroll position, so desktop browsers could not sign in. */
+  .admin-public-shell .admin-sidebar { @apply rounded-t-2xl border border-b-0 border-black/10 lg:static lg:h-auto; }
   .admin-public-shell .admin-content { @apply rounded-b-2xl border border-t-0 border-black/10 bg-white px-6 pb-8 pt-3 shadow-sm sm:px-8; }
   .admin-skip-link { @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-white focus:p-3 focus:text-brand-deepGreen focus:shadow-lg; }
   .admin-filter { @apply mt-5 grid min-w-0 grid-cols-2 items-end gap-3 rounded-xl border border-black/10 bg-white p-4 shadow-sm sm:flex sm:flex-wrap; }
