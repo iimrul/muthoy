@@ -37,7 +37,7 @@ API directly avoids a wrapper whose releases are coupled to React's.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | yes | |
+| `SUPABASE_URL` | yes | read by `lib/env.ts`. **Not** `NEXT_PUBLIC_SUPABASE_URL` — that name is read by nothing, so setting only it leaves the panel unconfigured |
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | **server only**; see the rule below |
 | `ADMIN_SESSION_SECRET` | yes | ≥ 32 bytes |
 | `ADMIN_ROLES` | yes | JSON mapping username → role |
