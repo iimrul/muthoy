@@ -298,10 +298,16 @@ function wrap(db: PGlite): Harness {
  * A database with the platform bootstrap and every migration applied, in
  * filename order — the same order the Supabase CLI uses.
  */
-export async function createHarness(): Promise<Harness> {
+export async function createHarness(options: { through?: string } = {}): Promise<Harness> {
   const db = await PGlite.create();
   await db.exec(PLATFORM_BOOTSTRAP);
-  for (const name of migrationFiles()) {
+  // `through` stops at a named migration, for a test that describes the chain as
+  // it stood at that point (for example a candidate written before a later fix).
+  const files = migrationFiles().filter((name) => options.through === undefined || name <= options.through);
+  if (options.through !== undefined && !files.includes(options.through)) {
+    throw new Error(`createHarness: ${options.through} is not a migration on disk`);
+  }
+  for (const name of files) {
     if (name !== API_ROLE_PRIVILEGES_MIGRATION) {
       await db.exec(migrationSql(name));
       continue;

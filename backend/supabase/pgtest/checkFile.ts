@@ -82,6 +82,13 @@ export const POST_E4_MIGRATIONS: readonly string[] = Object.freeze([
   // nothing; it now refuses to attest a premium claim no payment evidence
   // backs. Class B, and applied to no hosted project.
   '20261031000000_e11_entitlement_verification.sql',
+  // Migration38: local role-switch repair; no hosted activation.
+  '20261111000000_role_switch_credit_link_contract.sql',
+  // Migration39: Staff sale metadata permission repair, independently gated.
+  '20261115172840_staff_sale_credit_reconciliation.sql',
+  // Migration 40: server time bounds 39's Staff-supplied reconciliation clock,
+  // so a handset whose clock runs ahead cannot win every later LWW comparison.
+  '20261116020000_staff_reconciliation_server_clock.sql',
 ]);
 
 /**

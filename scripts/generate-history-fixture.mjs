@@ -271,7 +271,66 @@ function idFactory(prefix) {
  * against a file that already violates the ledger or the credit ledger cannot
  * tell a restore failure from a fixture failure.
  */
+// Synthetic single-device fixture only: no later deletions or pulled backdated rows
+// are modeled. This validates generated snapshots, not arbitrary restored history.
+// Independent, time-bounded refund oracle. Deliberately does not reuse the
+// generator's SQL aggregate or the drawer's later closing_expected value.
+function refundDrawerPayloadFailures(db) {
+  const failed = [];
+  for (const q of db.prepare("SELECT * FROM sync_queue WHERE operation_kind='refund' AND table_name='cash_drawer'").all()) {
+    const refund = db.prepare('SELECT * FROM sale_refunds WHERE id=?').get(q.operation_group_id);
+    const drawer = db.prepare('SELECT * FROM cash_drawer WHERE id=?').get(q.row_id);
+    let payload;
+    try { payload = JSON.parse(q.payload); } catch { failed.push(q); continue; }
+    const keys = db.prepare('PRAGMA table_info(cash_drawer)').all().map(column => column.name).sort();
+    if (!refund || !drawer || q.shop_id !== refund.shop_id || drawer.shop_id !== refund.shop_id
+      || drawer.business_date !== refund.business_date || q.op !== 'update'
+      || !payload || Array.isArray(payload) || Object.keys(payload).sort().join(',') !== keys.join(',')
+      || payload.id !== q.row_id || payload.shop_id !== q.shop_id || payload.business_date !== refund.business_date
+      || payload.is_dirty !== true || payload.is_deleted !== false
+      || payload.closed_at !== null || payload.closed_by !== null || payload.closing_counted !== null
+      || payload.opening_cash !== drawer.opening_cash || payload.created_at !== drawer.created_at
+      || !Number.isFinite(Date.parse(payload.updated_at))
+      || Date.parse(payload.updated_at) < Date.parse(refund.created_at)
+      || (drawer.closed_at && Date.parse(payload.updated_at) > Date.parse(drawer.closed_at))
+      || !Number.isSafeInteger(payload.closing_expected)) { failed.push(q); continue; }
+    const eligible = (row) => row.shop_id === refund.shop_id && !row.is_deleted
+      && Date.parse(row.created_at) <= Date.parse(payload.updated_at)
+      && businessDate(new Date(row.created_at)) === refund.business_date;
+    let expected = payload.opening_cash;
+    for (const row of db.prepare('SELECT * FROM sales').all().filter(eligible)) expected += row.cash_applied;
+    for (const row of db.prepare('SELECT * FROM payments').all().filter(eligible)) {
+      if (row.method !== 'cash') continue;
+      if (row.type === 'customer_payment') expected += row.amount;
+      if (row.type === 'supplier_payment' || row.type === 'withdrawal') expected -= row.amount;
+    }
+    for (const row of db.prepare('SELECT * FROM expenses').all().filter(eligible)) expected -= row.amount;
+    for (const row of db.prepare('SELECT * FROM refund_tenders').all().filter(eligible)) {
+      if (row.kind === 'cash' || (row.kind === 'collection_refund' && row.method === 'cash')) expected -= row.amount;
+    }
+    for (const row of db.prepare('SELECT * FROM sales_returns').all().filter(eligible)) {
+      if (row.refund_id === null && row.refund_method === 'cash') expected -= row.refund_amount;
+    }
+    if (payload.closing_expected !== expected) failed.push(q);
+  }
+  return failed;
+}
+
 export const INVARIANTS = [
+{ name: 'refund operation payload preserves refund-time drawer projection', check: refundDrawerPayloadFailures },
+// Fixture batch costs never change after sales. Current cost therefore equals
+// original cost here; this invariant is not valid for repriced production batches.
+{ name: 'sale line COGS equals quantity times original batch cost', sql: 'SELECT i.id FROM sale_items i JOIN batches b ON b.id=i.batch_id WHERE i.cogs<>i.qty*b.purchase_price' },
+{ name: 'sale line total equals quantity times unit price minus line discount', sql: 'SELECT id FROM sale_items WHERE line_total<>qty*unit_price-discount_amount' },
+{"name":"customer return movement quantities match return rows","sql":"WITH expected AS (\n SELECT r.shop_id,COALESCE(r.refund_id,r.id) ref_id,i.batch_id,SUM(r.qty) qty FROM sales_returns r JOIN sale_items i ON i.id=r.sale_item_id GROUP BY r.shop_id,COALESCE(r.refund_id,r.id),i.batch_id\n) SELECT e.ref_id id FROM expected e WHERE e.qty<>COALESCE((SELECT SUM(m.change_qty) FROM inventory_movements m WHERE m.shop_id=e.shop_id AND m.batch_id=e.batch_id AND m.ref_id=e.ref_id AND m.reason='return'),0)"},
+{"name":"supplier return movement quantities match purchase return rows","sql":"SELECT r.id FROM purchase_returns r JOIN purchase_items i ON i.id=r.purchase_item_id JOIN batches b ON b.shop_id=r.shop_id AND b.medicine_id=i.medicine_id AND b.batch_no=i.batch_no AND b.expiry_date=i.expiry_date WHERE r.purchase_id<>i.purchase_id OR r.credit_amount<>r.qty*i.purchase_price OR -r.qty<>COALESCE((SELECT SUM(m.change_qty) FROM inventory_movements m WHERE m.shop_id=r.shop_id AND m.batch_id=b.id AND m.ref_id=r.id AND m.reason='return'),0)"},
+{"name":"refund tenders exactly reconcile their full sale","sql":"SELECT r.id FROM sale_refunds r JOIN sales s ON s.id=r.sale_id WHERE r.shop_id<>s.shop_id OR r.total_amount<>s.total OR r.total_amount<>COALESCE((SELECT SUM(t.amount) FROM refund_tenders t WHERE t.refund_id=r.id AND t.is_deleted=0),0)"},
+{"name":"refund return quantities and identities match original items","sql":"SELECT r.id FROM sales_returns r JOIN sale_items i ON i.id=r.sale_item_id WHERE r.sale_id<>i.sale_id OR r.shop_id<>i.shop_id OR r.qty<=0 OR r.qty>i.qty OR (r.refund_id IS NOT NULL AND (r.qty<>i.qty OR r.refund_amount<>i.line_total))"},
+{"name":"refund tenders preserve shop and collection identities","sql":"SELECT t.id FROM refund_tenders t LEFT JOIN sale_refunds r ON r.id=t.refund_id LEFT JOIN payments p ON p.id=t.source_payment_id WHERE r.id IS NULL OR r.shop_id<>t.shop_id OR t.amount<0 OR (t.kind='collection_refund' AND (p.id IS NULL OR p.shop_id<>t.shop_id OR p.type<>'customer_payment' OR p.method<>t.method))"},
+{"name":"operation groups retain complete unique ordered members","sql":"SELECT operation_group_id id FROM sync_queue WHERE operation_group_id IS NOT NULL GROUP BY shop_id,operation_group_id HAVING COUNT(*)<>MAX(operation_expected_count) OR MIN(operation_expected_count)<>MAX(operation_expected_count) OR COUNT(DISTINCT operation_sequence)<>COUNT(*) OR MIN(operation_sequence)<>0 OR MAX(operation_sequence)<>COUNT(*)-1"},
+{"name":"sale movements have negative quantities and valid same-shop parents","sql":"SELECT m.id FROM inventory_movements m\nLEFT JOIN sales s ON s.id=m.ref_id LEFT JOIN batches b ON b.id=m.batch_id\nWHERE m.reason='sale' AND (m.change_qty>=0 OR s.id IS NULL OR b.id IS NULL OR m.shop_id<>s.shop_id OR m.shop_id<>b.shop_id)"},
+{"name":"sale items preserve sale batch medicine and shop identities","sql":"SELECT i.id FROM sale_items i LEFT JOIN sales s ON s.id=i.sale_id LEFT JOIN batches b ON b.id=i.batch_id LEFT JOIN medicines med ON med.id=i.medicine_id\nWHERE s.id IS NULL OR b.id IS NULL OR med.id IS NULL OR i.qty<=0 OR i.shop_id<>s.shop_id OR i.shop_id<>b.shop_id OR i.shop_id<>med.shop_id OR i.medicine_id<>b.medicine_id"},
+{"name":"sale movement quantities independently match sale items in both directions","sql":"WITH expected AS (\n SELECT shop_id,sale_id,batch_id,SUM(qty) qty FROM sale_items GROUP BY shop_id,sale_id,batch_id\n), actual AS (\n SELECT shop_id,ref_id sale_id,batch_id,-SUM(change_qty) qty FROM inventory_movements WHERE reason='sale' GROUP BY shop_id,ref_id,batch_id\n)\nSELECT e.sale_id id FROM expected e LEFT JOIN actual a USING(shop_id,sale_id,batch_id) WHERE a.qty IS NULL OR a.qty<>e.qty\nUNION ALL\nSELECT a.sale_id id FROM actual a LEFT JOIN expected e USING(shop_id,sale_id,batch_id) WHERE e.qty IS NULL"},
   {
     name: 'batches.stock equals the sum of its movements',
     sql: 'SELECT b.id FROM `batches` b WHERE b.`stock` <> COALESCE('
@@ -300,9 +359,10 @@ export const INVARIANTS = [
       + 'WHERE c.`amount` <> s.`credit_amount`',
   },
   {
-    name: 'credit balance equals amount minus its allocations',
+    name: 'credit balance equals amount minus allocations and refunded cancellation',
     sql: 'SELECT c.id FROM `credits` c WHERE c.`balance` <> c.`amount` - COALESCE('
-      + '(SELECT SUM(a.`amount`) FROM `credit_payment_allocations` a WHERE a.`credit_id` = c.`id`), 0)',
+      + '(SELECT SUM(a.`amount`) FROM `credit_payment_allocations` a WHERE a.`credit_id` = c.`id`), 0) - COALESCE('
+      + "(SELECT SUM(t.amount) FROM refund_tenders t JOIN sale_refunds r ON r.id=t.refund_id WHERE r.sale_id=c.sale_id AND r.shop_id=c.shop_id AND t.kind='credit_cancel' AND t.is_deleted=0),0)",
   },
   {
     name: 'no credit balance is negative or above its amount',
@@ -385,14 +445,20 @@ export const INVARIANTS = [
   },
 ];
 
+function historyInvariantFailures(db) {
+  return INVARIANTS.flatMap(invariant => {
+    const offenders = invariant.check ? invariant.check(db) : db.prepare(invariant.sql).all();
+    return offenders.length ? [{ name: invariant.name, count: offenders.length }] : [];
+  });
+}
+
+export function failingHistoryInvariantNames(db) {
+  return historyInvariantFailures(db).map(failure => failure.name);
+}
+
 export function validateHistoryFixture(db) {
-  const failures = [];
-  for (const invariant of INVARIANTS) {
-    const offenders = db.prepare(invariant.sql).all();
-    if (offenders.length > 0) {
-      failures.push(`${invariant.name}: ${offenders.length} offending row(s)`);
-    }
-  }
+  const failures = historyInvariantFailures(db)
+    .map(failure => `${failure.name}: ${failure.count} offending row(s)`);
   // Not a SQL invariant, because it compares the file against the migrations
   // that exist on disk right now rather than against itself.
   failures.push(...migrationMetadataFailures(db));
@@ -571,6 +637,183 @@ function main() {
     'SELECT `id`, `supplier_id`, `total` FROM `purchases` ORDER BY `id`',
   ).all();
 
+
+  // Fixed graph supplements scale-dependent history. Never used as app seed.
+  // Includes a collected-credit refund, legacy return and supplier return.
+  const seedAcceptanceGraph = (at, date) => {
+    let stamp = iso(at);
+    const refundStamp = stamp;
+    const batch = batches[0];
+    const remember = [];
+    const add = (table, row, op = 'insert') => {
+      insert(table, row);
+      const snapshot = db.prepare('SELECT * FROM ' + table + ' WHERE id=?').get(row.id);
+      remember.push({ table, row: { ...snapshot, is_dirty: true }, op });
+    };
+    for (const [name, qty, cash, credit] of [
+      ['collected', 3, 1000, 2000], ['legacy', 2, 2000, 0],
+    ]) {
+      const saleId = 'accept-sale-' + name;
+      insert('sales', { id: saleId, ...base(stamp), shop_id: shopId,
+        invoice_no: 'ACCEPT-' + name, subtotal: qty * 1000, discount_amount: 0,
+        total: qty * 1000, paid: cash, change: 0, cash_applied: cash,
+        credit_amount: credit, payment_type: credit ? 'split' : 'cash',
+        customer_id: credit ? customers[0] : null, staff_id: ownerId, business_date: date });
+      insert('sale_items', { id: 'accept-item-' + name, ...base(stamp), shop_id: shopId,
+        sale_id: saleId, medicine_id: batch.medicineId, batch_id: batch.batchId,
+        qty, unit_price: 1000, discount_amount: 0, line_total: qty * 1000,
+        cogs: qty * batch.purchasePrice });
+      insert('inventory_movements', { id: 'accept-sale-movement-' + name, ...base(stamp),
+        shop_id: shopId, batch_id: batch.batchId, change_qty: -qty, reason: 'sale',
+        ref_id: saleId, created_by: ownerId });
+    }
+    insert('credits', { id: 'accept-credit', ...base(stamp), shop_id: shopId,
+      sale_id: 'accept-sale-collected', customer_id: customers[0], amount: 2000, balance: 0 });
+    insert('payments', { id: 'accept-collection', ...base(stamp), shop_id: shopId,
+      type: 'customer_payment', party_id: customers[0], amount: 700,
+      method: 'cash', created_by: ownerId });
+    insert('credit_payment_allocations', { id: 'accept-allocation', ...base(stamp),
+      shop_id: shopId, customer_id: customers[0], payment_id: 'accept-collection',
+      credit_id: 'accept-credit', amount: 700 });
+    add('sale_refunds', { id: 'accept-refund', ...base(stamp), shop_id: shopId,
+      sale_id: 'accept-sale-collected', claim_id: 'synthetic-claim',
+      claim_token: 'synthetic-token-not-a-credential', reason: 'Synthetic full-sale return',
+      total_amount: 3000, business_date: date, created_by: ownerId });
+    add('sales_returns', { id: 'accept-full-return', ...base(stamp), shop_id: shopId,
+      sale_id: 'accept-sale-collected', sale_item_id: 'accept-item-collected',
+      refund_id: 'accept-refund', qty: 3, refund_amount: 3000, refund_method: 'cash',
+      reason: 'Synthetic full-sale return', created_by: ownerId });
+    add('inventory_movements', { id: 'accept-refund-movement', ...base(stamp),
+      shop_id: shopId, batch_id: batch.batchId, change_qty: 3, reason: 'return',
+      ref_id: 'accept-refund', created_by: ownerId });
+    for (const [kind, amount, method, source] of [
+      ['cash', 1000, 'cash', null], ['credit_cancel', 1300, null, null],
+      ['collection_refund', 700, 'cash', 'accept-collection'],
+    ]) {
+      add('refund_tenders', { id: 'accept-tender-' + kind, ...base(stamp), shop_id: shopId,
+        refund_id: 'accept-refund', kind, amount, method, source_payment_id: source });
+    }
+    // Production refunds retain original credit amount and allocations.
+    remember.push({ table: 'credits', row: { ...db.prepare("SELECT * FROM credits WHERE id='accept-credit'").get(), is_dirty: true }, op: 'update' });
+    add('audit_logs', { id: 'accept-refund-audit', ...base(stamp), shop_id: shopId,
+      actor_id: ownerId, action: 'sale_refunded', target: 'accept-sale-collected',
+      meta: JSON.stringify({ operationId: 'accept-refund', reason: 'Synthetic full-sale return' }) });
+    const drawer = db.prepare('SELECT id,opening_cash FROM cash_drawer WHERE shop_id=? AND business_date=?').get(shopId, date);
+    // Snapshot at the actual refund operation, before later fixture events/close.
+    // All rows currently inserted belong to this day and are no later than stamp.
+    const cash = db.prepare(`SELECT ?
+      + COALESCE((SELECT SUM(cash_applied) FROM sales WHERE shop_id=? AND business_date=? AND is_deleted=0),0)
+      + COALESCE((SELECT SUM(amount) FROM payments WHERE shop_id=? AND type='customer_payment' AND method='cash' AND date(created_at,'+06:00')=? AND is_deleted=0),0)
+      - COALESCE((SELECT SUM(amount) FROM expenses WHERE shop_id=? AND date(created_at,'+06:00')=? AND is_deleted=0),0)
+      - COALESCE((SELECT SUM(amount) FROM payments WHERE shop_id=? AND type IN ('supplier_payment','withdrawal') AND method='cash' AND date(created_at,'+06:00')=? AND is_deleted=0),0)
+      - COALESCE((SELECT SUM(amount) FROM refund_tenders WHERE shop_id=? AND (kind='cash' OR (kind='collection_refund' AND method='cash')) AND date(created_at,'+06:00')=? AND is_deleted=0),0)
+      - COALESCE((SELECT SUM(refund_amount) FROM sales_returns WHERE shop_id=? AND refund_id IS NULL AND refund_method='cash' AND date(created_at,'+06:00')=? AND is_deleted=0),0) expected`)
+      .get(drawer.opening_cash,shopId,date,shopId,date,shopId,date,shopId,date,shopId,date,shopId,date);
+    remember.push({ table: 'cash_drawer', rowId: drawer.id,
+      row: { ...db.prepare('SELECT * FROM cash_drawer WHERE id=?').get(drawer.id), closing_expected: Number(cash.expected), is_dirty: true, updated_at: stamp }, op: 'update' });
+    // Later operations must not overwrite this already-sent refund snapshot.
+    stamp = iso(new Date(at.getTime() + 1000));
+
+    insert('sales_returns', { id: 'accept-legacy-return', ...base(stamp), shop_id: shopId,
+      sale_id: 'accept-sale-legacy', sale_item_id: 'accept-item-legacy', refund_id: null,
+      qty: 1, refund_amount: 1000, refund_method: 'cash',
+      reason: 'Synthetic legacy return', created_by: ownerId });
+    insert('inventory_movements', { id: 'accept-legacy-movement', ...base(stamp),
+      shop_id: shopId, batch_id: batch.batchId, change_qty: 1, reason: 'return',
+      ref_id: 'accept-legacy-return', created_by: ownerId });
+    const receipt = db.prepare('SELECT * FROM purchase_items ORDER BY id LIMIT 1').get();
+    insert('purchase_returns', { id: 'accept-purchase-return', ...base(stamp), shop_id: shopId,
+      purchase_id: receipt.purchase_id, purchase_item_id: receipt.id, qty: 1,
+      credit_amount: receipt.purchase_price, reason: 'Synthetic supplier return', created_by: ownerId });
+    insert('inventory_movements', { id: 'accept-purchase-return-movement', ...base(stamp),
+      shop_id: shopId, batch_id: batch.batchId, change_qty: -1, reason: 'return',
+      ref_id: 'accept-purchase-return', created_by: ownerId });
+    const local = { id: batch.medicineId, shop_id: shopId, name: 'Fixture local name', updated_at: stamp };
+    const remote = { ...local, name: 'Fixture remote name' };
+    insert('conflict_queue', { id: 'accept-conflict', shop_id: shopId, table_name: 'medicines',
+      row_id: batch.medicineId, local_value: JSON.stringify(local), remote_value: JSON.stringify(remote),
+      reason: 'pull_local_pending', created_at: stamp, updated_at: stamp,
+      local_updated_at: stamp, remote_updated_at: stamp, detected_by: ownerId });
+    insert('sync_queue', { id: 'accept-sent-superseded', shop_id: shopId, table_name: 'medicines',
+      row_id: batch.medicineId, op: 'update', payload: JSON.stringify(local),
+      created_at: stamp, seq: 100, status: 'sent' });
+
+    for (const [name, cash, credit] of [['cash', 1000, 0], ['credit', 0, 2000]]) {
+      const total = cash + credit;
+      const qty = total / 1000;
+      const saleId = 'accept-sale-' + name;
+      const refundId = 'accept-refund-' + name;
+      insert('sales', { id: saleId, ...base(stamp), shop_id: shopId,
+        invoice_no: 'ACCEPT-' + name, subtotal: total, discount_amount: 0,
+        total, paid: cash, change: 0, cash_applied: cash, credit_amount: credit,
+        payment_type: credit ? 'credit' : 'cash', customer_id: credit ? customers[0] : null,
+        staff_id: ownerId, business_date: date });
+      insert('sale_items', { id: 'accept-item-' + name, ...base(stamp), shop_id: shopId,
+        sale_id: saleId, medicine_id: batch.medicineId, batch_id: batch.batchId,
+        qty, unit_price: 1000, discount_amount: 0, line_total: total, cogs: batch.purchasePrice * qty });
+      insert('inventory_movements', { id: 'accept-sale-movement-' + name, ...base(stamp), shop_id: shopId,
+        batch_id: batch.batchId, change_qty: -qty, reason: 'sale', ref_id: saleId, created_by: ownerId });
+      if (credit) insert('credits', { id: 'accept-credit-' + name, ...base(stamp), shop_id: shopId,
+        customer_id: customers[0], sale_id: saleId, amount: credit, balance: 0 });
+      insert('sale_refunds', { id: refundId, ...base(stamp), shop_id: shopId, sale_id: saleId,
+        claim_id: 'synthetic-' + name, claim_token: 'synthetic-not-a-credential', reason: 'Synthetic return',
+        total_amount: total, business_date: date, created_by: ownerId });
+      insert('sales_returns', { id: 'accept-return-' + name, ...base(stamp), shop_id: shopId,
+        sale_id: saleId, sale_item_id: 'accept-item-' + name, refund_id: refundId, qty,
+        refund_amount: total, refund_method: credit ? 'credit_note' : 'cash',
+        reason: 'Synthetic return', created_by: ownerId });
+      insert('inventory_movements', { id: 'accept-return-movement-' + name, ...base(stamp),
+        shop_id: shopId, batch_id: batch.batchId, change_qty: qty, reason: 'return',
+        ref_id: refundId, created_by: ownerId });
+      insert('refund_tenders', { id: 'accept-tender-' + name + '-full', ...base(stamp),
+        shop_id: shopId, refund_id: refundId, kind: credit ? 'credit_cancel' : 'cash',
+        method: credit ? null : 'cash', amount: total });
+    }
+    // Supplier credit: 1000 paid, 400 returned, then 600 received with only
+    // 200 cash. FIFO consumes exactly 400; no fake cash credit payment exists.
+    insert('suppliers', { id: 'accept-supplier', ...base(stamp), shop_id: shopId, name: 'Synthetic credit supplier' });
+    for (const [name, qty, total, paid] of [['old', 10, 1000, 1000], ['new', 6, 600, 200]]) {
+      const purchaseId = 'accept-purchase-' + name;
+      insert('purchases', { id: purchaseId, ...base(stamp), shop_id: shopId,
+        invoice_no: 'ACCEPT-PUR-' + name, supplier_id: 'accept-supplier',
+        total, payment_terms: 'cod', paid_amount: paid, invoice_date: date });
+      insert('purchase_items', { id: 'accept-purchase-item-' + name, ...base(stamp), shop_id: shopId,
+        purchase_id: purchaseId, medicine_id: batch.medicineId, batch_no: 'ACCEPT-' + name,
+        expiry_date: '2030-12-31', qty, purchase_price: 100, sale_price: 200,
+        status: 'received', received_at: stamp });
+      insert('batches', { id: 'accept-batch-' + name, ...base(stamp), shop_id: shopId,
+        medicine_id: batch.medicineId, batch_no: 'ACCEPT-' + name, expiry_date: '2030-12-31',
+        stock: 0, purchase_price: 100, sale_price: 200 });
+      insert('inventory_movements', { id: 'accept-purchase-movement-' + name, ...base(stamp), shop_id: shopId,
+        batch_id: 'accept-batch-' + name, change_qty: qty, reason: 'purchase',
+        ref_id: purchaseId, created_by: ownerId });
+      insert('payments', { id: 'accept-supplier-payment-' + name, ...base(stamp), shop_id: shopId,
+        type: 'supplier_payment', party_id: 'accept-supplier', amount: paid,
+        method: 'cash', ref_id: purchaseId, created_by: ownerId });
+    }
+    insert('purchase_returns', { id: 'accept-credit-return', ...base(stamp), shop_id: shopId,
+      purchase_id: 'accept-purchase-old', purchase_item_id: 'accept-purchase-item-old',
+      qty: 4, credit_amount: 400, reason: 'Synthetic supplier credit', created_by: ownerId });
+    insert('inventory_movements', { id: 'accept-credit-return-movement', ...base(stamp), shop_id: shopId,
+      batch_id: 'accept-batch-old', change_qty: -4, reason: 'return',
+      ref_id: 'accept-credit-return', created_by: ownerId });
+    insert('conflict_queue', { id: 'accept-resolved-conflict', shop_id: shopId,
+      table_name: 'medicines', row_id: batch.medicineId, local_value: JSON.stringify(local),
+      remote_value: JSON.stringify(remote), resolved: 1, resolution: 'keep_remote',
+      resolved_at: stamp, created_at: stamp, updated_at: stamp,
+      superseded_payloads: JSON.stringify([{ id: 'accept-superseded-pending', seq: 101,
+        op: 'update', payload: JSON.stringify(local) }]) });
+
+    // A complete, already-sent refund operation: no pending app work.
+    remember.forEach(({ table, row, op, rowId = row.id }, sequence) => {
+      insert('sync_queue', { id: 'accept-group-' + sequence, shop_id: shopId,
+        table_name: table, row_id: rowId, op, payload: JSON.stringify(Object.fromEntries(Object.entries(row).map(([key, value]) => [key, key.startsWith('is_') && (value === 0 || value === 1) ? Boolean(value) : value]))),
+        created_at: refundStamp, seq: sequence + 1, status: 'sent',
+        operation_group_id: 'accept-refund', operation_kind: 'refund',
+        operation_sequence: sequence, operation_expected_count: remember.length });
+    });
+  };
+
   const openCredits = [];
   let invoiceCounter = 0;
   for (let day = 0; day < options.days; day += 1) {
@@ -718,6 +961,8 @@ function main() {
       });
     }
 
+    if (day === options.days - 1) seedAcceptanceGraph(new Date(dayStart.getTime() + 19 * 3_600_000 + 60_000), date);
+
     // Closing the day is what makes the drawer row reconcilable, and a
     // reconciled day is the one shape the restore drill compares against.
     const closedAt = iso(new Date(dayStart.getTime() + 20 * 3_600_000));
@@ -727,8 +972,10 @@ function main() {
       + '+ COALESCE((SELECT SUM(`cash_applied`) FROM `sales` WHERE `shop_id`=? AND `business_date`=? AND `is_deleted`=0),0) '
       + "+ COALESCE((SELECT SUM(`amount`) FROM `payments` WHERE `shop_id`=? AND `type`='customer_payment' AND `method`='cash' AND date(`created_at`, '+06:00')=? AND `is_deleted`=0),0) "
       + '- COALESCE((SELECT SUM(`amount`) FROM `expenses` WHERE `shop_id`=? AND date(`created_at`, \'+06:00\')=? AND `is_deleted`=0),0) '
-      + "- COALESCE((SELECT SUM(`amount`) FROM `payments` WHERE `shop_id`=? AND `type` IN ('supplier_payment','withdrawal') AND `method`='cash' AND date(`created_at`, '+06:00')=? AND `is_deleted`=0),0) AS expected",
-    ).get(shopId, date, shopId, date, shopId, date, shopId, date, shopId, date);
+      + "- COALESCE((SELECT SUM(`amount`) FROM `payments` WHERE `shop_id`=? AND `type` IN ('supplier_payment','withdrawal') AND `method`='cash' AND date(`created_at`, '+06:00')=? AND `is_deleted`=0),0) "
+      + "- COALESCE((SELECT SUM(amount) FROM refund_tenders WHERE shop_id=? AND (kind='cash' OR (kind='collection_refund' AND method='cash')) AND is_deleted=0 AND date(created_at, '+06:00')=?),0) "
+      + "- COALESCE((SELECT SUM(refund_amount) FROM sales_returns WHERE shop_id=? AND refund_id IS NULL AND refund_method='cash' AND is_deleted=0 AND date(created_at, '+06:00')=?),0) AS expected",
+    ).get(shopId, date, shopId, date, shopId, date, shopId, date, shopId, date, shopId, date, shopId, date);
     db.prepare(
       'UPDATE `cash_drawer` SET `closed_by` = ?, `closed_at` = ?, `closing_expected` = ?, '
       + '`closing_counted` = ?, `reconciled_counted_amount` = ?, `reconciled_at` = ?, '
@@ -738,6 +985,7 @@ function main() {
       Number(cash.expected), closedAt, ownerId, closedAt, date, shopId,
     );
   }
+
 
   db.exec('COMMIT');
 
@@ -783,7 +1031,7 @@ function main() {
   console.log(`sales:        BDT ${taka(money.sales_paisa)}`);
   console.log(`  of which credit: BDT ${taka(money.credit_paisa)}`);
   console.log(`receivable:   BDT ${taka(money.receivable_paisa)} still owed`);
-  console.log(`payments in:  BDT ${taka(money.payments_paisa)}`);
+  console.log(`payments total: BDT ${taka(money.payments_paisa)}`);
   console.log(`payable:      BDT ${taka(money.payable_paisa)} owed to suppliers`);
   console.log(`stock:        ${money.units_in_stock} units`);
   console.log('');

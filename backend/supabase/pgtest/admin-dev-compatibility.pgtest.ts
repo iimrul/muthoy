@@ -16,8 +16,13 @@ const stores = ['admin_audit_log', 'admin_role_assignments', 'admin_support_case
 const rpc = 'publish_financial_snapshot(text,text,date,date,bigint,bigint,bigint,integer,integer,text,integer,integer,integer,integer,text)';
 const id = (n: number) => `f2160000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
+// The candidate pins migration 39's dispatcher body and was written before
+// migration 40 joined the chain, so its full-chain case is the chain through 39.
+// (It is superseded: DEV received the real 32-38 instead; see held-migrations.)
+const CANDIDATE_CHAIN_END = '20261115172840_staff_sale_credit_reconciliation.sql';
+
 async function fixture(dev: boolean): Promise<Harness> {
-  const h = dev ? await createBareHarness() : await createHarness();
+  const h = dev ? await createBareHarness() : await createHarness({ through: CANDIDATE_CHAIN_END });
   if(dev) {
     const files = migrationFiles().filter((name) => name <= '20261005000000_h5_revoke_auth_user_sessions.sql');
     expect(files).toHaveLength(31);

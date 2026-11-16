@@ -20,6 +20,25 @@ describe('sync SQLSTATE classification', () => {
   it('keeps inventory-ledger MU005 transient', () => {
     expect(classifySyncSqlError('MU005')).toEqual({ reason: 'transient', haltBatch: true });
   });
+
+  // H1 (2026-11-16 review). The device no longer retires a transient row after
+  // eight attempts, so a deterministic refusal labelled transient blocks every
+  // later row forever and never reaches the failed count the Owner is warned
+  // about. Postgres raises classes 22 and 23 only when the row itself can never
+  // be applied as sent; no migration raises them deliberately.
+  it.each(['23502', '23503', '23514', '23P01', '22P02', '22007', '22003', '22001', '22023'])(
+    'treats Postgres data/integrity error %s as permanent while keeping batch order',
+    (code) => {
+      expect(classifySyncSqlError(code)).toEqual({ reason: 'permanent', haltBatch: true });
+    },
+  );
+
+  it.each(['40001', '40P01', '55P03', '57014', '08006', '53300', 'P0001', 'XX000', 'MU022', '2', 'M2', undefined])(
+    'keeps %s transient: an outage, a contention or an unknown refusal must not retire durable work',
+    (code) => {
+      expect(classifySyncSqlError(code)).toEqual({ reason: 'transient', haltBatch: true });
+    },
+  );
 });
 
 describe('session revocation', () => {
