@@ -1,0 +1,134 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+ ❯ apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts (8 tests | 8 failed) 6167ms
+   ❯ HW-P1 — one row per paper line, nothing left in the buffer at the cut (target D:\Muthoy) (4)
+     × test print: contains LF terminators and the cut arrives at the start of a line 33ms
+     × end-of-day report: contains LF terminators and the cut arrives at the start of a line 6ms
+     × monthly P&L: contains LF terminators and the cut arrives at the start of a line 4ms
+     × test print renders exactly its intended rows 107ms
+   ❯ HW-P2 — a 3-line feed precedes the cut (PR-11) (1)
+     × monthly P&L: at least 3 LF after the last text before GS V (rows.filter(Boolean) removes them) 3ms
+   ❯ HW-P3 — no automatic second print after uncertain completion (T33) (3)
+     × DISCONNECTED after part of the job reached the printer: surfaced once, never re-sent automatically 5095ms
+     × SEND_FAILED after part of the job reached the printer: surfaced once, never re-sent automatically 749ms
+     × OUT_OF_RANGE after part of the job reached the printer: surfaced once, never re-sent automatically 161ms
+ ✓ apps/mobile/tests/hardware-readiness/printer-transport.hwtest.ts (23 tests | 1 skipped) 897ms
+ ✓ apps/mobile/tests/hardware-readiness/ocr-parsers.hwtest.ts (41 tests) 493ms
+ ✓ apps/mobile/tests/hardware-readiness/escpos-golden.hwtest.ts (26 tests) 315ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts > HW-P1 — one row per paper line, nothing left in the buffer at the cut (target D:\Muthoy) > test print: contains LF terminators and the cut arrives at the start of a line
+ FAIL  apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts > HW-P1 — one row per paper line, nothing left in the buffer at the cut (target D:\Muthoy) > end-of-day report: contains LF terminators and the cut arrives at the start of a line
+ FAIL  apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts > HW-P1 — one row per paper line, nothing left in the buffer at the cut (target D:\Muthoy) > monthly P&L: contains LF terminators and the cut arrives at the start of a line
+AssertionError: expected 0 to be greater than 0
+ ❯ apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts:36:32
+     34|       const bytes = build();
+     35|       const paper = renderEscPos(bytes, 32);
+     36|       expect(count(bytes, LF)).toBeGreaterThan(0);
+       |                                ^
+     37|       expect(paper.cuts[0]?.pendingText).toBe("");
+     38|       expect(paper.lines.filter((line) => line.wrapped)).toEqual([]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts > HW-P1 — one row per paper line, nothing left in the buffer at the cut (target D:\Muthoy) > test print renders exactly its intended rows
+AssertionError: expected [ …(3) ] to deeply equal [ '           MUTHOY POS', …(5) ]
+
+- Expected
++ Received
+
+  [
+-   "           MUTHOY POS",
+-   "    Printer test successful",
+-   "  Generic ESC/POS - 32 columns",
++   "MUTHOY POS?Printer test successf",
++   "ul?Generic ESC/POS - 32 columns?",
+    "--------------------------------",
+-   "",
+-   "",
+  ]
+
+ ❯ apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts:43:66
+     41|
+     42|   it("test print renders exactly its intended rows", () => {
+     43|     expect(paperText(renderEscPos(escpos.buildTestPrint(), 32))).toEqu…
+       |                                                                  ^
+     44|       "           MUTHOY POS",
+     45|       "    Printer test successful",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts > HW-P2 — a 3-line feed precedes the cut (PR-11) > monthly P&L: at least 3 LF after the last text before GS V (rows.filter(Boolean) removes them)
+AssertionError: expected 0 to be greater than or equal to 3
+ ❯ apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts:60:24
+     58|     let trailingLf = 0;
+     59|     for (let index = cutAt - 1; index >= 0 && bytes[index] === LF; ind…
+     60|     expect(trailingLf).toBeGreaterThanOrEqual(3);
+       |                        ^
+     61|   });
+     62| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts > HW-P3 — no automatic second print after uncertain completion (T33) > DISCONNECTED after part of the job reached the printer: surfaced once, never re-sent automatically
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts:77:5
+     75|   ];
+     76|   for (const failure of uncertain) {
+     77|     it(`${failure.code} after part of the job reached the printer: sur…
+       |     ^
+     78|       const paired = printer.savePairedPrinter({ id: "00:11:22:AA:BB:C…
+     79|       fakeBle.printScript.push({ deliverFraction: 0.5, reject: failure…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts > HW-P3 — no automatic second print after uncertain completion (T33) > SEND_FAILED after part of the job reached the printer: surfaced once, never re-sent automatically
+AssertionError: expected [ { …(5) }, { …(5) } ] to have a length of 1 but got 2
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts:81:32
+     79|       fakeBle.printScript.push({ deliverFraction: 0.5, reject: failure…
+     80|       const outcome = await printer.printEscPos(escpos.buildTestPrint(…
+     81|       expect(fakeBle.attempts).toHaveLength(1);
+       |                                ^
+     82|       expect(outcome).toBe("rejected");
+     83|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts > HW-P3 — no automatic second print after uncertain completion (T33) > OUT_OF_RANGE after part of the job reached the printer: surfaced once, never re-sent automatically
+AssertionError: expected [ { …(5) }, { …(5) }, { …(5) } ] to have a length of 1 but got 3
+
+- Expected
++ Received
+
+- 1
++ 3
+
+ ❯ apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts:81:32
+     79|       fakeBle.printScript.push({ deliverFraction: 0.5, reject: failure…
+     80|       const outcome = await printer.printEscPos(escpos.buildTestPrint(…
+     81|       expect(fakeBle.attempts).toHaveLength(1);
+       |                                ^
+     82|       expect(outcome).toBe("rejected");
+     83|     });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  8 failed | 89 passed | 1 skipped (98)
+   Start at  01:07:17
+   Duration  61.28s (transform 77%, tests 21%, import 1%, worker 1%)
+
+    Isolate  4 workers spawned · ~5.93s startup each (spawn + environment, per file)
+             at least ~17.80s faster with isolate: false — reuses workers across files instead of one per file
+

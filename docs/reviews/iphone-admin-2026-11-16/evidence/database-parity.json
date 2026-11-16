@@ -1,0 +1,787 @@
+{
+  "checkedAt": "2026-11-15T19:14:13.504Z",
+  "project": "btfprhticjgeihcngpif",
+  "readOnly": true,
+  "scope": "Public DEV catalog; literal/static Admin source dependencies. No records or RPCs executed.",
+  "sourceFiles": 94,
+  "hostedMigrations": 32,
+  "localMigrations": 39,
+  "missingMigrations": [
+    "20261008000000_h9_enrollment_hold_constraint_normalization.sql",
+    "20261008000100_h9_sync_staging_cleanup_schedule.sql",
+    "20261015000000_h9_api_role_table_privileges.sql",
+    "20261023000000_e4_batch3_admin_platform.sql",
+    "20261030000000_e4b_publication_snapshots.sql",
+    "20261031000000_e11_entitlement_verification.sql",
+    "20261111000000_role_switch_credit_link_contract.sql"
+  ],
+  "missingTables": [
+    "admin_audit_log",
+    "admin_platform_settings",
+    "admin_role_assignments",
+    "admin_support_cases",
+    "admin_support_notes",
+    "financial_publications"
+  ],
+  "missingFunctions": [
+    "publish_financial_snapshot"
+  ],
+  "dependencies": [
+    {
+      "file": "apps/admin/lib/adminActions.ts",
+      "line": 171,
+      "kind": "function",
+      "name": "b4_reconcile_plan_limits"
+    },
+    {
+      "file": "apps/admin/lib/adminActions.ts",
+      "line": 218,
+      "kind": "table",
+      "name": "payment_orders"
+    },
+    {
+      "file": "apps/admin/lib/adminAuditStore.ts",
+      "line": 200,
+      "kind": "table",
+      "name": "admin_audit_log"
+    },
+    {
+      "file": "apps/admin/lib/adminAuditStore.ts",
+      "line": 345,
+      "kind": "table",
+      "name": "admin_audit_log"
+    },
+    {
+      "file": "apps/admin/lib/adminAuditStore.ts",
+      "line": 490,
+      "kind": "table",
+      "name": "admin_audit_log"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 120,
+      "kind": "table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 143,
+      "kind": "table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 185,
+      "kind": "table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 203,
+      "kind": "table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 285,
+      "kind": "table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 301,
+      "kind": "table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 194,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 199,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 245,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 316,
+      "kind": "table",
+      "name": "entitlement_snapshots"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 344,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 381,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 470,
+      "kind": "table",
+      "name": "plan_offerings"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 478,
+      "kind": "table",
+      "name": "plan_offerings"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 545,
+      "kind": "table",
+      "name": "billing_subscriptions"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 546,
+      "kind": "table",
+      "name": "payment_orders"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 547,
+      "kind": "table",
+      "name": "payment_provider_events"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 562,
+      "kind": "table",
+      "name": "billing_subscriptions"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 567,
+      "kind": "table",
+      "name": "payment_orders"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 572,
+      "kind": "table",
+      "name": "payment_provider_events"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 737,
+      "kind": "table",
+      "name": "billing_accounts"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 743,
+      "kind": "table",
+      "name": "billing_subscriptions"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 748,
+      "kind": "table",
+      "name": "payment_orders"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1185,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1195,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1214,
+      "kind": "table",
+      "name": "billing_subscriptions"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1217,
+      "kind": "table",
+      "name": "billing_subscriptions"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1230,
+      "kind": "table",
+      "name": "payment_orders"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1236,
+      "kind": "table",
+      "name": "payment_orders"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1253,
+      "kind": "table",
+      "name": "sales"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1264,
+      "kind": "table",
+      "name": "sales"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1294,
+      "kind": "table",
+      "name": "sale_refunds"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1305,
+      "kind": "table",
+      "name": "sale_refunds"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1432,
+      "kind": "function",
+      "name": "b4_effective_tier"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1470,
+      "kind": "table",
+      "name": "entitlement_snapshots"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1555,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1561,
+      "kind": "table",
+      "name": "billing_subscriptions"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1566,
+      "kind": "table",
+      "name": "entitlement_snapshots"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1571,
+      "kind": "table",
+      "name": "payment_orders"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1576,
+      "kind": "table",
+      "name": "payment_provider_events"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1583,
+      "kind": "table",
+      "name": "sales"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1606,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1610,
+      "kind": "table",
+      "name": "billing_subscriptions"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1611,
+      "kind": "table",
+      "name": "entitlement_snapshots"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1614,
+      "kind": "table",
+      "name": "payment_orders"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1615,
+      "kind": "table",
+      "name": "payment_provider_events"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1616,
+      "kind": "table",
+      "name": "sales"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1723,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1744,
+      "kind": "table",
+      "name": "entitlement_snapshots"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1784,
+      "kind": "table",
+      "name": "billing_accounts"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1869,
+      "kind": "table",
+      "name": "billing_subscriptions"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1874,
+      "kind": "table",
+      "name": "billing_subscriptions"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1880,
+      "kind": "table",
+      "name": "entitlement_snapshots"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1886,
+      "kind": "table",
+      "name": "payment_orders"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1999,
+      "kind": "table",
+      "name": "audit_logs"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 2001,
+      "kind": "table",
+      "name": "audit_logs"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 2132,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 56,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 88,
+      "kind": "table",
+      "name": "billing_accounts"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 109,
+      "kind": "table",
+      "name": "entitlement_snapshots"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 135,
+      "kind": "table",
+      "name": "shop_memberships"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 187,
+      "kind": "table",
+      "name": "billing_subscriptions"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 227,
+      "kind": "table",
+      "name": "billing_subscriptions"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 236,
+      "kind": "table",
+      "name": "plan_offerings"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 266,
+      "kind": "table",
+      "name": "payment_orders"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 274,
+      "kind": "table",
+      "name": "payment_provider_events"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 323,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 355,
+      "kind": "table",
+      "name": "users"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 372,
+      "kind": "table",
+      "name": "users"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 385,
+      "kind": "table",
+      "name": "sales"
+    },
+    {
+      "file": "apps/admin/lib/adminQueries.ts",
+      "line": 401,
+      "kind": "table",
+      "name": "sales"
+    },
+    {
+      "file": "apps/admin/lib/adminSettings.ts",
+      "line": 142,
+      "kind": "table",
+      "name": "admin_platform_settings"
+    },
+    {
+      "file": "apps/admin/lib/adminSettings.ts",
+      "line": 262,
+      "kind": "table",
+      "name": "admin_platform_settings"
+    },
+    {
+      "file": "apps/admin/lib/adminSettings.ts",
+      "line": 276,
+      "kind": "table",
+      "name": "admin_platform_settings"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 95,
+      "kind": "table",
+      "name": "admin_support_cases"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 133,
+      "kind": "table",
+      "name": "admin_support_cases"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 177,
+      "kind": "table",
+      "name": "admin_support_notes"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 186,
+      "kind": "table",
+      "name": "admin_support_notes"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 246,
+      "kind": "table",
+      "name": "admin_support_cases"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 305,
+      "kind": "table",
+      "name": "admin_support_cases"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 343,
+      "kind": "table",
+      "name": "admin_support_notes"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 353,
+      "kind": "table",
+      "name": "admin_support_notes"
+    },
+    {
+      "file": "apps/admin/lib/publicationQueries.ts",
+      "line": 189,
+      "kind": "table",
+      "name": "financial_publications"
+    },
+    {
+      "file": "apps/admin/lib/publicationQueries.ts",
+      "line": 273,
+      "kind": "table",
+      "name": "admin_audit_log"
+    },
+    {
+      "file": "apps/admin/lib/publicationWriter.ts",
+      "line": 270,
+      "kind": "function",
+      "name": "publish_financial_snapshot"
+    },
+    {
+      "file": "apps/admin/lib/queries.ts",
+      "line": 73,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/queries.ts",
+      "line": 119,
+      "kind": "table",
+      "name": "shops"
+    },
+    {
+      "file": "apps/admin/lib/queries.ts",
+      "line": 134,
+      "kind": "table",
+      "name": "sales"
+    },
+    {
+      "file": "apps/admin/lib/queries.ts",
+      "line": 163,
+      "kind": "table",
+      "name": "sale_refunds"
+    },
+    {
+      "file": "apps/admin/lib/queries.ts",
+      "line": 191,
+      "kind": "table",
+      "name": "sales"
+    },
+    {
+      "file": "apps/admin/lib/queries.ts",
+      "line": 197,
+      "kind": "table",
+      "name": "sale_refunds"
+    }
+  ],
+  "issues": [
+    {
+      "file": "apps/admin/lib/adminAuditStore.ts",
+      "line": 200,
+      "kind": "missing_table",
+      "name": "admin_audit_log"
+    },
+    {
+      "file": "apps/admin/lib/adminAuditStore.ts",
+      "line": 345,
+      "kind": "missing_table",
+      "name": "admin_audit_log"
+    },
+    {
+      "file": "apps/admin/lib/adminAuditStore.ts",
+      "line": 490,
+      "kind": "missing_table",
+      "name": "admin_audit_log"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 120,
+      "kind": "missing_table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 143,
+      "kind": "missing_table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 185,
+      "kind": "missing_table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 203,
+      "kind": "missing_table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 285,
+      "kind": "missing_table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminIdentityStore.ts",
+      "line": 301,
+      "kind": "missing_table",
+      "name": "admin_role_assignments"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 1999,
+      "kind": "missing_select_grant",
+      "name": "audit_logs"
+    },
+    {
+      "file": "apps/admin/lib/adminPlatformQueries.ts",
+      "line": 2001,
+      "kind": "missing_select_grant",
+      "name": "audit_logs"
+    },
+    {
+      "file": "apps/admin/lib/adminSettings.ts",
+      "line": 142,
+      "kind": "missing_table",
+      "name": "admin_platform_settings"
+    },
+    {
+      "file": "apps/admin/lib/adminSettings.ts",
+      "line": 262,
+      "kind": "missing_table",
+      "name": "admin_platform_settings"
+    },
+    {
+      "file": "apps/admin/lib/adminSettings.ts",
+      "line": 276,
+      "kind": "missing_table",
+      "name": "admin_platform_settings"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 95,
+      "kind": "missing_table",
+      "name": "admin_support_cases"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 133,
+      "kind": "missing_table",
+      "name": "admin_support_cases"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 177,
+      "kind": "missing_table",
+      "name": "admin_support_notes"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 186,
+      "kind": "missing_table",
+      "name": "admin_support_notes"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 246,
+      "kind": "missing_table",
+      "name": "admin_support_cases"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 305,
+      "kind": "missing_table",
+      "name": "admin_support_cases"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 343,
+      "kind": "missing_table",
+      "name": "admin_support_notes"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 353,
+      "kind": "missing_table",
+      "name": "admin_support_notes"
+    },
+    {
+      "file": "apps/admin/lib/publicationQueries.ts",
+      "line": 189,
+      "kind": "missing_table",
+      "name": "financial_publications"
+    },
+    {
+      "file": "apps/admin/lib/publicationQueries.ts",
+      "line": 273,
+      "kind": "missing_table",
+      "name": "admin_audit_log"
+    },
+    {
+      "file": "apps/admin/lib/publicationWriter.ts",
+      "line": 270,
+      "kind": "missing_function",
+      "name": "publish_financial_snapshot"
+    }
+  ],
+  "unresolved": [
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 95,
+      "expression": "clientFor(deps).from('admin_support_cases').select(SUPPORT_CASE_COLUMNS)"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 133,
+      "expression": "clientFor(deps)\n    .from('admin_support_cases')\n    .select(SUPPORT_CASE_COLUMNS)"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 186,
+      "expression": "clientFor(deps)\n    .from('admin_support_notes')\n    .select(SUPPORT_NOTE_COLUMNS)"
+    },
+    {
+      "file": "apps/admin/lib/adminSupportStore.ts",
+      "line": 353,
+      "expression": "clientFor(deps)\n        .from('admin_support_notes')\n        .select(SUPPORT_NOTE_COLUMNS)"
+    },
+    {
+      "file": "apps/admin/lib/publicationQueries.ts",
+      "line": 189,
+      "expression": "client\n    .from('financial_publications')\n    .select(COLUMNS, { count: 'exact' })"
+    }
+  ],
+  "status": "FAIL"
+}

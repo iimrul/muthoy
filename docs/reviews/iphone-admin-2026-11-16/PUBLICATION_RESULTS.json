@@ -1,0 +1,53 @@
+{
+  "scope": "Scoped source snapshot with reused installed dependencies; no native, clean-lockfile, snapshot lint or hosted acceptance claim.",
+  "attempts": [
+    {
+      "receipt": "admin-build-1794787953048493600.json",
+      "task": "admin-build",
+      "exitCode": 1,
+      "logHashVerified": true
+    },
+    {
+      "receipt": "admin-build-1794787997302991500.json",
+      "task": "admin-build",
+      "exitCode": 1,
+      "logHashVerified": true
+    },
+    {
+      "receipt": "admin-build-1794788019429288400.json",
+      "task": "admin-build",
+      "exitCode": 1,
+      "logHashVerified": true
+    },
+    {
+      "receipt": "admin-build-1794788138347432900.json",
+      "task": "admin-build",
+      "exitCode": 0,
+      "logHashVerified": true
+    },
+    {
+      "receipt": "admin-recheck-1794787953070652900.json",
+      "task": "admin-recheck",
+      "exitCode": 1,
+      "logHashVerified": true
+    },
+    {
+      "receipt": "admin-recheck-1794787997399555600.json",
+      "task": "admin-recheck",
+      "exitCode": 1,
+      "logHashVerified": true
+    },
+    {
+      "receipt": "admin-recheck-1794788019413194000.json",
+      "task": "admin-recheck",
+      "exitCode": 0,
+      "logHashVerified": true
+    },
+    {
+      "receipt": "guard-check-1794788162652052400.json",
+      "task": "guard-check",
+      "exitCode": 0,
+      "logHashVerified": true
+    }
+  ]
+}

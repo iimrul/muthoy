@@ -1,3 +1,60 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  * { @apply box-border; }
+  body { @apply m-0; }
+  :focus-visible { @apply outline outline-2 outline-offset-4 outline-brand-deepGreen; }
+  input:not([type='hidden']):not([type='checkbox']):not([type='radio']), select, textarea {
+    @apply min-h-11 max-w-full rounded-lg border-black/15 bg-white px-3 py-2 text-base text-richBlack shadow-sm;
+  }
+  input::placeholder, textarea::placeholder { @apply text-midGray; }
+  button, select, summary { @apply touch-manipulation; }
+  button { @apply min-h-11; }
+  button:disabled { @apply cursor-not-allowed opacity-50; }
+  th, td { @apply break-words; }
+}
+
+@layer components {
+  .admin-shell { @apply min-h-screen lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]; }
+  .admin-sidebar { @apply min-w-0 border-b border-black/10 bg-white lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:border-b-0 lg:border-r; }
+  .admin-brand { @apply flex min-w-0 items-center gap-3 px-5 py-5 text-base font-bold text-brand-deepGreen; }
+  .admin-brand-symbol { @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-deepGreen text-2xl text-white; }
+  .admin-brand-caption { @apply mt-0.5 block text-xs font-normal text-midGray; }
+  .admin-nav-caption { @apply hidden px-6 pb-3 pt-5 text-xs font-semibold uppercase tracking-widest text-midGray lg:block; }
+  .admin-navigation { @apply flex gap-1 overflow-x-auto px-3 pb-3 lg:flex-col lg:overflow-y-auto lg:px-3; }
+  .admin-nav-link { @apply flex min-h-11 shrink-0 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-midGray transition-colors hover:bg-brand-softGreen/60 hover:text-brand-deepGreen; }
+  .admin-nav-mark { @apply flex h-6 w-6 shrink-0 items-center justify-center rounded border border-black/10 bg-brand-softGreen/50 text-xs text-brand-deepGreen; }
+  .admin-sidebar-footer { @apply mt-auto hidden border-t border-black/5 px-6 py-5 text-xs text-midGray lg:block; }
+  .admin-topbar { @apply flex flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-white/90 px-4 py-3 sm:px-8; }
+  .admin-account { @apply ml-auto flex min-w-0 max-w-full items-center gap-3; }
+  .admin-sign-out { @apply shrink-0 whitespace-nowrap rounded-lg border border-black/15 bg-white px-3 py-2 text-xs font-semibold text-richBlack hover:bg-brand-softGreen; }
+  .admin-content { @apply mx-auto min-w-0 max-w-[100rem] px-4 py-6 sm:px-8 sm:py-8; }
+  .admin-content h1 { @apply text-2xl font-bold tracking-tight text-brand-deepGreen sm:text-3xl; }
+  .admin-content h2 { @apply tracking-tight; }
+  .admin-content input:not([type='hidden']):not([type='checkbox']):not([type='radio']), .admin-content select, .admin-content textarea { @apply text-base; }
+  .admin-public-shell { @apply mx-auto max-w-lg px-4 py-8 sm:py-16; }
+  .admin-public-shell .admin-sidebar { @apply rounded-t-2xl border border-b-0 border-black/10; }
+  .admin-public-shell .admin-content { @apply rounded-b-2xl border border-t-0 border-black/10 bg-white px-6 pb-8 pt-3 shadow-sm sm:px-8; }
+  .admin-skip-link { @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-white focus:p-3 focus:text-brand-deepGreen focus:shadow-lg; }
+  .admin-filter { @apply mt-5 grid min-w-0 grid-cols-2 items-end gap-3 rounded-xl border border-black/10 bg-white p-4 shadow-sm sm:flex sm:flex-wrap; }
+  .admin-filter label { @apply min-w-0 max-w-full; }
+  .admin-filter label:has(input[type='search']) { @apply col-span-2 sm:w-64; }
+  .admin-filter label:has(select) { @apply sm:min-w-[8rem]; }
+  .admin-filter input, .admin-filter select { @apply w-full; }
+  .admin-filter > a, .admin-pager a { @apply inline-flex min-h-11 items-center justify-center; }
+  .admin-metric { @apply relative min-w-0 rounded-xl border border-black/10 bg-white p-5 shadow-sm; }
+  .admin-metric-value { @apply mt-3 break-words text-2xl font-semibold tracking-tight tabular-nums; }
+  .admin-table-scroll { @apply max-w-full overflow-x-auto rounded-xl border border-black/10 bg-white shadow-sm; }
+  .admin-table-scroll tbody tr { @apply transition-colors hover:bg-brand-softGreen/30; }
+  .admin-table-scroll th { @apply whitespace-nowrap; }
+  .admin-table-scroll th, .admin-table-scroll td { @apply px-4 py-3; }
+  .admin-table-scroll thead { @apply bg-brand-softGreen/70 text-brand-deepGreen; }
+  .admin-panel { @apply rounded-xl border border-black/10 bg-white p-5 shadow-sm; }
+  .admin-pager { @apply mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-black/10 bg-white px-4 py-3 text-sm; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

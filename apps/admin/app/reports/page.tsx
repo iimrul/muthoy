@@ -240,7 +240,8 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
           {textRows.length === 0 ? (
             <EmptyState message="This report has no rows in the chosen range. That is the data, not a filter error." />
           ) : (
-            <table className="mt-4 w-full text-sm">
+            <div className="admin-table-scroll mt-4" role="region" aria-label="Report results" tabIndex={0}>
+            <table className="w-full min-w-[36rem] text-sm">
               <caption className="sr-only">
                 {result.table.title}. {result.table.subtitle}
               </caption>
@@ -299,6 +300,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </section>
       )}

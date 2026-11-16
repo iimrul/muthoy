@@ -42,14 +42,14 @@ export function Pager({ meta, params, noun }: PagerProps) {
   const last = Math.min(meta.from + meta.pageSize, meta.total);
 
   return (
-    <nav aria-label="Pagination" className="mt-4 flex items-center gap-4 text-sm">
+    <nav aria-label="Pagination" className="admin-pager">
       <p className="text-midGray">
         {/* The EXACT count, never an estimate: an operator reads this figure. */}
         Showing <span className="tabular-nums">{first}</span>–
         <span className="tabular-nums">{last}</span> of{' '}
         <span className="tabular-nums">{meta.total}</span> {noun}
       </p>
-      <span className="ml-auto flex items-center gap-3">
+      <span className="ml-auto flex flex-wrap items-center gap-3">
         {meta.isFirstPage ? (
           <span aria-disabled="true" className="text-black/30">
             Previous
@@ -106,7 +106,7 @@ interface FilterFormProps {
  */
 export function FilterForm({ search, selects = [], range, hidden = {} }: FilterFormProps) {
   return (
-    <form method="get" className="mt-4 flex flex-wrap items-end gap-3">
+    <form method="get" className="admin-filter">
       {Object.entries(hidden).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />
       ))}
@@ -233,11 +233,7 @@ export function MetricTile({ metric, value, note, href }: MetricTileProps) {
   const body = (
     <>
       <p className="text-sm text-midGray">{metric.label}</p>
-      <p
-        className={
-          'mt-1 text-2xl font-semibold tabular-nums ' + (isMoney ? 'font-mono' : 'font-sans')
-        }
-      >
+      <p className={'admin-metric-value tabular-nums ' + (isMoney ? 'font-mono' : 'font-sans')}>
         {value}
       </p>
       {note === undefined ? null : <p className="mt-1 text-xs text-midGray">{note}</p>}
@@ -245,12 +241,12 @@ export function MetricTile({ metric, value, note, href }: MetricTileProps) {
   );
 
   if (href === undefined) {
-    return <div className="rounded border border-black/10 bg-white p-4">{body}</div>;
+    return <div className="admin-metric">{body}</div>;
   }
   return (
     <Link
       href={href}
-      className="block rounded border border-black/10 bg-white p-4 hover:border-black/25"
+      className="admin-metric block transition-colors hover:border-brand-deepGreen/40"
     >
       {body}
     </Link>

@@ -1293,6 +1293,29 @@ describe('§8.2 the drill-down shows support notes and withholds the location', 
     expect(html).toContain('Banani Pharmacy');
   });
 
+  // A-02 (Claude Admin E15 workstream, 2026-11-12). Round 13 finding 7 opened
+  // `/audit?shop=<uuid>` to `shop_audit.read`, but nothing LINKED to it: the
+  // nav's Audit entry needs `audit.read`, which `support` lacks, and this
+  // drill-down had no link. Over real HTTP the support role could reach its
+  // permitted per-shop log only by typing the URL.
+  test.each([
+    ['support', 'support', true],
+    ['founder', 'super_admin', true],
+    // billing holds audit.read but NOT shop_audit.read — the per-shop log is
+    // refused to it, so offering the link would be offering a refusal.
+    ['biller', 'billing', false],
+    ['viewer', 'read_only', false],
+  ] as const)('the per-shop audit link follows shop_audit.read (%s / %s)', async (username, role, expectLink) => {
+    setEnvironment({ [username]: role });
+    seedPlatform();
+    await signInAs(username, role);
+
+    const html = await renderWithParams('./shops/[id]/page', { id: SHOP_ID });
+
+    expect(html).toContain('Banani Pharmacy');
+    expect(html.includes(`href="/audit?shop=${SHOP_ID}"`)).toBe(expectLink);
+  });
+
   test('a malformed route parameter reaches no query', async () => {
     await signInAs('founder', 'super_admin');
 

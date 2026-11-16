@@ -202,7 +202,10 @@ export default async function AdminsPage({ searchParams }: AdminsPageProps) {
       {directory.length === 0 ? (
         <EmptyState message="ADMIN_ROLES names no account, so this panel has no admin users. Accounts are provisioned in the server environment, not here." />
       ) : (
-        <table className="mt-4 w-full text-sm">
+        // A-04: measured 177px wider than a 360px viewport. The wrapper
+        // scrolls the table, not the whole page.
+        <div className="admin-table-scroll mt-4" role="region" aria-label="Admin accounts" tabIndex={0}>
+        <table className="w-full min-w-[48rem] text-sm">
           <caption className="sr-only">
             Admin accounts, their environment role, any narrowing row, and the effective
             permissions.
@@ -256,6 +259,7 @@ export default async function AdminsPage({ searchParams }: AdminsPageProps) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {canWrite ? (
@@ -360,8 +364,8 @@ export default async function AdminsPage({ searchParams }: AdminsPageProps) {
         <p className="mt-1 text-sm text-midGray">
           Rendered from ROLE_PERMISSIONS itself, so it cannot drift from the code that decides.
         </p>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full text-xs">
+        <div className="admin-table-scroll mt-3" role="region" aria-label="Role permissions" tabIndex={0}>
+          <table className="w-full min-w-[40rem] text-xs">
             <caption className="sr-only">Which permission each of the four roles holds.</caption>
             <thead>
               <tr className="border-b border-black/10 text-left">

@@ -1,0 +1,71 @@
+ ⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of D:\Muthoy\pnpm-lock.yaml as the root directory.
+ To silence this warning, set `outputFileTracingRoot` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/output#caveats for more information.
+ Detected additional lockfiles: 
+   * D:\Muthoy\docs\reviews\iphone-admin-2026-11-16\evidence\scratch-publication\source\pnpm-lock.yaml
+
+   ▲ Next.js 15.5.29
+
+   Creating an optimized production build ...
+<w> [webpack.cache.PackFileCacheStrategy] Serializing big strings (105kiB) impacts deserialization performance (consider using Buffer instead and decode when needed)
+
+warn - The `content` option in your Tailwind CSS configuration is missing or empty.
+warn - Configure your content sources or your generated CSS will be missing styles.
+warn - https://tailwindcss.com/docs/content-configuration
+<w> [webpack.cache.PackFileCacheStrategy] Skipped not serializable cache item 'Compilation/modules|D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\build\webpack\loaders\css-loader\src\index.js??ruleSet[1].rules[14].oneOf[10].use[2]!D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\build\webpack\loaders\postcss-loader\src\index.js??ruleSet[1].rules[14].oneOf[10].use[3]!D:\Muthoy\docs\reviews\iphone-admin-2026-11-16\evidence\scratch-publication\source\apps\admin\app\globals.css': No serializer registered for PostCSSSyntaxError
+<w> while serializing webpack/lib/cache/PackFileCacheStrategy.PackContentItems -> webpack/lib/NormalModule -> webpack/lib/ModuleBuildError -> PostCSSSyntaxError
+Failed to compile.
+
+./app/globals.css:1:1
+Syntax error: D:\Muthoy\docs\reviews\iphone-admin-2026-11-16\evidence\scratch-publication\source\apps\admin\app\globals.css The `outline-brand-deepGreen` class does not exist. If `outline-brand-deepGreen` is a custom class, make sure it is defined within a `@layer` directive.
+
+> 1 | @tailwind base;
+    | ^
+  2 | @tailwind components;
+  3 | @tailwind utilities;
+
+./app/globals.css
+Syntax error: D:\Muthoy\docs\reviews\iphone-admin-2026-11-16\evidence\scratch-publication\source\apps\admin\app\globals.css The `outline-brand-deepGreen` class does not exist. If `outline-brand-deepGreen` is a custom class, make sure it is defined within a `@layer` directive. (1:1)
+
+> 1 | @tailwind base;
+    | ^
+  2 | @tailwind components;
+  3 | @tailwind utilities;
+
+    at tryRunOrWebpackError (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:29:316119)
+    at __webpack_require_module__ (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:29:131532)
+    at __nested_webpack_require_161494__ (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:29:130967)
+    at D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:29:131824
+    at symbolIterator (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\neo-async\async.js:1:14444)
+    at done (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\neo-async\async.js:1:14824)
+    at Hook.eval [as callAsync] (eval at create (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:14:9224), <anonymous>:15:1)
+    at Hook.CALL_ASYNC_DELEGATE [as _callAsync] (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:14:6378)
+    at D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:29:130687
+    at symbolIterator (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\neo-async\async.js:1:14402)
+-- inner error --
+Syntax error: D:\Muthoy\docs\reviews\iphone-admin-2026-11-16\evidence\scratch-publication\source\apps\admin\app\globals.css The `outline-brand-deepGreen` class does not exist. If `outline-brand-deepGreen` is a custom class, make sure it is defined within a `@layer` directive. (1:1)
+
+> 1 | @tailwind base;
+    | ^
+  2 | @tailwind components;
+  3 | @tailwind utilities;
+
+    at Object.<anonymous> (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\build\webpack\loaders\css-loader\src\index.js??ruleSet[1].rules[14].oneOf[10].use[2]!D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\build\webpack\loaders\postcss-loader\src\index.js??ruleSet[1].rules[14].oneOf[10].use[3]!D:\Muthoy\docs\reviews\iphone-admin-2026-11-16\evidence\scratch-publication\source\apps\admin\app\globals.css:1:7)
+    at D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:29:962717
+    at Hook.eval [as call] (eval at create (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:14:9002), <anonymous>:7:1)
+    at Hook.CALL_DELEGATE [as _call] (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:14:6272)
+    at D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:29:131565
+    at tryRunOrWebpackError (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:29:316073)
+    at __webpack_require_module__ (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:29:131532)
+    at __nested_webpack_require_161494__ (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:29:130967)
+    at D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\webpack\bundle5.js:29:131824
+    at symbolIterator (D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\compiled\neo-async\async.js:1:14444)
+
+Generated code for D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\build\webpack\loaders\css-loader\src\index.js??ruleSet[1].rules[14].oneOf[10].use[2]!D:\Muthoy\node_modules\.pnpm\_4d939130a4b1892fcc4067f8fcede395\node_modules\next\dist\build\webpack\loaders\postcss-loader\src\index.js??ruleSet[1].rules[14].oneOf[10].use[3]!D:\Muthoy\docs\reviews\iphone-admin-2026-11-16\evidence\scratch-publication\source\apps\admin\app\globals.css
+
+Import trace for requested module:
+./app/globals.css
+
+
+> Build failed because of webpack errors

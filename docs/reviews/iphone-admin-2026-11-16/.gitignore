@@ -1,0 +1,4 @@
+# Disposable test repositories, browser profiles and local build inputs.
+evidence/scratch-*/
+__pycache__/
+!evidence/*.log

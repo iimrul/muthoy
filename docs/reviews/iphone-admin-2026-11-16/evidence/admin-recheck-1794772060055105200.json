@@ -1,0 +1,22 @@
+{
+  "task": "admin-recheck",
+  "command": [
+    "pnpm.cmd",
+    "exec",
+    "vitest",
+    "run",
+    "apps/admin/app/adminRoutes.contract.test.tsx",
+    "apps/admin/lib/adminLabels.test.ts",
+    "--maxWorkers=1"
+  ],
+  "startUTC": "2026-11-15T19:47:40.055120+00:00",
+  "endUTC": "2026-11-15T19:47:59.108245+00:00",
+  "elapsedSeconds": 19.053,
+  "exitCode": 0,
+  "log": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\admin-recheck-1794772060055105200.log",
+  "logSha256": "717cef277a66a8ed7397cc14c0e04f36f09cc9b920cb0a743b67a3df99a080e2",
+  "syntheticScratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-admin-recheck-1794772060054346100",
+  "credentialEnvOmitted": true,
+  "privateEnvReadGuard": true,
+  "network": "loopback only"
+}

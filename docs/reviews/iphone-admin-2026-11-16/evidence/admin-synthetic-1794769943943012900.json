@@ -1,0 +1,21 @@
+{
+  "task": "admin-synthetic",
+  "command": [
+    "node",
+    "apps/admin/test/local-acceptance/run-role-matrix.mjs",
+    "--fixture",
+    "synthetic",
+    "--out",
+    "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-admin-synthetic-1794769943942267200\\http-matrix"
+  ],
+  "startUTC": "2026-11-15T19:12:23.943038+00:00",
+  "endUTC": "2026-11-15T19:15:50.543999+00:00",
+  "elapsedSeconds": 206.601,
+  "exitCode": 0,
+  "log": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\admin-synthetic-1794769943943012900.log",
+  "logSha256": "b4139b7a9dafc6b25e49109fc60bf19b00e886cf9164ca072a4b40062992cfd4",
+  "syntheticScratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-admin-synthetic-1794769943942267200",
+  "credentialEnvOmitted": true,
+  "privateEnvReadGuard": true,
+  "network": "loopback only"
+}

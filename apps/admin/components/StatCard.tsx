@@ -11,7 +11,7 @@ interface StatCardProps {
 
 export default function StatCard({ label, value, hint, isMoney = false }: StatCardProps) {
   return (
-    <section className="rounded-xl border border-black/10 p-5">
+    <section className="admin-metric">
       <h2 className="text-sm font-medium text-midGray">{label}</h2>
       <p className={`mt-2 text-3xl text-richBlack ${isMoney ? 'font-mono' : 'font-sans font-semibold'}`}>{value}</p>
       <p className="mt-1 text-xs text-midGray">{hint}</p>

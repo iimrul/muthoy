@@ -1,0 +1,25 @@
+$ turbo run lint
+
+   • Packages in scope: @muthoy/admin, @muthoy/config, @muthoy/constants, @muthoy/mobile, @muthoy/types, @muthoy/ui, @muthoy/utils, @muthoy/validation
+   • Running lint in 8 packages
+   • Remote caching disabled
+
+@muthoy/validation:lint: cache miss, executing 6d477636d49c7fcd
+@muthoy/constants:lint: cache miss, executing 302b2c3b6343c6ac
+@muthoy/types:lint: cache miss, executing 5acdae22185ba09c
+@muthoy/ui:lint: cache miss, executing 6a58b842d88f9f3d
+@muthoy/validation:lint: $ eslint .
+@muthoy/constants:lint: $ eslint .
+@muthoy/types:lint: $ eslint .
+@muthoy/ui:lint: $ eslint .
+@muthoy/utils:lint: cache miss, executing dae421228ce5c720
+@muthoy/utils:lint: $ eslint .
+@muthoy/admin:lint: cache miss, executing b6da6823472532e9
+@muthoy/mobile:lint: cache miss, executing 3cbf7926027ac99d
+@muthoy/mobile:lint: $ eslint .
+@muthoy/admin:lint: $ eslint .
+
+ Tasks:    7 successful, 7 total
+Cached:    0 cached, 7 total
+  Time:    15m25.131s 
+

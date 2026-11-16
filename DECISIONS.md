@@ -5095,3 +5095,15 @@ an earlier draft of this list failed to carry through), three cash sales totalli
 claimed as defects: an expiry notification for `FEFO-C` timestamped before that
 batch existed, and a Tk -82.00 expected drawer for 2026-11-01, which may simply
 be yesterday's COD purchases against an opening of 0.
+
+## 2026-11-16 — Admin presentation refresh and platform verification
+
+Admin keeps its existing server-rendered permission-filtered navigation and
+data/actions. Presentation now uses a desktop sidebar, phone navigation strip,
+shared cards/filters and keyboard-accessible table scrolling. No new client
+boundary or security allowlist exception is introduced. Local verification uses
+synthetic data; Chromium phone viewport checks do not prove iPhone/Safari or
+React Native behavior. DEV catalog drift and printer requirement failures remain
+explicit blockers. No protected business/database change is included. Evidence
+and remaining platform acceptance are recorded in
+`docs/reviews/iphone-admin-2026-11-16/REPORT.md`.

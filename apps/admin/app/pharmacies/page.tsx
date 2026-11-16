@@ -179,7 +179,10 @@ export default async function PharmaciesPage({ searchParams }: PharmaciesPagePro
         />
       ) : (
         <>
-          <table className="mt-4 w-full text-sm">
+          {/* A-04: the seven columns measured 132px wider than a 360px
+              viewport; the wrapper scrolls the table, not the whole page. */}
+          <div className="admin-table-scroll mt-4" role="region" aria-label="Pharmacy list" tabIndex={0}>
+          <table className="w-full min-w-[48rem] text-sm">
             <caption className="sr-only">
               Pharmacies, {meta.total} in total, page {meta.page} of {Math.max(1, meta.pageCount)}.
             </caption>
@@ -237,6 +240,7 @@ export default async function PharmaciesPage({ searchParams }: PharmaciesPagePro
               ))}
             </tbody>
           </table>
+          </div>
 
           <Pager meta={meta} params={carriedParams(raw)} noun="pharmacies" />
         </>

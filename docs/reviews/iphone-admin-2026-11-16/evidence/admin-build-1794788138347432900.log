@@ -1,0 +1,52 @@
+ ⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of D:\Muthoy\pnpm-lock.yaml as the root directory.
+ To silence this warning, set `outputFileTracingRoot` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/output#caveats for more information.
+ Detected additional lockfiles: 
+   * D:\Muthoy\docs\reviews\iphone-admin-2026-11-16\evidence\scratch-publication\source\pnpm-lock.yaml
+
+   ▲ Next.js 15.5.29
+
+   Creating an optimized production build ...
+<w> [webpack.cache.PackFileCacheStrategy] Serializing big strings (105kiB) impacts deserialization performance (consider using Buffer instead and decode when needed)
+ ✓ Compiled successfully in 26.5s
+   Linting and checking validity of types ...
+ ⨯ ESLint: Failed to load plugin 'react-hooks' declared in ' » eslint-config-next/core-web-vitals » D:\Muthoy\node_modules\.pnpm\_58aff5c17dcde69fa25f1de6e9ce939c\node_modules\eslint-config-next\index.js': Cannot find module 'eslint-plugin-react-hooks' Require stack: - D:\Muthoy\docs\reviews\iphone-admin-2026-11-16\evidence\scratch-publication\source\apps\admin\__placeholder__.js Referenced from: D:\Muthoy\node_modules\.pnpm\_58aff5c17dcde69fa25f1de6e9ce939c\node_modules\eslint-config-next\index.js
+   Collecting page data ...
+   Generating static pages (0/3) ...
+ ✓ Generating static pages (3/3)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                 Size  First Load JS
+┌ ƒ /                                    1.53 kB         108 kB
+├ ○ /_not-found                            997 B         104 kB
+├ ƒ /accounts                              172 B         106 kB
+├ ƒ /accounts/[id]                         172 B         106 kB
+├ ƒ /admins                                172 B         106 kB
+├ ƒ /analytics                           1.52 kB         108 kB
+├ ƒ /api/admin/session                     183 B         103 kB
+├ ƒ /api/audit/export                      183 B         103 kB
+├ ƒ /api/reports/export                    183 B         103 kB
+├ ƒ /audit                                 172 B         106 kB
+├ ƒ /login                                 183 B         103 kB
+├ ƒ /maps                                1.49 kB         108 kB
+├ ƒ /payments                              183 B         103 kB
+├ ƒ /pharmacies                            178 B         106 kB
+├ ƒ /reports                               178 B         106 kB
+├ ƒ /revenue                             1.53 kB         108 kB
+├ ƒ /settings                              183 B         103 kB
+├ ƒ /shops/[id]                            178 B         106 kB
+├ ƒ /subscriptions                         178 B         106 kB
+└ ƒ /support                               178 B         106 kB
++ First Load JS shared by all             103 kB
+  ├ chunks/9920-2a543be0920113f1.js      46.1 kB
+  ├ chunks/a7615f19-0379fc668898895e.js  54.2 kB
+  └ other shared chunks (total)          2.57 kB
+
+
+ƒ Middleware                             62.4 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

@@ -1,0 +1,27 @@
+Scope: all 9 workspace projects
+[ERROR] INTEGRATION_EXISTING_DATABASE_OPEN_REFUSED
+
+pnpm: INTEGRATION_EXISTING_DATABASE_OPEN_REFUSED
+    at new IntegrationDatabase (D:\Muthoy\docs\reviews\iphone-admin-2026-11-16\evidence\scratch-publication\source\docs\plans\external-integration-2026-11-15\verification-guard.cjs:65:55)
+    at StoreIndex.openDatabase (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:102243:19)
+    at new StoreIndex (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:102230:14)
+    at createNewStoreController (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:164610:83)
+    at async installDeps (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:200604:17)
+    at async Object.handler5 (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:201759:3)
+    at async file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:315095:19
+    at async main4 (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:315063:30)
+    at async runPnpm (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:315358:5)
+    at async file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:315351:3
+[ERROR] Command failed with exit code 1: "C:\Program Files\nodejs\node.exe" "C:\Users\Imrul\AppData\Local\node\corepack\v1\pnpm\11.20.0\bin\pnpm.mjs" install
+
+pnpm: Command failed with exit code 1: "C:\Program Files\nodejs\node.exe" "C:\Users\Imrul\AppData\Local\node\corepack\v1\pnpm\11.20.0\bin\pnpm.mjs" install
+    at getFinalError (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:89001:14)
+    at makeError (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:91308:21)
+    at getSyncResult (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:93152:10)
+    at spawnSubprocessSync (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:93112:14)
+    at execaCoreSync (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:93042:23)
+    at callBoundExeca (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:95570:23)
+    at boundExeca (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:95547:49)
+    at sync2 (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:95706:10)
+    at runPnpmCli (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:252536:5)
+    at runDepsStatusCheck (file:///C:/Users/Imrul/AppData/Local/node/corepack/v1/pnpm/11.20.0/dist/pnpm.mjs:254302:7)

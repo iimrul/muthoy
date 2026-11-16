@@ -1,0 +1,893 @@
+{
+  "generatedAt": "2026-11-15T19:12:36.082Z",
+  "fixture": "synthetic",
+  "base": "http://127.0.0.1:3951",
+  "checks": [
+    {
+      "role": "super_admin",
+      "kind": "login",
+      "status": 303,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/pharmacies",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/shops/00000000-0000-4000-8000-0000000000a1",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/accounts",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/subscriptions",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/payments",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/revenue",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/analytics",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/maps",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/support",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/admins",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/audit",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/audit?shop=00000000-0000-4000-8000-0000000000a1",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/reports",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "page",
+      "path": "/settings",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "api",
+      "path": "/api/reports/export",
+      "status": 400,
+      "expectAllowed": true,
+      "leakedSecretCount": 0,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "api",
+      "path": "/api/audit/export",
+      "status": 413,
+      "expectAllowed": true,
+      "leakedSecretCount": 0,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "nav",
+      "hrefs": [
+        "/",
+        "/pharmacies",
+        "/subscriptions",
+        "/revenue",
+        "/analytics",
+        "/maps",
+        "/support",
+        "/admins",
+        "/audit",
+        "/reports",
+        "/settings"
+      ],
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "reachability",
+      "family": "/audit (platform or per-shop)",
+      "reachable": true,
+      "pass": true
+    },
+    {
+      "role": "super_admin",
+      "kind": "logout",
+      "status": 303,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "login",
+      "status": 303,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/pharmacies",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/shops/00000000-0000-4000-8000-0000000000a1",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/accounts",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/subscriptions",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/payments",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/revenue",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/analytics",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/maps",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/support",
+      "status": 200,
+      "expectAllowed": false,
+      "denied": true,
+      "businessReadsWhenDenied": [],
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/admins",
+      "status": 200,
+      "expectAllowed": false,
+      "denied": true,
+      "businessReadsWhenDenied": [],
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/audit",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/audit?shop=00000000-0000-4000-8000-0000000000a1",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/reports",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "page",
+      "path": "/settings",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "api",
+      "path": "/api/reports/export",
+      "status": 400,
+      "expectAllowed": true,
+      "leakedSecretCount": 0,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "api",
+      "path": "/api/audit/export",
+      "status": 403,
+      "expectAllowed": false,
+      "leakedSecretCount": 0,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "nav",
+      "hrefs": [
+        "/",
+        "/pharmacies",
+        "/subscriptions",
+        "/revenue",
+        "/analytics",
+        "/maps",
+        "/audit",
+        "/reports",
+        "/settings"
+      ],
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "reachability",
+      "family": "/audit (platform or per-shop)",
+      "reachable": true,
+      "pass": true
+    },
+    {
+      "role": "billing",
+      "kind": "logout",
+      "status": 303,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "login",
+      "status": 303,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/pharmacies",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/shops/00000000-0000-4000-8000-0000000000a1",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/accounts",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/subscriptions",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/payments",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/revenue",
+      "status": 200,
+      "expectAllowed": false,
+      "denied": true,
+      "businessReadsWhenDenied": [],
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/analytics",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/maps",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/support",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/admins",
+      "status": 200,
+      "expectAllowed": false,
+      "denied": true,
+      "businessReadsWhenDenied": [],
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/audit",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/audit?shop=00000000-0000-4000-8000-0000000000a1",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/reports",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "page",
+      "path": "/settings",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "api",
+      "path": "/api/reports/export",
+      "status": 403,
+      "expectAllowed": false,
+      "leakedSecretCount": 0,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "api",
+      "path": "/api/audit/export",
+      "status": 403,
+      "expectAllowed": false,
+      "leakedSecretCount": 0,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "nav",
+      "hrefs": [
+        "/",
+        "/pharmacies",
+        "/subscriptions",
+        "/analytics",
+        "/maps",
+        "/support",
+        "/reports",
+        "/settings"
+      ],
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "reachability",
+      "family": "/audit (platform or per-shop)",
+      "reachable": true,
+      "pass": true
+    },
+    {
+      "role": "support",
+      "kind": "logout",
+      "status": 303,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "login",
+      "status": 303,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/pharmacies",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/shops/00000000-0000-4000-8000-0000000000a1",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/accounts",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/subscriptions",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/payments",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/revenue",
+      "status": 200,
+      "expectAllowed": false,
+      "denied": true,
+      "businessReadsWhenDenied": [],
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/analytics",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/maps",
+      "status": 200,
+      "expectAllowed": false,
+      "denied": true,
+      "businessReadsWhenDenied": [],
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/support",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/admins",
+      "status": 200,
+      "expectAllowed": false,
+      "denied": true,
+      "businessReadsWhenDenied": [],
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/audit",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/audit?shop=00000000-0000-4000-8000-0000000000a1",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/reports",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "page",
+      "path": "/settings",
+      "status": 200,
+      "expectAllowed": true,
+      "denied": false,
+      "leakedSecretCount": 0,
+      "errorNotice": false,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "api",
+      "path": "/api/reports/export",
+      "status": 403,
+      "expectAllowed": false,
+      "leakedSecretCount": 0,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "api",
+      "path": "/api/audit/export",
+      "status": 403,
+      "expectAllowed": false,
+      "leakedSecretCount": 0,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "nav",
+      "hrefs": [
+        "/",
+        "/pharmacies",
+        "/subscriptions",
+        "/analytics",
+        "/support",
+        "/audit",
+        "/reports",
+        "/settings"
+      ],
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "reachability",
+      "family": "/audit (platform or per-shop)",
+      "reachable": true,
+      "pass": true
+    },
+    {
+      "role": "read_only",
+      "kind": "logout",
+      "status": 303,
+      "pass": true
+    }
+  ],
+  "failures": [],
+  "skipped": [],
+  "summary": {
+    "total": 84,
+    "failed": 0,
+    "skipped": 0
+  }
+}

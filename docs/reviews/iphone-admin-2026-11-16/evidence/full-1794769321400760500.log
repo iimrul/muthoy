@@ -1,0 +1,738 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+ ❯ apps/mobile/tests/dev-production-safety.test.ts (43 tests | 1 failed) 2460ms
+   ✓ H-2 · the DEV OTP bypass is gone, not merely guarded (17)
+     ✓ dev/DevSkipOtpButton.tsx does not exist 19ms
+     ✓ dev/devAnonAuth.ts does not exist 2ms
+     ✓ dev/devAnonAuth.test.ts does not exist 1ms
+     ✓ dev/devOwnerLinkRepair.test.ts does not exist 2ms
+     ✓ dev/devRegistration.ts does not exist 1ms
+     ✓ no production source references DevSkipOtpButton 140ms
+     ✓ no production source references devAnonAuth 139ms
+     ✓ no production source references devRegistration 173ms
+     ✓ no production source references isDevPlaceholderPhone 150ms
+     ✓ no production source references repairOwnerDeviceLink 143ms
+     ✓ no production source references getDevRegistrationState 84ms
+     ✓ no production source references hasMatchingDevRepairSession 163ms
+     ✓ no production source references devSignInAnonymouslyAndRegister 181ms
+     ✓ no production source references DEV_SHOP_PHONE / DEV_SHOP_NAME 243ms
+     ✓ no production source references clearUnverifiedOwnerPhone 147ms
+     ✓ no source in the app can create an anonymous Supabase session 15ms
+     ✓ no production source imports anything from dev/ outside the allowlist 70ms
+   ✓ H-5 · the DEV registration harness is gone, not merely stubbed (16)
+     ✓ dev/devRegistrationHarness.tsx does not exist 1ms
+     ✓ dev/devRegistrationHarness.prod.tsx does not exist 1ms
+     ✓ dev/devOwnerOnboarding.ts does not exist 2ms
+     ✓ dev/devOwnerOnboarding.test.ts does not exist 1ms
+     ✓ dev/devOnlyResolver.cjs does not exist 1ms
+     ✓ dev/devOnlyResolver.test.ts does not exist 0ms
+     ✓ dev/devAuthorityRecovery.tsx does not exist 0ms
+     ✓ dev/devAuthorityRecovery.prod.tsx does not exist 0ms
+     ✓ dev/ holds only the release-inert instrumentation and its tests 1ms
+     ✓ metro.config.js swaps no module at resolution time 1ms
+     ✓ no app source, DEV source included, references the harness modules 12ms
+     ✓ no app source, DEV source included, references the harness entry points 8ms
+     ✓ no app source, DEV source included, references the harness identity store 7ms
+     ✓ no app source, DEV source included, references the harness email domain 68ms
+     ✓ no app source, DEV source included, references the DEV onboarding switch 6ms
+     ✓ no app source signs in or signs up with an email password 10ms
+   ✓ H-2 · no __DEV__ conditional grants capability (2)
+     ✓ every __DEV__ branch in production code is logging-only 44ms
+     ✓ no auth or onboarding screen contains a __DEV__ conditional at all 6ms
+   ✓ H-2 · the canonical production onboarding path is intact (4)
+     ✓ Registration still sends a real OTP and routes to verification 2ms
+     ✓ OTP verification still runs canonical onboarding, link-device and the cloud marker 1ms
+     ✓ link-device still requires an owner identity and full refreshed Owner claims 1ms
+     ✓ an unfinished registration resumes through OTP verification, never Registration 1ms
+   ❯ H-5 · the SMS provider is the server's business, never the app's (2)
+     × no app source, DEV source or app configuration names provider or hook material 302ms
+     ✓ a code is only ever requested from and checked by Supabase Auth, in sync/otp.ts 10ms
+   ✓ H-2 · release builds emit no config or session diagnostics (2)
+     ✓ the B4 physical-debug build marker is gone 278ms
+     ✓ the only unguarded boot log names missing variables and nothing else 3ms
+ ✓ backend/supabase/pgtest/b3-group7-purchase-return-sync.pgtest.ts (24 tests) 445067ms
+   ✓ residual-cash COD sync compatibility (10)
+     ✓ purchase_create consumes Supplier Credit and records only residual cash 30513ms
+     ✓ fully credit-covered purchase_create has no fake payment or drawer row 18087ms
+     ✓ purchase_receive_line validates cumulative paid_amount and residual payment 18690ms
+     ✓ fully credit-covered purchase_receive_line writes no payment or drawer row 22415ms
+     ✓ rejects a COD create item that is not bound to its operation header 19828ms
+     ✓ rejects non-bijective create movements across duplicate batch lines 19493ms
+     ✓ rejects a receive payload that mutates locked purchase-item fields 20172ms
+     ✓ rejects a residual-COD drawer row for the wrong business date 16368ms
+     ✓ rejects new-drawer rows when update precedes insert 17674ms
+     ✓ rejects forged residual cash and rolls back the whole COD create 16472ms
+   ✓ purchase_return — atomic apply + idempotent retry (1)
+     ✓ applies a normal partial return atomically and retries idempotently 15445ms
+   ✓ purchase_return — server re-derives the max returnable, never trusts the client (5)
+     ✓ locks the exact batch row before validating current stock 16953ms
+     ✓ rejects a qty exceeding received-minus-already-returned 17497ms
+     ✓ rejects a qty exceeding CURRENT BATCH STOCK even when received-minus-returned would allow more 18074ms
+     ✓ accounts for a prior return already on this line when computing the remainder 19367ms
+     ✓ rejects a return against a PENDING line 19068ms
+   ✓ purchase_return — server re-derives credit_amount, never trusts the client (1)
+     ✓ rejects a credit_amount that does not match qty * purchase_price 17325ms
+   ✓ purchase_return — row-shape and table-allowlist validation (7)
+     ✓ rejects reordered rows and leaves every table unchanged 19454ms
+     ✓ rejects a tombstoned movement or audit row 16939ms
+     ✓ requires every grouped return row to explicitly be live 16845ms
+     ✓ rejects a movement row with the wrong sign, reason, or batch 14990ms
+     ✓ rejects an audit row with the wrong action or target 15333ms
+     ✓ rejects a disallowed table in the group 17004ms
+     ✓ is Owner-only 20984ms
+ ✓ backend/supabase/pgtest/inventory-add-purchase-sync.pgtest.ts (33 tests) 648926ms
+   ✓ inventory_add_purchase (6)
+     ✓ applies exactly one new medicine and its one-line credit purchase for granted staff 30164ms
+     ✓ applies the exact COD graph for granted staff without purchase_create 19178ms
+     ✓ rejects missing inventory_add without leaving a partial medicine 20499ms
+     ✓ rejects COD drawer opening cash smuggling atomically 21360ms
+     ✓ rejects COD drawer closing expected smuggling atomically 19919ms
+     ✓ does not widen ordinary purchase_create for staff with inventory_add 20109ms
+   ✓ existing-medicine restock deployment prerequisite (1)
+     ✓ rejects reference-only receipts on the active chain before held migration activation 16601ms
+   ✓ HELD Batch 3 existing-medicine restock contract (20)
+     ✓ preserves the existing new-medicine credit graph 17327ms
+     ✓ preserves the existing new-medicine cod graph 16342ms
+     ✓ staff restocks an explicitly selected existing medicine with credit and preserves its identity 17113ms
+     ✓ staff restocks an explicitly selected existing medicine with cod and preserves its identity 17827ms
+     ✓ rejects a cross-shop existing medicine atomically 18548ms
+     ✓ applies the six-row existing-medicine COD graph against an already-open drawer 24723ms
+     ✓ uses 5000 paisa of available supplier credit before existing-medicine COD cash 22318ms
+     ✓ uses 30000 paisa of available supplier credit before existing-medicine COD cash 22592ms
+     ✓ rejects a deleted existing medicine atomically 20081ms
+     ✓ rejects forged existing medicine metadata using insert 17619ms
+     ✓ rejects forged existing medicine metadata using update 18196ms
+     ✓ requires a live inventory_add grant for existing medicine receipts 20332ms
+     ✓ rejects forged restock stock without partial stock or financial writes 15049ms
+     ✓ rejects forged restock medicine identity without partial stock or financial writes 19081ms
+     ✓ rejects forged restock quantity without partial stock or financial writes 17459ms
+     ✓ rejects forged restock invoice total without partial stock or financial writes 18419ms
+     ✓ rejects forged restock cash amount without partial stock or financial writes 17750ms
+     ✓ rejects forged restock opening cash without partial stock or financial writes 16373ms
+     ✓ rejects forged restock closing cash without partial stock or financial writes 19940ms
+     ✓ preserves the public wrapper and inner implementation ACLs 17104ms
+   ✓ draft_cancel_create (6)
+     ✓ atomically preserves a staff cancelled-cart header, snapshot, and items 19734ms
+     ✓ rejects another actor without leaving a partial draft 17309ms
+     ✓ rejects another device without leaving a partial draft 18710ms
+     ✓ rejects a non-cancelled status without leaving a partial draft 22440ms
+     ✓ rejects a cross-shop medicine without leaving a partial draft 27411ms
+     ✓ rejects duplicate medicines without leaving a partial draft 21261ms
+ ✓ backend/supabase/pgtest/dev-role-switch-prerequisites.pgtest.ts (38 tests) 696253ms
+   ✓ H-A role-purged credit link and actual server writes (4)
+     ✓ valid collection and replay preserve exact credit/payment/allocation ledgers 29614ms
+     ✓ accepts a null-link Owner collection while preserving the server sale identity 18365ms
+     ✓ denies a foreign Owner with unchanged ledgers 17985ms
+     ✓ denies reassignment of the credit to another shop with unchanged ledgers 16488ms
+   ✓ H-B actual Staff pull parent closure (2)
+     ✓ Owner receives the linked credit and its sale without changing server data 15747ms
+     ✓ Staff own-history pull contains no dangling colleague-credit sale reference 20105ms
+   ✓ HELD credit contract independent boundaries (12)
+     ✓ accepts authorized Staff's masked collection and replay with exact ledgers 17664ms
+     ✓ refuses a different nonnull sale identity without any financial writes 15527ms
+     ✓ preserves an existing link when an update omits the sale_id key 14671ms
+     ✓ keeps standalone credit collections null without guessing a sale 16094ms
+     ✓ keeps existing LWW for timestamp 2026-08-19T09:00:00.000Z 13671ms
+     ✓ keeps existing LWW for timestamp 2026-08-01T00:00:00.000Z 17157ms
+     ✓ keeps revoked Staff collection denied with unchanged ledgers 17011ms
+     ✓ keeps inactive Staff collection denied with unchanged ledgers 14775ms
+     ✓ retains own-Staff and history-authorized credit links 15346ms
+     ✓ changes only masked JSON keys and preserves complete page/cursor ordering 20984ms
+     ✓ keeps unauthorized credit and cross-shop pulls excluded 21309ms
+     ✓ keeps wrapper/internals API-denied and reapplication nonrecursive 16021ms
+   ✓ HELD five-argument compatibility on a warmed SQL session (1)
+     ✓ rebinds the existing delegator after wrapping an already-used six-argument function 19538ms
+   ✓ HELD E4 no-bypass function privileges (1)
+     ✓ denies service-role direct internals while SECURITY DEFINER public wrappers work 17851ms
+   ✓ F3 completed-draft hidden-sale hypothesis: test only (3)
+     ✓ Owner and own-Staff draft links have readable parent controls 16713ms
+     ✓ Staff colleague-completed draft has no unreadable sale FK 14258ms
+     ✓ foreign Owner cannot read another shop's completed draft 12737ms
+   ✓ F4 allocation parent-permission hypothesis: test only (3)
+     ✓ credit-management grant returns both allocation parents 15633ms
+     ✓ credit_view alone does not expose allocations with hidden credit/payment parents 17201ms
+     ✓ sale_return alone does not expose allocations with hidden credit/payment parents 15438ms
+   ✓ F4-C reconciliation/customer parent closure (1)
+     ✓ credit-view-only never receives a reconciliation state without its customer 16806ms
+   ✓ F3/F4 final SQL projection and permission boundaries (6)
+     ✓ masks by sale visibility even when the draft actor is Staff; history restores the exact page 14300ms
+     ✓ projects an incremental colleague draft without changing its cursor columns 15953ms
+     ✓ keeps default sales plus sale_return fail-closed without granting payment access 18463ms
+     ✓ tests each parent denial, grant revocation and the deliberate narrower pull exception 17287ms
+     ✓ preserves complete one-row pagination after excluding unreadable financial children 17711ms
+     ✓ denies direct private readability access and preserves ACLs after reapplication 16649ms
+   ✓ DEV-first future migration ordering (1)
+     ✓ refuses HELD reapplication over the later E4 wrapper without changing sources or ledgers 19885ms
+   ✓ HELD ordering precondition negative controls (3)
+     ✓ refuses an unexpected public source before replacing any wrapper 17973ms
+     ✓ refuses partial installation without normalizing the remaining objects 24640ms
+     ✓ refuses an unexpected SECURITY DEFINER owner 20973ms
+   ✓ promoted repository-order wrapper contract (1)
+     ✓ preserves E4 Staff identity pin and Owner control with migration38 after repository37 47630ms
+ ✓ backend/supabase/pgtest/h9-api-role-hardening.pgtest.ts (277 tests) 914195ms
+   ✓ R4 fresh superuser (52)
+     ✓ has all 15 checks passing and preserves exact platform ACL bytes on a second run 1730ms
+     ✓ rejects dormant creator SELECT in wrapped and autocommit execution 2673ms
+     ✓ rejects creator sequence USAGE in wrapped and autocommit execution 1303ms
+     ✓ rejects creator global SELECT in wrapped and autocommit execution 1554ms
+     ✓ rejects superuser creator in wrapped and autocommit execution 1367ms
+     ✓ rejects creator inherits CREATE in wrapped and autocommit execution 1804ms
+     ✓ rejects dormant PUBLIC default: formerly allowed in wrapped and autocommit execution 1313ms
+     ✓ rejects postgres global REFERENCES in wrapped and autocommit execution 1191ms
+     ✓ rejects postgres global EXECUTE in wrapped and autocommit execution 1985ms
+     ✓ rejects C11: postgres public EXECUTE grant option in wrapped and autocommit execution 1378ms
+     ✓ rejects other creator EXECUTE after PUBLIC global revoke in wrapped and autocommit execution 1893ms
+     ✓ rejects function default to reachable role in wrapped and autocommit execution 1693ms
+     ✓ X2 rejects one item missing before mutation 1367ms
+     ✓ X2 rejects functions missing before mutation 1441ms
+     ✓ X2 rejects whole profile missing before mutation 1419ms
+     ✓ X2 rejects substituted service_role grantee before mutation 965ms
+     ✓ X2 rejects substituted object type before mutation 1386ms
+     ✓ X2 rejects global rather than public before mutation 1688ms
+     ✓ X2 rejects extra grantee before mutation 1849ms
+     ✓ X2 rejects global types entry before mutation 1229ms
+     ✓ X2 rejects additional public object type before mutation 2274ms
+     ✓ X2 rejects grant option before mutation 1359ms
+     ✓ X2 rejects PUBLIC EXECUTE cannot use E3 before mutation 1861ms
+     ✓ X2 rejects Reach grantee before mutation 1374ms
+     ✓ refuses direct CREATE without altering attributes or memberships 1656ms
+     ✓ refuses PUBLIC CREATE without altering attributes or memberships 1854ms
+     ✓ refuses SET-only CREATE without altering attributes or memberships 1488ms
+     ✓ refuses two-hop CREATE without altering attributes or memberships 1939ms
+     ✓ refuses dead membership CREATE without altering attributes or memberships 1492ms
+     ✓ refuses SET-only BYPASSRLS without altering attributes or memberships 1508ms
+     ✓ refuses two-hop BYPASSRLS without altering attributes or memberships 1448ms
+     ✓ refuses dead membership LOGIN without altering attributes or memberships 1744ms
+     ✓ refuses reachable SUPERUSER without altering attributes or memberships 1212ms
+     ✓ refuses authenticated superuser without altering attributes or memberships 1821ms
+     ✓ refuses authenticated bypassrls without altering attributes or memberships 1947ms
+     ✓ refuses authenticated replication without altering attributes or memberships 1482ms
+     ✓ refuses authenticated createrole without altering attributes or memberships 1468ms
+     ✓ refuses authenticated createdb without altering attributes or memberships 1148ms
+     ✓ refuses authenticated login without altering attributes or memberships 1557ms
+     ✓ refuses anon BYPASSRLS without altering attributes or memberships 2030ms
+     ✓ refuses INHERIT CREATE without altering attributes or memberships 1609ms
+     ✓ refuses schema ownership through SET ROLE without altering attributes or memberships 1835ms
+     ✓ refuses database ownership through SET ROLE without altering attributes or memberships 1404ms
+     ✓ refuses reachable replication without altering attributes or memberships 2258ms
+     ✓ refuses reachable createrole without altering attributes or memberships 1915ms
+     ✓ refuses reachable createdb without altering attributes or memberships 1601ms
+     ✓ permits global PUBLIC EXECUTE revoked without normalizing another creator or global defaults 1442ms
+     ✓ permits global service_role EXECUTE, retaining builtin PUBLIC without normalizing another creator or global defaults 1408ms
+     ✓ permits PUBLIC EXECUTE re-added after global revoke without normalizing another creator or global defaults 1346ms
+     ✓ permits harmless membership without normalizing another creator or global defaults 2141ms
+     ✓ X2 canary kills removal of only the pre-guard 1397ms
+     ✓ attributes canary kills removal of only the pre-guard 874ms
+   ✓ R4 DEV superuser (52)
+     ✓ has all 15 checks passing and preserves exact platform ACL bytes on a second run 1414ms
+     ✓ rejects dormant creator SELECT in wrapped and autocommit execution 2210ms
+     ✓ rejects creator sequence USAGE in wrapped and autocommit execution 2412ms
+     ✓ rejects creator global SELECT in wrapped and autocommit execution 1286ms
+     ✓ rejects superuser creator in wrapped and autocommit execution 2328ms
+     ✓ rejects creator inherits CREATE in wrapped and autocommit execution 1587ms
+     ✓ rejects dormant PUBLIC default: formerly allowed in wrapped and autocommit execution 1601ms
+     ✓ rejects postgres global REFERENCES in wrapped and autocommit execution 2215ms
+     ✓ rejects postgres global EXECUTE in wrapped and autocommit execution 1891ms
+     ✓ rejects C11: postgres public EXECUTE grant option in wrapped and autocommit execution 1613ms
+     ✓ rejects other creator EXECUTE after PUBLIC global revoke in wrapped and autocommit execution 1931ms
+     ✓ rejects function default to reachable role in wrapped and autocommit execution 1573ms
+     ✓ X2 rejects one item missing before mutation 1505ms
+     ✓ X2 rejects functions missing before mutation 1416ms
+     ✓ X2 rejects whole profile missing before mutation 1364ms
+     ✓ X2 rejects substituted service_role grantee before mutation 1402ms
+     ✓ X2 rejects substituted object type before mutation 1676ms
+     ✓ X2 rejects global rather than public before mutation 1625ms
+     ✓ X2 rejects extra grantee before mutation 1565ms
+     ✓ X2 rejects global types entry before mutation 1591ms
+     ✓ X2 rejects additional public object type before mutation 1577ms
+     ✓ X2 rejects grant option before mutation 1316ms
+     ✓ X2 rejects PUBLIC EXECUTE cannot use E3 before mutation 946ms
+     ✓ X2 rejects Reach grantee before mutation 1150ms
+     ✓ refuses direct CREATE without altering attributes or memberships 1620ms
+     ✓ refuses PUBLIC CREATE without altering attributes or memberships 1226ms
+     ✓ refuses SET-only CREATE without altering attributes or memberships 1569ms
+     ✓ refuses two-hop CREATE without altering attributes or memberships 1642ms
+     ✓ refuses dead membership CREATE without altering attributes or memberships 1596ms
+     ✓ refuses SET-only BYPASSRLS without altering attributes or memberships 1397ms
+     ✓ refuses two-hop BYPASSRLS without altering attributes or memberships 1049ms
+     ✓ refuses dead membership LOGIN without altering attributes or memberships 1430ms
+     ✓ refuses reachable SUPERUSER without altering attributes or memberships 1246ms
+     ✓ refuses authenticated superuser without altering attributes or memberships 1300ms
+     ✓ refuses authenticated bypassrls without altering attributes or memberships 1155ms
+     ✓ refuses authenticated replication without altering attributes or memberships 1298ms
+     ✓ refuses authenticated createrole without altering attributes or memberships 1398ms
+     ✓ refuses authenticated createdb without altering attributes or memberships 1224ms
+     ✓ refuses authenticated login without altering attributes or memberships 1244ms
+     ✓ refuses anon BYPASSRLS without altering attributes or memberships 2020ms
+     ✓ refuses INHERIT CREATE without altering attributes or memberships 1512ms
+     ✓ refuses schema ownership through SET ROLE without altering attributes or memberships 2143ms
+     ✓ refuses database ownership through SET ROLE without altering attributes or memberships 1877ms
+     ✓ refuses reachable replication without altering attributes or memberships 1477ms
+     ✓ refuses reachable createrole without altering attributes or memberships 1331ms
+     ✓ refuses reachable createdb without altering attributes or memberships 1700ms
+     ✓ permits global PUBLIC EXECUTE revoked without normalizing another creator or global defaults 1528ms
+     ✓ permits global service_role EXECUTE, retaining builtin PUBLIC without normalizing another creator or global defaults 1839ms
+     ✓ permits PUBLIC EXECUTE re-added after global revoke without normalizing another creator or global defaults 1428ms
+     ✓ permits harmless membership without normalizing another creator or global defaults 1373ms
+     ✓ X2 canary kills removal of only the pre-guard 862ms
+     ✓ attributes canary kills removal of only the pre-guard 921ms
+   ✓ R4 fresh nonsuperuser (52)
+     ✓ has all 15 checks passing and preserves exact platform ACL bytes on a second run 859ms
+     ✓ rejects dormant creator SELECT in wrapped and autocommit execution 1227ms
+     ✓ rejects creator sequence USAGE in wrapped and autocommit execution 967ms
+     ✓ rejects creator global SELECT in wrapped and autocommit execution 1183ms
+     ✓ rejects superuser creator in wrapped and autocommit execution 1768ms
+     ✓ rejects creator inherits CREATE in wrapped and autocommit execution 2002ms
+     ✓ rejects dormant PUBLIC default: formerly allowed in wrapped and autocommit execution 1712ms
+     ✓ rejects postgres global REFERENCES in wrapped and autocommit execution 1556ms
+     ✓ rejects postgres global EXECUTE in wrapped and autocommit execution 1590ms
+     ✓ rejects C11: postgres public EXECUTE grant option in wrapped and autocommit execution 2581ms
+     ✓ rejects other creator EXECUTE after PUBLIC global revoke in wrapped and autocommit execution 3106ms
+     ✓ rejects function default to reachable role in wrapped and autocommit execution 1166ms
+     ✓ X2 rejects one item missing before mutation 1748ms
+     ✓ X2 rejects functions missing before mutation 1529ms
+     ✓ X2 rejects whole profile missing before mutation 1107ms
+     ✓ X2 rejects substituted service_role grantee before mutation 1445ms
+     ✓ X2 rejects substituted object type before mutation 1288ms
+     ✓ X2 rejects global rather than public before mutation 2117ms
+     ✓ X2 rejects extra grantee before mutation 1484ms
+     ✓ X2 rejects global types entry before mutation 1276ms
+     ✓ X2 rejects additional public object type before mutation 2169ms
+     ✓ X2 rejects grant option before mutation 2041ms
+     ✓ X2 rejects PUBLIC EXECUTE cannot use E3 before mutation 2176ms
+     ✓ X2 rejects Reach grantee before mutation 3101ms
+     ✓ refuses direct CREATE without altering attributes or memberships 2074ms
+     ✓ refuses PUBLIC CREATE without altering attributes or memberships 2061ms
+     ✓ refuses SET-only CREATE without altering attributes or memberships 1915ms
+     ✓ refuses two-hop CREATE without altering attributes or memberships 2566ms
+     ✓ refuses dead membership CREATE without altering attributes or memberships 1213ms
+     ✓ refuses SET-only BYPASSRLS without altering attributes or memberships 2190ms
+     ✓ refuses two-hop BYPASSRLS without altering attributes or memberships 2129ms
+     ✓ refuses dead membership LOGIN without altering attributes or memberships 2940ms
+     ✓ refuses reachable SUPERUSER without altering attributes or memberships 2875ms
+     ✓ refuses authenticated superuser without altering attributes or memberships 1535ms
+     ✓ refuses authenticated bypassrls without altering attributes or memberships 2075ms
+     ✓ refuses authenticated replication without altering attributes or memberships 1079ms
+     ✓ refuses authenticated createrole without altering attributes or memberships 1268ms
+     ✓ refuses authenticated createdb without altering attributes or memberships 1849ms
+     ✓ refuses authenticated login without altering attributes or memberships 1395ms
+     ✓ refuses anon BYPASSRLS without altering attributes or memberships 1635ms
+     ✓ refuses INHERIT CREATE without altering attributes or memberships 1869ms
+     ✓ refuses schema ownership through SET ROLE without altering attributes or memberships 2126ms
+     ✓ refuses database ownership through SET ROLE without altering attributes or memberships 1140ms
+     ✓ refuses reachable replication without altering attributes or memberships 1534ms
+     ✓ refuses reachable createrole without altering attributes or memberships 1435ms
+     ✓ refuses reachable createdb without altering attributes or memberships 1266ms
+     ✓ permits global PUBLIC EXECUTE revoked without normalizing another creator or global defaults 1162ms
+     ✓ permits global service_role EXECUTE, retaining builtin PUBLIC without normalizing another creator or global defaults 1672ms
+     ✓ permits PUBLIC EXECUTE re-added after global revoke without normalizing another creator or global defaults 1342ms
+     ✓ permits harmless membership without normalizing another creator or global defaults 783ms
+     ✓ X2 canary kills removal of only the pre-guard 1189ms
+     ✓ attributes canary kills removal of only the pre-guard 1308ms
+   ✓ R4 DEV nonsuperuser (52)
+     ✓ has all 15 checks passing and preserves exact platform ACL bytes on a second run 1102ms
+     ✓ rejects dormant creator SELECT in wrapped and autocommit execution 2357ms
+     ✓ rejects creator sequence USAGE in wrapped and autocommit execution 1913ms
+     ✓ rejects creator global SELECT in wrapped and autocommit execution 1588ms
+     ✓ rejects superuser creator in wrapped and autocommit execution 1280ms
+     ✓ rejects creator inherits CREATE in wrapped and autocommit execution 2454ms
+     ✓ rejects dormant PUBLIC default: formerly allowed in wrapped and autocommit execution 1563ms
+     ✓ rejects postgres global REFERENCES in wrapped and autocommit execution 1928ms
+     ✓ rejects postgres global EXECUTE in wrapped and autocommit execution 1842ms
+     ✓ rejects C11: postgres public EXECUTE grant option in wrapped and autocommit execution 1858ms
+     ✓ rejects other creator EXECUTE after PUBLIC global revoke in wrapped and autocommit execution 2461ms
+     ✓ rejects function default to reachable role in wrapped and autocommit execution 2530ms
+     ✓ X2 rejects one item missing before mutation 1586ms
+     ✓ X2 rejects functions missing before mutation 1873ms
+     ✓ X2 rejects whole profile missing before mutation 1764ms
+     ✓ X2 rejects substituted service_role grantee before mutation 1663ms
+     ✓ X2 rejects substituted object type before mutation 1119ms
+     ✓ X2 rejects global rather than public before mutation 1485ms
+     ✓ X2 rejects extra grantee before mutation 1253ms
+     ✓ X2 rejects global types entry before mutation 1753ms
+     ✓ X2 rejects additional public object type before mutation 1595ms
+     ✓ X2 rejects grant option before mutation 1595ms
+     ✓ X2 rejects PUBLIC EXECUTE cannot use E3 before mutation 1362ms
+     ✓ X2 rejects Reach grantee before mutation 1798ms
+     ✓ refuses direct CREATE without altering attributes or memberships 1659ms
+     ✓ refuses PUBLIC CREATE without altering attributes or memberships 1014ms
+     ✓ refuses SET-only CREATE without altering attributes or memberships 1386ms
+     ✓ refuses two-hop CREATE without altering attributes or memberships 1761ms
+     ✓ refuses dead membership CREATE without altering attributes or memberships 1332ms
+     ✓ refuses SET-only BYPASSRLS without altering attributes or memberships 2517ms
+     ✓ refuses two-hop BYPASSRLS without altering attributes or memberships 1737ms
+     ✓ refuses dead membership LOGIN without altering attributes or memberships 968ms
+     ✓ refuses reachable SUPERUSER without altering attributes or memberships 1501ms
+     ✓ refuses authenticated superuser without altering attributes or memberships 1017ms
+     ✓ refuses authenticated bypassrls without altering attributes or memberships 1310ms
+     ✓ refuses authenticated replication without altering attributes or memberships 1370ms
+     ✓ refuses authenticated createrole without altering attributes or memberships 1144ms
+     ✓ refuses authenticated createdb without altering attributes or memberships 949ms
+     ✓ refuses authenticated login without altering attributes or memberships 823ms
+     ✓ refuses anon BYPASSRLS without altering attributes or memberships 1513ms
+     ✓ refuses INHERIT CREATE without altering attributes or memberships 1704ms
+     ✓ refuses schema ownership through SET ROLE without altering attributes or memberships 1090ms
+     ✓ refuses database ownership through SET ROLE without altering attributes or memberships 1469ms
+     ✓ refuses reachable replication without altering attributes or memberships 1573ms
+     ✓ refuses reachable createrole without altering attributes or memberships 1659ms
+     ✓ refuses reachable createdb without altering attributes or memberships 1606ms
+     ✓ permits global PUBLIC EXECUTE revoked without normalizing another creator or global defaults 1638ms
+     ✓ permits global service_role EXECUTE, retaining builtin PUBLIC without normalizing another creator or global defaults 905ms
+     ✓ permits PUBLIC EXECUTE re-added after global revoke without normalizing another creator or global defaults 737ms
+     ✓ permits harmless membership without normalizing another creator or global defaults 788ms
+     ✓ X2 canary kills removal of only the pre-guard 1024ms
+     ✓ attributes canary kills removal of only the pre-guard 805ms
+   ✓ preserved behavior and platform feasibility (19)
+     ✓ supports a synthetic project without supabase_admin (nonsuper=false) 18865ms
+     ✓ supports a synthetic project without supabase_admin (nonsuper=true) 18263ms
+     ✓ reproduces BYPASSRLS cross-shop UPDATE on R3; the R4 guard refuses it unchanged 16916ms
+     ✓ proves explicit EXECUTE adds access after a creator globally revokes PUBLIC EXECUTE 14703ms
+     ✓ R3 accepts another creator data defaults; R4 refuses before future table/sequence exposure 20278ms
+     ✓ preserves actual auth/storage/extensions/cron ACLs, defaults and data (nonsuper=false) 16887ms
+     ✓ preserves actual auth/storage/extensions/cron ACLs, defaults and data (nonsuper=true) 15441ms
+     ✓ reads safe attributes and observational rolconfig without pg_authid privileges 19213ms
+     ✓ PostgreSQL rejects impossible PUBLIC grant options: grant select on public.shops to public with grant option 14317ms
+     ✓ PostgreSQL rejects impossible PUBLIC grant options: alter default privileges in schema public grant execute on functions to public with grant option 18398ms
+     ✓ PostgreSQL rejects impossible PUBLIC grant options: alter default privileges in schema public grant select on tables to public with grant option 26063ms
+     ✓ checks ownership of relkind r while preserving supported RLS rules 21278ms
+     ✓ checks ownership of relkind p while preserving supported RLS rules 21241ms
+     ✓ checks ownership of relkind v while preserving supported RLS rules 22414ms
+     ✓ checks ownership of relkind m while preserving supported RLS rules 28620ms
+     ✓ checks ownership of relkind f while preserving supported RLS rules 27371ms
+     ✓ checks ownership of relkind S while preserving supported RLS rules 31581ms
+     ✓ requires RLS on partitioned tables and revokes privileges on every supported kind 26369ms
+     ✓ proves global defaults add to schema defaults and do not come from creator memberships 19314ms
+   ✓ mutations exercise their branches and retained postconditions (18)
+     ✓ M2: a subset exception would accept a missing approved item 1960ms
+     ✓ M3: ignoring grantability would accept platform onward grants 1574ms
+     ✓ M4: ignoring global platform rows would accept a changed profile 2188ms
+     ✓ M5: omitting X2 would let PUBLIC EXECUTE use E3 1649ms
+     ✓ M6: dropping strict globals admits REFERENCES 1427ms
+     ✓ M7: broadening E3 admits explicit API EXECUTE 4616ms
+     ✓ M8: filtering current CREATE admits a dormant unsafe default 1905ms
+     ✓ M9: omitting Reach from CREATE admits SET-only creation 1397ms
+     ✓ M10: postgres-only default checks admit another creator 1023ms
+     ✓ M16: root-only attributes admit reachable BYPASSRLS 1714ms
+     ✓ M11: r-only ownership admits a view owned by another creator 2551ms
+     ✓ M12: r-only RLS admits an unprotected partitioned table 1247ms
+     ✓ M14: non-superuser postgres cannot alter the platform defaults, and the attempt rolls back 20076ms
+     ✓ snapshot/postcondition catches injected storage change, with atomic rollback 3326ms
+     ✓ snapshot/postcondition catches injected platform change, with atomic rollback 830ms
+     ✓ snapshot/postcondition catches injected role change, with atomic rollback 2284ms
+ ✓ backend/supabase/pgtest/e11-entitlement-verification.pgtest.ts (53 tests) 148202ms
+   ✓ migration 37 dependency, for the hosted apply order (4)
+     ✓ applies and works on the B4-era chain alone, with 36 absent 14847ms
+     ✓ applies on the ACTUAL DEV chain (1-34) and all five redefined gates answer 18548ms
+     ✓ the H-7 helper is a REAL dependency: on a B4-only chain the gate cannot answer 15701ms
+ ❯ apps/mobile/tests/eas-archive.test.ts (45 tests | 45 skipped) 93315ms
+   ↓ strict archive allowlist against a real Git revision (26)
+     ↓ approved inputs are exactly the mobile build inputs
+     ↓ the exact approved archive passes and its manifest hashes every approved file
+     ↓ extra path .git/config is refused (archive-git-metadata)
+     ↓ extra path apps/mobile/android/app/build.gradle is refused (archive-native-project)
+     ↓ extra path apps/mobile/ios/MuthoyPOS.xcodeproj/project.pbxproj is refused (archive-native-project)
+     ↓ extra path .claude/settings.local.json is refused (archive-forbidden-path)
+     ↓ extra path apps/mobile/.env is refused (archive-forbidden-path)
+     ↓ extra path backend/supabase/config.toml is refused (archive-forbidden-path)
+     ↓ extra path CLAUDE.md is refused (archive-unapproved-path)
+     ↓ extra path apps/mobile/notes/local.txt is refused (archive-unapproved-path)
+     ↓ extra path packages/types/stray.ts is refused (archive-unapproved-path)
+     ↓ empty directory shell backend is refused
+     ↓ empty directory shell apps/mobile/tests is refused
+     ↓ missing approved input apps/mobile/plugins/withAndroidBackupProtection.js is refused
+     ↓ missing approved input apps/mobile/assets/images/icon.png is refused
+     ↓ missing approved input apps/mobile/modules/muthoy-db-key/android/src/main/java/com/muthoy/dbkey/MuthoyDbKeyModule.kt is refused
+     ↓ missing approved input packages/types/src/index.ts is refused
+     ↓ archive bytes must equal the approved revision
+     ↓ utf8 secret key inside an approved file is refused without printing it
+     ↓ utf16le secret key inside an approved file is refused without printing it
+     ↓ service-role JWT inside an approved file is refused without printing it
+     ↓ a revision that drops SQLCipher or backup protection is refused even when bytes match
+     ↓ the archived app.config must resolve the expected native identity
+     ↓ an .easignore regression that admits repository metadata is caught by the allowlist
+     ↓ an .easignore regression that strips tracked build inputs is caught
+     ↓ untracked files EAS would copy are refused before inspection and before build
+   ↓ installed EAS CLI 21.8.0 archive, workflow and output behavior (7)
+     ↓ EAS deletes its cloned Git metadata and uploads nothing excluded, local or empty
+     ↓ the real EAS archive passes strict inspection and equals the approved revision
+     ↓ EAS resolves the managed Prebuild workflow despite generated native projects
+     ↓ the previous `/.git/` form keeps the clone metadata — every excluded file — in the upload
+     ↓ an untracked file EAS uploads is refused by both the pre-build and the archive checks
+     ↓ an empty untracked directory is uploaded by EAS as a shell and refused before and after
+     ↓ withheld values are printed exactly as the preflight classifies them
+   ↓ wrapper processes: hosted preflight, worker hook and local precedence (12)
+     ↓ a plaintext public key is read (sensitive via --include-sensitive) and validated
+     ↓ a sensitive public key is read (sensitive via --include-sensitive) and validated
+     ↓ a ansi public key is read (sensitive via --include-sensitive) and validated
+     ↓ secret hosted configuration is refused with a fixed reason
+     ↓ account-collision hosted configuration is refused with a fixed reason
+     ↓ missing hosted configuration is refused with a fixed reason
+     ↓ wrong-version hosted configuration is refused with a fixed reason
+     ↓ the masked placeholder itself is never accepted as a key
+     ↓ the worker hook passes a managed archive with the selected environment
+     ↓ the worker hook refuses any native project, even one with the right identity
+     ↓ the worker hook refuses a missing build profile
+     ↓ local validation: explicit shell values win over apps/mobile/.env; .env fills only what is absent
+ ✓ backend/supabase/pgtest/security.pgtest.ts (43 tests) 817588ms
+   ✓ claims round-trip through the access token hook (3)
+     ✓ injects app_user_id, role and permission_version for a bound account 26041ms
+     ✓ carries the CURRENT permission_version, so a refresh picks up a revocation 20261ms
+     ✓ leaves an UNBOUND account untouched, so registration keeps working 18392ms
+   ✓ Phase B1 operational Manager permissions (1)
+     ✓ uses the exact Manager preset and permits only an explicit staff-management grant 18667ms
+   ✓ identity binding (4)
+     ✓ converges when two first-logins race, instead of one of them failing 18477ms
+     ✓ refuses to give one auth account to two app users 18954ms
+     ✓ rejects a cross-shop binding target the way linkDevice must 19740ms
+     ✓ rebinds a LEGACY owner without leaving two rows 23578ms
+   ✓ staff escalation is refused (8)
+     ✓ cannot promote itself to owner by pushing its own role_id 26478ms
+     ✓ cannot change the owner PIN 22114ms
+     ✓ cannot deactivate the owner 25093ms
+     ✓ cannot deactivate another staff member 27090ms
+     ✓ cannot grant itself a permission 32700ms
+     ✓ cannot create a second owner account 27776ms
+     ✓ cannot soft-delete an account 21493ms
+     ✓ but the OWNER can still do all of it 31936ms
+   ✓ permission_version is server-controlled (5)
+     ✓ cannot be inserted or updated by the authenticated role 23792ms
+     ✓ ignores a client-chosen value on INSERT 20305ms
+     ✓ ignores a client-chosen value on UPDATE 22116ms
+     ✓ bumps on deactivation, a PIN reset and a role change 20220ms
+     ✓ does NOT bump on a routine change like a name 19526ms
+   ✓ user revocation flags are monotonic (4)
+     ✓ preserves ordinary LWW fields while forcing a deactivation 17569ms
+     ✓ does not touch another shop before ownership rejection 16562ms
+     ✓ does not let a newer stale profile payload reactivate a deactivated user 14903ms
+     ✓ does not let a newer stale payload resurrect a deleted user 15151ms
+   ✓ crafted payloads (4)
+     ✓ refuses a row attributed to somebody other than the caller 17390ms
+     ✓ accepts the same row in the caller's own name 14981ms
+     ✓ lets the OWNER attribute a sale to a staff member, for the shared handset 15366ms
+     ✓ refuses a positive stock movement disguised as a sale 16285ms
+   ✓ direct PostgREST access is denied by RLS (7)
+     ✓ lets a staff member read what inventory_view covers 17111ms
+     ✓ refuses a staff member the cash ledger 15611ms
+     ✓ refuses a staff member a stock write 13811ms
+     ✓ refuses a staff member the ROLE DEFAULTS table 16161ms
+     ✓ refuses a staff member a positive sale movement, directly 15650ms
+     ✓ refuses another shop entirely 16276ms
+     ✓ refuses a DEACTIVATED staff member everything, token or no token 15027ms
+   ✓ the login lockout (5)
+     ✓ locks a key after its budget and not before 13621ms
+     ✓ counts equivalent phone formats against ONE budget 15341ms
+     ✓ keeps the IP budget separate and looser than the phone budget 13457ms
+     ✓ increments atomically, so parallel attempts cannot overspend 12871ms
+     ✓ clears on a successful login 13147ms
+   ✓ phone canonicalisation in the database (2)
+     ✓ makes the unique index reject an equivalent form 14580ms
+     ✓ releases the number when a row is soft-deleted 11941ms
+ ✓ backend/supabase/pgtest/staff-sale-credit.pgtest.ts (42 tests) 749462ms
+   ✓ Staff split/credit atomic sale — DEV31=true (21)
+     ✓ uploads cash=100 paisa with sale-linked credit and exactly one stock delta 46918ms
+     ✓ uploads cash=0 paisa with sale-linked credit and exactly one stock delta 37529ms
+     ✓ retains the existing Owner verifier/hash while accepting Staff metadata refresh 29005ms
+     ✓ keeps standalone reconciliation editing denied 21345ms
+     ✓ never clears existing pending state 28811ms
+     ✓ never clears existing blocked state 26991ms
+     ✓ rejects forged new verifier 20157ms
+     ✓ rejects changing an existing verifier/hash 22803ms
+     ✓ rejects a foreign-shop reconciliation customer 22224ms
+     ✓ rejects metadata tombstones 21568ms
+     ✓ rejects a forged operation actor 16035ms
+     ✓ rolls back metadata when a later credit row fails its customer FK gate 15984ms
+     ✓ rejects reconciliation shop=1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b 14101ms
+     ✓ rejects reconciliation shop=null 15480ms
+     ✓ rejects reconciliation shop=undefined 15903ms
+     ✓ rejects changing the existing verification timestamp 15699ms
+     ✓ never marks unverified historical credit clean 16029ms
+     ✓ refuses a second application without replacing the accepted function 13899ms
+     ✓ requires a complete sale graph 11901ms
+     ✓ cannot use a non-sale kind to carry the exception 17173ms
+     ✓ refuses unknown original function bodies before patching 16038ms
+   ✓ Staff split/credit atomic sale — DEV31=false (21)
+     ✓ uploads cash=100 paisa with sale-linked credit and exactly one stock delta 16682ms
+     ✓ uploads cash=0 paisa with sale-linked credit and exactly one stock delta 14407ms
+     ✓ retains the existing Owner verifier/hash while accepting Staff metadata refresh 16170ms
+     ✓ keeps standalone reconciliation editing denied 16496ms
+     ✓ never clears existing pending state 17313ms
+     ✓ never clears existing blocked state 14195ms
+     ✓ rejects forged new verifier 13714ms
+     ✓ rejects changing an existing verifier/hash 12093ms
+     ✓ rejects a foreign-shop reconciliation customer 12323ms
+     ✓ rejects metadata tombstones 13742ms
+     ✓ rejects a forged operation actor 13567ms
+     ✓ rolls back metadata when a later credit row fails its customer FK gate 14616ms
+     ✓ rejects reconciliation shop=1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b 13373ms
+     ✓ rejects reconciliation shop=null 13533ms
+     ✓ rejects reconciliation shop=undefined 11603ms
+     ✓ rejects changing the existing verification timestamp 13119ms
+     ✓ never marks unverified historical credit clean 12723ms
+     ✓ refuses a second application without replacing the accepted function 13544ms
+     ✓ requires a complete sale graph 15295ms
+     ✓ cannot use a non-sale kind to carry the exception 15384ms
+     ✓ refuses unknown original function bodies before patching 19956ms
+ ✓ backend/supabase/pgtest/canonical-onboarding.pgtest.ts (17 tests) 256168ms
+   ✓ canonical Owner onboarding (12)
+     ✓ runs under the production ACL, with no grant-all masking 21525ms
+     ✓ is reachable by nobody else 16582ms
+     ✓ completes a real post-OTP registration 14306ms
+     ✓ completes a DEV registration through the identical function 14539ms
+     ✓ produces claims for the DEV owner indistinguishable in shape from the OTP owner 15750ms
+     ✓ is idempotent: re-running onboarding rewrites and duplicates nothing 14484ms
+     ✓ grants the 14-day trial exactly once, however many times onboarding runs 16149ms
+     ✓ recovers a partial legacy registration: shop and role present, Owner missing 14110ms
+     ✓ names the phone collision instead of leaking a raw 23505 12917ms
+     ✓ refuses to attach an Owner to a shop that belongs to somebody else 11337ms
+     ✓ refuses a payload whose shop and owner disagree about each other 11979ms
+     ✓ refuses a payload whose owner role belongs to another shop 13219ms
+   ✓ Multi-Shop create, rename, archive, restore (5)
+     ✓ creates the second shop on the same billing account, with no second trial 13596ms
+     ✓ renames through the definer path that service_role may actually use 14771ms
+     ✓ archives and restores, and refuses to archive the billing anchor 16439ms
+     ✓ refuses a shop on another billing account 19533ms
+     ✓ switches: the hook resolves the active shop through shop_memberships 14909ms
+ ✓ backend/supabase/pgtest/h9-api-role-privileges.pgtest.ts (71 tests) 116079ms
+   ✓ a project created with the platform defaults (F12) (12)
+     ✓ fails the runbook's read-only api_role_privileges checks before 34 and passes all of them after 343ms
+     ✓ keeps the reviewed users column grants narrow: no other column, no other shop, no Staff write 401ms
+     ✓ is idempotent: running it again changes nothing at all 1148ms
+   ✓ a project created like DEV (narrow defaults) (33)
+     ✓ leaves an owner-only sequence exactly as it is — no false abort, no ACL written out 585ms
+     ✓ Codex reproduction: SELECT(pin_hash) granted to PUBLIC after 34 lets Staff read the Owner's PIN hash — the checks catch it 474ms
+     ✓ Codex reproduction: a plain membership lets an API session SET ROLE into a PIN-hash reader — the checks catch it 687ms
+     ✓ Codex reproduction: UPDATE(phone) WITH GRANT OPTION inherited by authenticated lets it grant onward — the checks catch it 753ms
+     ✓ Codex reproduction: a PUBLIC default gives anon SELECT on the next table postgres creates — the checks catch it 883ms
+     ✓ catches a table-wide grant with exactly the checks that describe it 861ms
+     ✓ catches a sequence grant with exactly the checks that describe it 651ms
+     ✓ catches a default-privilege grant to anon with exactly the checks that describe it 732ms
+     ✓ catches lost schema usage with exactly the checks that describe it 558ms
+     ✓ catches a table without RLS with exactly the checks that describe it 507ms
+     ✓ catches a relation granted to PUBLIC with exactly the checks that describe it 614ms
+     ✓ catches a column granted to PUBLIC with exactly the checks that describe it 635ms
+     ✓ catches UPDATE(phone) swapped for UPDATE(permission_version) with exactly the checks that describe it 727ms
+     ✓ catches an approved column grant made grantable with exactly the checks that describe it 585ms
+     ✓ catches an approved column grant removed with exactly the checks that describe it 829ms
+     ✓ catches an unreviewed column grant added with exactly the checks that describe it 989ms
+     ✓ catches a membership authenticated can SET ROLE into a PIN-hash reader with exactly the checks that describe it 1035ms
+     ✓ catches a column privilege inherited through a role with exactly the checks that describe it 675ms
+     ✓ catches a transitive membership with exactly the checks that describe it 730ms
+     ✓ catches anon able to SET ROLE to authenticated with exactly the checks that describe it 781ms
+     ✓ catches UPDATE(phone) WITH GRANT OPTION inherited by authenticated with exactly the checks that describe it 551ms
+     ✓ catches a grant option on a kept privilege held directly with exactly the checks that describe it 708ms
+     ✓ catches the same grant option reachable by SET ROLE only with exactly the checks that describe it 644ms
+     ✓ catches a future-table default for a role authenticated reaches with exactly the checks that describe it 355ms
+     ✓ catches a PUBLIC default on future tables with exactly the checks that describe it 466ms
+     ✓ catches a global PUBLIC default on future sequences with exactly the checks that describe it 396ms
+     ✓ catches a PUBLIC default of another role that can create in public with exactly the checks that describe it 511ms
+     ✓ flags nothing for a membership into a role holding nothing in public 318ms
+   ✓ every unsafe configuration aborts 34 with nothing changed — no transaction around it (25)
+     ✓ it runs as another role 550ms
+     ✓ a public table belongs to another role 385ms
+     ✓ a public table has no row level security 480ms
+     ✓ a public table is granted to PUBLIC 514ms
+     ✓ a column is granted to PUBLIC 858ms
+     ✓ a PUBLIC default on future tables — Codex 499ms
+     ✓ a global PUBLIC default on future sequences — Codex 819ms
+     ✓ a PUBLIC default of another role that can create in public 1083ms
+     ✓ UPDATE(phone) is swapped for UPDATE(permission_version) 774ms
+     ✓ an approved column grant carries grant option 917ms
+     ✓ an approved column grant is missing 817ms
+     ✓ an API role holds an unreviewed column grant 526ms
+     ✓ a reviewed column grant would be stripped by the table-wide revoke 687ms
+     ✓ UPDATE(phone) WITH GRANT OPTION is inherited by authenticated — Codex 695ms
+     ✓ anon holds a grant option on a kept privilege 912ms
+     ✓ authenticated can SET ROLE into a PIN-hash reader — Codex 785ms
+     ✓ a column privilege is inherited through a role 691ms
+     ✓ a PIN-hash reader is reached through two memberships 845ms
+     ✓ anon can SET ROLE to authenticated 607ms
+     ✓ a grant option is reachable by SET ROLE only 674ms
+     ✓ a role authenticated reaches gets future tables by default 508ms
+     ✓ a privilege granted to anon by another grantor survives the revoke — so 34 fails after acting 1120ms
+     ✓ still applies with a membership into a role holding nothing in public 631ms
+     ✓ still applies with a PUBLIC EXECUTE default on future functions — the deferred function policy 831ms
+     ✓ is left exactly as it was after every refusal, and 34 then applies 501ms
+   ✓ the shared harness keeps the RLS suites testing policies (1)
+     ✓ createHarness runs migration 34 and restores exactly the API roles' pre-34 privileges 23447ms
+ ❯ backend/supabase/pgtest/h7-security.pgtest.ts (51 tests | 1 failed) 867628ms
+   ❯ C-1: the database refuses a cross-shop row on its own (8)
+     × rejects a NEW medicine addressed to another shop 61359ms
+     ✓ rejects a NEW customer addressed to another shop 28730ms
+     ✓ refuses to let a caller invent a brand-new shop 27924ms
+     ✓ rejects a NEW user addressed to another shop 26675ms
+     ✓ carries the guard on BOTH overloads, not just the one push.ts calls 22362ms
+     ✓ still applies a legitimate same-shop insert 25905ms
+     ✓ still rejects an UPDATE of an existing foreign row 21137ms
+     ✓ leaves `permissions` to its role_id check, having no shop_id of its own 18354ms
+   ✓ H-1: the Edge pull sends exactly what RLS would show (10)
+     ✓ sends a default Staff member NO expenses and NO payments 17144ms
+     ✓ sends the Owner the cash ledger, so the fix did not simply deny everyone 15179ms
+     ✓ is non-vacuous for all 32 synced tables 17973ms
+     ✓ restores expenses to a Staff member the Owner grants cash_management 17091ms
+     ✓ matches all 32 tables for a default Staff member (sales + inventory_view) 21530ms
+     ✓ matches all 32 tables for the Owner 17181ms
+     ✓ matches for a Staff member holding an unusual permission mix 19215ms
+     ✓ shows a Staff member their OWN sale but not a colleague's 17651ms
+     ✓ reports the readable set the device uses to purge what it may no longer keep 16570ms
+     ✓ gives a caller from another shop nothing at all 14876ms
+   ✓ M-1/M-2: a revoked staff member stops reading immediately (9)
+     ✓ refuses shop_b2_settings to a deactivated staff member 16397ms
+     ✓ refuses batch_promotions to a deactivated staff member 14785ms
+     ✓ refuses sale_drafts to a deactivated staff member 14239ms
+     ✓ refuses sale_draft_items to a deactivated staff member 15203ms
+     ✓ refuses credit_payment_allocations to a deactivated staff member 13381ms
+     ✓ refuses credit_reconciliation_states to a deactivated staff member 13333ms
+     ✓ refuses a deactivated staff member their OWN sale history 14606ms
+     ✓ refuses a PLAN-SUSPENDED staff member the same tables 12492ms
+     ✓ still lets a LIVE staff member read them, so the guard is not blanket denial 13777ms
+   ✓ M-5: the token hook decorates a revoked principal ON PURPOSE (1)
+     ✓ h7_token_hook_decorates_revoked_principal 13349ms
+   ✓ M-4: a shop without a billing account is bounded, not unlimited (8)
+     ✓ allows writes inside the onboarding window 13070ms
+     ✓ refuses writes once the window has closed 13845ms
+     ✓ refuses an archived shop, which previously reached the same `return true` 16535ms
+     ✓ refuses a soft-deleted shop 12464ms
+     ✓ allows a shop row that does not exist yet, so registration still completes 11989ms
+     ✓ leaves canonical onboarding unaffected — a real shop keeps writing 12402ms
+     ✓ does not let a future-dated mutable shops.created_at extend the window 13198ms
+     ✓ keeps the server bootstrap anchor unreachable from API roles 12220ms
+   ✓ multi-account isolation (5)
+     ✓ gives each owner their own billing account 13851ms
+     ✓ refuses Owner B a rename of Shop A 20275ms
+     ✓ refuses Owner B an archive of Shop A 16329ms
+     ✓ summarises only the shops on the calling account 16269ms
+     ✓ does not let one account consume another account's trial 12407ms
+   ✓ defence in depth (4)
+     ✓ does not expose the renamed pre-H-7 generic write primitive 13104ms
+     ✓ revokes DELETE from the API roles on every tombstone-only table 15065ms
+     ✓ drops the legacy unfiltered pull 15878ms
+     ✓ keeps the identity map and the lockout counter unreachable 13532ms
+   ✓ TRUNCATE is not an API-role privilege (6)
+     ✓ leaves anon and authenticated no TRUNCATE on any public table 13063ms
+     ✓ takes it back from a table that demonstrably had it 11935ms
+     ✓ stops a FUTURE table from inheriting it 13391ms
+     ✓ does not disarm service_role, which the sync path runs as 13116ms
+     ✓ leaves the sync write path working end to end 12882ms
+     ✓ leaves the RLS tests exercising policies, not a privilege error 12355ms
+ ✓ backend/supabase/pgtest/b3-groups456-sync.pgtest.ts (15 tests) 217549ms
+   ✓ purchase_create (4)
+     ✓ applies a full credit purchase atomically and retries idempotently 22876ms
+     ✓ rejects a total that does not match the server-recomputed sum of received lines 15739ms
+     ✓ requires COD purchases to be fully paid at creation via one settlement payment and drawer rows 15683ms
+     ✓ is Owner-only 14177ms
+   ✓ supplier_payment (3)
+     ✓ caps an over-amount client payload server-side rather than trusting it 12170ms
+     ✓ rejects an over-amount purchase-update mismatch against the server-recomputed remaining 13159ms
+     ✓ refuses a payment against a COD purchase 13308ms
+   ✓ purchase_receive_line — COD atomic settlement (review §3/§4) (2)
+     ✓ settles the newly-received line's value in the SAME transaction, keeping paid_amount equal to total 14077ms
+     ✓ rejects a total that does not match the server-recomputed sum 14238ms
+   ✓ purchase_void — safety re-derived server-side (contract §5.13) (5)
+     ✓ voids a purchase with zero movements and zero payments 13706ms
+     ✓ rejects voiding a purchase that has a stock movement, even if the client claims otherwise 14804ms
+     ✓ rejects voiding a purchase that has a payment, even though this operation's own rows carry none 13605ms
+     ✓ rejects a malformed 2-row graph missing the required audit_logs row 11643ms
+     ✓ is Owner-only 12433ms
+   ✓ old-client rollout safety (1)
+     ✓ still accepts an ungrouped (un-stamped) purchases row exactly as before this migration 15907ms

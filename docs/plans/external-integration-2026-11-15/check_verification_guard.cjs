@@ -1,0 +1,20 @@
+// Verification infrastructure checks only; no existing DB/private file opened.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const net = require('node:net');
+const { spawnSync } = require('node:child_process');
+const { DatabaseSync } = require('node:sqlite');
+const root = path.resolve(__dirname, '../../..');
+assert.throws(() => fs.readFileSync(path.join(root, '.env.nonexistent-integration-guard-control')), /INTEGRATION_PRIVATE_ENV_READ_REFUSED/);
+assert.throws(() => new DatabaseSync(path.join(root, 'nonexistent-integration-guard-control.db'), { open: false }), /INTEGRATION_EXISTING_DATABASE_OPEN_REFUSED/);
+const db = new DatabaseSync(':memory:');
+assert.equal(db.prepare('SELECT 1 AS value').get().value, 1);
+db.close();
+assert.throws(() => net.Socket.prototype.connect.call({}, { host: 'example.invalid', port: 443 }), /INTEGRATION_NON_LOOPBACK_CONNECTION_REFUSED/);
+assert.throws(() => net.Socket.prototype.connect.call({}, [{ host: 'example.invalid', port: 443 }]), /INTEGRATION_NON_LOOPBACK_CONNECTION_REFUSED/);
+const child = spawnSync(process.execPath, ['-e', "process.emitWarning('Application warning control', 'IntegrationControl'); process.emitWarning('SQLite is an experimental feature and might change at any time', 'ExperimentalWarning');"], { encoding: 'utf8', env: process.env });
+assert.equal(child.status, 0);
+assert.match(child.stderr, /IntegrationControl: Application warning control/);
+assert.equal(child.stderr.split('SQLite is an experimental feature and might change at any time').length - 1, 1);
+process.stdout.write('PASS: 6 guard checks; private reads/existing DB opens/non-loopback connections refused; memory DB allowed; application warnings preserved.\n');

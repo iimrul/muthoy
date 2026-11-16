@@ -30,7 +30,7 @@ export default function DataTable<Row>({ columns, rows, rowKey, emptyMessage }: 
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-black/10">
+    <div className="admin-table-scroll" role="region" aria-label="Table results" tabIndex={0}>
       <table className="w-full min-w-[36rem] text-left text-sm">
         <thead className="bg-brand-softGreen text-xs uppercase tracking-wide text-brand-deepGreen">
           <tr>
@@ -45,7 +45,7 @@ export default function DataTable<Row>({ columns, rows, rowKey, emptyMessage }: 
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-black/5">
           {rows.map((row) => (
             <tr key={rowKey(row)} className="border-t border-black/5">
               {columns.map((column) => (
