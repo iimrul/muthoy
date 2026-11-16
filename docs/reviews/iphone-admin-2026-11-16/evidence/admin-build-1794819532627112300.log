@@ -1,0 +1,9 @@
+ ⨯ Failed to load env from .env.local Error: INTEGRATION_PRIVATE_ENV_READ_REFUSED
+    at checkFile (D:\Muthoy\docs\plans\external-integration-2026-11-15\verification-guard.cjs:12:11)
+    at fs.<computed> [as readFileSync] (D:\Muthoy\docs\plans\external-integration-2026-11-15\verification-guard.cjs:17:42)
+   ▲ Next.js 15.5.29
+
+   Creating an optimized production build ...
+
+> Build error occurred
+[Error: spawn EPERM] { errno: -4048, code: 'EPERM', syscall: 'spawn' }

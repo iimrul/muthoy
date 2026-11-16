@@ -1,0 +1,17 @@
+{
+  "task": "tests",
+  "command": [
+    "node",
+    "D:\\Muthoy\\node_modules\\vitest\\vitest.mjs",
+    "run",
+    "apps/admin",
+    "--maxWorkers=1"
+  ],
+  "startUTC": "2026-11-16T09:50:15.667577+00:00",
+  "endUTC": "2026-11-16T09:51:23.913021+00:00",
+  "exitCode": 0,
+  "log": "appearance-tests-1794822615666820200.log",
+  "logSha256": "5d1d28c99be4f256d33dfe28c96a252033a5e9f13b137cd08cd4636ff789e761",
+  "scratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-appearance-tests-1794822615666820200",
+  "scope": "Synthetic loopback only; private env and hosted networking refused"
+}

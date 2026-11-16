@@ -1,0 +1,21 @@
+{
+  "task": "admin-build",
+  "command": [
+    "node",
+    "D:\\Muthoy\\apps\\admin\\node_modules\\next\\dist\\bin\\next",
+    "build",
+    "D:\\Muthoy\\apps\\admin"
+  ],
+  "cwd": "D:\\Muthoy\\apps\\admin",
+  "startUTC": "2026-11-16T09:00:06.576976+00:00",
+  "endUTC": "2026-11-16T09:01:16.220217+00:00",
+  "elapsedSeconds": 69.643,
+  "exitCode": 1,
+  "log": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\admin-build-1794819606576955300.log",
+  "logSha256": "9224d36f249714409ff7fd840e4786ac911e34ac72df711fe92428389ffe2556",
+  "syntheticScratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-admin-build-1794819606575610800",
+  "credentialEnvOmitted": true,
+  "privateEnvReadGuard": true,
+  "network": "loopback only",
+  "fontVerification": "SKIP: verification-only local Arial font mock; no Google font download or typography acceptance"
+}

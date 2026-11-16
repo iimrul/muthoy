@@ -1,0 +1,991 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > dashboard denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T09:50:19.271Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > dashboard denies a session the environment does not know, and issues NO business query
+[admin] dashboard denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.DashboardPage (D:/Muthoy/apps/admin/app/page.tsx:114:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > pharmacies denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T09:50:19.349Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > pharmacies denies a session the environment does not know, and issues NO business query
+[admin] pharmacy list denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.PharmaciesPage (D:/Muthoy/apps/admin/app/pharmacies/page.tsx:94:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > subscriptions denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T09:50:19.406Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > subscriptions denies a session the environment does not know, and issues NO business query
+[admin] subscriptions denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SubscriptionsPage (D:/Muthoy/apps/admin/app/subscriptions/page.tsx:191:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > revenue denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T09:50:19.441Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > revenue denies a session the environment does not know, and issues NO business query
+[admin] revenue denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.RevenuePage (D:/Muthoy/apps/admin/app/revenue/page.tsx:80:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > analytics denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T09:50:19.511Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > analytics denies a session the environment does not know, and issues NO business query
+[admin] analytics denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.AnalyticsPage (D:/Muthoy/apps/admin/app/analytics/page.tsx:94:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > maps denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T09:50:19.543Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > maps denies a session the environment does not know, and issues NO business query
+[admin] map denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.MapsPage (D:/Muthoy/apps/admin/app/maps/page.tsx:82:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > support denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T09:50:19.938Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > support denies a session the environment does not know, and issues NO business query
+[admin] support denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SupportPage (D:/Muthoy/apps/admin/app/support/page.tsx:112:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > admins denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T09:50:19.976Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > admins denies a session the environment does not know, and issues NO business query
+[admin] admin directory denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.AdminsPage (D:/Muthoy/apps/admin/app/admins/page.tsx:121:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > audit denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T09:50:20.010Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > audit denies a session the environment does not know, and issues NO business query
+[admin] audit denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAnyAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:270:19)
+    at Module.AuditPage (D:/Muthoy/apps/admin/app/audit/page.tsx:162:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > reports denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T09:50:20.039Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > reports denies a session the environment does not know, and issues NO business query
+[admin] reports denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.ReportsPage (D:/Muthoy/apps/admin/app/reports/page.tsx:117:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > settings denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T09:50:20.069Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > settings denies a session the environment does not know, and issues NO business query
+[admin] settings denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SettingsPage (D:/Muthoy/apps/admin/app/settings/page.tsx:42:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > revenue denies a real role that lacks its permission
+[admin-audit] {"at":"2026-11-16T09:50:20.088Z","actor":"ops","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"revenue.read"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > revenue denies a real role that lacks its permission
+[admin] revenue denied: AdminForbiddenError: This admin role does not have permission: revenue.read
+    at requirePermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:215:9)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:232:5)
+    at Module.RevenuePage (D:/Muthoy/apps/admin/app/revenue/page.tsx:80:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:327:18
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  permission: 'revenue.read',
+  role: 'read_only'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > admins denies a real role that lacks its permission
+[admin-audit] {"at":"2026-11-16T09:50:20.110Z","actor":"ops","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"admins.read"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > admins denies a real role that lacks its permission
+[admin] admin directory denied: AdminForbiddenError: This admin role does not have permission: admins.read
+    at requirePermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:215:9)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:232:5)
+    at Module.AdminsPage (D:/Muthoy/apps/admin/app/admins/page.tsx:121:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:327:18
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  permission: 'admins.read',
+  role: 'read_only'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > dashboard refuses a request with NO session at all
+[admin] dashboard denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.DashboardPage (D:/Muthoy/apps/admin/app/page.tsx:114:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > pharmacies refuses a request with NO session at all
+[admin] pharmacy list denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.PharmaciesPage (D:/Muthoy/apps/admin/app/pharmacies/page.tsx:94:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > subscriptions refuses a request with NO session at all
+[admin] subscriptions denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SubscriptionsPage (D:/Muthoy/apps/admin/app/subscriptions/page.tsx:191:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > revenue refuses a request with NO session at all
+[admin] revenue denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.RevenuePage (D:/Muthoy/apps/admin/app/revenue/page.tsx:80:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > analytics refuses a request with NO session at all
+[admin] analytics denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.AnalyticsPage (D:/Muthoy/apps/admin/app/analytics/page.tsx:94:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > maps refuses a request with NO session at all
+[admin] map denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.MapsPage (D:/Muthoy/apps/admin/app/maps/page.tsx:82:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > support refuses a request with NO session at all
+[admin] support denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SupportPage (D:/Muthoy/apps/admin/app/support/page.tsx:112:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > admins refuses a request with NO session at all
+[admin] admin directory denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.AdminsPage (D:/Muthoy/apps/admin/app/admins/page.tsx:121:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > audit refuses a request with NO session at all
+[admin] audit denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAnyAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:270:19)
+    at Module.AuditPage (D:/Muthoy/apps/admin/app/audit/page.tsx:162:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > reports refuses a request with NO session at all
+[admin] reports denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.ReportsPage (D:/Muthoy/apps/admin/app/reports/page.tsx:117:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > settings refuses a request with NO session at all
+[admin] settings denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SettingsPage (D:/Muthoy/apps/admin/app/settings/page.tsx:42:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > dashboard shows a fixed notice, never the driver message
+[admin] shops query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] billing_subscriptions query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] entitlement_snapshots query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] payment_orders query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] payment_provider_events query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] plan_offerings count failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] sales query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] shop count query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > dashboard shows a fixed notice, never the driver message
+[admin] dashboard failed to load: AdminDataError: shop count query failed
+    at getPlatformStats (D:/Muthoy/apps/admin/lib/queries.ts:126:11)
+    at async Promise.all (index 1)
+    at loadDashboard (D:/Muthoy/apps/admin/app/page.tsx:74:31)
+    at Module.DashboardPage (D:/Muthoy/apps/admin/app/page.tsx:121:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > pharmacies shows a fixed notice, never the driver message
+[admin] district list query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] shop count query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > pharmacies shows a fixed notice, never the driver message
+[admin] the pharmacy list failed to load: AdminDataError: district list query failed
+    at listShopDistricts (D:/Muthoy/apps/admin/lib/adminPlatformQueries.ts:256:13)
+    at async Promise.all (index 1)
+    at loadPharmacies (D:/Muthoy/apps/admin/app/pharmacies/page.tsx:67:31)
+    at Module.PharmaciesPage (D:/Muthoy/apps/admin/app/pharmacies/page.tsx:124:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > subscriptions shows a fixed notice, never the driver message
+[admin] entitlement_snapshots query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] plan_offerings count failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] payment_orders query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > subscriptions shows a fixed notice, never the driver message
+[admin] subscriptions failed to load: AdminDataError: entitlement_snapshots query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at async Promise.all (index 2)
+    at subscriptionsOverview (D:/Muthoy/apps/admin/lib/adminPlatformQueries.ts:1866:74)
+    at loadSubscriptions (D:/Muthoy/apps/admin/app/subscriptions/page.tsx:153:30)
+    at Module.SubscriptionsPage (D:/Muthoy/apps/admin/app/subscriptions/page.tsx:217:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > revenue shows a fixed notice, never the driver message
+[admin] shops count failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] sales count failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] billing_accounts query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] billing_subscriptions query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] payment_orders query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] billing_subscriptions count failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > revenue shows a fixed notice, never the driver message
+[admin] revenue failed to load: AdminDataError: billing_subscriptions count query failed
+    at revenueOverview (D:/Muthoy/apps/admin/lib/adminPlatformQueries.ts:556:13)
+    at async Promise.all (index 0)
+    at loadRevenue (D:/Muthoy/apps/admin/app/revenue/page.tsx:70:30)
+    at Module.RevenuePage (D:/Muthoy/apps/admin/app/revenue/page.tsx:86:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > analytics shows a fixed notice, never the driver message
+[admin] platform settings query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > analytics shows a fixed notice, never the driver message
+[admin] feature flag read failed for flag.analytics_enabled: AdminDataError: platform settings query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at readSettings (D:/Muthoy/apps/admin/lib/adminSettings.ts:141:16)
+    at featureState (D:/Muthoy/apps/admin/lib/adminSettings.ts:201:22)
+    at Module.AnalyticsPage (D:/Muthoy/apps/admin/app/analytics/page.tsx:100:16)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > maps shows a fixed notice, never the driver message
+[admin] platform settings query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > maps shows a fixed notice, never the driver message
+[admin] feature flag read failed for flag.maps_enabled: AdminDataError: platform settings query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at readSettings (D:/Muthoy/apps/admin/lib/adminSettings.ts:141:16)
+    at featureState (D:/Muthoy/apps/admin/lib/adminSettings.ts:201:22)
+    at Module.MapsPage (D:/Muthoy/apps/admin/app/maps/page.tsx:91:16)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > support shows a fixed notice, never the driver message
+[admin] admin_support_cases list failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > support shows a fixed notice, never the driver message
+[admin] the support queue failed to load: AdminDataError: support case list failed
+    at listSupportCases (D:/Muthoy/apps/admin/lib/adminSupportStore.ts:119:11)
+    at listSupportCaseSummaries (D:/Muthoy/apps/admin/lib/adminPlatformQueries.ts:404:17)
+    at loadSupport (D:/Muthoy/apps/admin/app/support/page.tsx:80:19)
+    at Module.SupportPage (D:/Muthoy/apps/admin/app/support/page.tsx:133:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > reports shows a fixed notice, never the driver message
+[admin] platform settings query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > reports shows a fixed notice, never the driver message
+[admin] feature flag read failed for flag.reports_pdf_enabled: AdminDataError: platform settings query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at readSettings (D:/Muthoy/apps/admin/lib/adminSettings.ts:141:16)
+    at featureState (D:/Muthoy/apps/admin/lib/adminSettings.ts:201:22)
+    at async Promise.all (index 1)
+    at Module.ReportsPage (D:/Muthoy/apps/admin/app/reports/page.tsx:126:29)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > settings shows a fixed notice, never the driver message
+[admin] platform settings query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > settings shows a fixed notice, never the driver message
+[admin] settings failed to load: AdminDataError: platform settings query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at readSettings (D:/Muthoy/apps/admin/lib/adminSettings.ts:141:16)
+    at settingsView (D:/Muthoy/apps/admin/lib/adminSettings.ts:366:20)
+    at loadSettings (D:/Muthoy/apps/admin/app/settings/page.tsx:28:30)
+    at Module.SettingsPage (D:/Muthoy/apps/admin/app/settings/page.tsx:54:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > §8.9 the audit page filters, and the per-shop view is gated > when the durable log CANNOT be read, the page says so loudly
+[admin] admin_audit_log read failed: relation "admin_audit_log" does not exist
+
+ ✓ apps/admin/app/adminRoutes.contract.test.tsx (126 tests) 6040ms
+   ✓ every route refuses an unauthorized role before it reads anything (25)
+     ✓ dashboard denies a session the environment does not know, and issues NO business query 543ms
+     ✓ support denies a session the environment does not know, and issues NO business query 396ms
+ ✓ apps/admin/lib/adminHashPassword.test.ts (14 tests) 4925ms
+   ✓ a valid password (3)
+     ✓ prints one ADMIN_ACCOUNTS element and the matching ADMIN_ROLES line 854ms
+     ✓ never prints the password back 645ms
+     ✓ uses only the FIRST line, so a pasted trailing line cannot change the hash 1714ms
+   ✓ every rejection (7)
+     ✓ accepts exactly 256 characters — the boundary is inclusive 805ms
+stderr | apps/admin/lib/netSalesProvenance.test.tsx > §6i ROUND 12: the boundary is the bytes, and the floor is per side > FINDING 5: the completeness evidence is ENFORCED on the analytics path
+[admin] incomplete report source read: sales 5 of 6
+[admin] incomplete report source read: sales 5 of 6
+
+ ✓ apps/admin/lib/netSalesProvenance.test.tsx (52 tests) 3404ms
+   ✓ §6i compile-negative: the substitutions do not TYPECHECK (7)
+     ✓ the PRELUDE itself compiles clean, or every case below is vacuous 3064ms
+ ✓ apps/admin/lib/adminLabels.test.ts (49 tests) 2595ms
+   ✓ the GROSS boundary (37)
+     ✓ MUTATION: every fabrication the reviewers found is now rejected 1636ms
+stderr | apps/admin/lib/adminLogin.test.ts > failure is not an oracle > a correct password for a username with no role entry is still refused
+[admin] session route is not configured: ADMIN_ACCOUNTS has founder with no ADMIN_ROLES entry
+
+stderr | apps/admin/lib/adminLogin.test.ts > logout, configuration and the real KDF > an unconfigured panel answers 503, never a session
+[admin] session route is not configured: ADMIN_ACCOUNTS is not set
+
+stderr | apps/admin/lib/adminLogin.test.ts > logout, configuration and the real KDF > an unconfigured panel answers 503, never a session
+[admin] session route is not configured: ADMIN_ROLES is not set
+
+stderr | apps/admin/lib/adminLogin.test.ts > logout, configuration and the real KDF > an unconfigured panel answers 503, never a session
+[admin] session route is not configured: ADMIN_SESSION_SECRET must be at least 32 bytes
+
+stderr | apps/admin/lib/adminLogin.test.ts > logout, configuration and the real KDF > an unconfigured panel answers 503, never a session
+[admin] session route is not configured: ADMIN_ACCOUNTS is empty
+
+stderr | apps/admin/lib/adminLogin.test.ts > logout, configuration and the real KDF > an unconfigured panel answers 503, never a session
+[admin] session route is not configured: ADMIN_SESSION_SECRET must be at least 32 bytes
+
+ ✓ apps/admin/lib/adminLogin.test.ts (30 tests) 2427ms
+   ✓ logout, configuration and the real KDF (6)
+     ✓ the REAL KDF parameters are the OWASP floor, and it reproduces the vector 989ms
+     ✓ the real KDF is what the module uses by default 960ms
+stderr | apps/admin/lib/adminAuditStore.test.ts > the Postgres sink > flush REJECTS when the insert failed
+[admin] admin_audit_log insert failed: permission denied for table admin_audit_log
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > the Postgres sink > the driver message never reaches the thrown error
+[admin] admin_audit_log insert failed: FATAL: password authentication failed
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > the Postgres sink > one failing insert does not leave the others unawaited
+[admin] admin_audit_log insert failed: nope
+[admin] admin_audit_log insert failed: nope
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > the Postgres sink > flush DRAINS, so a second flush does not re-report a settled write
+[admin] admin_audit_log insert failed: nope
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > recordAdminActionDurably > reports failed when the sink could not commit
+[admin] admin_audit_log insert failed: permission denied
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > recordAdminActionDurably > NEVER throws, even when the durable sink fails
+[admin] admin_audit_log insert failed: permission denied
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > recordAdminActionDurably > a failing durable sink still leaves the stderr-side entry recorded
+[admin] admin_audit_log insert failed: permission denied
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > an audit failure cannot crash the thing it is auditing (Gate 5 finding 2) > write() WITHOUT a flush produces no unhandled rejection
+[admin] admin_audit_log insert failed: relation does not exist
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > an audit failure cannot crash the thing it is auditing (Gate 5 finding 2) > and the failure is still REPORTED to an awaited flush
+[admin] admin_audit_log insert failed: relation does not exist
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > an audit failure cannot crash the thing it is auditing (Gate 5 finding 2) > a drained batch is not re-reported by the next flush
+[admin] admin_audit_log insert failed: relation does not exist
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > ROUND 11 FINDING 5: the durable audit log is READ, not only written > a FAILED read throws rather than answering "nothing happened"
+[admin] admin_audit_log read failed: relation "admin_audit_log" does not exist
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > ROUND 11 FINDING 5: the durable audit log is READ, not only written > the driver message never reaches the caller
+[admin] admin_audit_log read failed: connection to postgresql://admin:hunter2@db failed
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > ROUND 11 FINDING 5: the durable audit log is READ, not only written > the driver message never reaches the caller
+[admin] admin_audit_log read failed: connection to postgresql://admin:hunter2@db failed
+
+stderr | apps/admin/lib/adminAuditStore.test.ts > ROUND 11 FINDING 5: the durable audit log is READ, not only written > auditHistory SAYS SO when the table cannot be read
+[admin] admin_audit_log read failed: relation does not exist
+
+ ✓ apps/admin/lib/adminAuditStore.test.ts (57 tests) 410ms
+stderr | apps/admin/lib/adminLogout.test.ts > logout cutoff at the real Node permission gate > store failure clears browser cookie and explicitly reports unconfirmed server logout
+[admin] admin_role_assignments revoke failed: unavailable
+
+stderr | apps/admin/lib/adminLogout.test.ts > logout cutoff at the real Node permission gate > store failure clears browser cookie and explicitly reports unconfirmed server logout
+[admin] logout session revocation could not be confirmed
+
+ ✓ apps/admin/lib/adminLogout.test.ts (9 tests) 189ms
+ ✓ apps/admin/lib/adminGrants.test.ts (48 tests) 263ms
+stderr | apps/admin/lib/adminReports.test.ts > the completeness gate > a fixture LARGER THAN ONE PAGE that read short is refused
+[admin] incomplete report source read: shops 1000 of 1500
+
+stderr | apps/admin/lib/adminReports.test.ts > the completeness gate > loading MORE than counted is also refused — it is not "good enough"
+[admin] incomplete report source read: shops 2000 of 1000
+
+stderr | apps/admin/lib/adminReports.test.ts > the completeness gate > the gate runs BEFORE the table is built, so no partial rows exist
+[admin] incomplete report source read: shops 1000 of 1500
+
+stderr | apps/admin/lib/adminReports.test.ts > buildReport reads through its injected source > a source whose read was incomplete propagates the refusal
+[admin] incomplete report source read: shops 1000 of 1500
+
+ ✓ apps/admin/lib/adminReports.test.ts (98 tests) 186ms
+stderr | apps/admin/lib/adminSupport.test.ts > the store > a read failure THROWS rather than reporting an empty queue
+[admin] admin_support_cases list failed: connection refused
+
+stderr | apps/admin/lib/adminSupport.test.ts > the authorized writes > billing is denied and reaches no client at all
+[admin-audit] {"at":"2026-11-16T09:50:52.948Z","actor":"actor","actorVerified":true,"role":"billing","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"support.write"}}
+
+stderr | apps/admin/lib/adminSupport.test.ts > the authorized writes > read_only is denied and reaches no client at all
+[admin-audit] {"at":"2026-11-16T09:50:52.955Z","actor":"actor","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"support.write"}}
+
+stderr | apps/admin/lib/adminSupport.test.ts > the authorized writes > a NARROWED support admin is denied
+[admin-audit] {"at":"2026-11-16T09:50:52.964Z","actor":"support-a","actorVerified":true,"role":"support","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"support.write"}}
+
+stderr | apps/admin/lib/adminSupport.test.ts > the authorized writes > a write failure is audited and reports that nothing was written
+[admin] admin_support_notes insert failed: permission denied
+
+stderr | apps/admin/lib/adminSupport.test.ts > the authorized writes > a write failure is audited and reports that nothing was written
+[admin] support note append failed: AdminDataError: support note write failed
+    at insertSupportNote (D:/Muthoy/apps/admin/lib/adminSupportStore.ts:374:11)
+    at addSupportNote (D:/Muthoy/apps/admin/lib/adminSupportActions.ts:314:26)
+    at D:/Muthoy/apps/admin/lib/adminSupport.test.ts:771:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+ ✓ apps/admin/lib/adminSupport.test.ts (59 tests) 162ms
+stderr | apps/admin/lib/adminAuthz.test.ts > currentAdminSession > returns the role ADMIN_ROLES grants, not the one the cookie claims
+[admin-audit] {"at":"2026-11-16T09:50:53.999Z","actor":"ops","actorVerified":true,"role":"read_only","action":"session.role_mismatch","target":null,"outcome":"success","meta":{"claimedRole":"super_admin","effectiveRole":"read_only"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > currentAdminSession > a stale role claim is AUDITED, and the environment still wins
+[admin-audit] {"at":"2026-11-16T09:50:54.006Z","actor":"ops","actorVerified":true,"role":"read_only","action":"session.role_mismatch","target":null,"outcome":"success","meta":{"claimedRole":"super_admin","effectiveRole":"read_only"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > currentAdminSession > a username removed from ADMIN_ROLES is denied immediately, cookie and all
+[admin-audit] {"at":"2026-11-16T09:50:54.011Z","actor":"founder","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > currentAdminSession — the assignment row (Batch 3 §4.3) > rule 1: an is_active=false row DENIES, and never falls back to ADMIN_ROLES
+[admin-audit] {"at":"2026-11-16T09:50:54.022Z","actor":"founder","actorVerified":true,"role":"super_admin","action":"session.account_disabled","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"assignment_disabled"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > currentAdminSession — the assignment row (Batch 3 §4.3) > rule 3: a cookie minted BEFORE the revocation is refused
+[admin-audit] {"at":"2026-11-16T09:50:54.028Z","actor":"ops","actorVerified":true,"role":"read_only","action":"session.sessions_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"read_only","reason":"sessions_revoked"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > currentAdminSession — the assignment row (Batch 3 §4.3) > rule 3: a cookie minted AT the revocation instant is refused too
+[admin-audit] {"at":"2026-11-16T09:50:54.030Z","actor":"ops","actorVerified":true,"role":"read_only","action":"session.sessions_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"read_only","reason":"sessions_revoked"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > currentAdminSession — the assignment row (Batch 3 §4.3) > a disabled row denies even a cookie minted after its revocation point
+[admin-audit] {"at":"2026-11-16T09:50:54.032Z","actor":"ops","actorVerified":true,"role":"read_only","action":"session.account_disabled","target":null,"outcome":"denied","meta":{"claimedRole":"read_only","reason":"assignment_disabled"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > currentAdminSession — the assignment row (Batch 3 §4.3) > an unreadable store DENIES, with its own audited reason
+[admin] admin role assignment unreadable: Error: connection refused
+    at readAssignment (D:/Muthoy/apps/admin/lib/adminAuthz.test.ts:319:15)
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:135:24)
+    at D:/Muthoy/apps/admin/lib/adminAuthz.test.ts:317:5
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+[admin-audit] {"at":"2026-11-16T09:50:54.044Z","actor":"founder","actorVerified":true,"role":"super_admin","action":"session.role_store_unavailable","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"role store unreadable"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > currentAdminSession — the assignment row (Batch 3 §4.3) > an unreadable store does NOT fall back to the environment role
+[admin] admin role assignment unreadable: Error: connection refused
+    at readAssignment (D:/Muthoy/apps/admin/lib/adminAuthz.test.ts:339:15)
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:135:24)
+    at D:/Muthoy/apps/admin/lib/adminAuthz.test.ts:337:5
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+[admin-audit] {"at":"2026-11-16T09:50:54.047Z","actor":"founder","actorVerified":true,"role":"super_admin","action":"session.role_store_unavailable","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"role store unreadable"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > a demoted account loses the write permission on the very next request
+[admin-audit] {"at":"2026-11-16T09:50:54.050Z","actor":"founder","actorVerified":true,"role":"support","action":"session.role_mismatch","target":null,"outcome":"success","meta":{"claimedRole":"billing","effectiveRole":"support"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > a demoted account loses the write permission on the very next request
+[admin-audit] {"at":"2026-11-16T09:50:54.050Z","actor":"founder","actorVerified":true,"role":"support","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"subscriptions.write"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > a demotion from billing to support is not a RANKING question
+[admin-audit] {"at":"2026-11-16T09:50:54.052Z","actor":"founder","actorVerified":true,"role":"support","action":"session.role_mismatch","target":null,"outcome":"success","meta":{"claimedRole":"billing","effectiveRole":"support"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > a demotion from billing to support is not a RANKING question
+[admin-audit] {"at":"2026-11-16T09:50:54.053Z","actor":"founder","actorVerified":true,"role":"support","action":"session.role_mismatch","target":null,"outcome":"success","meta":{"claimedRole":"billing","effectiveRole":"support"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > a demotion from billing to support is not a RANKING question
+[admin-audit] {"at":"2026-11-16T09:50:54.053Z","actor":"founder","actorVerified":true,"role":"support","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"subscriptions.write"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > a narrowing row takes a permission away at the gate, not just in the nav
+[admin-audit] {"at":"2026-11-16T09:50:54.055Z","actor":"founder","actorVerified":true,"role":"super_admin","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"admins.write"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > a narrowing row takes a permission away at the gate, not just in the nav
+[admin-audit] {"at":"2026-11-16T09:50:54.056Z","actor":"founder","actorVerified":true,"role":"super_admin","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"settings.write"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > the denial is AUDITED here, on the awaited path (§8.9c)
+[admin-audit] {"at":"2026-11-16T09:50:54.057Z","actor":"ops","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"subscriptions.write"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > the denial is recorded exactly ONCE
+[admin-audit] {"at":"2026-11-16T09:50:54.071Z","actor":"ops","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"subscriptions.write"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > a disabled row refuses every permission, including the ones it names
+[admin-audit] {"at":"2026-11-16T09:50:54.076Z","actor":"founder","actorVerified":true,"role":"super_admin","action":"session.account_disabled","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"assignment_disabled"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > a disabled row refuses every permission, including the ones it names
+[admin-audit] {"at":"2026-11-16T09:50:54.076Z","actor":"founder","actorVerified":true,"role":"super_admin","action":"session.account_disabled","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"assignment_disabled"}}
+
+stderr | apps/admin/lib/adminAuthz.test.ts > requireAdminPermission > a disabled row refuses every permission, including the ones it names
+[admin-audit] {"at":"2026-11-16T09:50:54.077Z","actor":"founder","actorVerified":true,"role":"super_admin","action":"session.account_disabled","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"assignment_disabled"}}
+
+ ✓ apps/admin/lib/adminAuthz.test.ts (50 tests) 122ms
+stderr | apps/admin/lib/adminIdentityStore.test.ts > readRoleAssignment > a query error THROWS — it does not read as "no row"
+[admin] admin_role_assignments read failed: permission denied
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > readRoleAssignment > the driver message never reaches the thrown error
+[admin] admin_role_assignments read failed: FATAL: password authentication failed
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > writeRoleAssignment > a failing write throws without leaking the driver message
+[admin] admin_role_assignments insert failed: permission denied for table
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > revokeRoleAssignmentSessions — a security action must not widen authority > a row found with a NULL cutoff is not reported as already revoked
+[admin] admin_role_assignments revoke did not converge
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > revokeRoleAssignmentSessions — a security action must not widen authority > a row found with an EARLIER cutoff is not reported as already revoked either
+[admin] admin_role_assignments revoke did not converge
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > revokeRoleAssignmentSessions — a security action must not widen authority > a LOST INSERT race retries the update rather than throwing
+[admin] admin_role_assignments revoke insert retried: duplicate key value violates unique constraint
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > revokeRoleAssignmentSessions — a security action must not widen authority > a failing revoke throws without leaking the driver message
+[admin] admin_role_assignments revoke failed: permission denied for table
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > assignAdminRole — permission comes first > billing is denied and reaches no client at all
+[admin-audit] {"at":"2026-11-16T09:50:55.022Z","actor":"actor","actorVerified":true,"role":"billing","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"admins.write"}}
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > assignAdminRole — permission comes first > support is denied and reaches no client at all
+[admin-audit] {"at":"2026-11-16T09:50:55.025Z","actor":"actor","actorVerified":true,"role":"support","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"admins.write"}}
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > assignAdminRole — permission comes first > read_only is denied and reaches no client at all
+[admin-audit] {"at":"2026-11-16T09:50:55.028Z","actor":"actor","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"admins.write"}}
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > assignAdminRole — permission comes first > a NARROWED super_admin is denied too
+[admin-audit] {"at":"2026-11-16T09:50:55.030Z","actor":"actor","actorVerified":true,"role":"super_admin","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"admins.write"}}
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > assignAdminRole — the escalation guards > a store failure is audited as a failure and reported safely
+[admin] admin_role_assignments insert failed: permission denied
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > assignAdminRole — the escalation guards > a store failure is audited as a failure and reported safely
+[admin] assignAdminRole failed: AdminDataError: admin role assignment write failed
+    at writeRoleAssignment (D:/Muthoy/apps/admin/lib/adminIdentityStore.ts:196:13)
+    at assignAdminRole (D:/Muthoy/apps/admin/lib/adminIdentityActions.ts:174:20)
+    at D:/Muthoy/apps/admin/lib/adminIdentityStore.test.ts:809:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > revokeAdminSessions > billing cannot revoke anyone, and reaches no client
+[admin-audit] {"at":"2026-11-16T09:50:55.075Z","actor":"actor","actorVerified":true,"role":"billing","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"admins.write"}}
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > revokeAdminSessions > support cannot revoke anyone, and reaches no client
+[admin-audit] {"at":"2026-11-16T09:50:55.077Z","actor":"actor","actorVerified":true,"role":"support","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"admins.write"}}
+
+stderr | apps/admin/lib/adminIdentityStore.test.ts > revokeAdminSessions > read_only cannot revoke anyone, and reaches no client
+[admin-audit] {"at":"2026-11-16T09:50:55.078Z","actor":"actor","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"admins.write"}}
+
+ ✓ apps/admin/lib/adminIdentityStore.test.ts (66 tests) 132ms
+stderr | apps/admin/lib/adminSettings.test.ts > the flag state is three-valued > an UNREADABLE store is unknown, not disabled
+[admin] platform settings query failed: connection refused
+
+stderr | apps/admin/lib/adminSettings.test.ts > the flag state is three-valued > an UNREADABLE store is unknown, not disabled
+[admin] feature flag read failed for flag.maps_enabled: AdminDataError: platform settings query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at readSettings (D:/Muthoy/apps/admin/lib/adminSettings.ts:141:16)
+    at featureState (D:/Muthoy/apps/admin/lib/adminSettings.ts:201:22)
+
+stderr | apps/admin/lib/adminSettings.test.ts > the flag state is three-valued > isFeatureEnabled is false for unknown, so a boolean caller fails safe
+[admin] platform settings query failed: connection refused
+
+stderr | apps/admin/lib/adminSettings.test.ts > the flag state is three-valued > isFeatureEnabled is false for unknown, so a boolean caller fails safe
+[admin] feature flag read failed for flag.maps_enabled: AdminDataError: platform settings query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at readSettings (D:/Muthoy/apps/admin/lib/adminSettings.ts:141:16)
+    at featureState (D:/Muthoy/apps/admin/lib/adminSettings.ts:201:22)
+    at isFeatureEnabled (D:/Muthoy/apps/admin/lib/adminSettings.ts:220:11)
+
+stderr | apps/admin/lib/adminSettings.test.ts > reading the settings > a read failure THROWS rather than reporting an empty settings table
+[admin] platform settings query failed: connection refused
+
+stderr | apps/admin/lib/adminSettings.test.ts > the authorized write > billing is denied and reaches no client at all
+[admin-audit] {"at":"2026-11-16T09:50:56.722Z","actor":"actor","actorVerified":true,"role":"billing","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"settings.write"}}
+
+stderr | apps/admin/lib/adminSettings.test.ts > the authorized write > support is denied and reaches no client at all
+[admin-audit] {"at":"2026-11-16T09:50:56.729Z","actor":"actor","actorVerified":true,"role":"support","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"settings.write"}}
+
+stderr | apps/admin/lib/adminSettings.test.ts > the authorized write > read_only is denied and reaches no client at all
+[admin-audit] {"at":"2026-11-16T09:50:56.732Z","actor":"actor","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"settings.write"}}
+
+stderr | apps/admin/lib/adminSettings.test.ts > the authorized write > a NARROWED super_admin is denied too
+[admin-audit] {"at":"2026-11-16T09:50:56.735Z","actor":"actor","actorVerified":true,"role":"super_admin","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"settings.write"}}
+
+stderr | apps/admin/lib/adminSettings.test.ts > the authorized write > a write failure is audited and reports that nothing changed
+[admin] admin_platform_settings insert failed: permission denied
+
+stderr | apps/admin/lib/adminSettings.test.ts > the authorized write > a write failure is audited and reports that nothing changed
+[admin] feature flag write failed for flag.maps_enabled: AdminDataError: platform setting write failed
+    at writeSetting (D:/Muthoy/apps/admin/lib/adminSettings.ts:270:13)
+    at setPlatformFeatureFlag (D:/Muthoy/apps/admin/lib/adminSettingsActions.ts:133:20)
+    at D:/Muthoy/apps/admin/lib/adminSettings.test.ts:539:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+ ✓ apps/admin/lib/adminSettings.test.ts (40 tests) 161ms
+stderr | apps/admin/lib/adminActions.test.ts > permission comes first > read_only cannot run reconcilePlanLimits, and no RPC is reached
+[admin-audit] {"at":"2026-11-16T09:50:58.288Z","actor":"founder","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"subscriptions.write"}}
+
+stderr | apps/admin/lib/adminActions.test.ts > permission comes first > read_only cannot run reconcilePlanLimits, and no RPC is reached
+[admin-audit] {"at":"2026-11-16T09:50:58.297Z","actor":"founder","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"subscriptions.write"}}
+
+stderr | apps/admin/lib/adminActions.test.ts > permission comes first > support cannot run reconcilePlanLimits, and no RPC is reached
+[admin-audit] {"at":"2026-11-16T09:50:58.305Z","actor":"founder","actorVerified":true,"role":"support","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"subscriptions.write"}}
+
+stderr | apps/admin/lib/adminActions.test.ts > permission comes first > support cannot run reconcilePlanLimits, and no RPC is reached
+[admin-audit] {"at":"2026-11-16T09:50:58.309Z","actor":"founder","actorVerified":true,"role":"support","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"subscriptions.write"}}
+
+stderr | apps/admin/lib/adminActions.test.ts > permission comes first > read_only cannot expire a payment order
+[admin-audit] {"at":"2026-11-16T09:50:58.313Z","actor":"founder","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"support.write"}}
+
+stderr | apps/admin/lib/adminActions.test.ts > permission comes first > billing cannot expire a payment order
+[admin-audit] {"at":"2026-11-16T09:50:58.318Z","actor":"founder","actorVerified":true,"role":"billing","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"support.write"}}
+
+stderr | apps/admin/lib/adminActions.test.ts > permission comes first > a denial is audited with the permission that was missing
+[admin-audit] {"at":"2026-11-16T09:50:58.322Z","actor":"founder","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"subscriptions.write"}}
+
+stderr | apps/admin/lib/adminActions.test.ts > permission comes first > a demoted role loses the action on the next call, cookie unchanged
+[admin-audit] {"at":"2026-11-16T09:50:58.342Z","actor":"founder","actorVerified":true,"role":"support","action":"session.role_mismatch","target":null,"outcome":"success","meta":{"claimedRole":"billing","effectiveRole":"support"}}
+
+stderr | apps/admin/lib/adminActions.test.ts > permission comes first > a demoted role loses the action on the next call, cookie unchanged
+[admin-audit] {"at":"2026-11-16T09:50:58.343Z","actor":"founder","actorVerified":true,"role":"support","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"subscriptions.write"}}
+
+stderr | apps/admin/lib/adminActions.test.ts > expireStalePaymentOrder — the only direct write in the panel > a failing update is audited and reported without the driver message
+[admin] expire payment order failed: permission denied for table payment_orders
+
+stderr | apps/admin/lib/adminActions.test.ts > committed write outcome survives a page refresh failure > payment keeps its known audit outcome
+[admin] committed action page refresh failed: Error: cache unavailable
+    at D:/Muthoy/apps/admin/lib/adminActions.test.ts:324:44
+    at Mock (file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/spy.DDMXghXv.js:353:40)
+    at refreshCommittedPage (D:/Muthoy/apps/admin/lib/adminActions.ts:98:25)
+    at expireStalePaymentOrder (D:/Muthoy/apps/admin/lib/adminActions.ts:244:3)
+    at D:/Muthoy/apps/admin/lib/adminActions.test.ts:328:12
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminActions.test.ts > committed write outcome survives a page refresh failure > reconcile keeps its known audit outcome
+[admin] committed action page refresh failed: Error: cache unavailable
+    at D:/Muthoy/apps/admin/lib/adminActions.test.ts:324:44
+    at Mock (file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/spy.DDMXghXv.js:353:40)
+    at refreshCommittedPage (D:/Muthoy/apps/admin/lib/adminActions.ts:98:25)
+    at reconcilePlanLimits (D:/Muthoy/apps/admin/lib/adminActions.ts:183:3)
+    at D:/Muthoy/apps/admin/lib/adminActions.test.ts:328:12
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminActions.test.ts > committed write outcome survives a page refresh failure > payment retains applied-unrecorded when both audit and cache fail
+[admin] committed action page refresh failed: Error: cache unavailable
+    at revalidate (D:/Muthoy/apps/admin/lib/adminActions.test.ts:339:33)
+    at refreshCommittedPage (D:/Muthoy/apps/admin/lib/adminActions.ts:98:25)
+    at expireStalePaymentOrder (D:/Muthoy/apps/admin/lib/adminActions.ts:244:3)
+    at D:/Muthoy/apps/admin/lib/adminActions.test.ts:342:9
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminActions.test.ts > committed write outcome survives a page refresh failure > reconcile retains applied-unrecorded when both audit and cache fail
+[admin] committed action page refresh failed: Error: cache unavailable
+    at revalidate (D:/Muthoy/apps/admin/lib/adminActions.test.ts:339:33)
+    at refreshCommittedPage (D:/Muthoy/apps/admin/lib/adminActions.ts:98:25)
+    at reconcilePlanLimits (D:/Muthoy/apps/admin/lib/adminActions.ts:183:3)
+    at D:/Muthoy/apps/admin/lib/adminActions.test.ts:343:9
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminActions.test.ts > committed write outcome survives a page refresh failure > uncertain committed update never promises that nothing changed
+[admin] expire payment order failed: connection lost after commit
+
+ ✓ apps/admin/lib/adminActions.test.ts (24 tests) 170ms
+stderr | apps/admin/lib/queriesPagination.test.ts > complete reads under a smaller PostgREST response cap > accepts the exact row ceiling, but refuses one beyond it
+[admin] fixture exceeded 200000 rows
+
+stderr | apps/admin/lib/queriesPagination.test.ts > complete reads under a smaller PostgREST response cap > a later page error refuses instead of returning a partial list
+[admin] fixture query failed: database unavailable
+
+ ✓ apps/admin/lib/queriesPagination.test.ts (6 tests) 116ms
+ ✓ apps/admin/lib/publication.test.ts (64 tests) 180ms
+stderr | apps/admin/lib/adminSupportRetry.test.ts > support write replay protection > a note request id cannot be reused with changed payload: {"body":"Different note."}
+[admin] support note append failed: AdminDataError: support note request id is already in use
+    at insertSupportNote (D:/Muthoy/apps/admin/lib/adminSupportStore.ts:371:13)
+    at addSupportNote (D:/Muthoy/apps/admin/lib/adminSupportActions.ts:314:26)
+    at D:/Muthoy/apps/admin/lib/adminSupportRetry.test.ts:132:12
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminSupportRetry.test.ts > support write replay protection > a note request id cannot be reused with changed payload: {"caseId":"7b000000-0000-4000-8000-000000000002"}
+[admin] support note append failed: AdminDataError: support note request id is already in use
+    at insertSupportNote (D:/Muthoy/apps/admin/lib/adminSupportStore.ts:371:13)
+    at addSupportNote (D:/Muthoy/apps/admin/lib/adminSupportActions.ts:314:26)
+    at D:/Muthoy/apps/admin/lib/adminSupportRetry.test.ts:132:12
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminSupportRetry.test.ts > support write replay protection > a different admin cannot claim another admin's note replay
+[admin] support note append failed: AdminDataError: support note request id is already in use
+    at insertSupportNote (D:/Muthoy/apps/admin/lib/adminSupportStore.ts:371:13)
+    at addSupportNote (D:/Muthoy/apps/admin/lib/adminSupportActions.ts:314:26)
+    at D:/Muthoy/apps/admin/lib/adminSupportRetry.test.ts:141:12
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminSupportRetry.test.ts > support write replay protection > a case request id cannot be reused with changed payload: {"shopId":"7b000000-0000-4000-8000-000000000004"}
+[admin] support case open failed: AdminDataError: support case request id is already in use
+    at insertSupportCase (D:/Muthoy/apps/admin/lib/adminSupportStore.ts:273:13)
+    at openSupportCase (D:/Muthoy/apps/admin/lib/adminSupportActions.ts:124:34)
+    at D:/Muthoy/apps/admin/lib/adminSupportRetry.test.ts:149:12
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminSupportRetry.test.ts > support write replay protection > a case request id cannot be reused with changed payload: {"category":"payment"}
+[admin] support case open failed: AdminDataError: support case request id is already in use
+    at insertSupportCase (D:/Muthoy/apps/admin/lib/adminSupportStore.ts:273:13)
+    at openSupportCase (D:/Muthoy/apps/admin/lib/adminSupportActions.ts:124:34)
+    at D:/Muthoy/apps/admin/lib/adminSupportRetry.test.ts:149:12
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminSupportRetry.test.ts > support write replay protection > a case request id cannot be reused with changed payload: {"priority":"high"}
+[admin] support case open failed: AdminDataError: support case request id is already in use
+    at insertSupportCase (D:/Muthoy/apps/admin/lib/adminSupportStore.ts:273:13)
+    at openSupportCase (D:/Muthoy/apps/admin/lib/adminSupportActions.ts:124:34)
+    at D:/Muthoy/apps/admin/lib/adminSupportRetry.test.ts:149:12
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminSupportRetry.test.ts > support write replay protection > a case request id cannot be reused with changed payload: {"summary":"Changed summary"}
+[admin] support case open failed: AdminDataError: support case request id is already in use
+    at insertSupportCase (D:/Muthoy/apps/admin/lib/adminSupportStore.ts:273:13)
+    at openSupportCase (D:/Muthoy/apps/admin/lib/adminSupportActions.ts:124:34)
+    at D:/Muthoy/apps/admin/lib/adminSupportRetry.test.ts:149:12
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/lib/adminSupportRetry.test.ts > support write replay protection > a different admin cannot claim another admin's case replay
+[admin] support case open failed: AdminDataError: support case request id is already in use
+    at insertSupportCase (D:/Muthoy/apps/admin/lib/adminSupportStore.ts:273:13)
+    at openSupportCase (D:/Muthoy/apps/admin/lib/adminSupportActions.ts:124:34)
+    at D:/Muthoy/apps/admin/lib/adminSupportRetry.test.ts:157:12
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+ ✓ apps/admin/lib/adminSupportRetry.test.ts (15 tests) 111ms
+ ✓ apps/admin/middleware.test.ts (32 tests) 86ms
+stderr | apps/admin/lib/publicationWriter.test.ts > the permission comes first > a role without publications.write is refused before the source is read
+[admin-audit] {"at":"2026-11-16T09:51:06.018Z","actor":"founder","actorVerified":true,"role":"billing","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"publications.write"}}
+
+stderr | apps/admin/lib/publicationWriter.test.ts > the permission comes first > billing cannot publish
+[admin-audit] {"at":"2026-11-16T09:51:06.028Z","actor":"founder","actorVerified":true,"role":"billing","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"publications.write"}}
+
+stderr | apps/admin/lib/publicationWriter.test.ts > the permission comes first > support cannot publish
+[admin-audit] {"at":"2026-11-16T09:51:06.031Z","actor":"founder","actorVerified":true,"role":"support","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"publications.write"}}
+
+stderr | apps/admin/lib/publicationWriter.test.ts > the permission comes first > read_only cannot publish
+[admin-audit] {"at":"2026-11-16T09:51:06.033Z","actor":"founder","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"publications.write"}}
+
+stderr | apps/admin/lib/publicationWriter.test.ts > what is sent to SQL > reports an RPC failure without leaking the SQL message
+[admin] publish_financial_snapshot failed: duplicate key value violates unique constraint "x" DETAIL: value_paisa=40000
+
+ ✓ apps/admin/lib/publicationWriter.test.ts (26 tests) 81ms
+ ✓ apps/admin/lib/adminMetrics.test.ts (60 tests) 81ms
+ ✓ apps/admin/lib/adminRoles.test.ts (74 tests) 122ms
+ ✓ apps/admin/lib/adminValidation.test.ts (74 tests) 77ms
+ ✓ apps/admin/lib/adminSession.test.ts (42 tests) 77ms
+stderr | apps/admin/lib/adminQueries.test.ts > the reads themselves > a failing read raises AdminDataError, never a partial list
+[admin] billing_accounts query failed: billing_accounts read failed
+
+stderr | apps/admin/lib/adminQueries.test.ts > the reads themselves > a failing read raises AdminDataError, never a partial list
+[admin] payment_orders query failed: payment_orders read failed
+
+stderr | apps/admin/lib/adminQueries.test.ts > the reads themselves > a failing read raises AdminDataError, never a partial list
+[admin] billing_subscriptions query failed: billing_subscriptions read failed
+
+stderr | apps/admin/lib/adminQueries.test.ts > the reads themselves > a failing read does not leak the driver message to the caller
+[admin] shop detail query failed: shops read failed
+
+stderr | apps/admin/lib/adminQueries.test.ts > the reads themselves > a failing read does not leak the driver message to the caller
+[admin] shop detail query failed: shops read failed
+
+ ✓ apps/admin/lib/adminQueries.test.ts (20 tests) 80ms
+ ✓ apps/admin/lib/adminSubscriptionViews.test.ts (23 tests) 59ms
+ ✓ apps/admin/lib/adminFilters.test.ts (61 tests) 72ms
+ ✓ apps/admin/lib/adminViews.test.ts (50 tests) 69ms
+ ✓ apps/admin/lib/adminAuditViews.test.ts (35 tests) 61ms
+ ✓ apps/admin/lib/adminPdf.test.ts (19 tests) 79ms
+stderr | apps/admin/lib/adminEntitlementVerdicts.test.ts > the entitlement verdict is fetched, not derived > ONE account failing raises, although the other replied
+[admin] entitlement verdict failed: permission denied for function b4_effective_tier
+
+stderr | apps/admin/lib/adminEntitlementVerdicts.test.ts > the entitlement verdict is fetched, not derived > every account failing also raises
+[admin] entitlement verdict failed: permission denied for function b4_effective_tier
+
+stderr | apps/admin/lib/adminEntitlementVerdicts.test.ts > the entitlement verdict is fetched, not derived > a snapshot that MOVES mid-fan-out is refused, not reported
+[admin] entitlement snapshots moved while their verdicts were read
+
+ ✓ apps/admin/lib/adminEntitlementVerdicts.test.ts (11 tests) 58ms
+ ✓ apps/admin/lib/serviceRoleExposure.test.ts (19 tests) 46ms
+ ✓ apps/admin/lib/adminAudit.test.ts (51 tests) 44ms
+stderr | apps/admin/lib/publicationQueries.test.ts > reading the published set > a read FAILURE yields unavailable, which is not the same as empty
+[admin] reading financial_publications failed: relation "financial_publications" does not exist
+
+stderr | apps/admin/lib/publicationQueries.test.ts > reading the published set > a money column outside the safe integer range makes the set unavailable, not short
+[admin] a financial_publications row could not be converted: publication column gross_paisa is not a safe integer: 9007199254740993
+
+stderr | apps/admin/lib/publicationQueries.test.ts > a truncated read is refused, not answered > a truncated PUBLICATIONS read yields unavailable
+[admin] the financial_publications read is not trustworthy: the server reported 1001 rows and returned 1
+
+stderr | apps/admin/lib/publicationQueries.test.ts > a truncated read is refused, not answered > a truncated AUDIT read yields unavailable, which is the dangerous direction
+[admin] the publication audit read is not trustworthy: the server reported 1001 rows and returned 1
+
+stderr | apps/admin/lib/publicationQueries.test.ts > a truncated read is refused, not answered > an UNKNOWN count is refused, because it is not proof of completeness
+[admin] the financial_publications read is not trustworthy: the server did not report an exact row count (null)
+
+stderr | apps/admin/lib/publicationQueries.test.ts > a truncated read is refused, not answered > an UNKNOWN count is refused, because it is not proof of completeness
+[admin] the publication audit read is not trustworthy: the server did not report an exact row count (null)
+
+stderr | apps/admin/lib/publicationQueries.test.ts > the audit cross-check > a period the audit log records as published, with no serving row, is UNAVAILABLE
+[admin] financial_publications is missing periods the audit log records as published: 2026-10
+
+stderr | apps/admin/lib/publicationQueries.test.ts > the audit cross-check > an audit read failure makes the set unavailable rather than unchecked
+[admin] reading publication audit history failed: permission denied
+
+ ✓ apps/admin/lib/publicationQueries.test.ts (20 tests) 35ms
+ ✓ apps/admin/lib/adminGeo.test.ts (40 tests) 37ms
+ ✓ apps/admin/lib/adminIdentity.test.ts (36 tests) 32ms
+ ✓ apps/admin/lib/adminDashboard.test.ts (37 tests) 36ms
+ ✓ apps/admin/lib/platformStats.test.ts (14 tests) 42ms
+ ✓ apps/admin/lib/adminSuppression.test.ts (27 tests) 36ms
+ ✓ apps/admin/lib/adminCsv.test.ts (23 tests) 49ms
+ ✓ apps/admin/lib/basicAuth.test.ts (10 tests) 32ms
+
+ Test Files  40 passed (40)
+      Tests  1611 passed (1611)
+   Start at  15:50:17
+   Duration  66.41s (import 49%, tests 48%, transform 2%, worker 1%)
+
+     Import  134 modules were evaluated 271 times · 23.06s total, 49% of tracked time
+             ~11.66s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation
+

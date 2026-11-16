@@ -1,0 +1,22 @@
+ ⨯ Failed to load env from .env.local Error: INTEGRATION_PRIVATE_ENV_READ_REFUSED
+    at checkFile (D:\Muthoy\docs\plans\external-integration-2026-11-15\verification-guard.cjs:12:11)
+    at fs.<computed> [as readFileSync] (D:\Muthoy\docs\plans\external-integration-2026-11-15\verification-guard.cjs:17:42)
+   ▲ Next.js 15.5.29
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 25.9s
+   Linting and checking validity of types ...
+ ⨯ ESLint: Failed to load plugin 'react-hooks' declared in ' » eslint-config-next/core-web-vitals » D:\Muthoy\node_modules\.pnpm\_58aff5c17dcde69fa25f1de6e9ce939c\node_modules\eslint-config-next\index.js': Cannot find module 'eslint-plugin-react-hooks' Require stack: - D:\Muthoy\apps\admin\__placeholder__.js Referenced from: D:\Muthoy\node_modules\.pnpm\_58aff5c17dcde69fa25f1de6e9ce939c\node_modules\eslint-config-next\index.js
+Failed to compile.
+
+./components/AppearanceControls.tsx:13:12
+Type error: Object is possibly 'undefined'.
+
+[0m [90m 11 |[39m           title[33m=[39m{mode [33m===[39m [32m'system'[39m [33m?[39m [32m'Follow your device appearance'[39m [33m:[39m [32m`Use ${mode} mode`[39m}
+ [90m 12 |[39m         [33m>[39m
+[31m[1m>[22m[39m[90m 13 |[39m           {mode[[35m0[39m][33m.[39mtoUpperCase() [33m+[39m mode[33m.[39mslice([35m1[39m)}
+ [90m    |[39m            [31m[1m^[22m[39m
+ [90m 14 |[39m         [33m<[39m[33m/[39m[33mbutton[39m[33m>[39m
+ [90m 15 |[39m       ))}
+ [90m 16 |[39m     [33m<[39m[33m/[39m[33mdiv[39m[33m>[39m[0m
+Next.js build worker exited with code: 1 and signal: null

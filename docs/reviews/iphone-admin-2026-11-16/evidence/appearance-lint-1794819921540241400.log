@@ -1,0 +1,17 @@
+
+Oops! Something went wrong! :(
+
+ESLint: 9.39.5
+
+ESLint couldn't find the plugin "eslint-plugin-react-hooks".
+
+(The package "eslint-plugin-react-hooks" was not found when loaded as a Node module from the directory "D:\Muthoy\apps\admin".)
+
+It's likely that the plugin isn't installed correctly. Try reinstalling by running the following:
+
+    npm install eslint-plugin-react-hooks@latest --save-dev
+
+The plugin "eslint-plugin-react-hooks" was referenced from the config file in " » eslint-config-next/core-web-vitals » D:\Muthoy\node_modules\.pnpm\_58aff5c17dcde69fa25f1de6e9ce939c\node_modules\eslint-config-next\index.js".
+
+If you still can't figure out the problem, please see https://eslint.org/docs/latest/use/troubleshooting.
+

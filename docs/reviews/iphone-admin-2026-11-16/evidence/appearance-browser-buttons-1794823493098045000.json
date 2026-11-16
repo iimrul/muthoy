@@ -1,0 +1,17 @@
+{
+  "task": "browser-buttons",
+  "command": [
+    "node",
+    "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\appearance-check.mjs",
+    "--quick",
+    "--visible",
+    "--buttons-only"
+  ],
+  "startUTC": "2026-11-16T10:04:53.099163+00:00",
+  "endUTC": "2026-11-16T10:06:14.251424+00:00",
+  "exitCode": 1,
+  "log": "appearance-browser-buttons-1794823493098045000.log",
+  "logSha256": "04aa575212a665a4ae1169dc6aeb99991505ec68eeef159b4024f6131ddb8c72",
+  "scratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-appearance-browser-buttons-1794823493098045000",
+  "scope": "Synthetic loopback only; private env and hosted networking refused"
+}

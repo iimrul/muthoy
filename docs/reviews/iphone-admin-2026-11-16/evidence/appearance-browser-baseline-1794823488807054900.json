@@ -1,0 +1,19 @@
+{
+  "task": "browser-baseline",
+  "command": [
+    "node",
+    "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\appearance-check.mjs",
+    "--quick",
+    "--visible",
+    "--buttons-only",
+    "--isolated-production",
+    "--baseline-layout"
+  ],
+  "startUTC": "2026-11-16T10:04:48.808139+00:00",
+  "endUTC": "2026-11-16T10:06:55.243268+00:00",
+  "exitCode": 1,
+  "log": "appearance-browser-baseline-1794823488807054900.log",
+  "logSha256": "27f4e454ea4f1fedc71895110f5240136bdef066b7bcc36d9ca1a558643e5fbf",
+  "scratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-appearance-browser-baseline-1794823488807054900",
+  "scope": "Synthetic loopback only; private env and hosted networking refused"
+}

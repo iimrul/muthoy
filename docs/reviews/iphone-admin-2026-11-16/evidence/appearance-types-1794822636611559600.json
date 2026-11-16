@@ -1,0 +1,15 @@
+{
+  "task": "types",
+  "command": [
+    "node",
+    "D:\\Muthoy\\apps\\admin\\node_modules\\typescript\\bin\\tsc",
+    "--noEmit"
+  ],
+  "startUTC": "2026-11-16T09:50:36.612642+00:00",
+  "endUTC": "2026-11-16T09:50:49.337846+00:00",
+  "exitCode": 0,
+  "log": "appearance-types-1794822636611559600.log",
+  "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "scratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-appearance-types-1794822636611559600",
+  "scope": "Synthetic loopback only; private env and hosted networking refused"
+}

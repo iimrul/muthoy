@@ -1,0 +1,16 @@
+{
+  "task": "browser-quick",
+  "command": [
+    "node",
+    "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\appearance-check.mjs",
+    "--quick",
+    "--visible"
+  ],
+  "startUTC": "2026-11-16T09:38:04.264036+00:00",
+  "endUTC": "2026-11-16T09:38:49.104795+00:00",
+  "exitCode": 1,
+  "log": "appearance-browser-quick-1794821884263408800.log",
+  "logSha256": "f6c0afe29a5868625755aac262bc8ce56f9d767e946683483f5eab39a43bc921",
+  "scratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-appearance-browser-quick-1794821884263408800",
+  "scope": "Synthetic loopback only; private env and hosted networking refused"
+}

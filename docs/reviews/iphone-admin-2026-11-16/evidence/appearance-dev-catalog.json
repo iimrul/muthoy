@@ -1,0 +1,53 @@
+{
+  "project": "btfprhticjgeihcngpif",
+  "method": "Supabase MCP execute_sql; SELECT of catalogs, migration count and privilege metadata only. No business records read. No writes.",
+  "rows": [
+    {
+      "checked_at": "2026-11-16 09:21:25.999753+00",
+      "migration_count": 40,
+      "admin_stores": [
+        {
+          "rls": true,
+          "table": "admin_audit_log",
+          "anon_select": false,
+          "service_select": true
+        },
+        {
+          "rls": true,
+          "table": "admin_platform_settings",
+          "anon_select": false,
+          "service_select": true
+        },
+        {
+          "rls": true,
+          "table": "admin_role_assignments",
+          "anon_select": false,
+          "service_select": true
+        },
+        {
+          "rls": true,
+          "table": "admin_support_cases",
+          "anon_select": false,
+          "service_select": true
+        },
+        {
+          "rls": true,
+          "table": "admin_support_notes",
+          "anon_select": false,
+          "service_select": true
+        },
+        {
+          "rls": true,
+          "table": "financial_publications",
+          "anon_select": false,
+          "service_select": true
+        }
+      ],
+      "shop_audit_select": true,
+      "admin_rpcs": [
+        "b4_reconcile_plan_limits",
+        "publish_financial_snapshot"
+      ]
+    }
+  ]
+}
