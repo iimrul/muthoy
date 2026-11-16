@@ -1,0 +1,16 @@
+{
+  "task": "lint",
+  "command": [
+    "pnpm.cmd",
+    "lint"
+  ],
+  "startUTC": "2026-11-16T00:42:50.486280+00:00",
+  "endUTC": "2026-11-16T00:46:28.651736+00:00",
+  "exitCode": 0,
+  "log": "remediation-lint-1794789770485326600.log",
+  "logSha256": "9a11620fc1eda1b76b824a40bcb3be1b31fa5bcf1113d82650466d4a9b166b2c",
+  "privateFiles": "refused",
+  "databases": "new scratch or memory only",
+  "network": "loopback only",
+  "deviceAcceptance": "NOT RUN"
+}

@@ -18,7 +18,10 @@ export function thermalColumns(label: string, value: string, width = WIDTH): str
   const available = Math.max(1, width - right.length - 1);
   return `${left.slice(0, available)} ${right.slice(-Math.min(right.length, width - 1))}`.slice(0, width);
 }
-function ascii(value: string): Uint8Array { return new TextEncoder().encode(thermalText(value)); }
+function ascii(value: string): Uint8Array {
+  // Builder-owned LF delimiters survive; field helpers still sanitize control bytes.
+  return new TextEncoder().encode(value.split('\n').map((row) => thermalText(row)).join('\n'));
+}
 function combine(parts: readonly Uint8Array[]): Uint8Array {
   const total = parts.reduce((sum, part) => sum + part.length, 0); const output = new Uint8Array(total); let offset = 0;
   for (const part of parts) { output.set(part, offset); offset += part.length; } return output;
@@ -43,7 +46,7 @@ export function buildMonthlyPnlPrint(shopName: string, report: MonthlyReportSnap
     thermalColumns('Expenses', `-${paisaToTakaText(report.totals.expenses)}`), '-'.repeat(WIDTH),
     thermalColumns(report.totals.netProfit < 0 ? 'NET LOSS' : 'NET PROFIT', paisaToTakaText(report.totals.netProfit)),
     '', report.totals.isCogsPartial ? 'WARNING: COGS is partial' : '', 'English-only thermal output', '', ''];
-  return combine([new Uint8Array([ESC,0x40,ESC,0x61,0x00]), ascii(`${rows.filter(Boolean).join('\n')}\n`), new Uint8Array([GS,0x56,0x41,0x03])]);
+  return combine([new Uint8Array([ESC,0x40,ESC,0x61,0x00]), ascii(`${rows.filter(Boolean).join('\n')}\n\n\n`), new Uint8Array([GS,0x56,0x41,0x03])]);
 }
 
 export function buildEodReportPrint(shopName: string, report: ReportSnapshot): Uint8Array {

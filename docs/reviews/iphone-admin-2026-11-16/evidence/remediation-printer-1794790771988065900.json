@@ -1,0 +1,21 @@
+{
+  "task": "printer",
+  "command": [
+    "node",
+    "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-remediation-publication\\source\\node_modules\\vitest\\vitest.mjs",
+    "run",
+    "--maxWorkers=1",
+    "apps/mobile/domain/escpos.test.ts",
+    "apps/mobile/native/printer.test.ts",
+    "apps/mobile/tests/ios-native-compatibility.test.ts"
+  ],
+  "startUTC": "2026-11-16T00:59:31.989104+00:00",
+  "endUTC": "2026-11-16T00:59:35.782769+00:00",
+  "exitCode": 0,
+  "log": "remediation-printer-1794790771988065900.log",
+  "logSha256": "6fccdb70eca38cdbfac2507df9a02c484a5b4b12ed0144590059b4589e772f48",
+  "privateFiles": "refused",
+  "databases": "new scratch or memory only",
+  "network": "loopback only",
+  "deviceAcceptance": "NOT RUN"
+}

@@ -1,0 +1,20 @@
+{
+  "task": "database-regression",
+  "command": [
+    "node",
+    "D:\\Muthoy\\node_modules\\vitest\\vitest.mjs",
+    "run",
+    "--maxWorkers=1",
+    "backend/supabase/pgtest/staff-sale-credit.pgtest.ts",
+    "backend/supabase/pgtest/role-switch-credit-contract.pgtest.ts"
+  ],
+  "startUTC": "2026-11-16T00:50:19.040470+00:00",
+  "endUTC": "2026-11-16T00:57:00.673763+00:00",
+  "exitCode": 0,
+  "log": "remediation-database-regression-1794790219039284300.log",
+  "logSha256": "b6c67f43715c7a1e04405d7df8659349b3de5c5c23bb29b0d5252657e1de4542",
+  "privateFiles": "refused",
+  "databases": "new scratch or memory only",
+  "network": "loopback only",
+  "deviceAcceptance": "NOT RUN"
+}

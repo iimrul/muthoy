@@ -1,0 +1,117 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+ ❯ backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts (54 tests | 16 failed) 49240ms
+   ❯ held Admin compatibility — exact DEV order=true (27)
+     ✓ changes no existing business rows, sync/entitlement functions or unrelated table ACLs 107ms
+     ✓ the retained Staff repair uploads cash=100 sale once and still denies standalone credit edits 699ms
+     ✓ the retained Staff repair uploads cash=0 sale once and still denies standalone credit edits 321ms
+     ✓ all six stores enforce RLS and have no API policies 30ms
+     ✓ anon cannot read or insert into any Admin store or execute the publication RPC 400ms
+     ✓ authenticated cannot read or insert into any Admin store or execute the publication RPC 281ms
+     ✓ service_role reads all stores and shop audit; cannot write shop audit or refunds 221ms
+     ✓ role narrowing, disabling and revocation persist; attribution and deletion stay forbidden 104ms
+     ✓ audit appends durable records and refuses modification, deletion and truncation 44ms
+     ✓ support cases/notes persist; foreign shops, moved attribution and removed history are refused 100ms
+     ✓ settings persist only allowlisted keys, with immutable identity 56ms
+     ✓ publication and audit commit together; a repeat reads the first value without leaking new amounts 126ms
+     ✓ refuses unsafe publication {"month":2,"k":1} without an audit/publication write 18ms
+     ✓ refuses unsafe publication {"month":2,"clearing":2} without an audit/publication write 17ms
+     ✓ refuses unsafe publication {"month":2,"cohort":"single_shop"} without an audit/publication write 16ms
+     ✓ refuses unsafe publication {"month":2,"start":"2025-02-02"} without an audit/publication write 18ms
+     ✓ refuses unsafe publication {"month":2,"gross":50000,"refunds":10000,"value":39999} without an audit/publication write 21ms
+     ✓ failed publication audit rolls back its serving row 36ms
+     ✓ both publication functions pin search_path; the trigger helper has no direct service/API grant 29ms
+     × reapplication preserves business rows, Admin history and schema 103ms
+     × refuses unknown/partial installation atomically: alter table admin_platform_settings add column synthetic_unreviewed text 2ms
+     × refuses unknown/partial installation atomically: grant select(username) on admin_role_assignments to anon 2ms
+     × refuses unknown/partial installation atomically: drop table admin_platform_settings 2ms
+     × refuses unknown/partial installation atomically: alter table admin_role_assignments disable row level security 2ms
+     × refuses unknown/partial installation atomically: create policy synthetic_exposure on admin_role_assignments for select to anon using (true) 2ms
+     × refuses unknown/partial installation atomically: create or replace function sync_apply_operation_pre_b3_withdrawal(uuid,uuid,text,uuid,text,jsonb)
+      returns text language sql security definer set search_path=public as 'select ''unknown''::text' 2ms
+     × an isolated backup restores Admin history, publications, business data and Staff function 3ms
+   ❯ held Admin compatibility — exact DEV order=false (27)
+     ✓ changes no existing business rows, sync/entitlement functions or unrelated table ACLs 102ms
+     ✓ the retained Staff repair uploads cash=100 sale once and still denies standalone credit edits 974ms
+     ✓ the retained Staff repair uploads cash=0 sale once and still denies standalone credit edits 289ms
+     ✓ all six stores enforce RLS and have no API policies 9ms
+     ✓ anon cannot read or insert into any Admin store or execute the publication RPC 234ms
+     ✓ authenticated cannot read or insert into any Admin store or execute the publication RPC 164ms
+     ✓ service_role reads all stores and shop audit; cannot write shop audit or refunds 656ms
+     ✓ role narrowing, disabling and revocation persist; attribution and deletion stay forbidden 86ms
+     ✓ audit appends durable records and refuses modification, deletion and truncation 75ms
+     ✓ support cases/notes persist; foreign shops, moved attribution and removed history are refused 162ms
+     ✓ settings persist only allowlisted keys, with immutable identity 68ms
+     ✓ publication and audit commit together; a repeat reads the first value without leaking new amounts 156ms
+     ✓ refuses unsafe publication {"month":2,"k":1} without an audit/publication write 19ms
+     ✓ refuses unsafe publication {"month":2,"clearing":2} without an audit/publication write 18ms
+     ✓ refuses unsafe publication {"month":2,"cohort":"single_shop"} without an audit/publication write 22ms
+     ✓ refuses unsafe publication {"month":2,"start":"2025-02-02"} without an audit/publication write 29ms
+     ✓ refuses unsafe publication {"month":2,"gross":50000,"refunds":10000,"value":39999} without an audit/publication write 19ms
+     ✓ failed publication audit rolls back its serving row 29ms
+     ✓ both publication functions pin search_path; the trigger helper has no direct service/API grant 20ms
+     × reapplication preserves business rows, Admin history and schema 123ms
+     × refuses unknown/partial installation atomically: alter table admin_platform_settings add column synthetic_unreviewed text 3ms
+     × refuses unknown/partial installation atomically: grant select(username) on admin_role_assignments to anon 3ms
+     × refuses unknown/partial installation atomically: drop table admin_platform_settings 3ms
+     × refuses unknown/partial installation atomically: alter table admin_role_assignments disable row level security 2ms
+     × refuses unknown/partial installation atomically: create policy synthetic_exposure on admin_role_assignments for select to anon using (true) 2ms
+     × refuses unknown/partial installation atomically: create or replace function sync_apply_operation_pre_b3_withdrawal(uuid,uuid,text,uuid,text,jsonb)
+      returns text language sql security definer set search_path=public as 'select ''unknown''::text' 2ms
+     × an isolated backup restores Admin history, publications, business data and Staff function 2ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 16 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true > reapplication preserves business rows, Admin history and schema
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false > reapplication preserves business rows, Admin history and schema
+error: Admin compatibility refused: unknown publication implementation
+ ❯ pe.Ue node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pg-protocol/src/parser.ts:433:40
+ ❯ pe.tt node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pg-protocol/src/parser.ts:218:9
+ ❯ pe.parse node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pg-protocol/src/parser.ts:99:39
+ ❯ O.qe node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pglite/src/pglite.ts:758:26
+ ❯ node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pglite/src/pglite.ts:711:14
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:5921341
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:2615851
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:2648337
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:2648941
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:5569674
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/16]⎯
+
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true > refuses unknown/partial installation atomically: alter table admin_platform_settings add column synthetic_unreviewed text
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true > refuses unknown/partial installation atomically: grant select(username) on admin_role_assignments to anon
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true > refuses unknown/partial installation atomically: drop table admin_platform_settings
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true > refuses unknown/partial installation atomically: alter table admin_role_assignments disable row level security
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true > refuses unknown/partial installation atomically: create policy synthetic_exposure on admin_role_assignments for select to anon using (true)
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true > refuses unknown/partial installation atomically: create or replace function sync_apply_operation_pre_b3_withdrawal(uuid,uuid,text,uuid,text,jsonb)
+      returns text language sql security definer set search_path=public as 'select ''unknown''::text'
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true > an isolated backup restores Admin history, publications, business data and Staff function
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false > refuses unknown/partial installation atomically: alter table admin_platform_settings add column synthetic_unreviewed text
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false > refuses unknown/partial installation atomically: grant select(username) on admin_role_assignments to anon
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false > refuses unknown/partial installation atomically: drop table admin_platform_settings
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false > refuses unknown/partial installation atomically: alter table admin_role_assignments disable row level security
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false > refuses unknown/partial installation atomically: create policy synthetic_exposure on admin_role_assignments for select to anon using (true)
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false > refuses unknown/partial installation atomically: create or replace function sync_apply_operation_pre_b3_withdrawal(uuid,uuid,text,uuid,text,jsonb)
+      returns text language sql security definer set search_path=public as 'select ''unknown''::text'
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false > an isolated backup restores Admin history, publications, business data and Staff function
+error: current transaction is aborted, commands ignored until end of transaction block
+ ❯ pe.Ue node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pg-protocol/src/parser.ts:433:40
+ ❯ pe.tt node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pg-protocol/src/parser.ts:218:9
+ ❯ pe.parse node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pg-protocol/src/parser.ts:99:39
+ ❯ O.qe node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pglite/src/pglite.ts:758:26
+ ❯ node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pglite/src/pglite.ts:711:14
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:5921341
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:2615851
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:2648337
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:2648941
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:5569674
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/16]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  16 failed | 38 passed (54)
+   Start at  06:43:40
+   Duration  54.13s (tests 98%, transform 1%, import 1%)
+

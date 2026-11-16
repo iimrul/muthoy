@@ -5107,3 +5107,18 @@ React Native behavior. DEV catalog drift and printer requirement failures remain
 explicit blockers. No protected business/database change is included. Evidence
 and remaining platform acceptance are recorded in
 `docs/reviews/iphone-admin-2026-11-16/REPORT.md`.
+
+## 2026-11-16 — Approved printer repair and held Admin compatibility candidate
+
+Founder approved local remediation. ESC/POS now preserves builder-owned LF and
+the monthly three-line feed; fields retain control-byte sanitization and money
+content. Printer requests send once; uncertain completion never triggers an
+automatic whole-job replay. Explicit user retry remains possible.
+
+The CLI-generated Admin compatibility candidate stays in held-migrations. It
+restores only the missing platform stores/publication contract and required
+read-only grants, retaining existing Staff-sale/sync/entitlement functions.
+Unknown installations fail preflight. Local PostgreSQL role, replay, audit and
+synthetic restore tests do not authorize hosted activation or establish device
+acceptance. No migration-history repair or unrelated integration is activated.
+Current results and remaining gates: docs/reviews/iphone-admin-2026-11-16/REMEDIATION.md.

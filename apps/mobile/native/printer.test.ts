@@ -18,7 +18,7 @@ const { getPairedPrinter, printEscPos, removePairedPrinter, savePairedPrinter } 
 
 beforeEach(() => { native.print.mockReset(); native.scan.mockReset(); removePairedPrinter(); });
 
-describe('BLE printer connection truth and bounded retry', () => {
+describe('BLE printer connection truth and single delivery attempt', () => {
   it('keeps discovery selected-but-unvalidated until a real write completes', async () => {
     const selected = savePairedPrinter({ id:'AA:BB',name:'Printer',rssi:-40 });
     expect(selected.validatedAt).toBeUndefined();
@@ -28,18 +28,21 @@ describe('BLE printer connection truth and bounded retry', () => {
     expect(getPairedPrinter()?.validatedAt).toEqual(expect.any(String));
   });
 
-  it('reconnects once for a transient disconnect, then succeeds', async () => {
+  it('surfaces a disconnect once; a new explicit request can succeed', async () => {
     const selected = savePairedPrinter({ id:'AA:BB',name:'Printer',rssi:-40 });
     native.print.mockRejectedValueOnce({ code:'DISCONNECTED',message:'lost' }).mockResolvedValueOnce(undefined);
+    await expect(printEscPos(new Uint8Array([1]),selected)).rejects.toMatchObject({ code:'disconnected' });
+    expect(native.print).toHaveBeenCalledTimes(1);
+    expect(getPairedPrinter()?.validatedAt).toBeUndefined();
     await printEscPos(new Uint8Array([1]),selected);
     expect(native.print).toHaveBeenCalledTimes(2);
   });
 
-  it('stops after the bounded retry and never invents paper status', async () => {
+  it('never repeats a failed send or invents paper status', async () => {
     const selected = savePairedPrinter({ id:'AA:BB',name:'Printer',rssi:-40 });
     native.print.mockRejectedValue({ code:'SEND_FAILED',message:'failed' });
     await expect(printEscPos(new Uint8Array([1]),selected)).rejects.toMatchObject({ code:'send-failed' });
-    expect(native.print).toHaveBeenCalledTimes(2);
+    expect(native.print).toHaveBeenCalledTimes(1);
     native.print.mockReset(); native.print.mockRejectedValue({ code:'OUT_OF_PAPER',message:'unverified' });
     await expect(printEscPos(new Uint8Array([1]),selected)).rejects.toEqual(expect.objectContaining({ code:'unknown' }));
     expect(native.print).toHaveBeenCalledTimes(1);

@@ -1,4 +1,7 @@
-# Protected remediation — approval required, not executed
+# Protected remediation — local implementation approved
+
+16 November: Founder approved local implementation in chat. Current changes and
+test results: [REMEDIATION.md](REMEDIATION.md). Hosted activation remains separate.
 
 Evidence: `evidence/database-parity.json`, `dev-effective-privileges.json`,
 `dev-migrations.json`, and the printer requirement test log.
@@ -60,5 +63,6 @@ Repeat on Android. Do not clear, reinstall over, hydrate, or mutate an existing
 shop/device without separately approved bounded steps and a recovery path.
 
 No schema, sync, auth, money/stock writer, hosted mutation, device operation or
-deployment is performed by this report. These protected changes await Founder
-approval under `AGENTS.md` → Safety Gate.
+deployment was performed by the original report. Local implementation is now
+approved under `AGENTS.md` → Safety Gate; hosted activation and existing-device
+data operations retain their separate boundaries.

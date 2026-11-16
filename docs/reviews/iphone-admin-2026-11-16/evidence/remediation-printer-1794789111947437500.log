@@ -1,0 +1,17 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+ ✓ apps/mobile/tests/ios-native-compatibility.test.ts (11 tests) 692ms
+   ✓ same-app iOS native integration source contracts (8)
+     ✓ preserves independent synthetic bcrypt/HMAC golden values used by native XCTest 589ms
+ ✓ apps/mobile/native/printer.test.ts (8 tests) 50ms
+ ✓ apps/mobile/domain/escpos.test.ts (3 tests) 26ms
+
+ Test Files  3 passed (3)
+      Tests  22 passed (22)
+   Start at  06:31:54
+   Duration  4.03s (tests 48%, transform 33%, import 15%, worker 4%)
+
+    Isolate  3 workers spawned · ~756ms startup each (spawn + environment, per file)
+             at least ~1.51s faster with isolate: false — reuses workers across files instead of one per file
+

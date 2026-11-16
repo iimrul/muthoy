@@ -49,14 +49,9 @@ export async function scanBlePrinters(): Promise<DiscoveredPrinter[]> {
 export async function printEscPos(bytes: Uint8Array, printer: PairedPrinter | null = getPairedPrinter()): Promise<void> {
   if (!printer) throw new PrinterError('no-device', 'No printer paired');
   await requestPermissions();
-  const payload = bytesToBase64(bytes); let lastError: PrinterError | null = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try { await printBleBytesNative(printer.id, payload); markValidated(printer); return; }
-    catch (error) {
-      lastError = mapNativeError(error);
-      if (!['out-of-range','disconnected','send-failed'].includes(lastError.code) || attempt === 1) throw lastError;
-      await new Promise<void>((resolve) => setTimeout(resolve, 150));
-    }
-  }
-  throw lastError ?? new PrinterError('unknown', 'Printer operation failed');
+  // Native rejection can follow partial/full delivery. A whole-job retry could
+  // duplicate paper; only a new, explicit user request may send the job again.
+  try { await printBleBytesNative(printer.id, bytesToBase64(bytes)); }
+  catch (error) { throw mapNativeError(error); }
+  markValidated(printer);
 }

@@ -1,0 +1,15 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+ ✓ backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts (58 tests) 24563ms
+   ✓ held Admin compatibility — exact DEV order=true (29)
+     ✓ the retained Staff repair uploads cash=100 sale once and still denies standalone credit edits 303ms
+     ✓ an isolated backup restores Admin history, publications, business data and Staff function 3755ms
+   ✓ held Admin compatibility — exact DEV order=false (29)
+     ✓ an isolated backup restores Admin history, publications, business data and Staff function 3464ms
+
+ Test Files  1 passed (1)
+      Tests  58 passed (58)
+   Start at  06:47:34
+   Duration  25.72s (tests 98%, transform 1%, import 1%)
+

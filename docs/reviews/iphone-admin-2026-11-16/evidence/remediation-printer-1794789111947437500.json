@@ -1,0 +1,21 @@
+{
+  "task": "printer",
+  "command": [
+    "node",
+    "D:\\Muthoy\\node_modules\\vitest\\vitest.mjs",
+    "run",
+    "--maxWorkers=1",
+    "apps/mobile/domain/escpos.test.ts",
+    "apps/mobile/native/printer.test.ts",
+    "apps/mobile/tests/ios-native-compatibility.test.ts"
+  ],
+  "startUTC": "2026-11-16T00:31:51.948499+00:00",
+  "endUTC": "2026-11-16T00:31:58.596541+00:00",
+  "exitCode": 0,
+  "log": "remediation-printer-1794789111947437500.log",
+  "logSha256": "7d07da11c7fa5aabd6187aca4b6553c02d428626369ff23c8b19c16c7502008b",
+  "privateFiles": "refused",
+  "databases": "new scratch or memory only",
+  "network": "loopback only",
+  "deviceAcceptance": "NOT RUN"
+}

@@ -1,9 +1,11 @@
 # iPhone, Android and Admin verification — 16 November 2026
 
 **Release verdict: NO GO. Everything is not verified working.** Admin presentation
-was refreshed locally. Hosted Admin/database incompatibilities and printer
-requirements remain blockers. An inventory or passing Node test is not a device
-acceptance result.
+was refreshed locally. Hosted Admin/database incompatibilities remain blockers.
+Approved printer source repairs now pass local requirements; physical acceptance
+remains open. See [the remediation follow-up](REMEDIATION.md) for current results.
+The original audit receipts below remain historical. An inventory or passing Node
+test is not a device acceptance result.
 
 ## Built
 
@@ -127,7 +129,10 @@ See [catalog findings](evidence/database-parity.json),
 [effective privileges](evidence/dev-effective-privileges.json) and
 [hosted history](evidence/dev-migrations.json).
 
-### Printing fails current release requirements
+### Printing failures found in the original audit
+
+These source defects were repaired after approval. Current local requirements
+pass; [REMEDIATION.md](REMEDIATION.md) retains both baseline and repair results.
 
 The independent paper model detects missing actual LF row delimiters in test,
 end-of-day and monthly P&L print builders, incorrect test-print rows and missing
@@ -197,8 +202,9 @@ including Owner/Manager/Staff permissions and denied direct navigation.
 Protected remediation remains held by [AGENTS.md](../../../AGENTS.md), Safety Gate:
 “PLAN → identify files/risk/tests → WAIT FOR USER APPROVAL → IMPLEMENT.”
 The [proposed remediation plan](PROTECTED_REMEDIATION_PLAN.md) identifies files,
-risks and tests. Approval is required before those protected fixes; none was
-silently applied.
+risks and tests. Founder subsequently approved local implementation; its source
+changes and verification are recorded in the follow-up. Hosted activation remains
+separate and has not occurred.
 
 ## Files changed
 

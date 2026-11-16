@@ -1,0 +1,74 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+stdout | backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true
+Admin store contract true { hash: '77899583c7cda1baf3b6b55bd8ac237e' }
+
+stdout | backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false
+Admin store contract false { hash: '77899583c7cda1baf3b6b55bd8ac237e' }
+
+ ❯ backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts (36 tests | 2 failed) 17525ms
+   ❯ held Admin compatibility — exact DEV order=true (18)
+     ✓ changes no existing business rows, sync/entitlement functions or unrelated table ACLs 57ms
+     ✓ all six stores enforce RLS and have no API policies 9ms
+     ✓ anon cannot read or insert into any Admin store or execute the publication RPC 115ms
+     ✓ authenticated cannot read or insert into any Admin store or execute the publication RPC 124ms
+     ✓ service_role reads all stores and shop audit; cannot write shop audit or refunds 111ms
+     ✓ role narrowing, disabling and revocation persist; attribution and deletion stay forbidden 27ms
+     ✓ audit appends durable records and refuses modification, deletion and truncation 33ms
+     × support cases/notes persist; foreign shops, moved attribution and removed history are refused 77ms
+     ✓ settings persist only allowlisted keys, with immutable identity 19ms
+     ✓ publication and audit commit together; a repeat reads the first value without leaking new amounts 68ms
+     ✓ refuses unsafe publication {"month":2,"k":1} without an audit/publication write 11ms
+     ✓ refuses unsafe publication {"month":2,"clearing":2} without an audit/publication write 9ms
+     ✓ refuses unsafe publication {"month":2,"cohort":"single_shop"} without an audit/publication write 13ms
+     ✓ refuses unsafe publication {"month":2,"start":"2025-02-02"} without an audit/publication write 13ms
+     ✓ refuses unsafe publication {"month":2,"gross":50000,"refunds":10000,"value":39999} without an audit/publication write 14ms
+     ✓ failed publication audit rolls back its serving row 18ms
+     ✓ both publication functions pin search_path; the trigger helper has no direct service/API grant 12ms
+     ✓ reapplication preserves business rows, Admin history and schema 116ms
+   ❯ held Admin compatibility — exact DEV order=false (18)
+     ✓ changes no existing business rows, sync/entitlement functions or unrelated table ACLs 50ms
+     ✓ all six stores enforce RLS and have no API policies 7ms
+     ✓ anon cannot read or insert into any Admin store or execute the publication RPC 115ms
+     ✓ authenticated cannot read or insert into any Admin store or execute the publication RPC 111ms
+     ✓ service_role reads all stores and shop audit; cannot write shop audit or refunds 94ms
+     ✓ role narrowing, disabling and revocation persist; attribution and deletion stay forbidden 23ms
+     ✓ audit appends durable records and refuses modification, deletion and truncation 23ms
+     × support cases/notes persist; foreign shops, moved attribution and removed history are refused 63ms
+     ✓ settings persist only allowlisted keys, with immutable identity 16ms
+     ✓ publication and audit commit together; a repeat reads the first value without leaking new amounts 67ms
+     ✓ refuses unsafe publication {"month":2,"k":1} without an audit/publication write 14ms
+     ✓ refuses unsafe publication {"month":2,"clearing":2} without an audit/publication write 11ms
+     ✓ refuses unsafe publication {"month":2,"cohort":"single_shop"} without an audit/publication write 11ms
+     ✓ refuses unsafe publication {"month":2,"start":"2025-02-02"} without an audit/publication write 11ms
+     ✓ refuses unsafe publication {"month":2,"gross":50000,"refunds":10000,"value":39999} without an audit/publication write 11ms
+     ✓ failed publication audit rolls back its serving row 15ms
+     ✓ both publication functions pin search_path; the trigger helper has no direct service/API grant 7ms
+     ✓ reapplication preserves business rows, Admin history and schema 94ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true > support cases/notes persist; foreign shops, moved attribution and removed history are refused
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false > support cases/notes persist; foreign shops, moved attribution and removed history are refused
+AssertionError: expected '23001' to be '23503' // Object.is equality
+
+Expected: "23503"
+Received: "23001"
+
+ ❯ backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts:152:95
+    150|     for(const statement of ["update admin_support_notes set body='forg…
+    151|       expect(await attempt(h,'service_role',statement)).toBe('42501');
+    152|     expect(await attempt(h,'postgres',`delete from admin_support_cases…
+       |                                                                                               ^
+    153|   });
+    154|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 34 passed (36)
+   Start at  06:39:18
+   Duration  18.56s (tests 97%, transform 1%, import 1%)
+

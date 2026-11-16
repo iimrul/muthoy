@@ -37,3 +37,7 @@ backend/supabase/checks/e4_postmigration_checks.sql text eol=lf
 backend/supabase/migrations/20261030000000_e4b_publication_snapshots.sql text eol=lf
 backend/supabase/migrations/20261031000000_e11_entitlement_verification.sql text eol=lf
 backend/supabase/migrations/post-e4-source-hashes.json text eol=lf
+
+# Approved local Admin candidate: preserve reviewed bytes and SQL source fingerprints.
+backend/supabase/held-migrations/20261116002928_admin_dev_compatibility.sql text eol=lf
+docs/reviews/iphone-admin-2026-11-16/fixtures/dev-staff-sale-repair.sql text eol=lf

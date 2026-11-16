@@ -1,0 +1,67 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+ ❯ backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts (36 tests | 36 skipped) 18468ms
+   ❯ held Admin compatibility — exact DEV order=true (18)
+     ↓ changes no existing business rows, sync/entitlement functions or unrelated table ACLs
+     ↓ all six stores enforce RLS and have no API policies
+     ↓ anon cannot read or insert into any Admin store or execute the publication RPC
+     ↓ authenticated cannot read or insert into any Admin store or execute the publication RPC
+     ↓ service_role reads all stores and shop audit; cannot write shop audit or refunds
+     ↓ role narrowing, disabling and revocation persist; attribution and deletion stay forbidden
+     ↓ audit appends durable records and refuses modification, deletion and truncation
+     ↓ support cases/notes persist; foreign shops, moved attribution and removed history are refused
+     ↓ settings persist only allowlisted keys, with immutable identity
+     ↓ publication and audit commit together; a repeat reads the first value without leaking new amounts
+     ↓ refuses unsafe publication {"month":2,"k":1} without an audit/publication write
+     ↓ refuses unsafe publication {"month":2,"clearing":2} without an audit/publication write
+     ↓ refuses unsafe publication {"month":2,"cohort":"single_shop"} without an audit/publication write
+     ↓ refuses unsafe publication {"month":2,"start":"2025-02-02"} without an audit/publication write
+     ↓ refuses unsafe publication {"month":2,"gross":50000,"refunds":10000,"value":39999} without an audit/publication write
+     ↓ failed publication audit rolls back its serving row
+     ↓ both publication functions pin search_path; the trigger helper has no direct service/API grant
+     ↓ reapplication preserves business rows, Admin history and schema
+   ❯ held Admin compatibility — exact DEV order=false (18)
+     ↓ changes no existing business rows, sync/entitlement functions or unrelated table ACLs
+     ↓ all six stores enforce RLS and have no API policies
+     ↓ anon cannot read or insert into any Admin store or execute the publication RPC
+     ↓ authenticated cannot read or insert into any Admin store or execute the publication RPC
+     ↓ service_role reads all stores and shop audit; cannot write shop audit or refunds
+     ↓ role narrowing, disabling and revocation persist; attribution and deletion stay forbidden
+     ↓ audit appends durable records and refuses modification, deletion and truncation
+     ↓ support cases/notes persist; foreign shops, moved attribution and removed history are refused
+     ↓ settings persist only allowlisted keys, with immutable identity
+     ↓ publication and audit commit together; a repeat reads the first value without leaking new amounts
+     ↓ refuses unsafe publication {"month":2,"k":1} without an audit/publication write
+     ↓ refuses unsafe publication {"month":2,"clearing":2} without an audit/publication write
+     ↓ refuses unsafe publication {"month":2,"cohort":"single_shop"} without an audit/publication write
+     ↓ refuses unsafe publication {"month":2,"start":"2025-02-02"} without an audit/publication write
+     ↓ refuses unsafe publication {"month":2,"gross":50000,"refunds":10000,"value":39999} without an audit/publication write
+     ↓ failed publication audit rolls back its serving row
+     ↓ both publication functions pin search_path; the trigger helper has no direct service/API grant
+     ↓ reapplication preserves business rows, Admin history and schema
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false
+error: bind message supplies 8 parameters, but prepared statement "" requires 1
+ ❯ pe.Ue node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pg-protocol/src/parser.ts:433:40
+ ❯ pe.tt node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pg-protocol/src/parser.ts:218:9
+ ❯ pe.parse node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pg-protocol/src/parser.ts:99:39
+ ❯ O.qe node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pglite/src/pglite.ts:758:26
+ ❯ node_modules/.pnpm/_417c35709db4753643d171e87a29f77b/node_modules/@electric-sql/pglite/src/pglite.ts:711:14
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:5921341
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:2615851
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:2648337
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:2648941
+ ❯ null.<anonymous> wasm:/wasm/0267b22e:1:5569674
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  36 skipped (36)
+   Start at  06:38:23
+   Duration  19.75s (tests 97%, transform 2%, import 1%)
+

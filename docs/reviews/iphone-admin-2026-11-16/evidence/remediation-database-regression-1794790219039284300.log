@@ -1,0 +1,97 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+ ✓ backend/supabase/pgtest/role-switch-credit-contract.pgtest.ts (33 tests) 204302ms
+   ✓ H-A role-purged credit link and actual server writes (4)
+     ✓ valid collection and replay preserve exact credit/payment/allocation ledgers 16727ms
+     ✓ accepts a null-link Owner collection while preserving the server sale identity 12229ms
+     ✓ denies a foreign Owner with unchanged ledgers 9798ms
+     ✓ denies reassignment of the credit to another shop with unchanged ledgers 10573ms
+   ✓ H-B actual Staff pull parent closure (2)
+     ✓ Owner receives the linked credit and its sale without changing server data 7726ms
+     ✓ Staff own-history pull contains no dangling colleague-credit sale reference 7684ms
+   ✓ HELD credit contract independent boundaries (12)
+     ✓ accepts authorized Staff's masked collection and replay with exact ledgers 7180ms
+     ✓ refuses a different nonnull sale identity without any financial writes 6283ms
+     ✓ preserves an existing link when an update omits the sale_id key 4219ms
+     ✓ keeps standalone credit collections null without guessing a sale 3754ms
+     ✓ keeps existing LWW for timestamp 2026-08-19T09:00:00.000Z 3747ms
+     ✓ keeps existing LWW for timestamp 2026-08-01T00:00:00.000Z 3589ms
+     ✓ keeps revoked Staff collection denied with unchanged ledgers 3986ms
+     ✓ keeps inactive Staff collection denied with unchanged ledgers 3926ms
+     ✓ retains own-Staff and history-authorized credit links 3953ms
+     ✓ changes only masked JSON keys and preserves complete page/cursor ordering 4922ms
+     ✓ keeps unauthorized credit and cross-shop pulls excluded 3877ms
+     ✓ keeps wrapper/internals API-denied and reapplication nonrecursive 3501ms
+   ✓ HELD five-argument compatibility on a warmed SQL session (1)
+     ✓ rebinds the existing delegator after wrapping an already-used six-argument function 4619ms
+   ✓ HELD E4 no-bypass function privileges (1)
+     ✓ denies service-role direct internals while SECURITY DEFINER public wrappers work 3985ms
+   ✓ F3 completed-draft hidden-sale hypothesis: test only (3)
+     ✓ Owner and own-Staff draft links have readable parent controls 4670ms
+     ✓ Staff colleague-completed draft has no unreadable sale FK 5662ms
+     ✓ foreign Owner cannot read another shop's completed draft 6555ms
+   ✓ F4 allocation parent-permission hypothesis: test only (3)
+     ✓ credit-management grant returns both allocation parents 7117ms
+     ✓ credit_view alone does not expose allocations with hidden credit/payment parents 7066ms
+     ✓ sale_return alone does not expose allocations with hidden credit/payment parents 6234ms
+   ✓ F4-C reconciliation/customer parent closure (1)
+     ✓ credit-view-only never receives a reconciliation state without its customer 6698ms
+   ✓ F3/F4 final SQL projection and permission boundaries (6)
+     ✓ masks by sale visibility even when the draft actor is Staff; history restores the exact page 7105ms
+     ✓ projects an incremental colleague draft without changing its cursor columns 5614ms
+     ✓ keeps default sales plus sale_return fail-closed without granting payment access 5745ms
+     ✓ tests each parent denial, grant revocation and the deliberate narrower pull exception 4784ms
+     ✓ preserves complete one-row pagination after excluding unreadable financial children 4020ms
+     ✓ denies direct private readability access and preserves ACLs after reapplication 6735ms
+ ✓ backend/supabase/pgtest/staff-sale-credit.pgtest.ts (42 tests) 190947ms
+   ✓ Staff split/credit atomic sale — DEV31=true (21)
+     ✓ uploads cash=100 paisa with sale-linked credit and exactly one stock delta 7950ms
+     ✓ uploads cash=0 paisa with sale-linked credit and exactly one stock delta 3868ms
+     ✓ retains the existing Owner verifier/hash while accepting Staff metadata refresh 3522ms
+     ✓ keeps standalone reconciliation editing denied 7767ms
+     ✓ never clears existing pending state 6441ms
+     ✓ never clears existing blocked state 5864ms
+     ✓ rejects forged new verifier 8592ms
+     ✓ rejects changing an existing verifier/hash 7582ms
+     ✓ rejects a foreign-shop reconciliation customer 7580ms
+     ✓ rejects metadata tombstones 4783ms
+     ✓ rejects a forged operation actor 3225ms
+     ✓ rolls back metadata when a later credit row fails its customer FK gate 3658ms
+     ✓ rejects reconciliation shop=1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b 5712ms
+     ✓ rejects reconciliation shop=null 4859ms
+     ✓ rejects reconciliation shop=undefined 8858ms
+     ✓ rejects changing the existing verification timestamp 4891ms
+     ✓ never marks unverified historical credit clean 3894ms
+     ✓ refuses a second application without replacing the accepted function 3945ms
+     ✓ requires a complete sale graph 4163ms
+     ✓ cannot use a non-sale kind to carry the exception 3294ms
+     ✓ refuses unknown original function bodies before patching 3198ms
+   ✓ Staff split/credit atomic sale — DEV31=false (21)
+     ✓ uploads cash=100 paisa with sale-linked credit and exactly one stock delta 3874ms
+     ✓ uploads cash=0 paisa with sale-linked credit and exactly one stock delta 4853ms
+     ✓ retains the existing Owner verifier/hash while accepting Staff metadata refresh 3235ms
+     ✓ keeps standalone reconciliation editing denied 3231ms
+     ✓ never clears existing pending state 3263ms
+     ✓ never clears existing blocked state 3855ms
+     ✓ rejects forged new verifier 4262ms
+     ✓ rejects changing an existing verifier/hash 3778ms
+     ✓ rejects a foreign-shop reconciliation customer 3656ms
+     ✓ rejects metadata tombstones 4046ms
+     ✓ rejects a forged operation actor 3968ms
+     ✓ rolls back metadata when a later credit row fails its customer FK gate 3945ms
+     ✓ rejects reconciliation shop=1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b 4181ms
+     ✓ rejects reconciliation shop=null 3818ms
+     ✓ rejects reconciliation shop=undefined 3382ms
+     ✓ rejects changing the existing verification timestamp 3168ms
+     ✓ never marks unverified historical credit clean 3259ms
+     ✓ refuses a second application without replacing the accepted function 3191ms
+     ✓ requires a complete sale graph 3374ms
+     ✓ cannot use a non-sale kind to carry the exception 3684ms
+     ✓ refuses unknown original function bodies before patching 3267ms
+
+ Test Files  2 passed (2)
+      Tests  75 passed (75)
+   Start at  06:50:22
+   Duration  397.99s (tests 100%)
+

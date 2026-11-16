@@ -1,0 +1,15 @@
+
+ RUN  v5.1.0 D:/Muthoy/docs/reviews/iphone-admin-2026-11-16/evidence/scratch-remediation-publication/source
+
+ ✓ backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts (60 tests) 21727ms
+   ✓ held Admin compatibility — exact DEV order=true (30)
+     ✓ the retained Staff repair uploads cash=100 sale once and still denies standalone credit edits 322ms
+     ✓ an isolated backup restores Admin history, publications, business data and Staff function 2627ms
+   ✓ held Admin compatibility — exact DEV order=false (30)
+     ✓ an isolated backup restores Admin history, publications, business data and Staff function 2678ms
+
+ Test Files  1 passed (1)
+      Tests  60 passed (60)
+   Start at  06:59:35
+   Duration  22.75s (tests 98%, transform 1%, import 1%)
+

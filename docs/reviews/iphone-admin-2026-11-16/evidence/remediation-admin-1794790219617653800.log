@@ -1,0 +1,473 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > dashboard denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T00:50:30.685Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > dashboard denies a session the environment does not know, and issues NO business query
+[admin] dashboard denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.DashboardPage (D:/Muthoy/apps/admin/app/page.tsx:114:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > pharmacies denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T00:50:30.966Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > pharmacies denies a session the environment does not know, and issues NO business query
+[admin] pharmacy list denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.PharmaciesPage (D:/Muthoy/apps/admin/app/pharmacies/page.tsx:94:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > subscriptions denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T00:50:31.232Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > subscriptions denies a session the environment does not know, and issues NO business query
+[admin] subscriptions denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SubscriptionsPage (D:/Muthoy/apps/admin/app/subscriptions/page.tsx:191:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > revenue denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T00:50:31.424Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > revenue denies a session the environment does not know, and issues NO business query
+[admin] revenue denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.RevenuePage (D:/Muthoy/apps/admin/app/revenue/page.tsx:80:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > analytics denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T00:50:31.786Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > analytics denies a session the environment does not know, and issues NO business query
+[admin] analytics denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.AnalyticsPage (D:/Muthoy/apps/admin/app/analytics/page.tsx:94:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > maps denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T00:50:31.934Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > maps denies a session the environment does not know, and issues NO business query
+[admin] map denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.MapsPage (D:/Muthoy/apps/admin/app/maps/page.tsx:82:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > support denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T00:50:33.279Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > support denies a session the environment does not know, and issues NO business query
+[admin] support denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SupportPage (D:/Muthoy/apps/admin/app/support/page.tsx:112:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > admins denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T00:50:33.545Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > admins denies a session the environment does not know, and issues NO business query
+[admin] admin directory denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.AdminsPage (D:/Muthoy/apps/admin/app/admins/page.tsx:121:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > audit denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T00:50:33.802Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > audit denies a session the environment does not know, and issues NO business query
+[admin] audit denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAnyAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:270:19)
+    at Module.AuditPage (D:/Muthoy/apps/admin/app/audit/page.tsx:162:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > reports denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T00:50:33.999Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > reports denies a session the environment does not know, and issues NO business query
+[admin] reports denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.ReportsPage (D:/Muthoy/apps/admin/app/reports/page.tsx:117:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > settings denies a session the environment does not know, and issues NO business query
+[admin-audit] {"at":"2026-11-16T00:50:34.140Z","actor":"nobody","actorVerified":true,"role":null,"action":"session.role_revoked","target":null,"outcome":"denied","meta":{"claimedRole":"super_admin","reason":"no_environment_role"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > settings denies a session the environment does not know, and issues NO business query
+[admin] settings denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:173:11)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SettingsPage (D:/Muthoy/apps/admin/app/settings/page.tsx:42:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:307:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'no_role'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > revenue denies a real role that lacks its permission
+[admin-audit] {"at":"2026-11-16T00:50:34.254Z","actor":"ops","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"revenue.read"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > revenue denies a real role that lacks its permission
+[admin] revenue denied: AdminForbiddenError: This admin role does not have permission: revenue.read
+    at requirePermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:215:9)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:232:5)
+    at Module.RevenuePage (D:/Muthoy/apps/admin/app/revenue/page.tsx:80:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:327:18
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  permission: 'revenue.read',
+  role: 'read_only'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > admins denies a real role that lacks its permission
+[admin-audit] {"at":"2026-11-16T00:50:34.366Z","actor":"ops","actorVerified":true,"role":"read_only","action":"authz.denied","target":null,"outcome":"denied","meta":{"permission":"admins.read"}}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > admins denies a real role that lacks its permission
+[admin] admin directory denied: AdminForbiddenError: This admin role does not have permission: admins.read
+    at requirePermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:215:9)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:232:5)
+    at Module.AdminsPage (D:/Muthoy/apps/admin/app/admins/page.tsx:121:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:327:18
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  permission: 'admins.read',
+  role: 'read_only'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > dashboard refuses a request with NO session at all
+[admin] dashboard denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.DashboardPage (D:/Muthoy/apps/admin/app/page.tsx:114:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > pharmacies refuses a request with NO session at all
+[admin] pharmacy list denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.PharmaciesPage (D:/Muthoy/apps/admin/app/pharmacies/page.tsx:94:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > subscriptions refuses a request with NO session at all
+[admin] subscriptions denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SubscriptionsPage (D:/Muthoy/apps/admin/app/subscriptions/page.tsx:191:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > revenue refuses a request with NO session at all
+[admin] revenue denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.RevenuePage (D:/Muthoy/apps/admin/app/revenue/page.tsx:80:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > analytics refuses a request with NO session at all
+[admin] analytics denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.AnalyticsPage (D:/Muthoy/apps/admin/app/analytics/page.tsx:94:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > maps refuses a request with NO session at all
+[admin] map denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.MapsPage (D:/Muthoy/apps/admin/app/maps/page.tsx:82:5)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > support refuses a request with NO session at all
+[admin] support denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SupportPage (D:/Muthoy/apps/admin/app/support/page.tsx:112:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > admins refuses a request with NO session at all
+[admin] admin directory denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.AdminsPage (D:/Muthoy/apps/admin/app/admins/page.tsx:121:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > audit refuses a request with NO session at all
+[admin] audit denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAnyAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:270:19)
+    at Module.AuditPage (D:/Muthoy/apps/admin/app/audit/page.tsx:162:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > reports refuses a request with NO session at all
+[admin] reports denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.ReportsPage (D:/Muthoy/apps/admin/app/reports/page.tsx:117:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > every route refuses an unauthorized role before it reads anything > settings refuses a request with NO session at all
+[admin] settings denied: AdminUnauthenticatedError: No valid admin session
+    at currentAdminSession (D:/Muthoy/apps/admin/lib/adminAuthz.ts:122:11)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at requireAdminPermission (D:/Muthoy/apps/admin/lib/adminAuthz.ts:230:19)
+    at Module.SettingsPage (D:/Muthoy/apps/admin/app/settings/page.tsx:42:21)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:340:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20 {
+  reason: 'absent'
+}
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > dashboard shows a fixed notice, never the driver message
+[admin] shops query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] billing_subscriptions query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] entitlement_snapshots query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] payment_orders query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] payment_provider_events query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] plan_offerings count failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] sales query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] shop count query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > dashboard shows a fixed notice, never the driver message
+[admin] dashboard failed to load: AdminDataError: shop count query failed
+    at getPlatformStats (D:/Muthoy/apps/admin/lib/queries.ts:126:11)
+    at async Promise.all (index 1)
+    at loadDashboard (D:/Muthoy/apps/admin/app/page.tsx:74:31)
+    at Module.DashboardPage (D:/Muthoy/apps/admin/app/page.tsx:121:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > pharmacies shows a fixed notice, never the driver message
+[admin] district list query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] shop count query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > pharmacies shows a fixed notice, never the driver message
+[admin] the pharmacy list failed to load: AdminDataError: district list query failed
+    at listShopDistricts (D:/Muthoy/apps/admin/lib/adminPlatformQueries.ts:256:13)
+    at async Promise.all (index 1)
+    at loadPharmacies (D:/Muthoy/apps/admin/app/pharmacies/page.tsx:67:31)
+    at Module.PharmaciesPage (D:/Muthoy/apps/admin/app/pharmacies/page.tsx:124:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > subscriptions shows a fixed notice, never the driver message
+[admin] entitlement_snapshots query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] plan_offerings count failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] payment_orders query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > subscriptions shows a fixed notice, never the driver message
+[admin] subscriptions failed to load: AdminDataError: entitlement_snapshots query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at async Promise.all (index 2)
+    at subscriptionsOverview (D:/Muthoy/apps/admin/lib/adminPlatformQueries.ts:1866:74)
+    at loadSubscriptions (D:/Muthoy/apps/admin/app/subscriptions/page.tsx:153:30)
+    at Module.SubscriptionsPage (D:/Muthoy/apps/admin/app/subscriptions/page.tsx:217:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > revenue shows a fixed notice, never the driver message
+[admin] shops count failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] sales count failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] billing_accounts query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] billing_subscriptions query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] payment_orders query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+[admin] billing_subscriptions count failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > revenue shows a fixed notice, never the driver message
+[admin] revenue failed to load: AdminDataError: billing_subscriptions count query failed
+    at revenueOverview (D:/Muthoy/apps/admin/lib/adminPlatformQueries.ts:556:13)
+    at async Promise.all (index 0)
+    at loadRevenue (D:/Muthoy/apps/admin/app/revenue/page.tsx:70:30)
+    at Module.RevenuePage (D:/Muthoy/apps/admin/app/revenue/page.tsx:86:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > analytics shows a fixed notice, never the driver message
+[admin] platform settings query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > analytics shows a fixed notice, never the driver message
+[admin] feature flag read failed for flag.analytics_enabled: AdminDataError: platform settings query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at readSettings (D:/Muthoy/apps/admin/lib/adminSettings.ts:141:16)
+    at featureState (D:/Muthoy/apps/admin/lib/adminSettings.ts:201:22)
+    at Module.AnalyticsPage (D:/Muthoy/apps/admin/app/analytics/page.tsx:100:16)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > maps shows a fixed notice, never the driver message
+[admin] platform settings query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > maps shows a fixed notice, never the driver message
+[admin] feature flag read failed for flag.maps_enabled: AdminDataError: platform settings query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at readSettings (D:/Muthoy/apps/admin/lib/adminSettings.ts:141:16)
+    at featureState (D:/Muthoy/apps/admin/lib/adminSettings.ts:201:22)
+    at Module.MapsPage (D:/Muthoy/apps/admin/app/maps/page.tsx:91:16)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > support shows a fixed notice, never the driver message
+[admin] admin_support_cases list failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > support shows a fixed notice, never the driver message
+[admin] the support queue failed to load: AdminDataError: support case list failed
+    at listSupportCases (D:/Muthoy/apps/admin/lib/adminSupportStore.ts:119:11)
+    at listSupportCaseSummaries (D:/Muthoy/apps/admin/lib/adminPlatformQueries.ts:404:17)
+    at loadSupport (D:/Muthoy/apps/admin/app/support/page.tsx:80:19)
+    at Module.SupportPage (D:/Muthoy/apps/admin/app/support/page.tsx:133:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > reports shows a fixed notice, never the driver message
+[admin] platform settings query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > reports shows a fixed notice, never the driver message
+[admin] feature flag read failed for flag.reports_pdf_enabled: AdminDataError: platform settings query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at readSettings (D:/Muthoy/apps/admin/lib/adminSettings.ts:141:16)
+    at featureState (D:/Muthoy/apps/admin/lib/adminSettings.ts:201:22)
+    at async Promise.all (index 1)
+    at Module.ReportsPage (D:/Muthoy/apps/admin/app/reports/page.tsx:126:29)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > settings shows a fixed notice, never the driver message
+[admin] platform settings query failed: connection to postgresql://admin:hunter2@db.internal:5432/muthoy failed
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > a query failure renders a notice and leaks nothing > settings shows a fixed notice, never the driver message
+[admin] settings failed to load: AdminDataError: platform settings query failed
+    at readAllPages (D:/Muthoy/apps/admin/lib/queries.ts:47:13)
+    at readSettings (D:/Muthoy/apps/admin/lib/adminSettings.ts:141:16)
+    at settingsView (D:/Muthoy/apps/admin/lib/adminSettings.ts:366:20)
+    at loadSettings (D:/Muthoy/apps/admin/app/settings/page.tsx:28:30)
+    at Module.SettingsPage (D:/Muthoy/apps/admin/app/settings/page.tsx:54:18)
+    at render (D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:250:19)
+    at D:/Muthoy/apps/admin/app/adminRoutes.contract.test.tsx:418:20
+    at file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/run.CjdgFZiW.js:2801:20
+
+stderr | apps/admin/app/adminRoutes.contract.test.tsx > §8.9 the audit page filters, and the per-shop view is gated > when the durable log CANNOT be read, the page says so loudly
+[admin] admin_audit_log read failed: relation "admin_audit_log" does not exist
+
+ ✓ apps/admin/app/adminRoutes.contract.test.tsx (126 tests) 19589ms
+   ✓ every route refuses an unauthorized role before it reads anything (25)
+     ✓ dashboard denies a session the environment does not know, and issues NO business query 4018ms
+     ✓ analytics denies a session the environment does not know, and issues NO business query 367ms
+     ✓ support denies a session the environment does not know, and issues NO business query 1347ms
+   ✓ the declared column lists are real columns (12)
+     ✓ dashboard selects only columns the schema declares 496ms
+ ✓ apps/admin/lib/adminLabels.test.ts (49 tests) 3550ms
+   ✓ the GROSS boundary (37)
+     ✓ MUTATION: every fabrication the reviewers found is now rejected 2085ms
+
+ Test Files  2 passed (2)
+      Tests  175 passed (175)
+   Start at  06:50:22
+   Duration  33.33s (tests 73%, import 18%, transform 8%)
+

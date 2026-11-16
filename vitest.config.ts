@@ -418,6 +418,7 @@ export default defineConfig({
       "backend/supabase/pgtest/migration.pgtest.ts",
       "backend/supabase/pgtest/security.pgtest.ts",
       "backend/supabase/pgtest/b2.pgtest.ts",
+      "backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts",
       "backend/supabase/pgtest/b3-group2.pgtest.ts",
       "backend/supabase/pgtest/b3-group3.pgtest.ts",
       "backend/supabase/pgtest/b3-groups456-sync.pgtest.ts",

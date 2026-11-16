@@ -1,0 +1,14 @@
+
+ RUN  v5.1.0 D:/Muthoy/docs/reviews/iphone-admin-2026-11-16/evidence/scratch-remediation-publication/source
+
+ ✓ apps/mobile/native/printer.test.ts (3 tests) 32ms
+ ✓ apps/mobile/domain/escpos.test.ts (3 tests) 24ms
+
+ Test Files  2 passed (2)
+      Tests  6 passed (6)
+   Start at  06:59:33
+   Duration  1.75s (transform 59%, import 26%, tests 9%, worker 6%)
+
+    Isolate  2 workers spawned · ~512ms startup each (spawn + environment, per file)
+             at least ~512ms faster with isolate: false — reuses workers across files instead of one per file
+
