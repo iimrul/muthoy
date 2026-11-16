@@ -1,5 +1,288 @@
 # DECISIONS.md — Muthoy POS
 
+## 2026-11-11 - independently reviewed Apple and archive follow-ups
+
+Founder approved B2/B3: installation-scoped Apple Keychain services and excluded
+Documents/SQLite, installed MMKV Documents/mmkv, and installation metadata; Expo
+startup subscriber initializes before JS. Missing/corrupt marker with existing
+artifacts fails closed. A fresh reinstall uses a new marker without deleting old
+Keychain items. Authenticated key recovery preserves raw corrupt bytes atomically;
+corrupt pending-state inspection returns false while actual Keychain access errors
+still throw. Missing-key recovery is one add; marker publication uses a synced temp
+and no-clobber rename. Apple BLE retains the connection for a bounded500ms drain.
+Native runtime/build/XCTest remain unverified without Xcode; physical iOS deferred.
+Vendor LF rules are local to the new vendor folder; sealed root attributes unchanged.
+
+Founder approved C3 after independent review reproduced nested serialized conflict
+PIN credentials in business archives. Capture now parses/redacts that exact nested
+history; domain validation independently refuses credentials or malformed payloads.
+The actual keep-remote writer is unchanged. Regression proves original conflict,
+immutable journal, live credentials and financial ledgers remain unchanged while
+isolated decrypted/restored archives contain only reauthentication placeholders.
+Initial11FAIL44PASS and independent disabled-guard failures are retained. No live
+restoration, held SQL activation or automatic backup integration has occurred.
+
+## 2026-11-11 - approved three-priority implementation boundaries
+
+Founder approved DEV31 local prerequisite tests, iOS native/security group,
+local encrypted recovery core, HELD wrapper-order guard, and affected fixture
+migration setup. Existing DEV private Storage plus an owner recovery code is the
+selected independent custody. No hosted/device activation is authorized.
+The shared recordChange business-write boundary DOES change: it now appends an
+immutable shop/outbox-identity journal within the existing transaction, failing
+closed and rolling back the whole writer when the journal cannot persist. New
+additive SQLite0034 backfills the prior queue without changing it. This is a local
+implementation awaiting final independent review and explicit device activation;
+existing financial calculations, stock triggers, auth policies and server sync
+contracts are unchanged by the recovery core.
+
+Business-only archives use authenticated AES256GCM, random256bit recovery factor,
+exact tenant/owner/device/watermark metadata and original IDs. No automatic key
+persistence, setup UI, Staff continuous backup or live restoration is wired.
+Only independently downloaded, authenticated copies advance a protection receipt;
+new offline writes remain exposed. Archives restore to a fresh isolated database,
+using existing movement identities/triggers and comparing exact rows before commit;
+no live database swap or enrollment-authority bypass is provided. Credentials and
+device secrets are not restored. Authentic recovery and hosted Storage durability
+remain unverified. No-loss remains FAIL; a phone-only journal is not an independent
+surviving copy.
+
+The HELD role-credit candidate now refuses partial/unknown/later wrapper ordering
+instead of overwriting the E4 protection during reapplication. It remains HELD;
+active migration ordering/promotion and DEV activation require separate approval.
+iOS adds Apple implementations of the existing three native modules, device-only
+Keychain, fixed upstream bcrypt, SQLCipher and CoreBluetooth in the SAME app.
+Android native code is unchanged. Xcode/native runtime verification is blocked on
+this Windows host, and iOS physical testing is explicitly deferred. Baseline
+317files7459tests/Claude scopedACCEPT is retained as historical evidence; current
+changed source requires new full regression and independent review. Claude review capacity was restored after the scheduled reset. Independent review
+accepted local A/A2 and fixture scope C2. Recovery C and Apple source revisions
+remain under final re-review; no overall acceptance is inferred.
+
+
+## 2026-11-11 — Founder three-priority execution scope
+
+Work order is Android missing-data restoration, independently recoverable encrypted
+backup protection, then iOS compatibility in the SAME apps/mobile React Native/Expo
+app. Existing screens, services, domain logic and design are reused. iOS source and
+necessary native implementation are now authorized; no separate app, iOS physical
+acceptance, TestFlight/AppStore or release testing. Native build requires actual
+macOS/Xcode; this Windows host has none. Earlier iOS-on-hold wording is historical.
+
+Preserve317files7459testsPASS and Claude scopedACCEPT. No Main/Production/Preview
+operations or commit/push/merge/deploy. DEV is31migrations while repo is37; do not
+automatically apply unrelated migrations. Exact local prerequisite and iOS native
+security scopes requested; live activation/device rehydration need separate scope.
+Offline records cannot survive complete phone loss without an independent copy;
+no-loss remains FAIL. Independent custody/factor and exact recovery implementation
+approval precede key/writer/schema/storage changes. Seven remaining readiness groups
+stay pending; Batch6medicine data and direct bKash integration remain deferred.
+
+
+## 2026-11-11 — separately approved F3/F4 read-graph closure
+
+Founder approved local F3 draft projection/FK reconstruction and HELD F4 parent
+readability, then separately approved amendment C for reconciliation/customer
+closure. Five initial actual SQL/SQLite failures and two C failures are retained.
+The HELD pull masks only a hidden sale's completed_sale_id in draft JSON, using
+sale ownership/history visibility rather than draft actor. Completed drafts cannot
+be edited by the client; server writes already require own actor/origin device.
+No new draft write normalization is added on the server.
+
+The local DB apply writer DOES change again: unknown/changed-access full hydration
+may restore only an otherwise-identical equal-timestamp null completedSaleId.
+Dynamic complete local-column equality includes checkout/prescription data, with
+strict remote-key presence and boolean/timestamp normalization. Same-shop parent,
+unique-link and pending/failed dependency guards fail closed. A shared guarded
+helper retains every existing R1 assertion. Default/same-context LWW, other fields,
+queue writes, accounting and stock logic remain unchanged. Pending-ACK limitations
+still apply; this is not a general recovery mechanism.
+
+The HELD readable predicate now requires allocation access plus already-readable
+credits/payments/customers, and reconciliation access plus already-readable
+customers. Narrow credit_view/sale_return-only roles lose inconsistent child
+history without gaining financial parent access. Default sales+sale_return keeps
+customers/reconciliation but cannot receive allocations without payments. Refund
+paths lacking readable parents remain refused; no narrow-role acceptance claimed.
+This deliberately makes sync pull narrower than existing RLS for these children;
+RLS policies/grants are unchanged. Tests pin the exception, prewarmed callers,
+private service-role denial, pagination, revoke/pending behavior and exact ledgers.
+Staff inventory_edit receipt-less restock remains enabled. No active migration,
+classification/seal, schema, hosted change, device hydration, Metro or deployment.
+All release and no-loss gates remain open. No commit/push/merge.
+
+
+## 2026-11-11 — separately approved HELD server credit-link candidate
+
+Real active-chain PGlite tests confirmed both review hypotheses: a grouped
+collection accepted a null sale_id and erased an existing credit link; a Staff
+pull returned colleague-credit FKs without readable parent sales, making fresh
+SQLite hydration fail atomically. These are confirmed server-contract defects.
+Founder separately approved LOCAL HELD SQL and synthetic tests only. The candidate
+preserves existing server credit identity when a client sends null, refuses a
+different nonnull identity, and masks only unreadable colleague-sale IDs in Staff
+pull JSON. Stored credit amounts/balances, permissions, row selection, pagination
+and money formulas remain unchanged. Client collection writers are unchanged.
+Only the new contract pgtest explicitly applies the held SQL after the active
+chain. The SQLite role fixture mirrors this proven candidate projection. Original
+active-chain failing evidence is preserved. Public RPCs remain service_role-only. Claude F1 found the renamed internal
+functions also need denial to service_role under the newer E4 no-bypass rule;
+that local HELD correction revokes all API/service execution on internals while
+SECURITY DEFINER wrappers still work. No privilege widening is authorized.
+
+No active migration, classification manifest/seal, hosted function/database or
+schema is changed. Activation and real DEV acceptance need separate approval.
+A credit protected by pending work can retain a null local sale link after ACK
+until the next access change; this known R1 limitation can refuse a later refund,
+without miscounting money. No silent repair of that wider lifecycle is implemented.
+No automatic historical link reconstruction, data backfill or device hydration.
+Metro remains off. Local candidate PASS cannot establish hosted parity or GO.
+
+## 2026-11-11 — separately approved credit-link apply-writer extension
+
+Claude's second review identified a remaining financial relationship defect:
+Staff history purge clears credits.sale_id through ON DELETE SET NULL without
+changing its timestamp. Equal-timestamp LWW then refuses to restore that link.
+Both incremental restart and explicit full hydration reproduce it in real SQLite.
+Founder separately approved extending db/sync-helpers.ts and sync/pull.ts.
+The DB apply writer DOES change: access-context hydration may restore only the
+null credit sale link when timestamps/other business fields agree, its same-shop
+sale exists, and pending/failed dependency graphs do not protect the credit.
+Amount, balance and other columns are not replaced; normal LWW remains unchanged.
+Unknown old access metadata also triggers a one-time full fetch on every existing
+installation after update. This can increase network/time costs for large shops.
+
+Founder also approved temporary synthetic H-A/H-B server/SQLite tests only. Any
+confirmed server or fresh-hydration defect needs its own exact repair approval.
+No hosted changes or device restoration were authorized; Metro remains off.
+The earlier statement that DB apply writers were unchanged describes only the
+previous two-source-file repair, before this separately approved extension.
+
+## 2026-11-11 — approved review follow-ups and role-switch mirror repair
+
+Founder separately approved Manager opening-cash blank refusal/disabled Save with
+existing EN/BN feedback; explicit zero remains valid. Money tests now instrument
+actual unchanged writers, settle submit before snapshots and put writer/ledger
+assertions before presentation assertions. Six scratch precision controls fail at
+real writer-call assertions. Scanner caller mocks include the native status-bar
+export; existing OCR/retake assertions remain intact. Fixture-only stable-cost and
+single-device assumptions are explicit. No formula or money writer changes here.
+
+Physical Manager and cashier Staff status contrast passed after private logins.
+After returning Owner, the DEV mirror contained zero sales/items while the DEV
+server retained eleven/fifteen; stored drawer close2150 differed from live450paisa.
+No device business transaction, clearing or recovery command caused this review
+round's history loss. Existing access purge removed colleague rows under Staff;
+the shop-wide watermark then skipped those older rows on return to Owner.
+
+Founder first approved a synthetic test-only reproduction (one restoration failure,
+three isolation/pending controls), then separately approved local source repair in
+sync/cursorStore.ts and pull.ts plus scoped tests/mocks. New device-local materialized
+access metadata binds the watermark to server actor/scope/readable tables. Unknown
+or different context restarts through existing atomic full hydration before any
+incremental page apply; unchanged context stays incremental. Metadata persists
+before access purge. Existing DB apply writers, pending protection, permissions,
+server SQL/schema, accounting and hosted data remain unchanged. Role/scope changes
+can cost a full fetch. Existing remote insert dirty-flag defaults are pinned in
+synthetic tests rather than silently changed by this sync repair.
+
+Metro was confirmed stopped before source edits. Local synthetic validation is
+authorized; loading this repair onto the connected Dev and performing hydration
+requires separate bounded approval after verification. No hosted writes or device
+restoration have run. No-loss FAIL; Production/RC/pilot NO GO; Java dialog crash,
+complete hardware/hosted/recovery/Admin gates remain open. No commit/push/merge.
+
+## 2026-11-09–10 — isolated Android remediation, scoped approvals retained
+
+The Founder approved the Android Metro Development Build baseline and routine
+local fixes. Work is isolated in `remediation/android-metro-20261109` at `D:/md`;
+Main, Production and Preview applications and their data are preserved.
+
+The domain cash formula is unchanged. Business writers DID change under separate
+Founder approvals; the earlier blanket claim that they were unchanged was wrong.
+The approved groups implemented during 9–10 November 2026 are:
+
+- **T04/T05:** synthetic-only sale/movement identity, sign, quantity and shop
+  oracles, deterministic refund/return/allocation/conflict/group fixtures and
+  negative controls. Existing evidence and sealed artifacts remain preserved.
+- **T23:** all seven cash terms including refunds and supplier payments; additive
+  read-only `db/cash.ts` refund projection from the existing formula. No formula,
+  SQL, money writer or ledger calculation was changed in this group.
+- **T20:** receipt-less new-batch route for Free Owners and Staff authorized by
+  `inventory_edit` (server key `inventory_write`), distinct from the premium
+  Owner supplier-receipt route. Separate approvals added a transaction-local
+  medicine/shop/nondeleted guard in `db/inventory.ts::addBatchToMedicine`, then
+  converted its async Drizzle callback to synchronous `.get()`/`.run()` calls so
+  invalid quantity or movement failure cannot commit partial batch/outbox rows.
+- **Seventeen additional transaction boundaries:** separately approved synchronous
+  callbacks in `db/auth.ts`, `commercial.ts`, `inventory.ts`, `settings.ts`,
+  `staff.ts` and `suppliers.ts`. Together with the T20 callback this changes
+  eighteen writer transaction boundaries. The callables are `createShopAndOwner`,
+  `setOwnerPin`, `recordSuccessfulLogin`, `getEffectiveEntitlementForShop`,
+  `cacheShopSummaries`, `createMedicineWithBatch`, `createMedicineOnly`,
+  `addBatchToMedicine`, `updateShopProfile`, `changeOwnPin`, `createStaff`,
+  `resetStaffPin`, `deactivateStaff`, `removeStaff`, `writeAuditLog`,
+  `createSupplier`, `updateSupplier` and `archiveSupplier`. Checks, hashing and domain formulas
+  remain as before; transactional rollback behavior deliberately changes.
+- **T16:** read-only shop-scoped pending/failed outbox counts and exposure UI;
+  no sync writes, recovery journal or schema change.
+- **Decimal editing:** separately approved `components/forms/FormField.tsx`
+  retains editable numeric strings such as `1.` and `1.00` while emitting numeric
+  RHF values. This changed input behavior, not integer-paisa conversion or writers.
+  Claude F-08 subsequently found excess precision still needs explicit validation.
+- **T03 dependency groups:** Next and eslint-config-next 15.5.29; Vitest 5.1.0
+  (major test-tool upgrade), Node type compatibility, Zod 4.6.6 with Zod 3
+  unchanged; scoped PostCSS/sharp/shell-quote and compatible xmldom, js-yaml,
+  brace-expansion, node-forge, source-map-js, compression, Vite,
+  postcss-selector-parser and test-only Undici pins/overrides. XLSX moved from
+  mobile runtime dependencies to devDependencies for the independent export
+  test. Expo 57/RN 0.86.2 and disabled dependency build scripts remain unchanged.
+- **Android system bars:** `plugins/withAndroidLightSystemBars.js`, Expo plugin
+  wiring and shell/modal presentation corrections alter native theme defaults
+  and status-area presentation. No navigation or permission changes in this group.
+- **10 November native approval:** upstream react-native-screens PR #4413
+  backported to 4.26.2 as four C++ files in the pinned patch, workspace and
+  lockfile. This changes native listener lifetime synchronization. A separately
+  approved exact-hash Dev APK update preserved Dev data/session; finite cold-start
+  checks do not establish universal crash freedom or release performance.
+
+Approval provenance: Founder approvals are retained in the private execution
+record and conversation for 9–10 November. Exact individual timestamps for the
+above early groups are not retained; this entry does not invent day-specific
+approval times. The native backport/build/install receipts are dated 10 November.
+The Founder approved this disclosure correction on 10 November (Claude F-02).
+
+**Claude review, 10 November: REVISE.** Staff receipt-less restocking stays enabled,
+but T20 is PARTIAL: local SQLite and Free Owner device/server evidence do not
+prove Staff server or hardware acceptance. F-01 server tests, F-05/F-06/F-11 fixture corrections and F-08 money validation
+received separate scoped Founder approvals on 10 November; one additional pgtest
+include and the actual-writer F-06 amendment were approved separately that day.
+The amendment corrects the review premise: recordChange rereads complete rows
+and serializes snake_case. Refund fixtures now snapshot those rows at refund
+time, with real SQLite writer tests and independent cash/line invariants.
+Money FormFields keep raw editing strings while invalid excess precision becomes
+an explicitly rejected form value; shared taka schemas reject sub-paisa input.
+fromTaka, accounting formulas and production writers are unchanged in this round.
+The Founder separately approved the four custom cash inputs (OpeningCashModal,
+WithdrawSheet, ManagerDashboard and cash-summary) to validate raw precision before
+Number conversion, plus real SQLite regression tests. Current FormField handling
+also consumes delayed native numeric echoes without replacing the latest raw draft;
+Android exposed this defect and focused tests reproduced it before the fix.
+The Founder approved F-03 Staff/Manager status contrast, F-04 non-destructive Dev
+scanner inspection and F-13 consistent seven-term cash presentation with the
+supplier-payments row always visible, including zero, as a deliberate T23
+presentation decision. This supersedes the prototype's conditional supplier row;
+the domain formula and financial ledgers remain unchanged.
+
+No blanket authority covers hosted migrations, sync/auth/money/stock/recovery
+changes, destructive device operations, real SMS/payments, deployment or paid
+resources. No iOS or Batch 6 integration is implemented. No-loss remains FAIL;
+full physical, hosted, recovery and Admin gates remain open. RC/pilot/Production
+remain NO GO. Changes are uncommitted pending independent review and approval.
+See [implementation record](docs/plans/android-remediation-2026-11-09.md) and
+[Claude remediation scopes](docs/plans/claude-review-remediation-2026-11-10.md).
+
+
 ## 2026-10-18 — H-9 F1–F8 local remediation (hosted gates pending)
 
 Founder authorized one coordinated local remediation batch. Canonical H1 tooling is
@@ -5096,6 +5379,127 @@ claimed as defects: an expiry notification for `FEFO-C` timestamped before that
 batch existed, and a Tk -82.00 expected drawer for 2026-11-01, which may simply
 be yesterday's COD purchases against an opening of 0.
 
+
+## 2026-11-11 — Approved local A3/C4/C5 integration; live gates remain held
+
+Migration38 promotes the reviewed role/credit/draft/parent-closure HELD body with
+only its header changed. Both wrapper orders and actual E4 field pinning are
+verified locally; DEV remains at31 until an explicit history/order and activation
+approval. Six unrelated missing migrations must not be pushed automatically.
+Founder explicitly approved the sealed classification contract transition to38,
+A8/B21/C9 and SQLite0034 through the existing successor mechanism. Old accepted
+bytes/evidence and original E4 manifest are preserved.
+
+C5 adds SQLite0035 private Owner custody and immutable encrypted retry jobs.
+The confirmed random256bit recovery factor lives only in verified SQLCipher;
+it is excluded from outbox, journal, archives, MMKV, logs and clipboard. It is
+shown privately for independent retention and cleared on close/background/session
+handover. Existing business calculations/writers are unchanged in C5; the earlier
+approved recordChange journal hook is a real transaction-boundary modification.
+Owner role, tenant, active/locked/deleted state and session are checked again inside
+custody transactions. Parent graph membership now uses indexed Sets.
+
+Auto-review rejected a normal lifecycle path to actual DEV Storage because hosted
+uploads remain unapproved. The safer implementation has NO default network runtime:
+ordinary lifecycle only reports disabled/unavailable. Automated tests inject mocked
+Storage and exercise the actual crypto/SQLite/readback/receipt/retry path. No hosted
+bucket/policy/upload, phone migration, authentic restoration or key setup has run.
+Cloud activation requires a subsequent exact approval; this is not active backup.
+
+No-loss remains FAIL for offline sole copies. Automatic Staff coverage, attachment
+files, replacement-device authorization/old refund claims and authentic recovery
+are unaccepted. iOS uses the same React Native app; source exports are separate from
+native compilation, which remains BLOCKED without macOS/Xcode. Physical iOS tests
+remain deferred. Production NO GO; no commit/push/merge/deploy is authorized.
+
+C5 independent review corrections: custody now requires nonempty actual PRAGMA cipher_version in addition to the initialized encryption outcome; genuine plain SQLite is refused. After independent-copy receipt/job completion, the coordinator rereads current journal exposure and returns pending while newer writes remain uncovered. The inactive lifecycle checks only setup status and does not load the factor; prepublish custody is compared again. Each confirmed safeguard has its own disabled-fix negative (1 intended FAIL/18 PASS) alongside the valid full-file control. Actual native at-rest behavior still requires separately authorized platform validation.
+
+
+## 2026-11-11 — Approved A4 setup progress; Q/H/D remain conditional
+
+Founder approved A4-PG17-R, A4-CRED and A4-ENC. New isolated replacement target
+muthoy-q17-restore-20261111-v2 uses the pinned cached Supabase PG17.6 image,
+network none/no ports, read-only root/no container logs, new owned RAM mount
+noswap and cgroup swap0. Its fresh h9_restore_q_20261111 database is EMPTY after
+transactional five-extension checks. The failed initial empty target is retained;
+all14 original containers are unchanged. No authentic DEV restore is claimed.
+
+Official portable age1.3.2 ZIP matched the approved hash. Actual public-synthetic
+round-trip and wrong-factor/tamper/truncation refusal passed. New external private
+connection tooling passed39 synthetic checks, including actual isolated TLS
+positive/hostname/untrusted-CA negatives. EFS and owner/SYSTEM ACLs were verified
+on the exact new private directory/empty synthetic file before any content write.
+No actual password, passfile, DEV connection, archive, upload or restoration exists.
+These external tests do not replace the accepted327file/7628test application run.
+No application runtime, database, money, stock, auth or sync writer changed here.
+
+Claude review first timed out; final-source retry returned429 with reset00:10
+Asia/Dhaka. New credential tooling is NOT independently accepted and cannot collect
+a real password until review passes. Existing application scoped ACCEPT remains
+limited to its earlier source, not this tooling or operational Q/H/D gates.
+
+Founder requests existing Dropbox/private cloud, independently retained archive
+factor,30day/no-auto-delete retention, RPO0 during a verified writer pause and
+measured2hour restore target. Destination/access/readback/custody and actual DEV
+CA/session route remain unverified. The historical H5 plaintext-processing
+restriction remains: EFS, age and container no-swap alone do not prove Windows/VM
+paging and dump protection. Host-protection scope is proposed, not implemented.
+
+Q remains BLOCKED. H DEV31 overlay/history exception and D existing Dev hydration/
+bounded offline tests remain already approved CONDITIONALLY and NOT RUN. No hosted
+mutation, phone operation, Metro, reinstall/clear, old-stack change, commit/push/
+merge or Production action occurred. Full-phone-loss no-loss remains FAIL/deferred;
+seven unrelated readiness groups stay pending; Production NO GO. Detailed receipts
+and private operator steps: D:/MuthoyAudit-20261109/implementation/DEV_BACKUP_PRIVATE_SETUP.md.
+
+## 2026-11-15 — Approved external source integration into Main
+
+Founder approved docs/plans/external-integration-2026-11-15/PLAN.md and
+FILE_MANIFEST.json. After verifying the original source/destination hashes,
+228 individually allowlisted application/test/documentation/configuration files
+were imported from D:/md and D:/cc, plus 13 reviewed historical records/helper
+sources at their explicit destinations. Eighteen already identical entries and
+two duplicate patch bundles were excluded. There were no overlapping destination
+changes between the two workstreams. Existing prototype work is preserved.
+
+Current implementation source now lives in D:/Muthoy. Earlier D:/md source and
+Main-preserved statements in dated records describe their historical executions.
+All external workspaces, evidence, backups, pinned runtimes and Git history remain
+preserved. The source-only backup/host helpers are not activated or executed.
+
+Existing committed migration SQL and the original E4 seal remain byte-identical.
+New SQLite 0034/0035 and backend migration 38 are imported source, not applied
+migrations. No real database, hosted, device, credential, deployment, commit,
+push or deletion action is part of this integration. Tests use isolated synthetic
+fixtures only. Current actual test outcomes and remaining validation are recorded
+in docs/plans/external-integration-2026-11-15/INTEGRATION_REPORT.md; prior external
+PASS receipts are historical and do not establish current integrated acceptance.
+
+## 2026-11-15 — Offline sale retry and Staff credit authorization repairs
+
+Founder approved the current-source Dev/Metro device plan and separately approved
+R1 and R2 source repairs in chat. R1 removes the eight-transient-error terminal
+cutoff: durable pending rows remain retryable with existing capped backoff; only
+acknowledgement or a permanent refusal retires them. Explicit permanent failures
+are not automatically revived. Ten lost-response/replay and outage regressions
+cover unchanged operation identity and no duplicate writes.
+
+Physical tests passed Owner cash on historical installed Preview and current-source
+Dev, plus Staff cash/restart/reconnect. Staff split checkout exposed a separate
+server defect: the validated grouped sale's reconciliation exception was rejected
+again by the ordinary B2 writer. Seven original queue/business rows remain intact.
+R2 adds a guarded forward patch only at the validated sale dispatch boundary;
+standalone credit-management permissions and every later wrapper remain intact.
+Sales-only Staff cannot clear quarantined history or change existing verifier proof.
+
+R2's DEV31 and full-chain candidate passed 42 PostgreSQL checks after six intended
+pre-fix failures. Founder approved DEV activation and the exact seven-row requeue. Hosted migration
+20261115172840 changed only the intended function; catalog/ACL/business-state checks
+passed. The original split synced once after status-only queue recovery. Details:
+docs/plans/offline-sales-2026-11-15/PLAN.md. No unrelated hosted migration is part
+of this repair. GitHub publication is authorized for task changes only; unrelated
+integrated source remains preserved. Final evidence/status belongs to REPORT.md.
+
 ## 2026-11-16 — Admin presentation refresh and platform verification
 
 Admin keeps its existing server-rendered permission-filtered navigation and
@@ -5122,3 +5526,45 @@ Unknown installations fail preflight. Local PostgreSQL role, replay, audit and
 synthetic restore tests do not authorize hosted activation or establish device
 acceptance. No migration-history repair or unrelated integration is activated.
 Current results and remaining gates: docs/reviews/iphone-admin-2026-11-16/REMEDIATION.md.
+
+## 2026-11-16 — DEV catch-up to the full chain, H1/M1 repairs
+
+Founder approved: "fix H1 and apply 32-38", then "fix every problem so no
+backend work remains", on the Free plan. DEV (btfprhticjgeihcngpif) received
+pg_cron, then migrations 32-38 in order through the Management API as the
+postgres role, each with its history row in one transaction and its file hash
+verified against the manifests; migration 34 ran only after a fresh read-only
+F12 preflight passed. 39 was already on DEV, so the hosted order is 1-31, 39,
+32-38, 40; a PGlite probe proved that order ends byte-identical to 1-40 and
+migration 40 refuses to run on any other body.
+
+H1: Postgres SQLSTATE classes 22/23 are permanent (they mean the row can never
+apply), and the device reports a pending row with 8+ attempts as stuck. The
+Owner warning now counts failed+stuck rows and is resolved after a completed
+healthy cycle, so it re-arms; before, the first sync warning silenced all
+later ones. Rows still never retire on a transient error.
+
+M1: migration 40 bounds the Staff-supplied reconciliation updated_at by
+server time on refresh and insert, so a fast device clock cannot freeze the
+Owner out of later last-write-wins updates.
+
+pg_cron on DEV: enabled despite the earlier DEV exception, because the only
+staging rows on DEV were applied ones, which the cleanup job never deletes.
+The held admin compatibility candidate is superseded by applying 35/36.
+Scope deferrals (not bugs): held existing-medicine restock activation, held
+recovery storage, recovery-journal growth, full re-hydration cost, and the
+two-device first-credit race need their own designs.
+
+Functions on DEV now run the repository code: sync v32 and auth-send-sms v12 (each secrets change also bumps a version),
+with MUTHOY_SUPABASE_PROJECT_REF set and MUTHOY_SUPABASE_KEY_MODE=modern. The
+first deploy skipped the runbook's A-D2 settings and every request failed for
+about ten minutes (02:43-02:53 UTC, OTP failed closed, no SMS sent). Legacy
+mode then refused at boot (legacy_anon_key_invalid: the hosted SUPABASE_ANON_KEY
+is no longer a legacy-shaped JWT), so DEV moved to modern keys. The no-OTP A7
+rows pass, and a device-login for an unused phone returns the generic 401,
+which proves the modern secret key works against hosted REST - the item the
+runbook listed as unproven. PROD must set both values before its first deploy.
+
+The held admin compatibility test now builds its full-chain case through
+migration 39 (createHarness({ through })), the chain that candidate pins; every
+assertion is unchanged.
