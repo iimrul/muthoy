@@ -204,7 +204,8 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
           }
         />
       ) : (
-        <table className="mt-4 w-full text-sm">
+        <div className="admin-table-scroll mt-4" role="region" aria-label="Support cases" tabIndex={0}>
+        <table className="w-full min-w-[40rem] text-sm">
           <caption className="sr-only">Support cases, most recently updated first.</caption>
           <thead>
             <tr className="border-b border-black/10 text-left">
@@ -251,6 +252,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {detail === null ? null : (

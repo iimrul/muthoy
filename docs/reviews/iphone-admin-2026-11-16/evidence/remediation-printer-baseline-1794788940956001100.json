@@ -1,0 +1,21 @@
+{
+  "task": "printer-baseline",
+  "command": [
+    "node",
+    "D:\\Muthoy\\node_modules\\vitest\\vitest.mjs",
+    "run",
+    "--maxWorkers=1",
+    "--config",
+    "apps/mobile/tests/hardware-readiness/vitest.hardware.config.ts",
+    "apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts"
+  ],
+  "startUTC": "2026-11-16T00:29:00.956716+00:00",
+  "endUTC": "2026-11-16T00:29:03.453393+00:00",
+  "exitCode": 1,
+  "log": "remediation-printer-baseline-1794788940956001100.log",
+  "logSha256": "d607313b74f2b820a5c41718c03af02a12a0f2921081615ed1122af02748d830",
+  "privateFiles": "refused",
+  "databases": "new scratch or memory only",
+  "network": "loopback only",
+  "deviceAcceptance": "NOT RUN"
+}

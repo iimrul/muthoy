@@ -54,7 +54,6 @@
     "react-native-svg": "15.15.4",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.10.1",
-    "xlsx": "0.18.5",
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
   },
@@ -71,7 +70,9 @@
     "eslint-config-expo": "~57.0.1",
     "jsdom": "^30.0.1",
     "tailwindcss": "^3.4.19",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "xlsx": "0.18.5",
+    "@types/node": "22.20.1"
   },
   "scripts": {
     "start": "node ../../scripts/validate-mobile-environment.mjs --local --start",

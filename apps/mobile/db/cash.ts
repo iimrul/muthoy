@@ -990,6 +990,7 @@ export interface CashBreakdown {
   };
   creditCollections: { total: Paisa; details: CashBreakdownDetailRow[] };
   expenses: { total: Paisa; details: CashBreakdownDetailRow[] };
+  refunds: { total: Paisa };
   withdrawals: { total: Paisa };
   supplierPayments: { total: Paisa };
   expectedCash: Paisa;
@@ -1159,6 +1160,7 @@ export async function getCashBreakdown(
         amount: asPaisa(row.amount),
       })),
     },
+    refunds: { total: formula.refunds },
     withdrawals: { total: formula.withdrawals },
     supplierPayments: { total: formula.supplierPayments },
     expectedCash: expected,

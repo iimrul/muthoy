@@ -1,0 +1,20 @@
+{
+  "task": "hardware",
+  "command": [
+    "node",
+    "D:\\Muthoy\\node_modules\\vitest\\vitest.mjs",
+    "run",
+    "--maxWorkers=1",
+    "--config",
+    "apps/mobile/tests/hardware-readiness/vitest.hardware.config.ts"
+  ],
+  "startUTC": "2026-11-16T00:31:52.029550+00:00",
+  "endUTC": "2026-11-16T00:31:59.398722+00:00",
+  "exitCode": 0,
+  "log": "remediation-hardware-1794789112028479200.log",
+  "logSha256": "5544441f14d3b41fc3b378c885a587aa0ddfab4ee77547655fcaa93bfa084ca2",
+  "privateFiles": "refused",
+  "databases": "new scratch or memory only",
+  "network": "loopback only",
+  "deviceAcceptance": "NOT RUN"
+}

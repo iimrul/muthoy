@@ -1,0 +1,27 @@
+$ turbo run typecheck
+
+   • Packages in scope: @muthoy/admin, @muthoy/config, @muthoy/constants, @muthoy/mobile, @muthoy/types, @muthoy/ui, @muthoy/utils, @muthoy/validation
+   • Running typecheck in 8 packages
+   • Remote caching disabled
+
+@muthoy/ui:typecheck: cache miss, executing 85c5580c4bc3ba63
+@muthoy/types:typecheck: cache miss, executing 5f5757b348829d17
+@muthoy/validation:typecheck: cache miss, executing e9d7994a6d76155b
+@muthoy/constants:typecheck: cache miss, executing 9c0b8efdaf1b3488
+@muthoy/ui:typecheck: $ tsc --noEmit
+@muthoy/validation:typecheck: $ tsc --noEmit
+@muthoy/types:typecheck: $ tsc --noEmit
+@muthoy/constants:typecheck: $ tsc --noEmit
+@muthoy/utils:typecheck: cache miss, executing f4417165ee5bcfe7
+@muthoy/utils:typecheck: $ tsc --noEmit
+@muthoy/mobile:typecheck: cache miss, executing 7a385c7637459020
+@muthoy/admin:typecheck: cache miss, executing ee3b6110125e3ba1
+@muthoy/mobile:typecheck: $ tsc --noEmit
+@muthoy/admin:typecheck: $ next typegen && tsc --noEmit
+@muthoy/admin:typecheck: Generating route types...
+@muthoy/admin:typecheck: ✓ Route types generated successfully
+
+ Tasks:    7 successful, 7 total
+Cached:    0 cached, 7 total
+  Time:    6m24.466s 
+

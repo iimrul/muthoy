@@ -1,0 +1,20 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+stdout | backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true
+Admin store contract true { hash: 'fb0af5fc6b0b2f63ae3f891239ee3297' }
+
+stdout | backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false
+Admin store contract false { hash: 'fb0af5fc6b0b2f63ae3f891239ee3297' }
+
+ ✓ backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts (42 tests) 23736ms
+   ✓ held Admin compatibility — exact DEV order=true (21)
+     ✓ an isolated backup restores Admin history, publications, business data and Staff function 3395ms
+   ✓ held Admin compatibility — exact DEV order=false (21)
+     ✓ an isolated backup restores Admin history, publications, business data and Staff function 3062ms
+
+ Test Files  1 passed (1)
+      Tests  42 passed (42)
+   Start at  06:41:44
+   Duration  24.60s (tests 99%, transform 1%, import 1%)
+

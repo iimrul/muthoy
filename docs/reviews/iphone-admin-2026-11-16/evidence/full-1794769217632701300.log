@@ -1,0 +1,21 @@
+failed to load config from D:\Muthoy\vitest.config.ts
+
+⎯⎯⎯⎯⎯⎯⎯ Startup Error ⎯⎯⎯⎯⎯⎯⎯⎯
+Error: spawn EPERM
+    at ChildProcess.spawn (node:internal/child_process:420:11)
+    at Object.spawn (node:child_process:787:9)
+    at ensureServiceIsRunning (D:\Muthoy\node_modules\.pnpm\esbuild@0.28.1\node_modules\esbuild\lib\main.js:2268:29)
+    at build (D:\Muthoy\node_modules\.pnpm\esbuild@0.28.1\node_modules\esbuild\lib\main.js:2166:26)
+    at bundleConfigFile (file:///D:/Muthoy/node_modules/.pnpm/_c648d4848c62acc6fc383cb44904ffbb/node_modules/vite/dist/node/chunks/config.js:36066:23)
+    at bundleAndLoadConfigFile (file:///D:/Muthoy/node_modules/.pnpm/_c648d4848c62acc6fc383cb44904ffbb/node_modules/vite/dist/node/chunks/config.js:36053:24)
+    at loadConfigFromFile (file:///D:/Muthoy/node_modules/.pnpm/_c648d4848c62acc6fc383cb44904ffbb/node_modules/vite/dist/node/chunks/config.js:36022:179)
+    at resolveConfig (file:///D:/Muthoy/node_modules/.pnpm/_c648d4848c62acc6fc383cb44904ffbb/node_modules/vite/dist/node/chunks/config.js:35671:28)
+    at resolveConfig (file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/index.Di8au7q4.js:9300:31)
+    at createVitest (file:///D:/Muthoy/node_modules/.pnpm/_c0759250f59b5211632d521e04674ead/node_modules/vitest/dist/chunks/cli-api.COfZo8lK.js:13938:23) {
+  errno: -4048,
+  code: 'EPERM',
+  syscall: 'spawn'
+}
+
+
+

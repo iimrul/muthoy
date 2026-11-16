@@ -296,8 +296,14 @@ describe('W4-05 shop identity', () => {
 
     // And the pin's own guard: with no stored row, nothing is overlaid.
     const pinBody = await h.one<{ guarded: boolean }>(`
-      select position('if found then' in pg_get_functiondef(
-               to_regprocedure('public.sync_apply_row(text,text,jsonb,uuid,uuid,text)'))) > 0 as guarded
+      with outer_wrapper as (
+        select pg_get_functiondef(to_regprocedure('public.sync_apply_row(text,text,jsonb,uuid,uuid,text)')) as body
+      ) select case
+        when position('return public.sync_apply_row_pre_role_credit(' in body) > 0
+        then position('if found then' in pg_get_functiondef(
+          to_regprocedure('public.sync_apply_row_pre_role_credit(text,text,jsonb,uuid,uuid,text)'))) > 0
+        else position('if found then' in body) > 0
+      end as guarded from outer_wrapper
     `);
     expect(pinBody.guarded).toBe(true);
   });

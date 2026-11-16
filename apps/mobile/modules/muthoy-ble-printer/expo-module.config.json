@@ -1,4 +1,16 @@
 {
-  "platforms": ["android"],
-  "android": { "modules": ["com.muthoy.bleprinter.MuthoyBlePrinterModule"] }
+  "platforms": [
+    "android",
+    "apple"
+  ],
+  "android": {
+    "modules": [
+      "com.muthoy.bleprinter.MuthoyBlePrinterModule"
+    ]
+  },
+  "apple": {
+    "modules": [
+      "MuthoyBlePrinterModule"
+    ]
+  }
 }

@@ -86,6 +86,7 @@ interface StubProps {
 }
 
 vi.mock('react-native', () => ({
+  StatusBar: { currentHeight: 24 },
   Alert: { alert: vi.fn() },
   Linking: { openSettings: vi.fn() },
   Platform: { OS: 'android' },

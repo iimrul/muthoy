@@ -1,0 +1,16 @@
+{
+  "task": "types",
+  "command": [
+    "pnpm.cmd",
+    "typecheck"
+  ],
+  "startUTC": "2026-11-16T00:42:50.346537+00:00",
+  "endUTC": "2026-11-16T00:45:02.802778+00:00",
+  "exitCode": 0,
+  "log": "remediation-types-1794789770345257700.log",
+  "logSha256": "0e9a0f1b8d2dcdb9347de87a76925bd56f764663f597fead81aab55abe64e95c",
+  "privateFiles": "refused",
+  "databases": "new scratch or memory only",
+  "network": "loopback only",
+  "deviceAcceptance": "NOT RUN"
+}

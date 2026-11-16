@@ -164,16 +164,16 @@ export async function updateShopProfile(
   isStillActive: () => boolean,
 ): Promise<void> {
   await requireOwner(shopId, actorUserId);
-  await db.transaction(async (tx) => {
+  await db.transaction((tx) => {
     assertSessionLive(isStillActive);
     const values = stampUpdatedAt({
       ...(profile.name === undefined ? {} : { name: profile.name.trim() }),
       ...(profile.address === undefined ? {} : { address: profile.address?.trim() || null }),
       ...(profile.email === undefined ? {} : { email: profile.email?.trim() || null }),
     });
-    const result = await tx.update(users).set(values).where(and(
+    const result = tx.update(users).set(values).where(and(
       eq(users.id, actorUserId), eq(users.shopId, shopId), eq(users.isDeleted, false),
-    ));
+    )).run();
     if (result.changes !== 1) throw new Error('Owner profile not found');
     recordChange(tx, { shopId, table: 'users', rowId: actorUserId, op: 'update', payload: values });
     assertSessionLive(isStillActive);
@@ -226,8 +226,8 @@ export async function changeOwnPin(
   const pinLookupTag = await assertPinUnique(newRawPin, user.shopId, userId);
 
   const newPinHash = await hashPin(newRawPin);
-  await db.transaction(async (tx) => {
-    // Async callback — checked at both ends. Two bcrypt awaits precede this
+  await db.transaction((tx) => {
+    // Session checked at both ends. Two bcrypt awaits precede this
     // transaction, so the window between pressing Confirm and committing a
     // new PIN hash is one of the widest in the app.
     assertSessionLive(isStillActive);
@@ -238,12 +238,12 @@ export async function changeOwnPin(
       pinLookupTag,
       pinLookupPinSetAt: pinSetAt,
     });
-    await tx.update(users).set(userValues).where(eq(users.id, userId));
+    tx.update(users).set(userValues).where(eq(users.id, userId)).run();
     recordChange(tx, { shopId: user.shopId, table: 'users', rowId: userId, op: 'update', payload: userValues });
     const auditId = generateId();
     const now = new Date().toISOString();
     const auditValues = { id: auditId, shopId: user.shopId, actorId: userId, action: 'pin_changed', meta: null, createdAt: now, updatedAt: now };
-    await tx.insert(auditLogs).values(auditValues);
+    tx.insert(auditLogs).values(auditValues).run();
     recordChange(tx, { shopId: user.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
     assertSessionLive(isStillActive);
   });

@@ -56,3 +56,24 @@ virtualStoreDirMaxLength: 24
 # Deliberately not a wildcard on "apps/*": apps/prototype-web ships its own
 # independent pnpm-workspace.yaml/package.json (Vite + React 18 + Tailwind v4)
 # and must never be folded into this workspace's install.
+
+# Reviewed T03 resolutions; keep Next 15 and Expo SDK 57.
+overrides:
+  "next@15.5.29>postcss": "8.5.26"
+  "next@15.5.29>sharp": "0.35.5"
+  "react-devtools-core>shell-quote": "1.11.0"
+  "@xmldom/xmldom@>=0.8.0 <0.9.0": "0.8.15"
+  "@xmldom/xmldom@>=0.9.0 <0.10.0": "0.9.12"
+  "js-yaml@>=4.0.0 <5.0.0": "4.3.2"
+  "brace-expansion@>=5.0.0 <6.0.0": "5.0.12"
+  "node-forge@>=1.0.0 <2.0.0": "1.4.1"
+  "source-map-js@>=1.0.0 <2.0.0": "1.2.2"
+  "compression@>=1.0.0 <2.0.0": "1.8.2"
+  "zod@>=4.0.0 <5.0.0": "4.6.6"
+  "brace-expansion@>=1.0.0 <2.0.0": "1.1.21"
+  "vite@>=7.0.0 <8.0.0": "7.3.7"
+  "postcss-selector-parser@>=6.0.0 <7.0.0": "6.1.5"
+  "undici@>=8.0.0 <9.0.0": "8.12.2"
+
+patchedDependencies:
+  react-native-screens@4.26.2: patches/react-native-screens@4.26.2.patch

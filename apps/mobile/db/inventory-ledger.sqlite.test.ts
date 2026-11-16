@@ -157,6 +157,8 @@ beforeAll(() => {
   applyMigration('0028_shop_scoped_pin_lookup.sql');
   applyMigration('0029_pin_reserved_while_inactive.sql');
   applyMigration('0033_medicine_search_key.sql');
+  // Current writers require the additive atomic recovery journal.
+  applyMigration('0034_recovery_journal.sql');
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: USER_ID, name: 'Ledger Shop', phone: '01700000900', createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: 'owner', isSystem: true, createdAt: NOW, updatedAt: NOW }).run();

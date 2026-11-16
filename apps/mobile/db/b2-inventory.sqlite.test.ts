@@ -27,6 +27,8 @@ beforeAll(() => {
     '0029_pin_reserved_while_inactive.sql',
     '0033_medicine_search_key.sql'
   ]) applyMigration(name);
+  // Current writers require the additive atomic recovery journal.
+  applyMigration('0034_recovery_journal.sql');
   const now = new Date().toISOString();
   db.insert(schema.shops).values({ id: 'shop', ownerId: 'owner', name: 'B2', phone: '01700000000', createdAt: now, updatedAt: now }).run();
   db.insert(schema.roles).values({ id: 'owner-role', shopId: 'shop', name: 'owner', isSystem: true, createdAt: now, updatedAt: now }).run();

@@ -1,5 +1,28 @@
 # Muthoy POS
 
+## Current integration status — 2026-11-15
+
+The approved external source work is integrated file by file into this repository:
+Android remediation, money/stock/transaction tests, role-scoped sync repair,
+recovery source, the same-app iOS modules, and the separate Admin fixes/tests.
+See [the integration plan](docs/plans/external-integration-2026-11-15/PLAN.md)
+and [the verification report](docs/plans/external-integration-2026-11-15/INTEGRATION_REPORT.md).
+
+This is source integration. Existing database schemas/data, hosted contracts,
+installed applications and device state have not been changed. iOS native/XCTest,
+physical hardware, hosted activation and current-source device acceptance remain
+unverified here. Historical test receipts below retain their original scope.
+Production remains NO GO. B6-01 and B6-02 remain deferred deliverables.
+
+## Historical implementation receipt — 2026-11-09
+
+Android remediation is in progress from source `a23ca61262497474bf85ede78948ca831657c8db`.
+See [the dated implementation record](docs/plans/android-remediation-2026-11-09.md).
+Historical completion statements below do not establish current hosted parity,
+current-source Android acceptance or production readiness. iOS is on hold;
+B6-01 and B6-02 remain mandatory deferred deliverables.
+
+
 A Bangla-first, offline-first point-of-sale for independent pharmacies in
 Bangladesh. SQLite is the source of truth on-device; Supabase provides sync,
 backup, and the admin panel. See `PROJECT_CONTEXT.md` for the full product

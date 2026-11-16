@@ -1,5 +1,5 @@
-import { useContext, type ReactNode } from 'react';
-import { KeyboardAvoidingView, ScrollView, View } from 'react-native';
+import { useContext, useEffect, type ReactNode } from 'react';
+import { KeyboardAvoidingView, ScrollView, StatusBar, View } from 'react-native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import { colors } from '@muthoy/constants';
 import { AuthGradient, SoftBlob } from './AuthGradient';
@@ -100,6 +100,9 @@ function ScrollBody({
 }
 
 export function AuthShell({ variant, header, cornerStart, cornerEnd, hero, children, footer }: AuthShellProps) {
+  useEffect(() => {
+    StatusBar?.setBarStyle(variant === "hero" ? "light-content" : "dark-content");
+  }, [variant]);
   const insets = useInsets();
   const statusBarSpacer = header ? null : <View style={{ height: insets.top }} />;
 

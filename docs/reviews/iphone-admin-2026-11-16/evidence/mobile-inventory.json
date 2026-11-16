@@ -1,0 +1,9 @@
+{
+  "scope": "Route inventory, source hashes and lexical dependency checks only. Test references do not imply route runtime or interaction coverage.",
+  "routes": 51,
+  "layouts": 2,
+  "direct_cloud_findings": [],
+  "platform_branches": [],
+  "iphone_runtime": "NOT RUN",
+  "android_runtime": "NOT RUN"
+}

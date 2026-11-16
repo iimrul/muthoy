@@ -1,0 +1,24 @@
+{
+  "scope": "SHA256 of staged Git blob bytes; isolated snapshot verified these source files.",
+  "files": {
+    ".gitattributes": "829a2545af1a982ceaf40cd83d330f08df9538d23ef68d2742b6824e12923f35",
+    "apps/mobile/domain/escpos.ts": "1c47c29d4e9281f430a36bb6056c694ad25a0eb7dd00ee1c833027175a9d2f41",
+    "apps/mobile/native/printer.test.ts": "074aa45dba51108c10a2b0aad3161b21d9bcf7d3ff0bcdf632f79f828808fb9f",
+    "apps/mobile/native/printer.ts": "bb9a8bbf6edcb5e0aa1dd814c74eaa9cf6c12ce2d9f3ff9c66ab18c299fbe12a",
+    "apps/mobile/tests/hardware-readiness/escpos-golden.hwtest.ts": "abbb5172240904d80e1fe3d5022b51961a9237aa6af94741da772af804c01cac",
+    "apps/mobile/tests/hardware-readiness/fakes/escpos-paper.ts": "f4b62b4801041c180d9b873ac1770f2bb0a26d26b88cd2d959f51448e95f1a30",
+    "apps/mobile/tests/hardware-readiness/fakes/expo.ts": "a3dc41751dbaf4e800568f272d21e375f1c0d8d115aad2ed3d7705e59f236ee4",
+    "apps/mobile/tests/hardware-readiness/fakes/fake-ble-printer.ts": "c2ee92f349e89e148ed41da3e45dab068637af0d59a6d5a1efd8ac0cc22ed5ff",
+    "apps/mobile/tests/hardware-readiness/fakes/react-native.ts": "74799e922c783d4e9a9ba1a864ae90785dc8be55ce7f0452da806c0bbedb457d",
+    "apps/mobile/tests/hardware-readiness/ocr-parsers.hwtest.ts": "dbd2eee97263cb9e6f166b7556449a3be8fa214c2d25d19be95ce90559fe0d14",
+    "apps/mobile/tests/hardware-readiness/printer-transport.hwtest.ts": "aff55bc1281759de4efaeadbbcd9fa634289b6f1f916c11916a6bf0938c8a343",
+    "apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts": "079b7216a215633566a4459cf165ec028efbab341c8f1249d8dad6e1298ed136",
+    "apps/mobile/tests/hardware-readiness/support/fixtures.ts": "a68d21dcaa4c317006ffc10df800b912842281cc2dacac09d7e42c2c53a9b87d",
+    "apps/mobile/tests/hardware-readiness/support/target.ts": "775e7752d987c98bdd3c808faf99d6468577baae02d456a8af1e47d62f3b1146",
+    "apps/mobile/tests/hardware-readiness/vitest.hardware.config.ts": "6a9b7deedf0c815a86fa8cdd5e4db2c121abe57d13e4a635b4d8c71a970ae6d7",
+    "backend/supabase/checks/admin_dev_compatibility_preflight.sql": "7b8ae1b2de439562bb147350bbfc896bfa56df1073096704d61432f5019261bf",
+    "backend/supabase/held-migrations/20261116002928_admin_dev_compatibility.sql": "536feba37847e1dae1edb26cb9c13b45699a497221f6294b64da98c4618f368f",
+    "backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts": "66dc347c3d7ac43052a217201653e888f09cade075a133fb7b37c82769a710bb",
+    "vitest.config.ts": "085631e4c01cf708b5a63278c0c90ae16f86efe8b440d9863ecd32c9ce52b62d"
+  }
+}

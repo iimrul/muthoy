@@ -4,6 +4,7 @@ import { DM_Mono, Plus_Jakarta_Sans } from 'next/font/google';
 import Link from 'next/link';
 import './globals.css';
 import { currentAdminSession } from '../lib/adminAuthz';
+import AdminNavigation from '../components/AdminNavigation';
 
 // W4-06. The shell shows WHO is signed in and offers the sign-out the shared
 // Basic Auth credential never had (a browser cannot be told to forget one).
@@ -98,34 +99,44 @@ export default async function RootLayout({ children }: RootLayoutProps) {
 
   return (
     <html lang="en" className={`${plusJakartaSans.variable} ${dmMono.variable}`}>
-      <body className="min-h-screen bg-white font-sans text-richBlack antialiased">
-        <header className="border-b border-black/10">
-          <nav className="mx-auto flex w-full max-w-5xl items-center gap-6 px-6 py-4">
-            <span className="font-semibold text-brand-deepGreen">Muthoy Admin</span>
-            {signedIn
-              ? NAV_LINKS.filter((link) => signedIn.permissions.includes(link.permission)).map((link) => (
-                  <Link key={link.href} href={link.href} className="text-sm text-midGray hover:text-richBlack">
-                    {link.label}
-                  </Link>
-                ))
-              : null}
+      <body className="min-h-screen bg-brand-softGreen/30 font-sans text-richBlack antialiased">
+        <a href="#main-content" className="admin-skip-link">Skip to content</a>
+        <div className={signedIn ? 'admin-shell' : 'admin-public-shell'}>
+          <aside className="admin-sidebar" aria-label="Platform console">
+            <Link href="/" prefetch={false} className="admin-brand">
+              <span aria-hidden="true" className="admin-brand-symbol">m</span>
+              <span>Muthoy Admin<span className="admin-brand-caption">Platform console</span></span>
+            </Link>
             {signedIn ? (
-              <div className="ml-auto flex items-center gap-3">
-                <span className="text-xs text-midGray">
-                  {signedIn.username} · {signedIn.role}
-                </span>
-                <form method="post" action="/api/admin/session">
-                  <input type="hidden" name="intent" value="logout" />
-                  <input type="hidden" name="username" value={signedIn.username} />
-                  <button type="submit" title="Ends this and your older sessions. Newer sign-ins remain active." className="text-sm text-midGray underline hover:text-richBlack">
-                    Sign out
-                  </button>
-                </form>
-              </div>
+              <>
+                <p className="admin-nav-caption">Workspace</p>
+                <AdminNavigation links={NAV_LINKS.filter((link) => signedIn.permissions.includes(link.permission))} />
+                <p className="admin-sidebar-footer">Muthoy POS · Bangladesh</p>
+              </>
             ) : null}
-          </nav>
-        </header>
-        <main className="mx-auto w-full max-w-5xl px-6 py-8">{children}</main>
+          </aside>
+          <div className="min-w-0">
+            {signedIn ? (
+              <header className="admin-topbar">
+                <p className="text-sm font-medium text-brand-deepGreen">Administration</p>
+                <div className="admin-account">
+                  <div className="min-w-0 text-right">
+                    <p className="break-words text-sm font-semibold">{signedIn.username}</p>
+                    <p className="text-xs text-midGray">{signedIn.role.replaceAll('_', ' ')}</p>
+                  </div>
+                  <form method="post" action="/api/admin/session">
+                    <input type="hidden" name="intent" value="logout" />
+                    <input type="hidden" name="username" value={signedIn.username} />
+                    <button type="submit" title="Ends this and your older sessions. Newer sign-ins remain active." className="admin-sign-out">
+                      Sign out
+                    </button>
+                  </form>
+                </div>
+              </header>
+            ) : null}
+            <main id="main-content" tabIndex={-1} className="admin-content">{children}</main>
+          </div>
+        </div>
       </body>
     </html>
   );

@@ -362,12 +362,10 @@ export async function createStaff(
   };
 
   try {
-    const writeLocal = () => db.transaction(async (tx) => {
-      // Async callback — checked at both ends so a handover landing between the
-      // awaits rolls the transaction back rather than creating a login under
-      // the outgoing owner's name.
+    const writeLocal = async () => db.transaction((tx) => {
+      // Synchronous transaction: row, permissions and outbox commit together.
       assertSessionLive(isStillActive);
-      await tx.insert(users).values(values);
+      tx.insert(users).values(values).run();
       timing?.mark('sqlite_user_insert');
       recordChange(tx, { shopId, table: 'users', rowId: userId, op: 'insert', payload: values });
       timing?.mark('user_outbox_enqueue');
@@ -419,8 +417,8 @@ export async function resetStaffPin(
   const pinHash = await hashPin(newRawPin);
   const pinSetAt = new Date().toISOString();
 
-  await db.transaction(async (tx) => {
-    // Async callback — checked at both ends. A PIN reset that lands after the
+  await db.transaction((tx) => {
+    // Synchronous transaction — checked at both ends. A PIN reset that lands after the
     // phone changed hands would lock a staff member out on the say-so of
     // someone no longer logged in.
     assertSessionLive(isStillActive);
@@ -432,7 +430,7 @@ export async function resetStaffPin(
     const auditId = generateId();
     const now = new Date().toISOString();
     const auditValues = { id: auditId, shopId: staff.shopId, actorId: performedByUserId, action: 'pin_reset', target: staffId, meta: null, createdAt: now, updatedAt: now };
-    await tx.insert(auditLogs).values(auditValues);
+    tx.insert(auditLogs).values(auditValues).run();
     recordChange(tx, { shopId: staff.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
     assertSessionLive(isStillActive);
   });
@@ -446,8 +444,8 @@ export async function deactivateStaff(
   const staff = await getManageableStaffTarget(staffId);
   await requireOwner(staff.shopId, performedByUserId);
 
-  await db.transaction(async (tx) => {
-    // Async callback — checked at both ends. This one is reached from an
+  await db.transaction((tx) => {
+    // Session checked at both ends. This one is reached from an
     // Alert confirmation callback, which can sit on screen indefinitely.
     assertSessionLive(isStillActive);
     updateStaffSecurityFields(tx, {
@@ -458,7 +456,7 @@ export async function deactivateStaff(
     const auditId = generateId();
     const now = new Date().toISOString();
     const auditValues = { id: auditId, shopId: staff.shopId, actorId: performedByUserId, action: 'staff_deactivated', target: staffId, meta: null, createdAt: now, updatedAt: now };
-    await tx.insert(auditLogs).values(auditValues);
+    tx.insert(auditLogs).values(auditValues).run();
     recordChange(tx, { shopId: staff.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
     assertSessionLive(isStillActive);
   });
@@ -492,7 +490,7 @@ export async function removeStaff(
 ): Promise<void> {
   const staff = await getManageableStaffTarget(staffId);
   await requireOwner(staff.shopId, performedByUserId);
-  await db.transaction(async (tx) => {
+  await db.transaction((tx) => {
     assertSessionLive(isStillActive);
     const now = new Date().toISOString();
     const values = stampUpdatedAt({ isActive: false, isDeleted: true, deletedAt: now, deletedBy: performedByUserId });
@@ -500,7 +498,7 @@ export async function removeStaff(
     recordChange(tx, { shopId: staff.shopId, table: 'users', rowId: staffId, op: 'delete', payload: values });
     const auditId = generateId();
     const auditValues = { id: auditId, shopId: staff.shopId, actorId: performedByUserId, action: 'staff_removed', target: staffId, meta: null, createdAt: now, updatedAt: now };
-    await tx.insert(auditLogs).values(auditValues);
+    tx.insert(auditLogs).values(auditValues).run();
     recordChange(tx, { shopId: staff.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
     assertSessionLive(isStillActive);
   });
@@ -514,8 +512,8 @@ export async function writeAuditLog(shopId: string, actorUserId: string, action:
   const id = generateId();
   const now = new Date().toISOString();
   const values = { id, shopId, actorId: actorUserId, action, meta: detail, createdAt: now, updatedAt: now };
-  await db.transaction(async (tx) => {
-    await tx.insert(auditLogs).values(values);
+  await db.transaction((tx) => {
+    tx.insert(auditLogs).values(values).run();
     recordChange(tx, { shopId, table: 'audit_logs', rowId: id, op: 'insert', payload: values });
   });
 }

@@ -1,0 +1,23 @@
+{
+  "task": "focused",
+  "command": [
+    "pnpm.cmd",
+    "exec",
+    "vitest",
+    "run",
+    "apps/mobile",
+    "packages",
+    "apps/admin",
+    "--maxWorkers=2"
+  ],
+  "startUTC": "2026-11-15T19:30:04.805396+00:00",
+  "endUTC": "2026-11-15T19:46:37.361013+00:00",
+  "elapsedSeconds": 992.556,
+  "exitCode": 1,
+  "log": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\focused-1794771004805360200.log",
+  "logSha256": "fbe3245957cb4badc065b575cb4ce13fe1fa1be8891f73f2a43fbd31a7a8b296",
+  "syntheticScratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-focused-1794771004804426500",
+  "credentialEnvOmitted": true,
+  "privateEnvReadGuard": true,
+  "network": "loopback only"
+}

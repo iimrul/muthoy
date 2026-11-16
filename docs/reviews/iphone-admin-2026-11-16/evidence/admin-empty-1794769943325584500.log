@@ -1,0 +1,5 @@
+checks=80 failed=0 skipped=4
+SKIP {"role":"super_admin","kind":"reachability","family":"/audit (platform or per-shop)","reason":"fixture has no pharmacy to link from"}
+SKIP {"role":"billing","kind":"reachability","family":"/audit (platform or per-shop)","reason":"fixture has no pharmacy to link from"}
+SKIP {"role":"support","kind":"reachability","family":"/audit (platform or per-shop)","reason":"fixture has no pharmacy to link from"}
+SKIP {"role":"read_only","kind":"reachability","family":"/audit (platform or per-shop)","reason":"fixture has no pharmacy to link from"}

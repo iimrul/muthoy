@@ -14,7 +14,9 @@ function replaceBlock(source, body) {
   const start = source.indexOf(START);
   const end = source.indexOf(END);
   if (start < 0 || end < start) throw new Error('Missing generated rollback markers');
-  return `${source.slice(0, start)}${START}\n${body.trim()}\n${END}${source.slice(end + END.length)}`;
+  const eol = source.includes('\r\n') ? '\r\n' : '\n';
+  const block = [START, body.trim().replace(/\r\n/g, '\n'), END].join('\n').replace(/\n/g, eol);
+  return source.slice(0, start) + block + source.slice(end + END.length);
 }
 
 export function generatedBlocks() {

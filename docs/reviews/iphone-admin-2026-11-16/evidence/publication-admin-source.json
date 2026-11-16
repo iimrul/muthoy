@@ -1,0 +1,23 @@
+{
+  "hashAlgorithm": "SHA-256 of staged Git blob bytes before commit",
+  "files": {
+    "apps/admin/app/adminRoutes.contract.test.tsx": "d9a0636d98bc804f6550e4f9b0397ff54d546bce09ad955a9ca33ef0a5f03e39",
+    "apps/admin/app/admins/page.tsx": "d40f46890f7e0bfb19085f0204609e995b70dbee08993f887b3ffdc23849bf33",
+    "apps/admin/app/globals.css": "f1a419fd1e982d349980e88d607f84dead3cd53353052228cfd4d660724f2328",
+    "apps/admin/app/layout.tsx": "0211e52cf026f163ffe6255e19d0f2fd4f01e3361e334ee8ef1af4c75339a2ff",
+    "apps/admin/app/page.tsx": "b0cb15f5091506179793f1304c8f4befd9ad5de42df29383a8c07c6ba5ae1a3c",
+    "apps/admin/app/pharmacies/page.tsx": "d8f40c20de52b106c125b7c9c1d1eefe5acc6c9d2aeda1d7b44fe5f03d47a16b",
+    "apps/admin/app/reports/page.tsx": "ffc03f28d475aa79ebc586d03583f07d659e3fdf1b150276313e32c5fb854e57",
+    "apps/admin/app/shops/[id]/page.tsx": "38981185571f6c346360d025d94201530617c86024198e0b800f6477091a1ab7",
+    "apps/admin/app/support/page.tsx": "011cec15609e205ae9bc8ba2721fce73f10901e897bec0abd00212692f9ce392",
+    "apps/admin/components/AdminNavigation.tsx": "e47921e5f60b45fa0f172396457959a715176d060059a64d6733caeecf98df9a",
+    "apps/admin/components/DataTable.tsx": "4a43847060262a554f728b752980b2c817ce1fb21d3e61f6b0550bbb9adc71f7",
+    "apps/admin/components/PageParts.tsx": "e8ae0975b4c875e85535984d5586c0a1f72de82816d25625c1d644c61688a3f3",
+    "apps/admin/components/PharmacyTable.tsx": "76e9d27363e11c84f7d2f9a143bba8ec65ed967eb2c1ad7667ce696838b24ea5",
+    "apps/admin/components/StatCard.tsx": "f5b413c4efaebd6f59cfad08b16eb80d9dbdc5722459901b964df9a58ed7b172",
+    "apps/admin/components/charts/ChartPanel.tsx": "47abcde1d318a84e25012a8e42a4e26890962629459cdcc4f6442a805493007e",
+    "apps/admin/test/local-acceptance/fixture.mjs": "29b12cd499cfdf044d8b06f6207b70c36905f2075bdffbc7f43b42b93ba4b7b2",
+    "apps/admin/test/local-acceptance/mock-supabase.mjs": "605c82a060125b44a87250da628b7ffebb8c80622481ace3b152a276973633ee",
+    "apps/admin/test/local-acceptance/run-role-matrix.mjs": "526bc67523d04c49c19715cbe46c7fa429e8c819a70d6df40ad8322cef480c4b"
+  }
+}

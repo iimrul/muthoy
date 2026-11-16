@@ -104,11 +104,13 @@ export const ERROR_NAME_KEYS: Record<string, CatalogKey> = {
 export function localizeValidationMessage(message: string | undefined, t: Translate): string | undefined {
   if (!message) return undefined;
   const labels: Record<string, CatalogKey> = {
+    'Use no more than two decimal places': 'moneyPrecisionLabel',
     'Customer name is too short': 'customerNameTooShortLabel',
     'Supplier name is too short': 'supplierNameTooShortLabel',
     'Enter a valid email address': 'invalidEmailLabel',
     'Batch number is required': 'batchRequiredLabel',
     'Enter a valid date (YYYY-MM-DD)': 'invalidDateLabel',
+    'Enter a real calendar date': 'invalidDateLabel',
     'Expiry date must be today or later': 'expiryTodayOrLaterLabel',
     'Quantity must be a whole number': 'quantityWholeLabel',
     'Quantity must be at least 1': 'quantityMinimumLabel',

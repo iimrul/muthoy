@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { AppTextInput as TextInput } from '../../components/ui/AppTextInput';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';

@@ -87,6 +87,11 @@ export const E4_MIGRATIONS = Object.freeze([
   // Migration 37, E11. Also NOT applied to any hosted project, and declared
   // here for the same reason: an undeclared file makes this refusal lie.
   '20261031000000_e11_entitlement_verification.sql',
+  // Migration38: local role-switch repair; no hosted activation.
+  '20261111000000_role_switch_credit_link_contract.sql',
+  '20261115172840_staff_sale_credit_reconciliation.sql',
+  // Migration 40: server time bounds 39's Staff-supplied reconciliation clock.
+  '20261116020000_staff_reconciliation_server_clock.sql',
 ]);
 // The chain, pinned by NAME rather than by count.
 //

@@ -1,3 +1,4 @@
+import { moneyAmountSchema } from './money';
 import { z } from 'zod';
 
 const optionalText = z.string().trim().transform((value) => (value === '' ? undefined : value)).optional();
@@ -33,8 +34,8 @@ export const purchaseLineItemFieldsSchema = z.object({
   batchNo: z.string().trim().min(1, 'Batch number is required'),
   expiryDate: requiredExpirySchema,
   quantity: z.number().int('Quantity must be a whole number').min(1, 'Quantity must be at least 1'),
-  purchasePrice: z.number().min(0, 'Purchase price cannot be negative'),
-  salePrice: z.number().min(0, 'Sale price cannot be negative'),
+  purchasePrice: moneyAmountSchema.min(0, 'Purchase price cannot be negative'),
+  salePrice: moneyAmountSchema.min(0, 'Sale price cannot be negative'),
 });
 
 export type SupplierFieldsInput = z.input<typeof supplierFieldsSchema>;

@@ -1499,3 +1499,51 @@ export const deviceBindingState = sqliteTable(
     shopIdx: index("device_binding_state_shop_idx").on(t.shopId, t.status),
   }),
 );
+
+// Local append-only recovery witness. No FK: it must outlive access purges and
+// the source rows, like conflict_queue. Never part of the server sync registry.
+export const recoveryJournal = sqliteTable("recovery_journal", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  shopId: text("shop_id").notNull(),
+  queueId: text("queue_id").notNull().unique(),
+  outboxSeq: integer("outbox_seq").notNull(),
+  tableName: text("table_name").notNull(),
+  rowId: text("row_id").notNull(),
+  op: text("op").notNull(),
+  payload: text("payload").notNull(),
+  operationGroupId: text("operation_group_id"),
+  operationKind: text("operation_kind"),
+  operationSequence: integer("operation_sequence"),
+  operationExpectedCount: integer("operation_expected_count"),
+  createdAt: text("created_at").notNull().default(sql`(current_timestamp)`),
+}, (t) => ({ shopWatermark: index("recovery_journal_shop_watermark").on(t.shopId, t.id) }));
+
+export const recoveryBackupState = sqliteTable("recovery_backup_state", {
+  shopId: text("shop_id").notNull(), deviceId: text("device_id").notNull(),
+  archiveId: text("archive_id").notNull(), archiveSha256: text("archive_sha256").notNull(),
+  watermark: integer("watermark").notNull(), verifiedAt: text("verified_at").notNull(),
+}, (t) => ({ pk: primaryKey({ columns: [t.shopId, t.deviceId] }) }));
+export const recoveryImportReceipts = sqliteTable("recovery_import_receipts", {
+  archiveId: text("archive_id").primaryKey(), shopId: text("shop_id").notNull(),
+  ownerId: text("owner_id").notNull(), archiveSha256: text("archive_sha256").notNull(),
+  importedAt: text("imported_at").notNull(),
+});
+
+// Private SQLCipher metadata survives mirror access purges. No business FKs:
+// neither custody nor pending encrypted jobs may block Owner/Staff isolation.
+export const recoveryOwnerCustody = sqliteTable("recovery_owner_custody", {
+  shopId: text("shop_id").primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  codeHex: text("code_hex").notNull(),
+  confirmedAt: text("confirmed_at").notNull(),
+});
+export const recoveryBackupJobs = sqliteTable("recovery_backup_jobs", {
+  archiveId: text("archive_id").primaryKey(),
+  shopId: text("shop_id").notNull(),
+  ownerId: text("owner_id").notNull(),
+  deviceId: text("device_id").notNull(),
+  archiveSha256: text("archive_sha256").notNull(),
+  watermark: integer("watermark").notNull(),
+  ciphertext: text("ciphertext").notNull(),
+  preparedAt: text("prepared_at").notNull(),
+}, t => ({ oneDevice: uniqueIndex("recovery_backup_jobs_one_device").on(t.shopId,t.deviceId) }));

@@ -61,6 +61,8 @@ beforeAll(() => {
     '0033_medicine_search_key.sql'
   ];
   for (const migration of migrations) applyMigration(migration);
+  // Current writers require the additive atomic recovery journal.
+  applyMigration('0034_recovery_journal.sql');
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: OWNER_ID, name: 'Supplier Shop', phone: '01700000701', createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: 'owner', isSystem: true, createdAt: NOW, updatedAt: NOW }).run();

@@ -1,0 +1,164 @@
+{
+  "scope": "Fresh local checks and read-only DEV catalog; no device/native/hosted acceptance claim.",
+  "attempts": [
+    {
+      "receipt": "admin-build-1794769217021378800.json",
+      "task": "admin-build",
+      "exitCode": 1,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "admin-build-1794769317395767400.json",
+      "task": "admin-build",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "admin-build-1794770470501637100.json",
+      "task": "admin-build",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "admin-build-1794771593522010900.json",
+      "task": "admin-build",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "admin-build-1794772061565452900.json",
+      "task": "admin-build",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "admin-empty-1794769943325584500.json",
+      "task": "admin-empty",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "admin-recheck-1794772060055105200.json",
+      "task": "admin-recheck",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": [
+        "2 passed (2)",
+        "175 passed (175)"
+      ]
+    },
+    {
+      "receipt": "admin-synthetic-1794769943943012900.json",
+      "task": "admin-synthetic",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "browser-1794769943300642900.json",
+      "task": "browser",
+      "exitCode": 1,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "browser-1794771022922936200.json",
+      "task": "browser",
+      "exitCode": 1,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "browser-1794771294978294200.json",
+      "task": "browser",
+      "exitCode": 1,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "browser-1794771425581612500.json",
+      "task": "browser",
+      "exitCode": 1,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "browser-1794771780768294300.json",
+      "task": "browser",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "browser-1794772181357682300.json",
+      "task": "browser",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "environment-safety-1794771196930065500.json",
+      "task": "environment-safety",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": [
+        "1 passed (1)",
+        "43 passed (43)"
+      ]
+    },
+    {
+      "receipt": "focused-1794771004805360200.json",
+      "task": "focused",
+      "exitCode": 1,
+      "logHashVerified": true,
+      "testSummary": [
+        "2 failed | 259 passed (261)",
+        "2 failed | 5365 passed (5367)"
+      ]
+    },
+    {
+      "receipt": "full-1794769217632701300.json",
+      "task": "full",
+      "exitCode": 1,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "full-1794769321400760500.json",
+      "task": "full",
+      "exitCode": 1,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "hardware-1794769605975037500.json",
+      "task": "hardware",
+      "exitCode": 1,
+      "logHashVerified": true,
+      "testSummary": [
+        "1 failed | 3 passed (4)",
+        "8 failed | 89 passed | 1 skipped (98)"
+      ]
+    },
+    {
+      "receipt": "lint-1794769599758096400.json",
+      "task": "lint",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": []
+    },
+    {
+      "receipt": "types-1794769905067639200.json",
+      "task": "types",
+      "exitCode": 0,
+      "logHashVerified": true,
+      "testSummary": []
+    }
+  ]
+}

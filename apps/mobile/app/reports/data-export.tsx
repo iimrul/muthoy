@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
+import { AppTextInput as TextInput } from '../../components/ui/AppTextInput';
 import Feather from '@expo/vector-icons/Feather';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AccessDenied } from '../../components/ui/AccessDenied';
@@ -21,7 +22,7 @@ const META: { key: ExportDataset; bn: string; en: string; icon: keyof typeof Fea
 
 export default function DataExportScreen() {
   const params = useLocalSearchParams<{ startDate?: string; endDate?: string }>();
-  const { locale, t } = useI18n(); const bn = locale === 'bn'; const { session, isAllowed } = useOwnerAccess();
+  const { locale, t, formatNumber } = useI18n(); const bn = locale === 'bn'; const { session, isAllowed } = useOwnerAccess();
   const today = currentBusinessDate(); const [startDate, setStartDate] = useState(params.startDate ?? addDays(today, -29));
   const [endDate, setEndDate] = useState(params.endDate ?? today);
   const [datasets, setDatasets] = useState<Record<ExportDataset, boolean>>({ sales: true, inventory: false, credit: false, expenses: false });
@@ -44,10 +45,10 @@ export default function DataExportScreen() {
     <View className="flex-1 bg-brand-softGreen">
       <StandardHeader title={bn ? 'ডেটা এক্সপোর্ট' : 'Data Export'} onBackPress={() => router.back()} />
       <ScrollView contentContainerClassName="gap-4 p-4 pb-28" keyboardShouldPersistTaps="handled">
-        <View className="gap-3 rounded-2xl bg-white p-4"><Text className="font-sans-bold text-sm">{bn ? 'তারিখের পরিসীমা' : 'Date Range'}</Text><View className="flex-row gap-3">{[{ label: bn ? 'শুরু' : 'Start', value: startDate, set: setStartDate }, { label: bn ? 'শেষ' : 'End', value: endDate, set: setEndDate }].map((field) => <View className="flex-1 gap-1" key={field.label}><Text className="font-sans text-xs text-midGray">{field.label}</Text><TextInput value={field.value} onChangeText={field.set} maxLength={10} className="h-11 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] px-3 font-mono text-sm" /></View>)}</View></View>
+        <View className="gap-3 rounded-2xl bg-white p-4"><Text className="font-sans-bold text-sm">{bn ? 'তারিখের পরিসীমা' : 'Date Range'}</Text><View className="flex-row gap-3">{[{ label: bn ? 'শুরু' : 'Start', value: startDate, set: setStartDate }, { label: bn ? 'শেষ' : 'End', value: endDate, set: setEndDate }].map((field) => <View className="flex-1 gap-1" key={field.label}><Text className="font-sans text-xs text-midGray">{field.label}</Text><TextInput value={field.value} onChangeText={field.set} maxLength={10} className="h-11 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] px-3 font-sans text-sm" /></View>)}</View></View>
         <View className="gap-3 rounded-2xl bg-white p-4"><Text className="font-sans-bold text-sm">{bn ? 'ডাটাসেট নির্বাচন করুন' : 'Select Datasets'}</Text><View className="flex-row flex-wrap gap-2">{META.map((item) => { const active = datasets[item.key]; return <Pressable key={item.key} onPress={() => setDatasets({ ...datasets, [item.key]: !active })} className={`w-[48%] flex-row items-center gap-3 rounded-xl border-2 p-3 ${active ? 'border-brand-green bg-brand-softGreen' : 'border-[#E5E7EB] bg-white'}`}><View className="h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: item.bg }}><Feather name={item.icon} size={16} color={item.tint} /></View><Text className="flex-1 font-sans-semibold text-sm">{bn ? item.bn : item.en}</Text></Pressable>; })}</View></View>
         <View className="gap-3 rounded-2xl bg-white p-4"><Text className="font-sans-bold text-sm">{bn ? 'ফরম্যাট' : 'Format'}</Text><View className="flex-row gap-2">{(['csv','xlsx'] as const).map((value) => <Pressable key={value} onPress={() => setFormat(value)} className={`flex-1 items-center rounded-xl border-2 py-2 ${format === value ? 'border-brand-green bg-brand-softGreen' : 'border-[#E5E7EB]'}`}><Text className="font-sans-bold text-sm text-brand-deepGreen">{value === 'csv' ? 'CSV' : 'Excel (.xlsx)'}</Text></Pressable>)}</View></View>
-        {busy ? <View className="gap-2 rounded-2xl bg-white p-4"><View className="flex-row justify-between"><Text className="font-sans text-xs text-midGray">{bn ? 'এক্সপোর্ট হচ্ছে…' : 'Exporting…'}</Text><Text className="font-mono text-xs">{progress}%</Text></View><View className="h-2 overflow-hidden rounded-full bg-[#F3F4F6]"><View className="h-full bg-brand-green" style={{ width: `${progress}%` }} /></View></View> : null}
+        {busy ? <View className="gap-2 rounded-2xl bg-white p-4"><View className="flex-row justify-between"><Text className="font-sans text-xs text-midGray">{bn ? 'এক্সপোর্ট হচ্ছে…' : 'Exporting…'}</Text><Text className="font-sans text-xs">{formatNumber(progress)}%</Text></View><View className="h-2 overflow-hidden rounded-full bg-[#F3F4F6]"><View className="h-full bg-brand-green" style={{ width: `${progress}%` }} /></View></View> : null}
         {error ? <View className="flex-row items-start gap-2 rounded-2xl border border-[#FCA5A5] bg-[#FEE2E2] p-3"><Feather name="alert-triangle" size={16} color="#B91C1C" /><Text className="flex-1 font-sans text-xs text-[#7F1D1D]">{error}</Text></View> : null}
         {done ? <View className="flex-row items-start gap-2 rounded-2xl border border-[#A7F3D0] bg-brand-softGreen p-3"><Feather name="check-circle" size={16} color="#047857" /><Text className="flex-1 font-sans text-xs text-brand-deepGreen">{done}</Text></View> : null}
         <Pressable disabled={busy || !selected.length} onPress={() => void run()} className="flex-row items-center justify-center gap-2 rounded-2xl bg-brand-green py-4 disabled:opacity-50"><Feather name="share-2" size={17} color="#FFFFFF" /><Text className="font-sans-bold text-white">{bn ? 'এক্সপোর্ট ও শেয়ার করুন' : 'Export & Share'}</Text></Pressable>

@@ -1,0 +1,1 @@
+PASS: 6 guard checks; private reads/existing DB opens/non-loopback connections refused; memory DB allowed; application warnings preserved.

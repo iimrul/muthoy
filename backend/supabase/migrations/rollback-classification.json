@@ -37,7 +37,10 @@
     "20261015000000_h9_api_role_table_privileges.sql": "A",
     "20261023000000_e4_batch3_admin_platform.sql": "C",
     "20261030000000_e4b_publication_snapshots.sql": "B",
-    "20261031000000_e11_entitlement_verification.sql": "B"
+    "20261031000000_e11_entitlement_verification.sql": "B",
+    "20261111000000_role_switch_credit_link_contract.sql": "B",
+    "20261115172840_staff_sale_credit_reconciliation.sql": "B",
+    "20261116020000_staff_reconciliation_server_clock.sql": "B"
   },
   "postgresDeclaredOverrides": [
     "20260813000000_initial_schema.sql",
@@ -55,7 +58,8 @@
     "0018",
     "0024",
     "0029",
-    "0033"
+    "0033",
+    "0034"
   ],
   "sqliteDropsTables": [
     "0006",

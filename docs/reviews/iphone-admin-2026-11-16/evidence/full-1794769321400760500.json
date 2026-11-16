@@ -1,0 +1,19 @@
+{
+  "task": "full",
+  "command": [
+    "pnpm.cmd",
+    "exec",
+    "vitest",
+    "run"
+  ],
+  "startUTC": "2026-11-15T19:02:01.400788+00:00",
+  "endUTC": "2026-11-15T19:30:03.438857+00:00",
+  "elapsedSeconds": 1682.038,
+  "exitCode": 1,
+  "log": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\full-1794769321400760500.log",
+  "logSha256": "fb1ea9e90cc57ba1ee0ee60c887c482fa4f71ad967139de00b9497b2424b5a7b",
+  "syntheticScratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-full-1794769321399933600",
+  "credentialEnvOmitted": true,
+  "privateEnvReadGuard": true,
+  "network": "loopback only"
+}

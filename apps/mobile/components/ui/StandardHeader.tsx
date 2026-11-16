@@ -1,10 +1,11 @@
-import { useContext, type ReactNode } from 'react';
-import { Pressable, Text, View } from 'react-native';
-import Feather from '@expo/vector-icons/Feather';
-import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
-import { colors } from '@muthoy/constants';
-import { LanguageToggle } from './LanguageToggle';
-import { useI18n } from '../../state/localeStore';
+import { useContext, type ReactNode } from "react";
+import { Pressable, Text, View } from "react-native";
+import Feather from "@expo/vector-icons/Feather";
+import { SafeAreaInsetsContext } from "react-native-safe-area-context";
+import { colors } from "@muthoy/constants";
+import { LanguageToggle } from "./LanguageToggle";
+import { fillTemplate } from "../../i18n/display";
+import { useI18n } from "../../state/localeStore";
 
 // StandardHeader — Volume 4 NAVIGATION: "standardized header component
 // (translucent soft-green, back chevron, centered title, language toggle)
@@ -31,7 +32,7 @@ export interface StandardHeaderProps {
    * green chevron and title, second line, auth-style toggle). The default is
    * unchanged for every existing screen.
    */
-  tone?: 'default' | 'auth';
+  tone?: "default" | "auth";
   /** Second line under the title. Auth tone only. */
   subtitle?: string;
   /** Pads for the status bar, for a screen drawn edge-to-edge with no other inset. */
@@ -44,18 +45,24 @@ function AuthToneHeader({
   onBackPress,
   rightAccessory,
   safeAreaTop,
-}: Pick<StandardHeaderProps, 'title' | 'subtitle' | 'onBackPress' | 'rightAccessory' | 'safeAreaTop'>) {
+}: Pick<
+  StandardHeaderProps,
+  "title" | "subtitle" | "onBackPress" | "rightAccessory" | "safeAreaTop"
+>) {
   const { t, locale } = useI18n();
   const insets = useContext(SafeAreaInsetsContext);
-  const topInset = safeAreaTop ? insets?.top ?? 0 : 0;
-  const face = locale === 'bn' ? 'font-bangla' : 'font-sans';
+  const topInset = safeAreaTop ? (insets?.top ?? 0) : 0;
+  const face = locale === "bn" ? "font-bangla" : "font-sans";
   return (
-    <View className="flex-row items-center gap-3 bg-brand-softGreen/90 px-4 pb-3" style={{ paddingTop: topInset + 16 }}>
+    <View
+      className="flex-row items-center gap-3 bg-brand-softGreen/90 px-4 pb-3"
+      style={{ paddingTop: topInset + 16 }}
+    >
       {onBackPress ? (
         <Pressable
           onPress={onBackPress}
           accessibilityRole="button"
-          accessibilityLabel={t('goBack')}
+          accessibilityLabel={t("goBack")}
           hitSlop={8}
           className="h-9 w-9 items-center justify-center rounded-full active:bg-white/70"
         >
@@ -65,11 +72,18 @@ function AuthToneHeader({
         <View className="h-9 w-9" />
       )}
       <View className="flex-1 items-center">
-        <Text accessibilityRole="header" className={`${face} text-center text-[15px] text-brand-deepGreen`}>
+        <Text
+          accessibilityRole="header"
+          className={`${face} text-center text-[15px] text-brand-deepGreen`}
+        >
           {title}
         </Text>
         {subtitle ? (
-          <Text className={`${face} mt-0.5 text-center text-[11px] text-brand-deepGreen/70`}>{subtitle}</Text>
+          <Text
+            className={`${face} mt-0.5 text-center text-[11px] text-brand-deepGreen/70`}
+          >
+            {subtitle}
+          </Text>
         ) : null}
       </View>
       <View className="flex-row items-center gap-1">
@@ -88,12 +102,14 @@ export function StandardHeader({
   onSyncPress,
   syncing = false,
   rightAccessory,
-  tone = 'default',
+  tone = "default",
   subtitle,
-  safeAreaTop = false,
+  safeAreaTop = tone === "default",
 }: StandardHeaderProps) {
-  const { t } = useI18n();
-  if (tone === 'auth') {
+  const { t, locale, formatNumber } = useI18n();
+  const insets = useContext(SafeAreaInsetsContext);
+  const topInset = safeAreaTop ? (insets?.top ?? 0) : 0;
+  if (tone === "auth") {
     return (
       <AuthToneHeader
         title={title}
@@ -105,50 +121,67 @@ export function StandardHeader({
     );
   }
   return (
-    <View className="flex-row items-center justify-center bg-brand-softGreen px-4 py-4">
-      {onBackPress ? (
-        <Pressable
-          onPress={onBackPress}
-          accessibilityRole="button"
-          accessibilityLabel={t('goBack')}
-          hitSlop={8}
-          className="absolute left-4 h-10 w-10 items-center justify-center active:opacity-70"
+    <View
+      className="bg-brand-softGreen px-4 pb-4"
+      style={{ paddingTop: topInset + 16 }}
+    >
+      <View className="min-h-11 flex-row items-center gap-2">
+        {onBackPress ? (
+          <Pressable
+            onPress={onBackPress}
+            accessibilityRole="button"
+            accessibilityLabel={t("goBack")}
+            hitSlop={8}
+            className="h-11 w-11 shrink-0 items-center justify-center active:opacity-70"
+          >
+            <Feather name="chevron-left" size={24} color={colors.richBlack} />
+          </Pressable>
+        ) : null}
+        <Text
+          accessibilityRole="header"
+          numberOfLines={2}
+          className={`${locale === "bn" ? "font-bangla" : "font-sans-semibold"} min-w-0 flex-1 text-center text-base text-richBlack`}
         >
-          <Feather name="chevron-left" size={24} color="#111827" />
-        </Pressable>
-      ) : null}
-      <Text className="font-sans-semibold text-base text-richBlack">{title}</Text>
-      <View className="absolute right-3 flex-row items-center gap-1">
-        {onBellPress ? (
-          <Pressable
-            onPress={onBellPress}
-            accessibilityRole="button"
-            accessibilityLabel={`Open notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
-            hitSlop={8}
-            className="h-10 w-10 items-center justify-center active:opacity-70"
-          >
-            <Feather name="bell" size={20} color="#111827" />
-            {unreadCount > 0 ? (
-              <View className="absolute right-0 top-0 min-w-5 items-center rounded-full bg-error px-1">
-                <Text className="font-mono text-xs text-white">{unreadCount > 10 ? '10+' : unreadCount}</Text>
-              </View>
-            ) : null}
-          </Pressable>
-        ) : null}
-        {onSyncPress ? (
-          <Pressable
-            disabled={syncing}
-            onPress={onSyncPress}
-            accessibilityRole="button"
-            accessibilityLabel={t('sync')}
-            hitSlop={8}
-            className="h-10 w-10 items-center justify-center active:opacity-70"
-          >
-            <Feather name="refresh-cw" size={18} color="#059669" />
-          </Pressable>
-        ) : null}
-        {rightAccessory}
-        <LanguageToggle />
+          {title}
+        </Text>
+        <View className="shrink-0 flex-row items-center gap-1">
+          {onBellPress ? (
+            <Pressable
+              onPress={onBellPress}
+              accessibilityRole="button"
+              accessibilityLabel={fillTemplate(t("headerNotificationsLabel"), {
+                count: formatNumber(unreadCount),
+              })}
+              hitSlop={8}
+              className="h-11 w-11 items-center justify-center active:opacity-70"
+            >
+              <Feather name="bell" size={20} color={colors.richBlack} />
+              {unreadCount > 0 ? (
+                <View className="absolute right-0 top-0 min-w-5 items-center rounded-full bg-error px-1">
+                  <Text className="font-sans text-xs text-white">
+                    {unreadCount > 10
+                      ? formatNumber(10) + "+"
+                      : formatNumber(unreadCount)}
+                  </Text>
+                </View>
+              ) : null}
+            </Pressable>
+          ) : null}
+          {onSyncPress ? (
+            <Pressable
+              disabled={syncing}
+              onPress={onSyncPress}
+              accessibilityRole="button"
+              accessibilityLabel={t("sync")}
+              hitSlop={8}
+              className="h-11 w-11 items-center justify-center active:opacity-70"
+            >
+              <Feather name="refresh-cw" size={18} color={colors.brandGreen} />
+            </Pressable>
+          ) : null}
+          {rightAccessory}
+          <LanguageToggle />
+        </View>
       </View>
     </View>
   );

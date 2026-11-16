@@ -1,0 +1,205 @@
+{
+  "scope": "Local implementation only; hosted activation and device acceptance not run. All failures retained.",
+  "attempts": [
+    {
+      "receipt": "remediation-admin-1794790219617653800.json",
+      "task": "admin",
+      "exitCode": 0,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "2 passed (2)",
+        "175 passed (175)"
+      ]
+    },
+    {
+      "receipt": "remediation-database-1794789476416973200.json",
+      "task": "database",
+      "exitCode": 1,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": []
+    },
+    {
+      "receipt": "remediation-database-1794789500698519800.json",
+      "task": "database",
+      "exitCode": 1,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "1 failed (1)",
+        "36 skipped (36)"
+      ]
+    },
+    {
+      "receipt": "remediation-database-1794789556499937100.json",
+      "task": "database",
+      "exitCode": 1,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "1 failed (1)",
+        "2 failed | 34 passed (36)"
+      ]
+    },
+    {
+      "receipt": "remediation-database-1794789702066417700.json",
+      "task": "database",
+      "exitCode": 0,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "1 passed (1)",
+        "42 passed (42)"
+      ]
+    },
+    {
+      "receipt": "remediation-database-1794789816428439600.json",
+      "task": "database",
+      "exitCode": 1,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "1 failed (1)",
+        "16 failed | 38 passed (54)"
+      ]
+    },
+    {
+      "receipt": "remediation-database-1794789961127937000.json",
+      "task": "database",
+      "exitCode": 1,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "1 failed (1)",
+        "2 failed | 52 passed (54)"
+      ]
+    },
+    {
+      "receipt": "remediation-database-1794790052533901000.json",
+      "task": "database",
+      "exitCode": 0,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "1 passed (1)",
+        "58 passed (58)"
+      ]
+    },
+    {
+      "receipt": "remediation-database-1794790215531415300.json",
+      "task": "database",
+      "exitCode": 1,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "1 failed (1)",
+        "2 failed | 58 passed (60)"
+      ]
+    },
+    {
+      "receipt": "remediation-database-1794790456496905800.json",
+      "task": "database",
+      "exitCode": 0,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "1 passed (1)",
+        "60 passed (60)"
+      ]
+    },
+    {
+      "receipt": "remediation-database-1794790773572369400.json",
+      "task": "database",
+      "exitCode": 0,
+      "scope": "staged source snapshot",
+      "logHashVerified": true,
+      "summary": [
+        "1 passed (1)",
+        "60 passed (60)"
+      ]
+    },
+    {
+      "receipt": "remediation-database-regression-1794790219039284300.json",
+      "task": "database-regression",
+      "exitCode": 0,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "2 passed (2)",
+        "75 passed (75)"
+      ]
+    },
+    {
+      "receipt": "remediation-hardware-1794789112028479200.json",
+      "task": "hardware",
+      "exitCode": 0,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "4 passed (4)",
+        "103 passed | 1 skipped (104)"
+      ]
+    },
+    {
+      "receipt": "remediation-hardware-1794790776185344200.json",
+      "task": "hardware",
+      "exitCode": 0,
+      "scope": "staged source snapshot",
+      "logHashVerified": true,
+      "summary": [
+        "4 passed (4)",
+        "100 passed | 1 skipped (101)"
+      ]
+    },
+    {
+      "receipt": "remediation-lint-1794789770485326600.json",
+      "task": "lint",
+      "exitCode": 0,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": []
+    },
+    {
+      "receipt": "remediation-printer-1794789111947437500.json",
+      "task": "printer",
+      "exitCode": 0,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "3 passed (3)",
+        "22 passed (22)"
+      ]
+    },
+    {
+      "receipt": "remediation-printer-1794790771988065900.json",
+      "task": "printer",
+      "exitCode": 0,
+      "scope": "staged source snapshot",
+      "logHashVerified": true,
+      "summary": [
+        "2 passed (2)",
+        "6 passed (6)"
+      ]
+    },
+    {
+      "receipt": "remediation-printer-baseline-1794788940956001100.json",
+      "task": "printer-baseline",
+      "exitCode": 1,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": [
+        "1 failed (1)",
+        "8 failed (8)"
+      ]
+    },
+    {
+      "receipt": "remediation-types-1794789770345257700.json",
+      "task": "types",
+      "exitCode": 0,
+      "scope": "integrated working directory",
+      "logHashVerified": true,
+      "summary": []
+    }
+  ]
+}

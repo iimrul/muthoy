@@ -1,0 +1,21 @@
+{
+  "task": "environment-safety",
+  "command": [
+    "pnpm.cmd",
+    "exec",
+    "vitest",
+    "run",
+    "apps/mobile/tests/dev-production-safety.test.ts",
+    "--maxWorkers=1"
+  ],
+  "startUTC": "2026-11-15T19:33:16.930098+00:00",
+  "endUTC": "2026-11-15T19:33:30.335469+00:00",
+  "elapsedSeconds": 13.405,
+  "exitCode": 0,
+  "log": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\environment-safety-1794771196930065500.log",
+  "logSha256": "2023c228173c93cb1cd68d8608f50acc85a8924c5e1b39006a4cadc2765866d5",
+  "syntheticScratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-environment-safety-1794771196928108100",
+  "credentialEnvOmitted": true,
+  "privateEnvReadGuard": "Exact mobile .env read permitted for existing filename-only source assertion; no values logged. Other private files refused.",
+  "network": "loopback only"
+}

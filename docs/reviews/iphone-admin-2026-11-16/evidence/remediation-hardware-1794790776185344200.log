@@ -1,0 +1,16 @@
+
+ RUN  v5.1.0 D:/Muthoy/docs/reviews/iphone-admin-2026-11-16/evidence/scratch-remediation-publication/source
+
+ ✓ apps/mobile/tests/hardware-readiness/printer-transport.hwtest.ts (26 tests | 1 skipped) 128ms
+ ✓ apps/mobile/tests/hardware-readiness/ocr-parsers.hwtest.ts (41 tests) 99ms
+ ✓ apps/mobile/tests/hardware-readiness/escpos-golden.hwtest.ts (26 tests) 49ms
+ ✓ apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts (8 tests) 38ms
+
+ Test Files  4 passed (4)
+      Tests  100 passed | 1 skipped (101)
+   Start at  06:59:38
+   Duration  4.24s (transform 50%, import 24%, tests 19%, worker 6%)
+
+    Isolate  4 workers spawned · ~610ms startup each (spawn + environment, per file)
+             at least ~1.83s faster with isolate: false — reuses workers across files instead of one per file
+

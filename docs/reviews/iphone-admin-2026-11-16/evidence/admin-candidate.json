@@ -1,0 +1,11 @@
+{
+  "candidate": "backend/supabase/held-migrations/20261116002928_admin_dev_compatibility.sql",
+  "sha256": "536feba37847e1dae1edb26cb9c13b45699a497221f6294b64da98c4618f368f",
+  "sources": {
+    "20261023000000_e4_batch3_admin_platform.sql": "9ee3568340f198a878ae0e8859238b78abb5562c0404b04e8f2bdb560ca21899",
+    "20261030000000_e4b_publication_snapshots.sql": "a072d9d66dd8f0e356f6151cbe6dcfe95cddc3f0481c51ed1b2c49ae82840028"
+  },
+  "status": "HELD; hosted activation not approved",
+  "storeContractMd5": "fb0af5fc6b0b2f63ae3f891239ee3297",
+  "reviewedStaffFunctionMd5": "d4f8a9bfbeaa410244089594c7757cdc"
+}

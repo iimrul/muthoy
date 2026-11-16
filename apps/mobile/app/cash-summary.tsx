@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../components/ui/AppTextInput";
 import { router, useFocusEffect } from "expo-router";
 import { asPaisa, fromTaka, ZERO_PAISA, type Paisa } from "@muthoy/types";
 import { formatMoney } from "@muthoy/utils";
-import { cashReconcileFormSchema } from "@muthoy/validation";
+import { cashReconcileFormSchema, hasExcessMoneyDecimals, moneyDraftValue } from "@muthoy/validation";
 import { AccessDenied } from "../components/ui/AccessDenied";
 import { showToast } from "../components/ui/Toast";
 import { StandardHeader } from "../components/ui/StandardHeader";
+import { breakdownFormulaInput, cashFormulaCaption } from "../components/cash/cashPresentation";
 import { CashSummarySheet } from "../components/cash/CashSummarySheet";
 import { OpeningCashModal } from "../components/cash/OpeningCashModal";
 import { WithdrawSheet } from "../components/cash/WithdrawSheet";
@@ -32,34 +34,6 @@ import { subscribeToSyncCompletion, triggerSyncNow } from "../sync";
 // is NOT re-derived here. CLAUDE.md rule 5: opening cash defaults to 0, is
 // set by the user, and is written against today's business date only.
 
-
-// CH-2: compact formula terms, localized with the rest of the app. Terms only
-// appear when nonzero.
-function formulaCaption(
-  breakdown: CashBreakdown,
-  t: ReturnType<typeof useI18n>["t"],
-): string {
-  const parts = [
-    `${t("cashFormulaOpen")} ${formatMoney(breakdown.openingCash)}`,
-    `${t("cashFormulaSales")} ${formatMoney(breakdown.cashSales.total)}`,
-  ];
-  if (breakdown.creditCollections.total > ZERO_PAISA) {
-    parts.push(
-      `+ ${t("cashFormulaCollected")} ${formatMoney(breakdown.creditCollections.total)}`,
-    );
-  }
-  if (breakdown.expenses.total > ZERO_PAISA) {
-    parts.push(
-      `− ${t("cashFormulaExpense")} ${formatMoney(breakdown.expenses.total)}`,
-    );
-  }
-  if (breakdown.withdrawals.total > ZERO_PAISA) {
-    parts.push(
-      `− ${t("cashFormulaWithdrawal")} ${formatMoney(breakdown.withdrawals.total)}`,
-    );
-  }
-  return parts.join(" ");
-}
 
 export default function CashSummaryScreen() {
   const { t } = useI18n();
@@ -172,9 +146,9 @@ export default function CashSummaryScreen() {
   );
 
   const countedParsed = cashReconcileFormSchema.safeParse({
-    countedCashTaka: Number(countedText.trim()),
+    countedCashTaka: moneyDraftValue(countedText.trim()),
   });
-  const canReconcile = countedText.trim().length > 0 && !isReconciling;
+  const canReconcile = countedText.trim().length > 0 && countedParsed.success && !isReconciling;
 
   const handleReconcile = useCallback(async () => {
     if (!session || !countedParsed.success) return;
@@ -237,7 +211,7 @@ export default function CashSummaryScreen() {
           </Text>
           {breakdown ? (
             <Text className="font-sans text-xs text-white/70">
-              {formulaCaption(breakdown, t)}
+              {cashFormulaCaption(breakdownFormulaInput(breakdown), t, formatMoney)}
             </Text>
           ) : null}
         </View>
@@ -282,6 +256,7 @@ export default function CashSummaryScreen() {
             placeholder="0.00"
             className="rounded-xl border border-midGray/40 px-4 py-3 font-mono text-base text-richBlack"
           />
+          {hasExcessMoneyDecimals(countedText) ? <Text accessibilityRole="alert" className="font-sans text-sm text-error">{t("moneyPrecisionLabel")}</Text> : null}
           <Pressable
             onPress={() => void handleReconcile()}
             disabled={!canReconcile}

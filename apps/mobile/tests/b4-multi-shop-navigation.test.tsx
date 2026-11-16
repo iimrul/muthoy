@@ -83,6 +83,7 @@ vi.mock('react-native', () => {
     Modal: ({ children, visible }: StubProps) => (visible ? createElement('div', null, children) : null),
     TextInput: () => createElement('input', null),
     ScrollView: ({ children }: StubProps) => createElement('div', null, children),
+    StatusBar: { setBarStyle: vi.fn() },
     Alert: { alert: vi.fn() },
     BackHandler: { addEventListener: vi.fn(() => ({ remove: vi.fn() })) },
     InteractionManager: {

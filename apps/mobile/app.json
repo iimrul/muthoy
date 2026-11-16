@@ -16,7 +16,9 @@
         ],
         "BGTaskSchedulerPermittedIdentifiers": [
           "com.expo.modules.backgroundtask.processing"
-        ]
+        ],
+        "NSBluetoothAlwaysUsageDescription": "Muthoy uses Bluetooth to connect to your receipt printer.",
+        "NSBluetoothPeripheralUsageDescription": "Muthoy uses Bluetooth to connect to your receipt printer."
       }
     },
     "android": {
@@ -53,10 +55,14 @@
         {
           "android": {
             "useSQLCipher": true
+          },
+          "ios": {
+            "useSQLCipher": true
           }
         }
       ],
       "./plugins/withAndroidBackupProtection",
+      "./plugins/withAndroidLightSystemBars",
       "expo-notifications",
       [
         "expo-camera",

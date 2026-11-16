@@ -1,0 +1,17 @@
+{
+  "task": "lint",
+  "command": [
+    "pnpm.cmd",
+    "lint"
+  ],
+  "startUTC": "2026-11-15T19:06:39.758128+00:00",
+  "endUTC": "2026-11-15T19:22:22.844883+00:00",
+  "elapsedSeconds": 943.087,
+  "exitCode": 0,
+  "log": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\lint-1794769599758096400.log",
+  "logSha256": "ede83b5c54a8beacd807a1f05274bfad27c64abd8275c6989ade2a1eb9507753",
+  "syntheticScratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-lint-1794769599751440400",
+  "credentialEnvOmitted": true,
+  "privateEnvReadGuard": true,
+  "network": "loopback only"
+}

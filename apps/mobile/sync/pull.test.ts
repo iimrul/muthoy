@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   applyRemoteRows: vi.fn(() => []),
   purgeUnreadableTables: vi.fn(),
   getLastPulledCursor: vi.fn(),
+  getLastPulledAccess: vi.fn(),
+  setLastPulledAccess: vi.fn(),
   setLastPulledCursor: vi.fn(),
   tableNames: [
     'shops', 'subscriptions', 'roles', 'permissions', 'users', 'user_permissions',
@@ -41,6 +43,8 @@ vi.mock('../db/sync-helpers', () => ({
 }));
 vi.mock('./cursorStore', () => ({
   getLastPulledCursor: mocks.getLastPulledCursor,
+  getLastPulledAccess: mocks.getLastPulledAccess,
+  setLastPulledAccess: mocks.setLastPulledAccess,
   setLastPulledCursor: mocks.setLastPulledCursor,
   clearLastPulledCursor: vi.fn(),
   HYDRATION_TABLE_ORDER: mocks.tableNames,
@@ -75,6 +79,7 @@ function page(
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getLastPulledCursor.mockReturnValue(START_CURSOR);
+  mocks.getLastPulledAccess.mockReturnValue(null);
 });
 
 describe('pullChanges honours the device-handover kill switch', () => {
@@ -185,6 +190,7 @@ describe('pullChanges honours the device-handover kill switch', () => {
   });
 
   it('passes a complete valid access answer to shop-scoped reconciliation', async () => {
+    mocks.getLastPulledAccess.mockReturnValue({actorUserId:"user-1",saleHistoryScope:"own",readableTables:[...CORE_TABLES].sort()});
     mocks.invoke.mockResolvedValue(page('r1', false, 1, {
       readableTables: CORE_TABLES,
       accessUserId: 'user-1',
@@ -202,6 +208,7 @@ describe('pullChanges honours the device-handover kill switch', () => {
   });
 
   it('restarts from page one when access changes during pagination', async () => {
+    mocks.getLastPulledAccess.mockReturnValue({actorUserId:"user-1",saleHistoryScope:"all",readableTables:[...CORE_TABLES].sort()});
     const accessV1 = {
       readableTables: CORE_TABLES, accessUserId: 'user-1', saleHistoryScope: 'all',
     };
@@ -212,17 +219,19 @@ describe('pullChanges honours the device-handover kill switch', () => {
       .mockResolvedValueOnce(page('r1', true, 1, accessV1))
       .mockResolvedValueOnce(page('r2', false, 2))
       .mockResolvedValueOnce(page('r1', true, 2, accessV2))
+      .mockResolvedValueOnce(page('r1', true, 2, accessV2))
       .mockResolvedValueOnce(page('r2', false, 2));
 
     await pullChanges(SHOP);
 
-    expect(mocks.invoke).toHaveBeenCalledTimes(4);
+    expect(mocks.invoke).toHaveBeenCalledTimes(5);
     expect(mocks.invoke.mock.calls[0]?.[1]?.body).toMatchObject({
       since: START_CURSOR, includeAccess: true,
     });
     expect(mocks.invoke.mock.calls[2]?.[1]?.body).toMatchObject({
       since: START_CURSOR, includeAccess: true,
     });
+    expect(mocks.invoke.mock.calls[3]?.[1]?.body).toMatchObject({since:null,includeAccess:true});
     expect(mocks.purgeUnreadableTables).toHaveBeenCalledTimes(1);
     expect(mocks.purgeUnreadableTables).toHaveBeenCalledWith(expect.objectContaining({
       saleHistoryScope: 'own',

@@ -1,4 +1,27 @@
 # TECH_STACK.md — Muthoy POS
+
+## Current integration status — 2026-11-15
+
+The approved external source work is integrated file by file into this repository:
+Android remediation, money/stock/transaction tests, role-scoped sync repair,
+recovery source, the same-app iOS modules, and the separate Admin fixes/tests.
+See [the integration plan](docs/plans/external-integration-2026-11-15/PLAN.md)
+and [the verification report](docs/plans/external-integration-2026-11-15/INTEGRATION_REPORT.md).
+
+This is source integration. Existing database schemas/data, hosted contracts,
+installed applications and device state have not been changed. iOS native/XCTest,
+physical hardware, hosted activation and current-source device acceptance remain
+unverified here. Historical test receipts below retain their original scope.
+Production remains NO GO. B6-01 and B6-02 remain deferred deliverables.
+
+## Historical implementation receipt — 2026-11-09
+
+Android remediation is in progress from source `a23ca61262497474bf85ede78948ca831657c8db`.
+See [the dated implementation record](docs/plans/android-remediation-2026-11-09.md).
+Historical completion statements below do not establish current hosted parity,
+current-source Android acceptance or production readiness. On11November the Founder authorized iOS implementation in this SAME React Native app; physical iOS testing remains deferred;
+B6-01 and B6-02 remain mandatory deferred deliverables.
+
 ### The finalized, locked technology stack. Read alongside CLAUDE.md,
 ### PROJECT_CONTEXT.md, and DEVELOPMENT_RULES.md. Do not deviate without updating
 ### this file first and logging why in DECISIONS.md.
@@ -44,6 +67,29 @@
   holds the non-exportable key for local lookup tags.
 
 ## Native Features
+
+Current platform implementation (11 November): this SAME mobile app now includes
+Apple DB-key, PIN-crypto and BLE Expo modules plus iOS SQLCipher configuration.
+iOS source/JS boundary checks are separate from native compilation: no Xcode is
+available here, so native build/runtime is BLOCKED and physical testing deferred.
+Apple keys use nonsynchronizing AfterFirstUnlockThisDeviceOnly Keychain storage;
+this is device-only software-key custody, not a Secure Enclave/non-exportable-key
+claim. PIN bcrypt cost10 vendors the fixed upstream BCryptSwift commit
+7cebf3c0d9b507912f572a0ad9b4d6af764d8b1a with Apache license/provenance; HMAC lookup
+retains the existing domain and base64url contract. BLE uses CoreBluetooth with
+existing shared ESC/POS formatting. Android native implementations are unchanged.
+
+Recovery core (approved local scope): additive SQLite journal within the existing
+outbox transaction; versioned tenant business snapshots; installed expo-crypto
+AES256GCM; owner-held random256bit factor; independently verified immutable DEV
+Storage copies and isolated SQLite restore. Founder-approved local Owner custody stores a confirmed factor only in existing
+verified SQLCipher; durable jobs retain identical ciphertext across retries. The
+Owner setup/status panel and foreground lifecycle are locally integrated. There is
+NO default network runtime: hosted backup activation remains blocked pending its
+own approval. No Staff coverage protocol is enabled. HELD Storage SQL is not hosted. No-loss remains FAIL while an independent copy is unavailable.
+
+The following Android implementation details remain the verified native baseline:
+
 - Local Android Expo module backed by `at.favre.lib:bcrypt` 0.10.2 for
   standard bcrypt at cost 10; Android Keystore HMAC-SHA256 for local-only PIN
   lookup tags. Requires a development/EAS build, not Expo Go.
@@ -57,7 +103,7 @@
 - expo-location
 - Local Android Expo BLE printer module: BLE scan/connect plus ESC/POS byte
   transport. Pairing metadata is device-local in MMKV; Beta printing is
-  Android-only and requires a development/EAS build.
+  Android-verified; the Apple source transport above also requires a native development build.
 
 ## Backend — Supabase
 - Supabase PostgreSQL
@@ -68,7 +114,7 @@
 - Limited Realtime (used sparingly — battery/data cost on low-end phones)
 - Custom Sync Queue (Outbox Pattern) — SQLite → Sync Queue → Supabase
 
-### Commercial, onboarding, and deployed state
+### Historical commercial, onboarding, and deployment record
 
 - Server-owned Free/Pro/Ultra entitlement and Owner-level billing-account model.
   SQLite stores a verified cache for instant/offline UX; it never grants access.
@@ -91,6 +137,11 @@
   fails closed and is not production-ready.
 
 ## Admin Panel — Next.js
+
+Integrated dependency manifests pin Next.js/eslint-config-next 15.5.29,
+Recharts 3.10.1 and Leaflet 1.9.4. The Day 14 note below is retained historical
+context; it is not a description of the current Admin implementation.
+
 - Next.js 15
 - Tailwind CSS
 - shadcn/ui
@@ -98,7 +149,7 @@
 - Leaflet (shop map, using captured lat/long — a dedicated map library instead
   of forcing one charting library to do both jobs)
 
-> **Current state (Day 14, P0):** `apps/admin` runs on Next.js 15 + Tailwind
+> **Historical state (Day 14, P0):** `apps/admin` runs on Next.js 15 + Tailwind
 > only. shadcn/ui, Recharts and Leaflet are **not installed** — they arrive with
 > the P1 Full Admin build-out (Volume 5), since the P0 panel has no charts and
 > no map by design.

@@ -1,0 +1,10 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+ ✓ apps/mobile/tests/dev-production-safety.test.ts (43 tests) 1572ms
+
+ Test Files  1 passed (1)
+      Tests  43 passed (43)
+   Start at  01:33:25
+   Duration  4.22s (tests 80%, import 17%, transform 1%, worker 1%)
+

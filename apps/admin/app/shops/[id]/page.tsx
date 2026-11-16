@@ -161,6 +161,17 @@ export default async function ShopDetailPage({ params }: ShopPageProps) {
     <>
       <h1 className="text-xl font-semibold">{shop.name}</h1>
       <p className="mt-1 text-sm text-midGray">Shop {shop.id}</p>
+      {/* A-02: the per-shop audit view (`/audit?shop=`) is granted by
+          shop_audit.read, which the nav's Audit entry (audit.read) does not
+          cover — so for `support` this link is the ONLY way in. Presentation
+          only: /audit re-checks the permission server-side either way. */}
+      {permissions.includes('shop_audit.read') ? (
+        <p className="mt-2 text-sm">
+          <Link href={`/audit?shop=${shop.id}`} className="underline">
+            View this pharmacy&apos;s audit log
+          </Link>
+        </p>
+      ) : null}
 
       <div className="mt-6">
         <DetailList

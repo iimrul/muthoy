@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Modal, Pressable, Text, TextInput, View } from "react-native";
 import { fromTaka, type Paisa } from "@muthoy/types";
-import { openingCashFormSchema } from "@muthoy/validation";
+import { openingCashFormSchema, hasExcessMoneyDecimals, moneyDraftValue } from "@muthoy/validation";
 import { useI18n } from "../../state/localeStore";
 
 // Opening-cash bottom sheet — the prototype's OpeningCashModal.
@@ -49,7 +49,7 @@ export function OpeningCashModal({
   };
 
   const parsed = openingCashFormSchema.safeParse({
-    openingCashTaka: Number(amount.trim()),
+    openingCashTaka: moneyDraftValue(amount.trim()),
   });
   const canSave =
     amount.trim().length > 0 &&
@@ -141,6 +141,8 @@ export function OpeningCashModal({
               className="rounded-2xl border border-midGray/40 px-4 py-3 font-mono text-base text-richBlack"
             />
           </View>
+
+          {hasExcessMoneyDecimals(amount) ? <Text accessibilityRole="alert" className="font-sans text-sm text-error">{t("moneyPrecisionLabel")}</Text> : null}
 
           {error ? (
             <Text

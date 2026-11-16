@@ -182,6 +182,8 @@ beforeAll(async () => {
   applyMigration('0028_shop_scoped_pin_lookup.sql');
   applyMigration('0029_pin_reserved_while_inactive.sql');
   applyMigration('0033_medicine_search_key.sql');
+  // Current writers require the additive atomic recovery journal.
+  applyMigration('0034_recovery_journal.sql');
 
   // Day 4: the owner registers, sets a PIN, and the device gets linked.
   const registration = await createShopAndOwner({

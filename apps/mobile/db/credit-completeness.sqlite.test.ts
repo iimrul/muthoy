@@ -82,6 +82,8 @@ beforeAll(() => {
   applyMigration('0027_h7_local_access_lock.sql');
   applyMigration('0028_shop_scoped_pin_lookup.sql');
   applyMigration('0029_pin_reserved_while_inactive.sql');
+  // Current writers require the additive atomic recovery journal.
+  applyMigration('0034_recovery_journal.sql');
 
   db.insert(shops).values({ id: SHOP_ID, ownerId: OWNER_ID, name: 'Credit Shop', phone: '01700000801', createdAt: NOW, updatedAt: NOW }).run();
   db.insert(roles).values({ id: ROLE_ID, shopId: SHOP_ID, name: 'owner', isSystem: true, createdAt: NOW, updatedAt: NOW }).run();

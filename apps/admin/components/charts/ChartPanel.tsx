@@ -71,7 +71,7 @@ export default function ChartPanel({
   const render = format ?? ((value: number) => String(value));
 
   return (
-    <section aria-labelledby={headingId} className="rounded border border-black/10 bg-white p-4">
+    <section aria-labelledby={headingId} className="admin-panel min-w-0">
       <h2 id={headingId} className="text-base font-semibold">
         {heading}
       </h2>

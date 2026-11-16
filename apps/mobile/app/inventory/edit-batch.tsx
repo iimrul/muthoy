@@ -1,12 +1,6 @@
 import { useEffect, useState } from "react";
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router, useLocalSearchParams } from "expo-router";
 import { parseTakaTextToPaisa } from "@muthoy/utils";
 import Feather from "@expo/vector-icons/Feather";

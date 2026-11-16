@@ -42,14 +42,19 @@ interface StubProps {
   children?: ReactNode;
   onPress?: () => void;
   accessibilityLabel?: string;
+  className?: string;
+  testID?: string;
+  style?: { height?: number };
+  statusBarTranslucent?: boolean;
 }
 
 // Minimal DOM stand-ins: only the props this component actually relies on are
 // forwarded, so React never warns about unknown DOM attributes.
 vi.mock("react-native", () => ({
-  View: ({ children }: StubProps) => createElement("div", null, children),
+  View: ({ children, testID, style, className }: StubProps) => createElement("div", { "data-testid": testID, style, className }, children),
+  StatusBar: { currentHeight: 24 },
   Text: ({ children }: StubProps) => createElement("span", null, children),
-  Modal: ({ children }: StubProps) => createElement("div", null, children),
+  Modal: ({ children, statusBarTranslucent }: StubProps) => createElement("div", {"data-testid":"scanner-modal","data-status-translucent":String(statusBarTranslucent)}, children),
   ActivityIndicator: () => createElement("div", { role: "progressbar" }),
   Pressable: ({ children, onPress, accessibilityLabel }: StubProps) =>
     createElement(
@@ -150,6 +155,7 @@ describe("MedicineTextScanner — visibility", () => {
       }),
     );
     expect(screen.queryByLabelText("Close scanner")).toBeNull();
+    expect(screen.queryByTestId("scanner-status-surface")).toBeNull();
   });
 });
 
@@ -474,5 +480,19 @@ describe("MedicineTextScanner — captureOnly recognition", () => {
     // Recognition does not transfer ownership of the file to the scanner: the
     // caller still owns it, and on a resumed held draft it is already durable.
     expect(removeTemporaryCaptureMock).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("scanner system-icon contrast surface", () => {
+  it("reserves the native status height above the black scanner when permission is denied", () => {
+    currentPermissionState="deniable";renderScanner();
+    expect(screen.getByTestId("scanner-modal").getAttribute("data-status-translucent")).toBe("true");
+    expect(screen.getByTestId("scanner-status-surface").style.height).toBe("24px");
+    expect(screen.getByTestId("scanner-status-surface").className).toContain("bg-white");
+    expect(screen.getByLabelText("Close scanner")).toBeTruthy();
+    expect(captureAsyncMock).not.toHaveBeenCalled();
+    expect(scanTextMock).not.toHaveBeenCalled();
+    expect(requestPermissionMock).not.toHaveBeenCalled();
   });
 });

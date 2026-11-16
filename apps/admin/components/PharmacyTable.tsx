@@ -21,7 +21,7 @@ export default function PharmacyTable({ pharmacies }: PharmacyTableProps) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-black/10">
+    <div className="admin-table-scroll" role="region" aria-label="Pharmacies" tabIndex={0}>
       <table className="w-full min-w-[36rem] text-left text-sm">
         <thead className="bg-brand-softGreen text-xs uppercase tracking-wide text-brand-deepGreen">
           <tr>

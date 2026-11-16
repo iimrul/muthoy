@@ -193,6 +193,18 @@ export async function findUnresolvedSyncAlert(shopId: string): Promise<{ id: str
   return row ?? null;
 }
 
+/**
+ * Closes the shop's open sync warnings. findUnresolvedSyncAlert gates every new
+ * sync warning, so an alert nobody resolves silences all later ones; the sync
+ * engine calls this only after a completed cycle with a healthy queue.
+ */
+export async function resolveSyncAlerts(shopId: string): Promise<void> {
+  const now = new Date().toISOString();
+  await db.update(notifications).set({ resolvedAt: now, updatedAt: now }).where(and(
+    eq(notifications.shopId, shopId), eq(notifications.type, 'sync'), isNull(notifications.resolvedAt),
+  ));
+}
+
 export async function resolveLowStockAlert(notificationId: string): Promise<void> {
   const now = new Date().toISOString();
   await db.update(notifications).set({ resolvedAt: now, updatedAt: now }).where(and(

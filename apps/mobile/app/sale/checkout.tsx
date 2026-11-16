@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { asPaisa, subtractPaisa, type Paisa } from "@muthoy/types";
@@ -16,7 +10,7 @@ import { MedicineTextScanner } from "../../components/scanner/MedicineTextScanne
 import { PrescriptionLinesReview } from "../../components/sale/PrescriptionLinesReview";
 import { StandardHeader } from "../../components/ui/StandardHeader";
 import { listCustomers, type CustomerListItem } from "../../db/customers";
-import { StaleSessionError } from "../../db/errors";
+import { DayClosedError, StaleSessionError } from "../../db/errors";
 import {
   createSaleTransaction,
   getActiveBatchForMedicine,
@@ -353,6 +347,8 @@ export default function CheckoutScreen() {
         setRefreshedAllocation(caught.refreshedAllocation);
         setConfirmedQuoteRevision(cartRevision);
         setError(t("quoteChangedReviewLabel"));
+      } else if (caught instanceof DayClosedError) {
+        setError(t("dayClosedErrorLabel"));
       } else if (caught instanceof StaleSessionError) {
         setError(t("activeUserChangedNotSavedLabel"));
       } else
@@ -917,7 +913,8 @@ function CheckoutLineRow({
             selectTextOnFocus
             keyboardType="number-pad"
             accessibilityLabel={`${item.medicineName} quantity`}
-            className={`h-7 w-12 rounded-lg border text-center font-sans-semibold text-sm text-richBlack ${overStock ? "border-error bg-errorBg" : "border-midGray bg-white"}`}
+            style={{ paddingVertical: 0 }}
+            className={`h-11 w-12 rounded-lg border text-center font-sans-semibold text-sm text-richBlack ${overStock ? "border-error bg-errorBg" : "border-midGray bg-white"}`}
           />
           <Pressable
             onPress={() => onQuantityChange(item.quantity + 1)}

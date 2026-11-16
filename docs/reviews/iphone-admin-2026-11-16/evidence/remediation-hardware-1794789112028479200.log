@@ -1,0 +1,16 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+ ✓ apps/mobile/tests/hardware-readiness/release-requirements.hwtest.ts (8 tests) 52ms
+ ✓ apps/mobile/tests/hardware-readiness/printer-transport.hwtest.ts (29 tests | 1 skipped) 142ms
+ ✓ apps/mobile/tests/hardware-readiness/ocr-parsers.hwtest.ts (41 tests) 80ms
+ ✓ apps/mobile/tests/hardware-readiness/escpos-golden.hwtest.ts (26 tests) 59ms
+
+ Test Files  4 passed (4)
+      Tests  103 passed | 1 skipped (104)
+   Start at  06:31:54
+   Duration  4.89s (transform 52%, import 24%, tests 19%, worker 5%)
+
+    Isolate  4 workers spawned · ~736ms startup each (spawn + environment, per file)
+             at least ~2.21s faster with isolate: false — reuses workers across files instead of one per file
+

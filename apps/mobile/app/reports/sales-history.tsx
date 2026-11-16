@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  FlatList,
-  Modal,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { FlatList, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router } from "expo-router";
 import { formatMoney } from "@muthoy/utils";
 import { EmptyState } from "../../components/ui/EmptyState";

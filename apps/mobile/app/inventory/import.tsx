@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router } from "expo-router";
 import { parseCsv } from "@muthoy/utils";
 import { inventoryCsvRowSchema } from "@muthoy/validation";

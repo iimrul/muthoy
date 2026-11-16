@@ -1,0 +1,21 @@
+{
+  "task": "hardware",
+  "command": [
+    "pnpm.cmd",
+    "exec",
+    "vitest",
+    "run",
+    "--config",
+    "apps/mobile/tests/hardware-readiness/vitest.hardware.config.ts"
+  ],
+  "startUTC": "2026-11-15T19:06:45.975062+00:00",
+  "endUTC": "2026-11-15T19:08:20.112086+00:00",
+  "elapsedSeconds": 94.137,
+  "exitCode": 1,
+  "log": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\hardware-1794769605975037500.log",
+  "logSha256": "22b88358f72d74a1490d4ca82f02f8f496811558b1757d3df7cf6944d501df74",
+  "syntheticScratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-hardware-1794769605974021900",
+  "credentialEnvOmitted": true,
+  "privateEnvReadGuard": true,
+  "network": "loopback only"
+}

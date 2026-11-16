@@ -36,6 +36,9 @@ function syncedSchemaTables(): string[] {
     // owns. Both are therefore local-only, and the import-provenance table with
     // them.
     "medicine_catalog", "medicine_catalog_imports",
+    // Explicit private custody/journal metadata, never remote business rows.
+    "recovery_journal", "recovery_backup_state", "recovery_import_receipts",
+    "recovery_owner_custody", "recovery_backup_jobs",
   ]);
   return [...schemaSource.matchAll(/sqliteTable\(\s*["']([^"']+)["']/g)]
     .map((match) => match[1])

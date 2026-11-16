@@ -1,0 +1,18 @@
+{
+  "task": "guard-check",
+  "command": [
+    "node",
+    "D:\\Muthoy\\docs\\plans\\external-integration-2026-11-15\\check_verification_guard.cjs"
+  ],
+  "cwd": "D:\\Muthoy",
+  "startUTC": "2026-11-16T00:16:02.652123+00:00",
+  "endUTC": "2026-11-16T00:16:03.024790+00:00",
+  "elapsedSeconds": 0.373,
+  "exitCode": 0,
+  "log": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\guard-check-1794788162652052400.log",
+  "logSha256": "a63a21771a025c65b41b55f233cf747659a86e5df0c95583bbd609e41c87de8e",
+  "syntheticScratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-guard-check-1794788162651374500",
+  "credentialEnvOmitted": true,
+  "privateEnvReadGuard": true,
+  "network": "loopback only"
+}

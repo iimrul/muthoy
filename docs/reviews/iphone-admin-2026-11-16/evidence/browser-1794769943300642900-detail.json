@@ -1,0 +1,1565 @@
+{
+  "generatedAt": "2026-11-15T19:16:31.999Z",
+  "scope": "Chromium only, synthetic loopback data, offline verification fonts. NOT iPhone/Safari or native-device verification.",
+  "checks": [
+    {
+      "kind": "browser-login",
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/",
+      "kind": "render",
+      "title": "Dashboard",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/pharmacies",
+      "kind": "render",
+      "title": "Pharmacies",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 221
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 122
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 101
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 113
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 183
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/subscriptions",
+      "kind": "render",
+      "title": "Subscriptions",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 113
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 93
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 107
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/revenue",
+      "kind": "render",
+      "title": "Revenue & billing",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/analytics",
+      "kind": "render",
+      "title": "Analytics",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 159
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 159
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/maps",
+      "kind": "render",
+      "title": "Maps",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 122
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 146
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/support",
+      "kind": "render",
+      "title": "Support",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 221
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 113
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 320
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 119
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 87
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 288
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        },
+        {
+          "text": "Open case",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/admins",
+      "kind": "render",
+      "title": "Admins & roles",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 64.59375
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 131
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 98
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 64.59375
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Save",
+          "height": 44
+        },
+        {
+          "text": "Revoke sessions",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/audit",
+      "kind": "render",
+      "title": "Admin audit",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 221
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 181
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 113
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 132
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 159
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 159
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 320
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        },
+        {
+          "text": "Open",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/reports",
+      "kind": "render",
+      "title": "Reports",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 344
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 113
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 159
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 159
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/settings",
+      "kind": "render",
+      "title": "Settings",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "TEXTAREA",
+          "font": 14,
+          "width": 1110
+        },
+        {
+          "tag": "TEXTAREA",
+          "font": 14,
+          "width": 1110
+        },
+        {
+          "tag": "TEXTAREA",
+          "font": 14,
+          "width": 1110
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Disable",
+          "height": 44
+        },
+        {
+          "text": "Disable",
+          "height": 44
+        },
+        {
+          "text": "Disable",
+          "height": 44
+        }
+      ],
+      "pass": false
+    },
+    {
+      "viewport": "desktop",
+      "path": "/payments",
+      "kind": "render",
+      "title": "Payment orders",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/accounts",
+      "kind": "render",
+      "title": "Billing accounts",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "desktop",
+      "path": "/shops/00000000-0000-4000-8000-0000000000a1",
+      "kind": "render",
+      "title": "Synthetic Pharmacy A",
+      "width": 1440,
+      "contentWidth": 1440,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/",
+      "kind": "render",
+      "title": "Dashboard",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/pharmacies",
+      "kind": "render",
+      "title": "Pharmacies",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 31.890625
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 31.90625
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 31.890625
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 31.90625
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 31.90625
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/subscriptions",
+      "kind": "render",
+      "title": "Subscriptions",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 61.15625
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 61.171875
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 61.171875
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/revenue",
+      "kind": "render",
+      "title": "Revenue & billing",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/analytics",
+      "kind": "render",
+      "title": "Analytics",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 97.75
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 97.75
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/maps",
+      "kind": "render",
+      "title": "Maps",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 97.75
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 97.75
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/support",
+      "kind": "render",
+      "title": "Support",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 97.75
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 97.75
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 320
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 119
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 87
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 288
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        },
+        {
+          "text": "Open case",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/admins",
+      "kind": "render",
+      "title": "Admins & roles",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 64.59375
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 131
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 98
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 64.59375
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Save",
+          "height": 44
+        },
+        {
+          "text": "Revoke sessions",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/audit",
+      "kind": "render",
+      "title": "Admin audit",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 26
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 24.59375
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 24.578125
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 24.59375
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 26
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 26
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 320
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        },
+        {
+          "text": "Open",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/reports",
+      "kind": "render",
+      "title": "Reports",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 42.875
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 42.875
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 42.875
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 42.875
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/settings",
+      "kind": "render",
+      "title": "Settings",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "TEXTAREA",
+          "font": 14,
+          "width": 332
+        },
+        {
+          "tag": "TEXTAREA",
+          "font": 14,
+          "width": 332
+        },
+        {
+          "tag": "TEXTAREA",
+          "font": 14,
+          "width": 332
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Disable",
+          "height": 44
+        },
+        {
+          "text": "Disable",
+          "height": 44
+        },
+        {
+          "text": "Disable",
+          "height": 44
+        }
+      ],
+      "pass": false
+    },
+    {
+      "viewport": "phone",
+      "path": "/payments",
+      "kind": "render",
+      "title": "Payment orders",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/accounts",
+      "kind": "render",
+      "title": "Billing accounts",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "phone",
+      "path": "/shops/00000000-0000-4000-8000-0000000000a1",
+      "kind": "render",
+      "title": "Synthetic Pharmacy A",
+      "width": 390,
+      "contentWidth": 390,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/",
+      "kind": "render",
+      "title": "Dashboard",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/pharmacies",
+      "kind": "render",
+      "title": "Pharmacies",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 26
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 25.90625
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 25.890625
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 25.90625
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 25.90625
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/subscriptions",
+      "kind": "render",
+      "title": "Subscriptions",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 51.15625
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 51.171875
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 51.171875
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/revenue",
+      "kind": "render",
+      "title": "Revenue & billing",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/analytics",
+      "kind": "render",
+      "title": "Analytics",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 82.75
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 82.75
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/maps",
+      "kind": "render",
+      "title": "Maps",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 82.75
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 82.75
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/support",
+      "kind": "render",
+      "title": "Support",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 82.75
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 82.75
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 320
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 119
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 87
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 288
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        },
+        {
+          "text": "Open case",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/admins",
+      "kind": "render",
+      "title": "Admins & roles",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 64.59375
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 131
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 98
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 64.59375
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Save",
+          "height": 44
+        },
+        {
+          "text": "Revoke sessions",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/audit",
+      "kind": "render",
+      "title": "Admin audit",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 26
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 19.59375
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 19.578125
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 19.59375
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 26
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 26
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 320
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        },
+        {
+          "text": "Open",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/reports",
+      "kind": "render",
+      "title": "Reports",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 35.375
+        },
+        {
+          "tag": "SELECT",
+          "font": 16,
+          "width": 35.375
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 35.375
+        },
+        {
+          "tag": "INPUT",
+          "font": 16,
+          "width": 35.375
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Apply",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/settings",
+      "kind": "render",
+      "title": "Settings",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [
+        {
+          "tag": "TEXTAREA",
+          "font": 14,
+          "width": 302
+        },
+        {
+          "tag": "TEXTAREA",
+          "font": 14,
+          "width": 302
+        },
+        {
+          "tag": "TEXTAREA",
+          "font": 14,
+          "width": 302
+        }
+      ],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        },
+        {
+          "text": "Disable",
+          "height": 44
+        },
+        {
+          "text": "Disable",
+          "height": 44
+        },
+        {
+          "text": "Disable",
+          "height": 44
+        }
+      ],
+      "pass": false
+    },
+    {
+      "viewport": "narrow",
+      "path": "/payments",
+      "kind": "render",
+      "title": "Payment orders",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/accounts",
+      "kind": "render",
+      "title": "Billing accounts",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "viewport": "narrow",
+      "path": "/shops/00000000-0000-4000-8000-0000000000a1",
+      "kind": "render",
+      "title": "Synthetic Pharmacy A",
+      "width": 360,
+      "contentWidth": 360,
+      "hasMain": true,
+      "errorNotice": false,
+      "navLinks": 11,
+      "fields": [],
+      "buttons": [
+        {
+          "text": "Sign out",
+          "height": 44
+        }
+      ],
+      "pass": true
+    },
+    {
+      "kind": "filter-submit",
+      "pass": false
+    }
+  ],
+  "errors": [
+    {
+      "kind": "console",
+      "args": [
+        "Failed to fetch RSC payload for http://127.0.0.1:4212/. Falling back to browser navigation.",
+        "TypeError: Failed to fetch\n    at y (http://127.0.0.1:4212/_next/static/chunks/1874-ba4f8c1ddb6f863d.js:1:164958)\n    at async _ (http://127.0.0.1:4212/_next/static/chunks/1874-ba4f8c1ddb6f863d.js:1:163816)\n    at async Object.o [as task] (http://127.0.0.1:4212/_next/static/chunks/1874-ba4f8c1ddb6f863d.js:1:68544)"
+      ]
+    },
+    {
+      "kind": "runner",
+      "message": "Error: Browser evaluation failed: {\"exceptionId\":1,\"text\":\"Uncaught\",\"lineNumber\":0,\"columnNumber\":68,\"scriptId\":\"361\",\"stackTrace\":{\"callFrames\":[{\"functionName\":\"\",\"scriptId\":\"361\",\"url\":\"\",\"lineNumber\":0,\"columnNumber\":68}]},\"exception\":{\"type\":\"object\",\"subtype\":\"error\",\"className\":\"TypeError\",\"description\":\"TypeError: Cannot read properties of null (reading 'value')\\n    at <anonymous>:1:69\",\"objectId\":\"-2713749563353766239.48.2\"}}\n    at expression (file:///D:/Muthoy/docs/reviews/iphone-admin-2026-11-16/browser-check.mjs:34:33)\n    at async file:///D:/Muthoy/docs/reviews/iphone-admin-2026-11-16/browser-check.mjs:117:45"
+    }
+  ],
+  "summary": {
+    "checks": 44,
+    "failed": 4,
+    "errors": 2
+  }
+}

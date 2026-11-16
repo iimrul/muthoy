@@ -1,4 +1,5 @@
-import { and, asc, count, desc, eq, isNull, max, or } from "drizzle-orm";
+import { appendRecoveryJournal } from "./recoveryJournal";
+import { and, asc, count, desc, eq, gte, isNull, max, or } from "drizzle-orm";
 import { canonicalizeExpenseCategory } from "@muthoy/validation";
 import { medicineSearchKeys } from "@muthoy/utils";
 import {
@@ -154,6 +155,10 @@ export interface ApplyRemoteRowsOptions {
    * of its history.
    */
   moreToCome?: boolean;
+  /** Access-context hydration only: reconstruct a clean credit FK pruned locally. */
+  restoreAccessPrunedCreditLinks?: boolean;
+  /** Access-context hydration only: reconstruct a clean completed-draft FK. */
+  restoreAccessPrunedDraftLinks?: boolean;
 }
 
 const HYDRATION_TABLE_RANK = new Map<SyncTableName, number>(
@@ -619,8 +624,7 @@ export function recordChange(
           readCompleteRow(tx, params.table, params.rowId),
         );
 
-  tx.insert(syncQueue)
-    .values({
+  const queueRow = {
       id: generateId(),
       seq: nextSeq(tx),
       shopId: params.shopId,
@@ -633,8 +637,9 @@ export function recordChange(
       operationSequence: params.operation?.sequence ?? null,
       operationExpectedCount: params.operation?.expectedCount ?? null,
       status: "pending",
-    })
-    .run();
+  } satisfies typeof syncQueue.$inferInsert;
+  tx.insert(syncQueue).values(queueRow).run();
+  appendRecoveryJournal(tx, queueRow);
 }
 
 function timestampMs(value: unknown, label: string): number {
@@ -936,11 +941,73 @@ function assertRemoteRowTenant(
   }
 }
 
+/** Reconstruct only a projection-pruned FK, never other business values. */
+function restoreAccessPrunedSaleLink(
+  tx: DbTransaction,
+  tableName: "credits" | "sale_drafts",
+  local: Record<string, unknown>,
+  remote: Record<string, unknown>,
+  protectedIds: ReadonlySet<string>,
+): boolean {
+  const link = tableName === "credits" ? "saleId" : "completedSaleId";
+  const remoteSaleId = remote[link];
+  if (
+    local[link] !== null ||
+    typeof remoteSaleId !== "string" || !remoteSaleId ||
+    typeof local.id !== "string" || protectedIds.has(local.id) ||
+    (tableName === "sale_drafts" && local.status !== "completed")
+  ) {
+    return false;
+  }
+  // Every persisted local business column participates, including future fields.
+  // Dirty is local-only; creation/deletion timestamps compare by instant below.
+  for (const key of Object.keys(local)) {
+    if ([link, "isDirty", "updatedAt", "createdAt", "deletedAt"].includes(key)) continue;
+    const remoteValue = typeof local[key] === "boolean" && (remote[key] === 0 || remote[key] === 1)
+      ? Boolean(remote[key]) : remote[key];
+    if (!Object.prototype.hasOwnProperty.call(remote, key) || local[key] !== remoteValue) {
+      return false;
+    }
+  }
+  for (const key of ["createdAt", "deletedAt"] as const) {
+    if (!Object.prototype.hasOwnProperty.call(remote, key)) return false;
+    if (local[key] === null && remote[key] === null) continue;
+    const localValue = local[key];
+    const remoteValue = remote[key];
+    if (typeof localValue !== "string" || typeof remoteValue !== "string") return false;
+    const localTime = Date.parse(localValue);
+    const remoteTime = Date.parse(remoteValue);
+    if (!Number.isFinite(localTime) || !Number.isFinite(remoteTime) || localTime !== remoteTime) {
+      return false;
+    }
+  }
+  const parent = tx.select({ id: sales.id }).from(sales).where(and(
+    eq(sales.id, remoteSaleId), eq(sales.shopId, local.shopId as string),
+  )).get();
+  if (!parent) return false;
+
+  if (tableName === "credits") {
+    tx.update(credits).set({ saleId: remoteSaleId }).where(and(
+      eq(credits.id, local.id), eq(credits.shopId, local.shopId as string),
+    )).run();
+  } else {
+    const alreadyLinked = tx.select({ id: saleDrafts.id }).from(saleDrafts)
+      .where(eq(saleDrafts.completedSaleId, remoteSaleId)).get();
+    if (alreadyLinked && alreadyLinked.id !== local.id) return false;
+    tx.update(saleDrafts).set({ completedSaleId: remoteSaleId }).where(and(
+      eq(saleDrafts.id, local.id), eq(saleDrafts.shopId, local.shopId as string),
+    )).run();
+  }
+  return true;
+}
+
 function applyToTable<T extends SyncTableName>(
   tx: DbTransaction,
   tableName: T,
   row: Record<string, unknown>,
   expectedShopId?: string,
+  protectedCreditIds?: ReadonlySet<string>,
+  protectedDraftIds?: ReadonlySet<string>,
 ): RemoteRowResult {
   const rowId = row.id;
   if (typeof rowId !== "string") {
@@ -1013,12 +1080,22 @@ function applyToTable<T extends SyncTableName>(
   // "skipped_stale" discards the remote change, and an "applied" overwrites a
   // local one. Fail-soft — see tryRecordConflict.
   tryRecordConflict(tx, tableName, rowId, local, row);
-  if (
-    local &&
-    timestampMs(local.updatedAt, "Local") >=
-      timestampMs(row.updatedAt, "Remote")
-  ) {
-    return "skipped_stale";
+  if (local) {
+    const localTime = timestampMs(local.updatedAt, "Local");
+    const remoteTime = timestampMs(row.updatedAt, "Remote");
+    if (localTime >= remoteTime) {
+      if (
+        localTime === remoteTime && (
+          (tableName === "credits" && protectedCreditIds &&
+            restoreAccessPrunedSaleLink(tx, tableName, local, row, protectedCreditIds)) ||
+          (tableName === "sale_drafts" && protectedDraftIds &&
+            restoreAccessPrunedSaleLink(tx, tableName, local, row, protectedDraftIds))
+        )
+      ) {
+        return "applied";
+      }
+      return "skipped_stale";
+    }
   }
 
   if (tableName === "users") {
@@ -1059,7 +1136,7 @@ function applyToTable<T extends SyncTableName>(
     return "applied";
   }
 
-  // Every non-audit table uses strict LWW: equal timestamps are no-ops.
+  // Strict LWW, except the access-pruned sale FK repairs handled above.
   upsertRemoteRow(tx, tableName, row);
   if (tableName === "inventory_movements") {
     reactivateArchivedMovementAncestors(tx, row);
@@ -1432,6 +1509,15 @@ export function applyRemoteRows(
 
   const results = new Array<RemoteRowResult>(changes.length);
   db.transaction((tx) => {
+    // Snapshot dependencies before any apply. A later row must not erase the
+    // pending/failed graph that protects a row from relationship repair.
+    const protectedGraph = options.expectedShopId &&
+      (options.restoreAccessPrunedCreditLinks || options.restoreAccessPrunedDraftLinks)
+      ? protectedOutboxGraph(options.expectedShopId) : undefined;
+    const protectedCreditIds = options.restoreAccessPrunedCreditLinks && protectedGraph
+      ? protectedIdsFor(protectedGraph, "credits") : undefined;
+    const protectedDraftIds = options.restoreAccessPrunedDraftLinks && protectedGraph
+      ? protectedIdsFor(protectedGraph, "sale_drafts") : undefined;
     for (const { change, index } of applyOrder) {
       const result = applyToTable(
         tx,
@@ -1441,6 +1527,8 @@ export function applyRemoteRows(
           toCamelCaseRow(change.row),
         ),
         options.expectedShopId,
+        protectedCreditIds,
+        protectedDraftIds,
       );
       if (result === "deferred" && !options.moreToCome) {
         // Thrown from INSIDE the transaction, deliberately: every row applied
@@ -1818,25 +1906,60 @@ export function markSyncRowPermanentFailure(id: string, error: string): void {
 export function markSyncRowTransientFailure(
   id: string,
   error: string,
-  maxAttempts = 8,
 ): void {
   db.transaction((tx) => {
     const row = tx
-      .select({ attempts: syncQueue.attempts })
+      .select({ attempts: syncQueue.attempts, status: syncQueue.status })
       .from(syncQueue)
       .where(eq(syncQueue.id, id))
       .get();
-    if (!row) return;
-    const attempts = row.attempts + 1;
+    if (!row || row.status !== "pending") return;
+    // An outage cannot retire durable work; only an ACK or permanent refusal can.
+    const attempts = Math.min(row.attempts + 1, Number.MAX_SAFE_INTEGER);
     tx.update(syncQueue)
       .set({
         attempts,
         lastError: error,
-        status: attempts >= maxAttempts ? "failed" : "pending",
       })
       .where(eq(syncQueue.id, id))
       .run();
   });
+}
+
+/**
+ * Attempts after which a still-pending row is reported as stuck. It is the
+ * point at which the queue used to give up; it now only changes what the Owner
+ * is told. The row stays pending and keeps retrying, because an outage must
+ * never retire durable work.
+ */
+export const STUCK_SYNC_ATTEMPTS = 8;
+
+/** Pending rows that have kept failing for STUCK_SYNC_ATTEMPTS tries. */
+export function countStuckSyncRows(shopId: string): number {
+  return (
+    db
+      .select({ value: count() })
+      .from(syncQueue)
+      .where(and(
+        eq(syncQueue.shopId, shopId),
+        eq(syncQueue.status, "pending"),
+        gte(syncQueue.attempts, STUCK_SYNC_ATTEMPTS),
+      ))
+      .get()?.value ?? 0
+  );
+}
+
+/** Queue exposure only; a sent/empty queue does not establish backup coverage. */
+export function getSyncExposure(shopId: string): { pending: number; failed: number; stuck: number } {
+  const rows = db.select({ status: syncQueue.status, value: count() })
+    .from(syncQueue).where(and(eq(syncQueue.shopId, shopId),
+      or(eq(syncQueue.status, "pending"), eq(syncQueue.status, "failed"))))
+    .groupBy(syncQueue.status).all();
+  return {
+    pending: rows.find((row) => row.status === "pending")?.value ?? 0,
+    failed: rows.find((row) => row.status === "failed")?.value ?? 0,
+    stuck: countStuckSyncRows(shopId),
+  };
 }
 
 export function countFailedSyncRows(shopId: string): number {

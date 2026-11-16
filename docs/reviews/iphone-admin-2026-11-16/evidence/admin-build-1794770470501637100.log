@@ -1,0 +1,47 @@
+$ next build
+ ⨯ Failed to load env from .env.local Error: INTEGRATION_PRIVATE_ENV_READ_REFUSED
+    at checkFile (D:\Muthoy\docs\plans\external-integration-2026-11-15\verification-guard.cjs:12:11)
+    at fs.<computed> [as readFileSync] (D:\Muthoy\docs\plans\external-integration-2026-11-15\verification-guard.cjs:17:42)
+   ▲ Next.js 15.5.29
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 73s
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/3) ...
+ ✓ Generating static pages (3/3)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                 Size  First Load JS
+┌ ƒ /                                    1.53 kB         108 kB
+├ ○ /_not-found                            997 B         104 kB
+├ ƒ /accounts                              172 B         106 kB
+├ ƒ /accounts/[id]                         172 B         106 kB
+├ ƒ /admins                                172 B         106 kB
+├ ƒ /analytics                           1.52 kB         108 kB
+├ ƒ /api/admin/session                     180 B         103 kB
+├ ƒ /api/audit/export                      180 B         103 kB
+├ ƒ /api/reports/export                    180 B         103 kB
+├ ƒ /audit                                 172 B         106 kB
+├ ƒ /login                                 180 B         103 kB
+├ ƒ /maps                                1.49 kB         108 kB
+├ ƒ /payments                              180 B         103 kB
+├ ƒ /pharmacies                            177 B         106 kB
+├ ƒ /reports                               177 B         106 kB
+├ ƒ /revenue                             1.53 kB         108 kB
+├ ƒ /settings                              180 B         103 kB
+├ ƒ /shops/[id]                            177 B         106 kB
+├ ƒ /subscriptions                         177 B         106 kB
+└ ƒ /support                               177 B         106 kB
++ First Load JS shared by all             103 kB
+  ├ chunks/1874-ba4f8c1ddb6f863d.js        46 kB
+  ├ chunks/32afe653-76ecae657fcc05ac.js  54.2 kB
+  └ other shared chunks (total)          2.57 kB
+
+
+ƒ Middleware                             62.3 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

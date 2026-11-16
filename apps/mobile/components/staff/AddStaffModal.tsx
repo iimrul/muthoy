@@ -5,9 +5,9 @@ import {
   Pressable,
   ScrollView,
   Text,
-  TextInput,
   View,
 } from "react-native";
+import { AppTextInput as TextInput } from "../ui/AppTextInput";
 import { createStaffSchema } from "@muthoy/validation";
 import {
   PinPad,

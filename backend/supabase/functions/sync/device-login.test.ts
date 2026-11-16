@@ -27,7 +27,7 @@ const FUNCTIONS = resolve('backend/supabase/functions/sync');
 const MIGRATION_SQL = readFileSync(
   resolve('backend/supabase/migrations/20260819000000_staff_device_login.sql'),
   'utf8',
-);
+).replace(/\r\n/g, '\n');
 const DEVICE_LOGIN = readFileSync(resolve(FUNCTIONS, 'deviceLogin.ts'), 'utf8');
 const DEVICE_LOGIN_POLICY = readFileSync(resolve(FUNCTIONS, 'deviceLoginPolicy.ts'), 'utf8');
 const RECOVER_PIN = readFileSync(resolve(FUNCTIONS, 'recoverPin.ts'), 'utf8');

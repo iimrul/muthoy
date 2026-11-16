@@ -62,6 +62,8 @@ beforeAll(() => {
     "0033_medicine_search_key.sql"
   ])
     applyMigration(name);
+  // Current writers require the additive atomic recovery journal.
+  applyMigration('0034_recovery_journal.sql');
   const timestamp = now();
   db.insert(schema.shops)
     .values({

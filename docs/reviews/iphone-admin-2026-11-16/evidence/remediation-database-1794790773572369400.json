@@ -1,0 +1,19 @@
+{
+  "task": "database",
+  "command": [
+    "node",
+    "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-remediation-publication\\source\\node_modules\\vitest\\vitest.mjs",
+    "run",
+    "--maxWorkers=1",
+    "backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts"
+  ],
+  "startUTC": "2026-11-16T00:59:33.573674+00:00",
+  "endUTC": "2026-11-16T00:59:58.585136+00:00",
+  "exitCode": 0,
+  "log": "remediation-database-1794790773572369400.log",
+  "logSha256": "11c22a9c6419f1010f874a2bb741b65c0f745ab204a438ee2a37de8893749228",
+  "privateFiles": "refused",
+  "databases": "new scratch or memory only",
+  "network": "loopback only",
+  "deviceAcceptance": "NOT RUN"
+}

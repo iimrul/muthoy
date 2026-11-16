@@ -410,7 +410,7 @@ export default async function DashboardPage() {
           : ' The subscription run rate is not shown, because this account does not hold the permission for it.'}
       </p>
 
-      <section aria-labelledby="alerts" className="mt-8">
+      <section aria-labelledby="alerts" className="admin-panel mt-8">
         <h2 id="alerts" className="text-base font-semibold">
           Operational alerts
         </h2>
@@ -457,14 +457,15 @@ export default async function DashboardPage() {
         />
       </div>
 
-      <section aria-labelledby="recent" className="mt-8">
+      <section aria-labelledby="recent" className="admin-panel mt-8">
         <h2 id="recent" className="text-base font-semibold">
           Recent registrations
         </h2>
         {recent.length === 0 ? (
           <EmptyState message="No pharmacy has registered yet, so there is nothing recent to show." />
         ) : (
-          <table className="mt-3 w-full text-sm">
+          <div className="admin-table-scroll mt-3" role="region" aria-label="Recent registrations" tabIndex={0}>
+          <table className="w-full min-w-[32rem] text-sm">
             <caption className="sr-only">The ten most recently registered pharmacies.</caption>
             <thead>
               <tr className="border-b border-black/10 text-left">
@@ -500,6 +501,7 @@ export default async function DashboardPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </>

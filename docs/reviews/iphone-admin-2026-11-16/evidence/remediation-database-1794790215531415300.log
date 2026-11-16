@@ -1,0 +1,90 @@
+
+ RUN  v5.1.0 D:/Muthoy
+
+ ❯ backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts (60 tests | 2 failed) 48016ms
+   ❯ held Admin compatibility — exact DEV order=true (30)
+     ✓ changes no existing business rows, sync/entitlement functions or unrelated table ACLs 157ms
+     ✓ the retained Staff repair uploads cash=100 sale once and still denies standalone credit edits 975ms
+     ✓ the retained Staff repair uploads cash=0 sale once and still denies standalone credit edits 254ms
+     ✓ all six stores enforce RLS and have no API policies 13ms
+     ✓ anon cannot read or insert into any Admin store or execute the publication RPC 315ms
+     ✓ authenticated cannot read or insert into any Admin store or execute the publication RPC 210ms
+     ✓ service_role reads all stores and shop audit; cannot write shop audit or refunds 224ms
+     ✓ role narrowing, disabling and revocation persist; attribution and deletion stay forbidden 56ms
+     ✓ audit appends durable records and refuses modification, deletion and truncation 37ms
+     ✓ support cases/notes persist; foreign shops, moved attribution and removed history are refused 81ms
+     ✓ settings persist only allowlisted keys, with immutable identity 29ms
+     ✓ publication and audit commit together; a repeat reads the first value without leaking new amounts 132ms
+     × refuses unsafe publication "set local role service_role" without an audit/publication write 46ms
+     ✓ refuses unsafe publication {"month":2,"k":1} without an audit/publication write 18ms
+     ✓ refuses unsafe publication {"month":2,"clearing":2} without an audit/publication write 15ms
+     ✓ refuses unsafe publication {"month":2,"cohort":"single_shop"} without an audit/publication write 16ms
+     ✓ refuses unsafe publication {"month":2,"start":"2025-02-02"} without an audit/publication write 16ms
+     ✓ refuses unsafe publication {"month":2,"gross":50000,"refunds":10000,"value":39999} without an audit/publication write 15ms
+     ✓ failed publication audit rolls back its serving row 26ms
+     ✓ both publication functions pin search_path; the trigger helper has no direct service/API grant 17ms
+     ✓ reapplication preserves business rows, Admin history and schema 237ms
+     ✓ refuses unknown/partial installation atomically: alter table admin_platform_settings add column synthetic_unreviewed text 98ms
+     ✓ refuses unknown/partial installation atomically: grant select(username) on admin_role_assignments to anon 143ms
+     ✓ refuses unknown/partial installation atomically: drop table admin_platform_settings 73ms
+     ✓ refuses unknown/partial installation atomically: alter table admin_role_assignments disable row level security 73ms
+     ✓ refuses unknown/partial installation atomically: create policy synthetic_exposure on admin_role_assignments for select to anon using (true) 112ms
+     ✓ refuses unknown/partial installation atomically: alter function financial_publications_immutable() security definer 160ms
+     ✓ refuses unknown/partial installation atomically: create or replace function sync_apply_operation_pre_b3_withdrawal(p_shop_id uuid,p_operation_id uuid,p_operation_kind text,p_actor_id uuid,p_device_id text,p_rows jsonb)
+      returns text language sql security definer set search_path=public as 'select ''unknown''::text' 81ms
+     ✓ refuses an unreviewed publication function body before replacing it 59ms
+     ✓ an isolated backup restores Admin history, publications, business data and Staff function 8745ms
+   ❯ held Admin compatibility — exact DEV order=false (30)
+     ✓ changes no existing business rows, sync/entitlement functions or unrelated table ACLs 67ms
+     ✓ the retained Staff repair uploads cash=100 sale once and still denies standalone credit edits 353ms
+     ✓ the retained Staff repair uploads cash=0 sale once and still denies standalone credit edits 219ms
+     ✓ all six stores enforce RLS and have no API policies 11ms
+     ✓ anon cannot read or insert into any Admin store or execute the publication RPC 147ms
+     ✓ authenticated cannot read or insert into any Admin store or execute the publication RPC 135ms
+     ✓ service_role reads all stores and shop audit; cannot write shop audit or refunds 125ms
+     ✓ role narrowing, disabling and revocation persist; attribution and deletion stay forbidden 30ms
+     ✓ audit appends durable records and refuses modification, deletion and truncation 35ms
+     ✓ support cases/notes persist; foreign shops, moved attribution and removed history are refused 67ms
+     ✓ settings persist only allowlisted keys, with immutable identity 25ms
+     ✓ publication and audit commit together; a repeat reads the first value without leaking new amounts 79ms
+     × refuses unsafe publication "set local role service_role" without an audit/publication write 24ms
+     ✓ refuses unsafe publication {"month":2,"k":1} without an audit/publication write 14ms
+     ✓ refuses unsafe publication {"month":2,"clearing":2} without an audit/publication write 12ms
+     ✓ refuses unsafe publication {"month":2,"cohort":"single_shop"} without an audit/publication write 14ms
+     ✓ refuses unsafe publication {"month":2,"start":"2025-02-02"} without an audit/publication write 17ms
+     ✓ refuses unsafe publication {"month":2,"gross":50000,"refunds":10000,"value":39999} without an audit/publication write 14ms
+     ✓ failed publication audit rolls back its serving row 33ms
+     ✓ both publication functions pin search_path; the trigger helper has no direct service/API grant 14ms
+     ✓ reapplication preserves business rows, Admin history and schema 161ms
+     ✓ refuses unknown/partial installation atomically: alter table admin_platform_settings add column synthetic_unreviewed text 79ms
+     ✓ refuses unknown/partial installation atomically: grant select(username) on admin_role_assignments to anon 120ms
+     ✓ refuses unknown/partial installation atomically: drop table admin_platform_settings 99ms
+     ✓ refuses unknown/partial installation atomically: alter table admin_role_assignments disable row level security 114ms
+     ✓ refuses unknown/partial installation atomically: create policy synthetic_exposure on admin_role_assignments for select to anon using (true) 113ms
+     ✓ refuses unknown/partial installation atomically: alter function financial_publications_immutable() security definer 95ms
+     ✓ refuses unknown/partial installation atomically: create or replace function sync_apply_operation_pre_b3_withdrawal(p_shop_id uuid,p_operation_id uuid,p_operation_kind text,p_actor_id uuid,p_device_id text,p_rows jsonb)
+      returns text language sql security definer set search_path=public as 'select ''unknown''::text' 62ms
+     ✓ refuses an unreviewed publication function body before replacing it 48ms
+     ✓ an isolated backup restores Admin history, publications, business data and Staff function 7426ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=true > refuses unsafe publication "set local role service_role" without an audit/publication write
+ FAIL  backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts > held Admin compatibility — exact DEV order=false > refuses unsafe publication "set local role service_role" without an audit/publication write
+AssertionError: expected null not to be null
+ ❯ backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts:225:68
+    223|   ])('refuses unsafe publication %j without an audit/publication write…
+    224|     const before=await h.one('select (select count(*) from financial_p…
+    225|     expect(await attempt(h,'service_role',publish(overrides))).not.toB…
+       |                                                                    ^
+    226|     expect(await h.one('select (select count(*) from financial_publica…
+    227|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 58 passed (60)
+   Start at  06:50:21
+   Duration  49.67s (tests 99%, transform 1%)
+

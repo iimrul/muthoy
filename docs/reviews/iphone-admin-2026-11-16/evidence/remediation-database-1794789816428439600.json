@@ -1,0 +1,19 @@
+{
+  "task": "database",
+  "command": [
+    "node",
+    "D:\\Muthoy\\node_modules\\vitest\\vitest.mjs",
+    "run",
+    "--maxWorkers=1",
+    "backend/supabase/pgtest/admin-dev-compatibility.pgtest.ts"
+  ],
+  "startUTC": "2026-11-16T00:43:36.429586+00:00",
+  "endUTC": "2026-11-16T00:44:35.010859+00:00",
+  "exitCode": 1,
+  "log": "remediation-database-1794789816428439600.log",
+  "logSha256": "b5f036f9ed1695e6f8e44b734b8405544a6bbc2271bb2697eb420bb74b761193",
+  "privateFiles": "refused",
+  "databases": "new scratch or memory only",
+  "network": "loopback only",
+  "deviceAcceptance": "NOT RUN"
+}

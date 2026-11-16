@@ -1,0 +1,17 @@
+{
+  "task": "browser",
+  "command": [
+    "node",
+    "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\browser-check.mjs"
+  ],
+  "startUTC": "2026-11-15T19:30:22.922964+00:00",
+  "endUTC": "2026-11-15T19:32:56.337103+00:00",
+  "elapsedSeconds": 153.414,
+  "exitCode": 1,
+  "log": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\browser-1794771022922936200.log",
+  "logSha256": "6d1f7af675b7a010c25109b34d7d16a7c06f41e9756b4bb695018db903c5f8b3",
+  "syntheticScratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-browser-1794771022921855900",
+  "credentialEnvOmitted": true,
+  "privateEnvReadGuard": true,
+  "network": "loopback only"
+}

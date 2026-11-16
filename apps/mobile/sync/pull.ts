@@ -5,6 +5,8 @@ import {
 } from "../db/sync-helpers";
 import {
   getLastPulledCursor,
+  getLastPulledAccess,
+  setLastPulledAccess,
   HYDRATION_TABLE_ORDER,
   setLastPulledCursor,
   type PullCursor,
@@ -71,19 +73,21 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
-function parseAccessAnswer(response: Record<string, unknown>): PullPage["access"] {
+function parseAccessAnswer(
+  response: Record<string, unknown>,
+): PullPage["access"] {
   if (!("readableTables" in response)) return undefined;
   const value = response.readableTables;
   const actorUserId = response.accessUserId;
   const saleHistoryScope = response.saleHistoryScope;
   if (
-    !Array.isArray(value)
-    || value.some((entry) => !isSyncTableName(entry))
-    || new Set(value).size !== value.length
-    || ALWAYS_READABLE_TABLES.some((table) => !value.includes(table))
-    || typeof actorUserId !== "string"
-    || actorUserId.length === 0
-    || (saleHistoryScope !== "all" && saleHistoryScope !== "own")
+    !Array.isArray(value) ||
+    value.some((entry) => !isSyncTableName(entry)) ||
+    new Set(value).size !== value.length ||
+    ALWAYS_READABLE_TABLES.some((table) => !value.includes(table)) ||
+    typeof actorUserId !== "string" ||
+    actorUserId.length === 0 ||
+    (saleHistoryScope !== "all" && saleHistoryScope !== "own")
   ) {
     // A malformed access answer must never be partially interpreted. The pull
     // may still apply valid rows, but reconciliation is skipped wholesale.
@@ -185,9 +189,9 @@ function parsePullPage(value: unknown, shopId: string): PullPage {
  * drain under standing the server has just withdrawn.
  */
 export class DeviceAccessRevokedDuringSyncError extends Error {
-  constructor(readonly objection: 'device_revoked' | 'binding_revoked') {
-    super('This device is no longer authorised for this shop');
-    this.name = 'DeviceAccessRevokedDuringSyncError';
+  constructor(readonly objection: "device_revoked" | "binding_revoked") {
+    super("This device is no longer authorised for this shop");
+    this.name = "DeviceAccessRevokedDuringSyncError";
   }
 }
 
@@ -224,11 +228,15 @@ async function fetchPullPage(
   // Recorded BEFORE the rows are applied, so a revoked device persists its own
   // quarantine even if applying the page then fails. sync/deviceRegistry.ts
   // enforces the monotonic guard, so a stale page cannot lift a revocation.
-  const objection = await applyPulledDeviceAuthority(shopId, page.device, actorUserId);
+  const objection = await applyPulledDeviceAuthority(
+    shopId,
+    page.device,
+    actorUserId,
+  );
   // And acted on immediately. Waiting until the cycle finished would let the
   // remaining pages apply, and the outbox drain behind them, under an
   // authority the snapshot in hand has already withdrawn.
-  if (objection === 'device_revoked' || objection === 'binding_revoked') {
+  if (objection === "device_revoked" || objection === "binding_revoked") {
     throw new DeviceAccessRevokedDuringSyncError(objection);
   }
   return page;
@@ -249,6 +257,10 @@ function reconcileLocalAccess(
   if (!access) {
     return;
   }
+  // Persist before any destructive access purge. If this storage write fails,
+  // keep the old mirror; a later actor must never inherit an owner watermark
+  // without the access context that explains which rows were removed.
+  setLastPulledAccess(shopId, access);
   purgeUnreadableTables({ shopId, ...access });
 }
 
@@ -288,6 +300,7 @@ function applyChanges(
   shopId: string,
   changes: PullChange[],
   moreToCome: boolean,
+  restoreAccessPrunedSaleLinks = false,
 ): PullChange[] {
   if (changes.length === 0) {
     return [];
@@ -297,9 +310,27 @@ function applyChanges(
       tableName: change.tableName,
       row: change.payload,
     })),
-    { moreToCome, expectedShopId: shopId },
+    {
+      moreToCome, expectedShopId: shopId,
+      restoreAccessPrunedCreditLinks: restoreAccessPrunedSaleLinks,
+      restoreAccessPrunedDraftLinks: restoreAccessPrunedSaleLinks,
+    },
   );
   return changes.filter((_, index) => results[index] === "deferred");
+}
+
+function materializedAccessChanged(
+  shopId: string,
+  access: NonNullable<PullPage["access"]>,
+): boolean {
+  const previous = getLastPulledAccess(shopId);
+  return (
+    !previous ||
+    previous.actorUserId !== access.actorUserId ||
+    previous.saleHistoryScope !== access.saleHistoryScope ||
+    JSON.stringify(previous.readableTables) !==
+      JSON.stringify([...access.readableTables].sort())
+  );
 }
 
 async function pullFullHydration(
@@ -319,7 +350,14 @@ async function pullFullHydration(
     if (isCancelled()) {
       return;
     }
-    const page = await fetchPullPage(shopId, cursor, timing, first, actorUserId, isCancelled);
+    const page = await fetchPullPage(
+      shopId,
+      cursor,
+      timing,
+      first,
+      actorUserId,
+      isCancelled,
+    );
     if (!page) return;
     accessVersion = requireStableAccessVersion(accessVersion, page);
     access = access ?? page.access;
@@ -358,7 +396,12 @@ async function pullFullHydration(
   // so nothing detected it — the owner simply saw wrong stock with no way to
   // tell it apart from the truth. All or nothing instead: a failed hydration
   // rolls back to an empty shop and no cursor, so the next login starts over.
-  applyChanges(shopId, discoveredChanges, false);
+  applyChanges(
+    shopId,
+    discoveredChanges,
+    false,
+    Boolean(access && materializedAccessChanged(shopId, access)),
+  );
   // A fresh hydration cannot hold anything it was not just sent, so this is a
   // no-op in practice. It runs anyway so both pull paths obey one rule.
   reconcileLocalAccess(shopId, access);
@@ -388,9 +431,25 @@ async function pullIncremental(
     if (isCancelled()) {
       return;
     }
-    const page = await fetchPullPage(shopId, cursor, undefined, first, actorUserId, isCancelled);
+    const page = await fetchPullPage(
+      shopId,
+      cursor,
+      undefined,
+      first,
+      actorUserId,
+      isCancelled,
+    );
     if (!page) return;
     accessVersion = requireStableAccessVersion(accessVersion, page);
+    if (first && page.access) {
+      if (materializedAccessChanged(shopId, page.access)) {
+        // A shop watermark cannot recover old rows removed for another actor
+        // or permission scope. Discard this preflight page before any apply
+        // or cursor write, then use the existing atomic full hydration.
+        await pullFullHydration(shopId, isCancelled, undefined, actorUserId);
+        return;
+      }
+    }
     access = access ?? page.access;
     first = false;
     // Applying rows and advancing the cursor are both writes. Neither may
@@ -399,7 +458,11 @@ async function pullIncremental(
     if (isCancelled()) {
       return;
     }
-    deferred = applyChanges(shopId, [...deferred, ...page.changes], page.hasMore);
+    deferred = applyChanges(
+      shopId,
+      [...deferred, ...page.changes],
+      page.hasMore,
+    );
 
     if (page.changes.length > 0) {
       cursor = requireNextCursor(page);

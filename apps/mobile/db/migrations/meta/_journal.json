@@ -239,6 +239,20 @@
       "when": 1791417600000,
       "tag": "0033_medicine_search_key",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1794355200000,
+      "tag": "0034_recovery_journal",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1794355200001,
+      "tag": "0035_recovery_backup_custody",
+      "breakpoints": true
     }
   ]
 }

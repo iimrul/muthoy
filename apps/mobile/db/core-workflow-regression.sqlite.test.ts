@@ -598,15 +598,21 @@ describe('the outbox bookkeeping around a retry', () => {
     expect(countFailedSyncRows(SHOP)).toBe(0);
   });
 
-  it('retrying past the limit is what finally marks a row failed, not a single error', () => {
+  it('keeps the same durable work pending throughout a prolonged outage', () => {
     const queued = listPendingSyncRows(SHOP, 10_000);
     expect(queued.length).toBeGreaterThan(0);
     const target = queued[0]!;
 
-    // maxAttempts is a parameter so this does not depend on the default.
-    markSyncRowTransientFailure(target.id, 'still unreachable', target.attempts + 1);
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      markSyncRowTransientFailure(target.id, 'still unreachable');
+    }
 
-    expect(listPendingSyncRows(SHOP, 10_000).some((row) => row.id === target.id)).toBe(false);
-    expect(countFailedSyncRows(SHOP)).toBe(1);
+    const pending = listPendingSyncRows(SHOP, 10_000);
+    expect(pending).toHaveLength(queued.length);
+    expect(pending.find((row) => row.id === target.id)).toEqual({
+      ...target,
+      attempts: target.attempts + 12,
+    });
+    expect(countFailedSyncRows(SHOP)).toBe(0);
   });
 });

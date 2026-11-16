@@ -69,3 +69,18 @@ apps/mobile/dist/
 
 # Local H-7 device retest captures
 .codex-h7-retest/
+
+# Expo local state in any workspace (device lists, dev-server settings).
+.expo/
+
+# Machine-bound DEV backup/host helpers. They pin this machine's Windows
+# account and private paths as a deliberate security check, so they stay
+# local and are never published to the public repository.
+scripts/backup/*.ps1
+
+# Machine-local operational receipts: folder inventories, deletion logs and a
+# retained dependency store. They carry private paths and hundreds of MB, so
+# they stay on this machine and never reach the public repository.
+docs/plans/external-cleanup-2026-11-15/
+docs/plans/external-integration-2026-11-15/
+docs/reviews/external-work/DEV_BACKUP_PRIVATE_SETUP.md

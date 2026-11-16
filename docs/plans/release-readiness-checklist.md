@@ -1,5 +1,14 @@
 # Release-readiness checklist
 
+## Current implementation receipt — 2026-11-09
+
+Android remediation is in progress from source `a23ca61262497474bf85ede78948ca831657c8db`.
+See [the dated implementation record](android-remediation-2026-11-09.md).
+Historical completion statements below do not establish current hosted parity,
+current-source Android acceptance or production readiness. iOS is on hold;
+B6-01 and B6-02 remain mandatory deferred deliverables.
+
+
 **As at the close of Batch 3. Every line is either DONE with its evidence, or
 OPEN with the reason and the owner. Nothing here is marked done on the strength
 of an intention.**

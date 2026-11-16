@@ -42,6 +42,8 @@ vi.mock('../sync/cursorStore', async () => {
   const helpers = await vi.importActual<typeof import('./sync-helpers')>('./sync-helpers');
   return {
     HYDRATION_TABLE_ORDER: helpers.HYDRATION_TABLE_ORDER,
+    getLastPulledAccess: () => null,
+    setLastPulledAccess: vi.fn(),
     getLastPulledCursor: (shopId: string) => mocks.cursors.get(shopId) ?? null,
     setLastPulledCursor: (shopId: string, cursor: unknown) => {
       mocks.cursors.set(shopId, cursor);

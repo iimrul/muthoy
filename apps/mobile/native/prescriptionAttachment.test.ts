@@ -17,7 +17,6 @@ const fs = vi.hoisted(() => ({
 
 vi.mock('expo-file-system', () => {
   class Directory {
-    constructor(..._parts: unknown[]) {}
     create() {}
   }
   class File {

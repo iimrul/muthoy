@@ -1,12 +1,15 @@
-import { countFailedSyncRows } from "../db/sync-helpers";
+import { countFailedSyncRows, countStuckSyncRows } from "../db/sync-helpers";
 import {
   createNotification,
   findUnresolvedSyncAlert,
+  resolveSyncAlerts,
 } from "../db/notifications";
 import { encodeLocalizedText } from "../i18n/localizedText";
 
 export async function notifyIfSyncIsStuck(shopId: string): Promise<void> {
-  const failedCount = countFailedSyncRows(shopId);
+  // Stuck rows count too: they keep retrying instead of failing, so the failed
+  // count alone would stay at zero while later sales wait behind them.
+  const failedCount = countFailedSyncRows(shopId) + countStuckSyncRows(shopId);
   if (failedCount <= 0 || (await findUnresolvedSyncAlert(shopId))) {
     return;
   }
@@ -30,4 +33,15 @@ export async function notifySyncHalted(
     return;
   }
   await createNotification(shopId, "sync", "warning", "Sync stopped", message);
+}
+
+/**
+ * Re-arms the warning: once a completed cycle leaves nothing failed or stuck,
+ * the open sync warning is resolved so the next problem is reported afresh.
+ */
+export async function resolveSyncAlertIfHealthy(shopId: string): Promise<void> {
+  if (countFailedSyncRows(shopId) + countStuckSyncRows(shopId) > 0) {
+    return;
+  }
+  await resolveSyncAlerts(shopId);
 }

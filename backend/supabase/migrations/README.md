@@ -9,7 +9,7 @@ migration below as reversible, redeployable, or forward-only, and carries the
 decision table for who calls a restore.
 
 <!-- rollback-classification:start -->
-Rollback classification: **A: 8 · B: 20 · C: 9 — of 37.** Source: [rollback-classification.json](rollback-classification.json).
+Rollback classification: **A: 8 · B: 23 · C: 9 — of 40.** Source: [rollback-classification.json](rollback-classification.json).
 <!-- rollback-classification:end -->
 
 The data backup at step 2 of "Required sequence" is the only way back from a
@@ -397,3 +397,16 @@ simultaneous push.
   toggle is no longer the only defence: `verifyCallerJwt()` now rejects an
   anonymous caller outright with `anonymous_session_rejected` (H-7, 2026-09-07),
   ahead of any claim handling.
+
+### Local migration38 promotion (Founder A3 approval; not hosted)
+
+20261111000000_role_switch_credit_link_contract.sql promotes only the accepted
+HELD body. Original37 SQL files/seals remain immutable. DEV still has31 migrations;
+no missing32..37 migration is applied by this local promotion. Automatic hosted
+push is blocked: a separate explicit history/order decision must name the one DEV
+patch and preserve the six missing versions. Both wrapper orders are tested,
+including E4 Staff shop-identity protection. Existing deployed push/pull bodies
+match the reviewed contract; unrelated router, auth and billing changes are not
+part of this deployment. Live schema/data backup, paused sync, empty in-flight
+staging, exact pre/post comparison and Founder approval remain mandatory.
+No device hydration or historical-null backfill is authorized here.

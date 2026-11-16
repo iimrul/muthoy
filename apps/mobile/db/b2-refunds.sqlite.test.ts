@@ -44,6 +44,8 @@ beforeAll(() => {
     '0029_pin_reserved_while_inactive.sql',
     '0033_medicine_search_key.sql'
   ]) applyMigration(name);
+  // Current writers require the additive atomic recovery journal.
+  applyMigration('0034_recovery_journal.sql');
   const now = new Date().toISOString();
   db.insert(schema.shops).values({ id: 'shop', ownerId: 'owner', name: 'B2', phone: '01700000000', createdAt: now, updatedAt: now }).run();
   db.insert(schema.roles).values({ id: 'owner-role', shopId: 'shop', name: 'owner', isSystem: true, createdAt: now, updatedAt: now }).run();
@@ -160,5 +162,36 @@ describe('credit balance canonicalization — refund consistency (W-1)', () => {
     expect(listRow?.balance).toBe(ZERO_PAISA);
     expect(totals.totalOutstanding).toBe(ZERO_PAISA);
     expect(detail.totalDue).toBe(ZERO_PAISA);
+  });
+});
+
+
+describe('refund queue production payload contract (Claude F-06)', () => {
+  it('stores complete snake_case rows at refund time and retains them after later sale and close', async () => {
+    const now=new Date().toISOString();const shopId='refund-shape-shop',owner='refund-shape-owner',medicine='refund-shape-medicine',batch='refund-shape-batch';
+    db.insert(schema.shops).values({id:shopId,ownerId:owner,name:'Synthetic shape',phone:'01700000000',createdAt:now,updatedAt:now}).run();
+    db.insert(schema.roles).values({id:'refund-shape-role',shopId,name:'owner',isSystem:true,createdAt:now,updatedAt:now}).run();
+    db.insert(schema.users).values({id:owner,shopId,name:'Synthetic owner',pinHash:'synthetic',pinSetAt:now,roleId:'refund-shape-role',isActive:true,createdAt:now,updatedAt:now}).run();
+    db.insert(schema.medicines).values({id:medicine,shopId,name:'Synthetic shape medicine',createdAt:now,updatedAt:now}).run();
+    db.insert(schema.batches).values({id:batch,shopId,medicineId:medicine,batchNo:'SYNTH-SHAPE',stock:0,purchasePrice:asPaisa(100),salePrice:asPaisa(200),createdAt:now,updatedAt:now}).run();
+    db.insert(schema.inventoryMovements).values({id:'refund-shape-opening',shopId,batchId:batch,changeQty:3,reason:'purchase',createdBy:owner,createdAt:now,updatedAt:now}).run();
+    const sale=await createSaleTransaction({shopId,staffId:owner,isStillActive:ALWAYS_LIVE,payment:{type:'cash',tendered:asPaisa(200)},lines:[{medicineId:medicine,quantity:1}]});
+    const eligibility=await getRefundEligibility(shopId,owner,sale.saleId);
+    const refund=await createFullSaleRefund({shopId,actorUserId:owner,saleId:sale.saleId,reason:'Synthetic shape proof',claim:{claimId:'synthetic-shape-claim',claimToken:'synthetic-shape-authority',operationId:eligibility.operationId,deviceId:'shape-device'},currentDeviceId:'shape-device',isStillActive:ALWAYS_LIVE});
+    const members=sqlite.prepare("SELECT table_name,row_id,payload FROM sync_queue WHERE operation_group_id=? ORDER BY operation_sequence").all(refund.refundId) as {table_name:string;row_id:string;payload:string}[];
+    for(const member of members) {
+      const row=sqlite.prepare('SELECT * FROM '+member.table_name+' WHERE id=?').get(member.row_id) as Record<string,unknown>;
+      const expected=Object.fromEntries(Object.entries(row).map(([key,value])=>[key,key.startsWith('is_')&&(value===0||value===1)?Boolean(value):value]));
+      expect(JSON.parse(member.payload)).toEqual(expected);
+    }
+    const drawerMember=members.find(row=>row.table_name==='cash_drawer')!;const payload=JSON.parse(drawerMember.payload);
+    expect(payload).toMatchObject({shop_id:shopId,closing_expected:0,is_dirty:true,closed_at:null,closing_counted:null});
+    expect(payload).not.toHaveProperty('closingExpected');expect(Object.keys(payload).sort()).toEqual((sqlite.prepare('PRAGMA table_info(cash_drawer)').all() as {name:string}[]).map(row=>row.name).sort());
+    await createSaleTransaction({shopId,staffId:owner,isStillActive:ALWAYS_LIVE,payment:{type:'cash',tendered:asPaisa(200)},lines:[{medicineId:medicine,quantity:1}]});
+    const { closeDay }=await import('./cash');
+    await closeDay({shopId,closedBy:owner,businessDate:payload.business_date,countedCash:asPaisa(200),isStillActive:ALWAYS_LIVE});
+    const closed=sqlite.prepare('SELECT closing_expected,closed_at FROM cash_drawer WHERE id=?').get(drawerMember.row_id) as {closing_expected:number;closed_at:string};
+    expect(closed.closing_expected).toBe(200);expect(closed.closed_at).toBeTruthy();
+    expect(sqlite.prepare("SELECT payload FROM sync_queue WHERE operation_group_id=? AND table_name='cash_drawer'").get(refund.refundId)).toEqual({payload:drawerMember.payload});
   });
 });

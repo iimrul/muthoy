@@ -1,0 +1,20 @@
+{
+  "task": "admin-build",
+  "command": [
+    "pnpm.cmd",
+    "--filter",
+    "@muthoy/admin",
+    "build"
+  ],
+  "startUTC": "2026-11-15T19:47:41.565473+00:00",
+  "endUTC": "2026-11-15T19:48:53.691989+00:00",
+  "elapsedSeconds": 72.127,
+  "exitCode": 0,
+  "log": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\admin-build-1794772061565452900.log",
+  "logSha256": "1d373f61460d4ca95e0edfa71f1ceeda49d06d247b0a90ced197029a29ac979d",
+  "syntheticScratch": "D:\\Muthoy\\docs\\reviews\\iphone-admin-2026-11-16\\evidence\\scratch-admin-build-1794772061564341700",
+  "credentialEnvOmitted": true,
+  "privateEnvReadGuard": true,
+  "network": "loopback only",
+  "fontVerification": "SKIP: verification-only local Arial font mock; no Google font download or typography acceptance"
+}

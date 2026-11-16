@@ -24,6 +24,19 @@ if (path.relative(workspaceRoot, expoPackageRoot).startsWith('..')) {
   // Metro must watch its real target or pnpm package symlinks resolve as missing.
   config.watchFolders.push(externalVirtualStoreRoot);
 }
+// CMake creates/removes temporary directories during concurrent native builds.
+// Watching those generated trees races fs.watch on Windows (ENOENT) and can
+// terminate Metro after a successful bundle. Keep native source visible.
+const generatedAndroidDirectories =
+  /[/\\]android[/\\](?:[^/\\]+[/\\])*(?:build|\.cxx)(?:[/\\]|$)/;
+const existingBlockList = config.resolver.blockList;
+config.resolver.blockList = [
+  ...(Array.isArray(existingBlockList)
+    ? existingBlockList
+    : existingBlockList ? [existingBlockList] : []),
+  generatedAndroidDirectories,
+];
+
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
