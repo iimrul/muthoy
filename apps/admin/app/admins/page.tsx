@@ -17,7 +17,7 @@ import { outcomeNote } from '../../lib/adminOutcomes';
 import { ADMIN_ROLE_NAMES, parseAdminRoles, permissionMatrix } from '../../lib/adminRoles';
 import { formatDhakaDateTime } from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
-import { assignAdminRoleAction, revokeAdminSessionsAction } from '../adminFormActions';
+import { ADMIN_FORM_PATHS } from '../../lib/adminFormPaths';
 
 // Batch 3 §8.8 — Admin Users & Roles.
 //
@@ -274,7 +274,7 @@ export default async function AdminsPage({ searchParams }: AdminsPageProps) {
             The result is the INTERSECTION of the environment role and the role chosen here, so
             naming a wider role grants nothing extra. You cannot change your own role.
           </p>
-          <form action={assignAdminRoleAction} className="mt-3 flex flex-wrap items-end gap-3">
+          <form method="post" action={ADMIN_FORM_PATHS.assignAdminRole} className="mt-3 flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-midGray">Username</span>
               <select name="username" className="rounded border border-black/15 px-2 py-1">
@@ -332,7 +332,7 @@ export default async function AdminsPage({ searchParams }: AdminsPageProps) {
             Forward-only: it cannot revive sessions an earlier revocation already killed. You cannot
             revoke your own.
           </p>
-          <form action={revokeAdminSessionsAction} className="mt-2 flex flex-wrap items-end gap-3">
+          <form method="post" action={ADMIN_FORM_PATHS.revokeAdminSessions} className="mt-2 flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-midGray">Username</span>
               <select name="username" className="rounded border border-black/15 px-2 py-1">

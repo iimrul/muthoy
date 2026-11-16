@@ -4,7 +4,7 @@ import { formatMoney } from '@muthoy/utils';
 import { requireAdminPermission } from '../../lib/adminAuthz';
 import { outcomeNote } from '../../lib/adminOutcomes';
 import ActionButton from '../../components/ActionButton';
-import { expireOrderAction } from '../adminFormActions';
+import { ADMIN_FORM_PATHS } from '../../lib/adminFormPaths';
 import { listPaymentOrderSummaries } from '../../lib/adminQueries';
 import {
   billingCycleLabel,
@@ -70,7 +70,7 @@ export default async function PaymentsPage({ searchParams }: PaymentsPageProps) 
           cell: (row) =>
             row.isStaleOpen ? (
               <ActionButton
-                action={expireOrderAction}
+                action={ADMIN_FORM_PATHS.expireOrder}
                 fieldName="orderId"
                 fieldValue={row.id}
                 label="Mark expired"

@@ -25,11 +25,7 @@ import {
 } from '../../lib/adminSupport';
 import { formatDhakaDateTime, isUuid } from '../../lib/adminViews';
 import { toDisplayMessage } from '../../lib/errors';
-import {
-  addSupportNoteAction,
-  openSupportCaseAction,
-  updateSupportCaseAction,
-} from '../adminFormActions';
+import { ADMIN_FORM_PATHS } from '../../lib/adminFormPaths';
 
 // Batch 3 §8.7 — Support Management.
 //
@@ -327,7 +323,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
           </div>
 
           {canWrite ? (
-            <form action={updateSupportCaseAction} className="mt-4 flex flex-wrap items-end gap-3">
+            <form method="post" action={ADMIN_FORM_PATHS.updateSupportCase} className="mt-4 flex flex-wrap items-end gap-3">
               <input type="hidden" name="caseId" value={detail.case.id} />
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-midGray">Status</span>
@@ -418,7 +414,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
           )}
 
           {canWrite ? (
-            <form action={addSupportNoteAction} className="mt-4">
+            <form method="post" action={ADMIN_FORM_PATHS.addSupportNote} className="mt-4">
               <input type="hidden" name="requestId" value={randomUUID()} />
               <input type="hidden" name="caseId" value={detail.case.id} />
               <label className="flex flex-col gap-1 text-sm">
@@ -453,7 +449,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
           <p className="mt-1 text-sm text-midGray">
             Every case is about one pharmacy. Paste its id from the pharmacy list.
           </p>
-          <form action={openSupportCaseAction} className="mt-3 flex flex-wrap items-end gap-3">
+          <form method="post" action={ADMIN_FORM_PATHS.openSupportCase} className="mt-3 flex flex-wrap items-end gap-3">
             <input type="hidden" name="requestId" value={randomUUID()} />
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-midGray">Pharmacy id</span>

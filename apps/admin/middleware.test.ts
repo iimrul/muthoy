@@ -142,6 +142,25 @@ describe('an unauthenticated request', () => {
     expect(response.headers.get('location')).toBeNull();
   });
 
+  // The write forms are native browser POSTs, so an expired session there is a
+  // navigation like any page: the operator must land on sign-in, not on a bare
+  // 401 body. It is still a DENIAL — nothing reaches the handler.
+  test('a write form posted without a session is sent to sign in', async () => {
+    const response = await middleware(request('/api/admin/actions/set-feature-flag'));
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(ORIGIN + '/login');
+  });
+
+  test.each(['/api/admin/actions', '/api/admin/actionsx', '/api/admin/actions-extra/x'])(
+    'a near miss of the write-form prefix (%s) is still a plain 401',
+    async (path) => {
+      const response = await middleware(request(path));
+
+      expect(response.status).toBe(401);
+    },
+  );
+
   test.each([
     ['a forged signature', 'not-a-real-token.aaaa'],
     ['an empty cookie', ''],

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { ADMIN_FORM_ACTION_PREFIX } from './lib/adminFormPaths';
 import { parseAdminRoles } from './lib/adminRoles';
 import {
   ADMIN_SESSION_COOKIE,
@@ -45,7 +46,11 @@ function notConfigured(): NextResponse {
  * redirecting a fetch to an HTML form turns an auth failure into a parse error.
  */
 function denied(request: NextRequest): NextResponse {
-  if (request.nextUrl.pathname.startsWith('/api/')) {
+  const path = request.nextUrl.pathname;
+  // The panel's write forms are native browser POSTs (lib/adminFormRoute.ts),
+  // so a session that expired while a page sat open must land on the sign-in
+  // page like any other navigation, not on a bare 401 text body.
+  if (path.startsWith('/api/') && !path.startsWith(ADMIN_FORM_ACTION_PREFIX)) {
     return new NextResponse('Authentication required.\n', {
       status: 401,
       headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },

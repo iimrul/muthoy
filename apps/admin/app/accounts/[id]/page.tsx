@@ -6,7 +6,7 @@ import ErrorNotice from '../../../components/ErrorNotice';
 import { requireAdminPermission } from '../../../lib/adminAuthz';
 import { outcomeNote } from '../../../lib/adminOutcomes';
 import ActionButton from '../../../components/ActionButton';
-import { reconcileLimitsAction } from '../../adminFormActions';
+import { ADMIN_FORM_PATHS } from '../../../lib/adminFormPaths';
 import { getAccountDetail, type AccountDetailView } from '../../../lib/adminQueries';
 import {
   billingCycleLabel,
@@ -126,7 +126,7 @@ export default async function AccountDetailPage({ params, searchParams }: Accoun
       {mayWrite ? (
         <div className="mt-6 flex flex-wrap items-start gap-4">
           <ActionButton
-            action={reconcileLimitsAction}
+            action={ADMIN_FORM_PATHS.reconcileLimits}
             fieldName="accountId"
             fieldValue={account.id}
             label="Reconcile plan limits"

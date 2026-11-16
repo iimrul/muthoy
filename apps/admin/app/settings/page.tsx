@@ -3,7 +3,7 @@ import { requireAdminPermission } from '../../lib/adminAuthz';
 import { outcomeNote } from '../../lib/adminOutcomes';
 import { settingsView, type AdminSettingsView } from '../../lib/adminSettings';
 import { toDisplayMessage } from '../../lib/errors';
-import { setFeatureFlagAction } from '../adminFormActions';
+import { ADMIN_FORM_PATHS } from '../../lib/adminFormPaths';
 
 // Batch 3 §8.11 — Settings.
 //
@@ -102,7 +102,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
               </div>
 
               {canWrite ? (
-                <form action={setFeatureFlagAction} className="ml-auto">
+                <form method="post" action={ADMIN_FORM_PATHS.setFeatureFlag} className="ml-auto">
                   <input type="hidden" name="key" value={flag.key} />
                   {/* The NEW value, sent explicitly. A checkbox would send
                       nothing when unticked, and an absent field is not the

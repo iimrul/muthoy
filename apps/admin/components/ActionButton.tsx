@@ -1,9 +1,13 @@
-// W4-08 — a single-field form that posts to one server action. Server
+// W4-08 — a single-field form that posts to one write route. Server
 // component: there are no client components in this app, and a write that
-// needed JavaScript to be safe would be the wrong design anyway.
+// needed JavaScript to be safe would be the wrong design anyway. A plain POST
+// answered with a 303 is also what makes the confirmation reliable; see
+// lib/adminFormRoute.ts.
+
+import type { AdminFormPath } from '../lib/adminFormPaths';
 
 interface ActionButtonProps {
-  action: (formData: FormData) => Promise<void>;
+  action: AdminFormPath;
   fieldName: string;
   fieldValue: string;
   label: string;
@@ -12,7 +16,7 @@ interface ActionButtonProps {
 
 export default function ActionButton({ action, fieldName, fieldValue, label, hint }: ActionButtonProps) {
   return (
-    <form action={action} className="inline-flex flex-col gap-1">
+    <form method="post" action={action} className="inline-flex flex-col gap-1">
       <input type="hidden" name={fieldName} value={fieldValue} />
       <button
         type="submit"
