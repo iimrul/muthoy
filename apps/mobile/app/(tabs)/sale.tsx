@@ -5,11 +5,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { asPaisa } from "@muthoy/types";
 import { daysUntilExpiry } from "@muthoy/utils";
-import { MedicineTextScanner } from "../../components/scanner/MedicineTextScanner";
-import {
-  ScanConfirmSheet,
-  type ScanConfirmCandidate,
-} from "../../components/scanner/ScanConfirmSheet";
+import { LiveStripScanner } from "../../components/scanner/LiveStripScanner";
 import { showToast } from "../../components/ui/Toast";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { StandardHeader } from "../../components/ui/StandardHeader";
@@ -25,10 +21,6 @@ import {
   type BarcodeCandidate,
 } from "../../db/inventory";
 import { createLatestRequestGuard } from "../../domain/latestRequestGuard";
-import {
-  extractMedicineNameCandidate,
-  findExactNameMatch,
-} from "../../domain/ocrText";
 import { useCartStore } from "../../state/cartStore";
 import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
@@ -67,9 +59,6 @@ export default function SaleEntryScreen() {
     BarcodeCandidate[]
   >([]);
   const [searchGuard] = useState(() => createLatestRequestGuard());
-  const [pendingScan, setPendingScan] = useState<ScanConfirmCandidate | null>(
-    null,
-  );
   const hasRunHandedOverQuery = useRef(false);
 
   useEffect(() => {
@@ -94,13 +83,11 @@ export default function SaleEntryScreen() {
     };
   }, [mode, query, session, t]);
 
-  // Shared by manual typing and scan-to-search so both hit the exact same
-  // searchMedicinesForSale relevance path — no new matching logic invented
-  // for OCR (docs/plans/ocr.md). Returns both the matches and whether this
-  // call is still the most recent one: a scan's search can take long enough
-  // (capture + OCR + query) that a manual retype starts and finishes first,
-  // and a stale scan result must never drive an auto-add after that
-  // (docs/plans/ocr.md — Sale Entry stale-result safety).
+  // The typed search (and a query handed over from another screen). Returns
+  // both the matches and whether this call is still the most recent one, so a
+  // slow search that a newer keystroke overtook never overwrites the results.
+  // Scanning no longer goes through here: the live strip scanner matches
+  // against the shop's whole inventory in memory (domain/stripMatcher.ts).
   //
   // Declared HERE, above the effects and above the `!session` guard below, and
   // wrapped in useCallback: the handed-over-query effect calls it, and an
@@ -169,62 +156,6 @@ export default function SaleEntryScreen() {
     setSearchError(null);
     setScanFeedback(null);
     await runSearch(value);
-  };
-
-  // Read-only lookup: a scan just runs the same search a manual query would.
-  // Auto-adds to cart only when the search is still current (not superseded
-  // by a newer manual search while the scan was in flight) AND the sole
-  // result's own name is an exact normalized match for what was scanned —
-  // searchMedicinesForSale does FTS *prefix* matching, so "exactly one
-  // result" alone is not enough evidence a short/truncated OCR read is
-  // really that product (docs/plans/ocr.md). Anything less certain just
-  // populates the list like any ambiguous typed query — never a dead end.
-  const handleScanResult = async (recognizedText: string) => {
-    const candidate =
-      extractMedicineNameCandidate(recognizedText) ?? recognizedText.trim();
-    setSearchError(null);
-    setScanFeedback(null);
-    setQuery(candidate);
-    const { matches, isLatest } = await runSearch(candidate);
-    if (!isLatest) {
-      return;
-    }
-    const exactMatch = findExactNameMatch(candidate, matches);
-    if (exactMatch) {
-      // W2-01 section 6.2.3: proposed, not recorded. This used to call
-      // addLineAndReport directly, so one misread put a line in the cart with
-      // no confirmation — the defect the founder's own recovery note names.
-      setPendingScan({
-        recognizedText: candidate,
-        medicineId: exactMatch.medicineId,
-        name: exactMatch.name,
-        generic: exactMatch.generic,
-        manufacturer: exactMatch.manufacturer,
-        requiresPrescription: exactMatch.requiresPrescription,
-        batchId: exactMatch.activeBatch.id,
-        batchNo: exactMatch.activeBatchNo,
-        expiryDate: exactMatch.activeBatch.expiryDate,
-        unitPrice: exactMatch.activeBatch.salePrice,
-        availableQuantity: exactMatch.activeBatch.quantityAvailable,
-      });
-    }
-  };
-
-  const confirmPendingScan = (confirmed: ScanConfirmCandidate) => {
-    addLineAndReport({
-      medicineId: confirmed.medicineId,
-      medicineName: confirmed.name,
-      generic: confirmed.generic,
-      manufacturer: confirmed.manufacturer,
-      requiresPrescription: confirmed.requiresPrescription,
-      batchId: confirmed.batchId,
-      batchNo: confirmed.batchNo ?? undefined,
-      quantity: 1,
-      unitPrice: confirmed.unitPrice,
-      expiryDate: confirmed.expiryDate,
-      availableQuantity: confirmed.availableQuantity,
-    });
-    setPendingScan(null);
   };
 
   const addBarcodeCandidate = async (candidate: BarcodeCandidate) => {
@@ -508,22 +439,20 @@ export default function SaleEntryScreen() {
           </Text>
         </Pressable>
       ) : null}
-      <MedicineTextScanner
+      {/* The same live scanner app/scan.tsx renders (founder decision
+          2026-11-20): a confident strip adds one unit with an Undo window. */}
+      <LiveStripScanner
         visible={isScannerVisible}
-        mode="lookup"
+        shopId={session.shopId}
+        userId={session.userId}
         onClose={() => setIsScannerVisible(false)}
-        onTextRecognized={handleScanResult}
+        onDone={() => {
+          // Closed first: the scanner is a native modal and would otherwise
+          // stay on top of the cart screen pushed below it.
+          setIsScannerVisible(false);
+          router.push("/sale/cart");
+        }}
         onBarcodeRecognized={handleBarcode}
-        keepOpenOnResult
-      />
-      <ScanConfirmSheet
-        candidate={pendingScan}
-        onConfirm={confirmPendingScan}
-        // Nothing to navigate to: handleScanResult already put the recognised
-        // text in this screen's own search box and ran the search, so closing
-        // the sheet leaves the user in exactly the pre-filled manual search.
-        onEdit={() => setPendingScan(null)}
-        onDiscard={() => setPendingScan(null)}
       />
       <Modal
         visible={barcodeCandidates.length > 0}
