@@ -35,6 +35,11 @@ Three surfaces use it:
 
 ## 2. The confirmation gates, and why there are two scanners
 
+> **Superseded for the SALE scan on 2026-11-20 — see §7.** The founder replaced
+> the sale confirmation sheet with live auto-add. Add Medicine prefill, purchase
+> invoice review and the checkout prescription review keep their confirmation
+> exactly as described below.
+
 **Every add that originates from a possible MISREAD passes a confirmation
 sheet.** The user sees what was recognised and confirms it before anything
 enters the cart or the database.
@@ -153,3 +158,109 @@ None of the following is claimed, and each needs a human with a phone:
    (E7). Shop-inventory search stays single-script until the Batch 3 migration
    above, so a device run must NOT be read as proving multilingual inventory
    search.
+
+---
+
+## 7. Live strip scan with auto-add (founder decision, 2026-11-20)
+
+**Decision.** The founder asked for scan-to-sell without pressing anything:
+bring a strip in front of the camera and one unit is in the cart; a strip the
+shop does not stock says "not found in inventory". Flagged under CLAUDE.md
+rule 11 because it reverses the W2-01 rule above ("confirmation must never be
+skippable"); the founder chose, explicitly:
+
+1. **(ক)** a confident match adds immediately with a 3-second **Undo**; an
+   ambiguous strip is offered as a one-tap choice; never a silent guess.
+2. **Prescription medicines auto-add too** (recommendation was a tap; the
+   founder declined). The cart and checkout carry the prescription warning.
+3. Start with the existing `expo-camera` (auto-captured frames), not a new
+   native camera library.
+4. Proceeds under the existing P1 OCR scope override (rule 13).
+
+**Why the old scanner read badly.** It was the logic, not the camera.
+`extractMedicineNameCandidate` took the first plausible line — on a Napa Extra
+strip that is "MA No. 186-480-006" — and `findExactNameMatch` then needed exact
+equality, which the "®" in "Napa® Extra" alone defeats.
+
+**How it reads now** (`domain/stripMatcher.ts`). Backwards: the shop's own
+inventory is the dictionary, and a medicine matches when every word of its
+brand name is on the strip, so registration and licence lines drop out by
+themselves. Then: a printed strength that contradicts a medicine removes it
+(Progut MUPS 40 vs a 20 mg strip); the most specific name wins (Napa Extra over
+Napa); a winner the strip does not fully explain — an extra printed strength
+("Caffeine 65 mg" for plain Napa) or a formulation word beside its name
+("Extra", "Extend", "MUPS", "Forte"…) — is OFFERED, never added, because the
+shop may simply not stock the product actually shown. A brand with no word read
+is never substituted from its generic (Maxpro is not Progut).
+
+**One add per appearance** (`domain/stripScanSession.ts`). A medicine is locked
+after it is added until the strip has been out of view for two frames AND
+900 ms; holding a strip adds one unit, taking it away and back adds another.
+Weak matches and choices need two agreeing frames; "not found" is
+rate-limited and silenced while a just-added strip is still in view.
+
+**Unchanged safety.** The stock ceiling (`addItem`), the FEFO batch
+(`getActiveBatchForMedicine`, real expiry dates), all offline (the dictionary
+is SQLite, read once per opening by `db/scanVocabulary.ts`), and every frame is
+a temporary file deleted after reading. Both scan entry points (`app/scan.tsx`
+and the Sale tab) render the same `LiveStripScanner`; `ScanConfirmSheet` is
+removed.
+
+**Limits, stated plainly.**
+- ML Kit's on-device model (`text-recognition:16.0.1`) reads **Latin script
+  only**. Bengali print on a strip is invisible to it; matching relies on the
+  English brand name, which the strips photographed all carry. A medicine the
+  shop stored under a Bengali name still matches when its transliteration is
+  within one letter of the English print (ফ্লাকোল ↔ Flacol is tested).
+- Text turned 90° (a strip held sideways) is unlikely to read; hold strips
+  level.
+- The matcher's fixtures are the founder's five strips **transcribed by hand**,
+  not captured ML Kit output. Recognition accuracy and the real frame rate are
+  device questions — see the device checklist below.
+- No vibration: the app holds no VIBRATE permission.
+
+**The beep (founder request, 2026-11-20).** A unit that really enters the cart
+plays the prototype's beep — `assets/sounds/scan-beep.wav`, rendered from the
+prototype's own WebAudio values (800 Hz sine, 0.3 → 0.01 over 150 ms) — through
+`native/scanSound.ts` (`expo-audio` ~57.0.5). Silent / vibrate mode is
+respected. `expo-audio` is a NATIVE module, so it plays only on a build made
+after this change; on an older build the module is absent and the beep is
+silently skipped (verified on the phone below). Its config plugin is NOT added,
+so no microphone permission or background-audio service enters the app.
+
+**Device run, 2026-11-20 — Galaxy A04s (SM-A047F, Android 14), installed
+`com.muthoy.pos.dev` (built 2026-11-10), JavaScript from this branch via Metro.**
+
+| Check | Result |
+|---|---|
+| Scanner opens from the Sale tab and from the `/scan` deep link | PASS |
+| Camera permission: panel → system dialog → live preview | PASS |
+| Live frame loop runs without a tap; capture + ML Kit per frame | ~0.85–1.1 s (logcat timestamps) |
+| Every frame deleted after reading (app `cache/Camera` never held more than one file) | PASS |
+| The app's own `scanTextLines` on the five photos, real ML Kit | all five read; output saved verbatim as `domain/stripMatcher.device-ocr.json` |
+| Matcher on that real output | all five → the right medicine; Napa Extra / Extend never become plain Napa (tests) |
+| Beep on this older build (no ExpoAudio) | module absent, `playScanBeep` called twice, app alive — silent, no crash |
+
+What the real read showed: "mg" is often misread ("500 rmg", "500 ng"), the
+script-font "Extend" almost never reads cleanly ("Napa°tend", "NapaCxtend",
+"'NapaExtend"), and the ORSaline packet yields little more than "SMC" and
+"OsMc0RSaine". The matcher handles all three (glued brand, one-to-two-letter
+slips), and ORSaline is a WEAK match — it needs two agreeing frames live.
+
+**Still not verified — needs a person with the phone:** holding real strips in
+front of the camera (one add per appearance, Undo, the Progut 20/40 choice), and
+hearing the beep, which needs a new dev build. Note the DEV shop's inventory has
+two items both named "Progut MUPS" with no strength in the name: a Progut strip
+will be OFFERED as a choice between them, not added, until they are told apart.
+
+**iPhone.** Everything used is cross-platform — `expo-camera`, ML Kit text
+recognition and `expo-audio` all support iOS — but the app has never been built
+or run on an iPhone (no Mac here; it needs an EAS iOS build and an Apple
+developer account). Known iOS risks to check on the first build: whether iOS
+still plays the camera shutter sound on every captured frame (`shutterSound:
+false` is set for every frame, but nobody has yet LISTENED on either platform —
+on Android ask the person testing; on iOS some regions force the sound), the
+silent switch (the beep respects it by design), and the ML Kit pod.
+If the shutter sound cannot be silenced on iOS, the frame-processor camera
+(`react-native-vision-camera`, no photo capture at all) is the fix, after its
+own compatibility check against this SDK.

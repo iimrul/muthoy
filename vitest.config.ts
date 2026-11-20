@@ -163,6 +163,7 @@ export default defineConfig({
       // W2-03: the folded-key migration, its backfill and the union query,
       // on real SQLite against a POPULATED pre-0033 fixture.
       "apps/mobile/db/w203-shop-medicine-search.sqlite.test.ts",
+      "apps/mobile/db/scan-vocabulary.sqlite.test.ts",
       "apps/mobile/tests/environment-policy.test.ts",
       // H-9 archive controls on a real Git revision; the EAS CLI 21.8.0 half
       // runs EAS's own copy/workflow code when that pinned CLI is installed.
@@ -359,7 +360,7 @@ export default defineConfig({
       // real scanner and the real capture-cleanup helper.
       "apps/mobile/tests/sale/resumed-draft-capture.test.tsx",
       // W2-01 section 6.2.3: the scan cannot reach the cart without a confirm.
-      "apps/mobile/tests/sale/scan-confirm.test.tsx",
+      "apps/mobile/tests/sale/live-scan.test.tsx",
       // W2-01 section 6.2.4: the captured prescription is read, reviewed per
       // line, and never added to the sale on its own.
       "apps/mobile/tests/sale/prescription-ocr.test.tsx",

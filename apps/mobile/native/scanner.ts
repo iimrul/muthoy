@@ -14,6 +14,7 @@
 //     saving — never auto-saves a scanned value (Volume 4 OCR).
 //
 import { recognizeText } from '@infinitered/react-native-mlkit-text-recognition';
+import type { OcrTextLine } from '../domain/stripMatcher';
 
 export interface BarcodeScanResult {
   data: string;
@@ -43,4 +44,20 @@ export async function scanText(imageUri: string): Promise<TextScanResult | null>
   const result = await recognizeText(imageUri);
   const recognizedText = result.text.trim();
   return recognizedText ? { recognizedText } : null;
+}
+
+// The live strip scanner's read: every recognised LINE with its rendered
+// height, instead of one flattened string. domain/stripMatcher.ts matches a
+// brand per line and treats the largest print as the likeliest brand, which
+// `.text` alone throws away. Errors bubble, exactly like scanText.
+export async function scanTextLines(imageUri: string): Promise<OcrTextLine[]> {
+  const result = await recognizeText(imageUri);
+  return result.blocks.flatMap((block) =>
+    block.lines
+      .filter((line) => line.text.trim().length > 0)
+      .map((line) => ({
+        text: line.text,
+        height: Math.max(0, line.frame.bottom - line.frame.top),
+      })),
+  );
 }
