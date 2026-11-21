@@ -3,7 +3,6 @@ import { Alert, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useFocusRefresh } from "../../navigation/useFocusRefresh";
 import { formatMoney } from "@muthoy/utils";
-import { ZERO_PAISA } from "@muthoy/types";
 import { LanguageToggle } from "../../components/ui/LanguageToggle";
 import { AccessDenied } from "../../components/ui/AccessDenied";
 import { DashboardLoadState } from "../../components/staff/DashboardLoadState";
@@ -25,6 +24,8 @@ import { LogoutConfirmSheet } from "../../components/auth/LogoutConfirmSheet";
 import { endShiftToPinPad } from "../../navigation/endShift";
 import { useUnreadCount } from "../../state/useUnreadCount";
 import { SafeAreaInsetsContext } from "react-native-safe-area-context";
+
+const FIGURE_PENDING = "—";
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -51,7 +52,6 @@ export default function StaffHomeScreen() {
   const session = useSessionStore((state) => state.session);
   const { t, formatNumber, formatTime } = useI18n();
   const [data, setData] = useState<StaffDashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [endShiftOpen, setEndShiftOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
@@ -80,7 +80,6 @@ export default function StaffHomeScreen() {
 
   const reload = useCallback(async () => {
     if (!session || session.role !== "staff") return;
-    setLoading(true);
     const guard = captureSessionFor(session);
     markRuntimeDiagnosticStep(
       "cashier_dashboard_db_query_started",
@@ -106,8 +105,6 @@ export default function StaffHomeScreen() {
           cause instanceof Error ? cause.message : "Dashboard failed to load",
         );
       });
-    } finally {
-      guard?.ifLive(() => setLoading(false));
     }
   }, [session]);
   useFocusRefresh(
@@ -145,15 +142,6 @@ export default function StaffHomeScreen() {
     );
   if (session.role === "manager") return <ManagerDashboard />;
   if (session.role !== "staff") return <AccessDenied homeHref="/dashboard" />;
-  if (loading && !data)
-    return (
-      <DashboardLoadState
-        loading
-        message={t("dashboardLoading")}
-        retryLabel={t("retry")}
-        onRetry={() => void reload()}
-      />
-    );
   if (error && !data)
     return (
       <DashboardLoadState
@@ -164,6 +152,12 @@ export default function StaffHomeScreen() {
       />
     );
 
+  // No full-screen loader (founder 2026-11-21): the shift screen renders at
+  // once and its figures read "—" for the moment before the first local read
+  // lands — never a zero that looks like a real takings figure.
+  const salesValue = data ? formatMoney(data.sales) : FIGURE_PENDING;
+  const countValue = data ? formatNumber(data.transactionCount) : FIGURE_PENDING;
+  const averageValue = data ? formatMoney(data.averageBill) : FIGURE_PENDING;
   const can = (permission: Parameters<typeof resolvePermission>[1]) =>
     resolvePermission(session.role, permission, session.permissions);
   const shiftStart = session.startedAt ?? new Date().toISOString();
@@ -243,15 +237,15 @@ export default function StaffHomeScreen() {
         <View className="mx-4 -mt-16 flex-row divide-x divide-midGray rounded-2xl bg-white p-3">
           <Stat
             label={t("todaysSales")}
-            value={formatMoney(data?.sales ?? ZERO_PAISA)}
+            value={salesValue}
           />
           <Stat
             label={t("transactions")}
-            value={formatNumber(data?.transactionCount ?? 0)}
+            value={countValue}
           />
           <Stat
             label={t("averageBill")}
-            value={formatMoney(data?.averageBill ?? ZERO_PAISA)}
+            value={averageValue}
           />
         </View>
         {error ? (
@@ -344,11 +338,11 @@ export default function StaffHomeScreen() {
                   </Text>
                 </View>
               ))
-            ) : (
+            ) : data ? (
               <Text className="p-6 text-center font-sans text-sm text-midGray">
                 {t("firstSale")}
               </Text>
-            )}
+            ) : null}
           </View>
         </View>
         <Pressable
@@ -378,15 +372,15 @@ export default function StaffHomeScreen() {
             <View className="flex-row">
               <Stat
                 label={t("sales")}
-                value={formatMoney(data?.sales ?? ZERO_PAISA)}
+                value={salesValue}
               />
               <Stat
                 label={t("txns")}
-                value={formatNumber(data?.transactionCount ?? 0)}
+                value={countValue}
               />
               <Stat
                 label={t("average")}
-                value={formatMoney(data?.averageBill ?? ZERO_PAISA)}
+                value={averageValue}
               />
             </View>
             <View className="rounded-xl bg-brand-softGreen p-3">

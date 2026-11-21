@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router } from "expo-router";
@@ -74,15 +74,15 @@ export default function CartScreen() {
           />
         }
         renderItem={({ item }) => (
+          // Store actions are passed as-is (stable), so a +/− re-renders only
+          // the row whose line changed, never every row in the cart.
           <CartRow
             item={item}
             t={t}
             formatNumber={formatNumber}
             formatMoney={formatMoney}
-            onQuantityChange={(quantity) =>
-              updateQuantity(item.medicineId, quantity)
-            }
-            onRemove={() => removeItem(item.medicineId)}
+            onQuantityChange={updateQuantity}
+            onRemove={removeItem}
           />
         )}
       />
@@ -130,7 +130,7 @@ export default function CartScreen() {
   );
 }
 
-function CartRow({
+const CartRow = memo(function CartRow({
   item,
   t,
   formatNumber,
@@ -142,9 +142,10 @@ function CartRow({
   t: (key: CatalogKey) => string;
   formatNumber: (value: number) => string;
   formatMoney: (value: import("@muthoy/types").Paisa) => string;
-  onQuantityChange: (quantity: number) => void;
-  onRemove: () => void;
+  onQuantityChange: (medicineId: string, quantity: number) => void;
+  onRemove: (medicineId: string) => void;
 }) {
+  const setQuantity = (quantity: number) => onQuantityChange(item.medicineId, quantity);
   const lineTotal = applyDiscount(
     item.unitPrice,
     item.quantity,
@@ -174,7 +175,7 @@ function CartRow({
             {formatMoney(lineTotal)}
           </Text>
           <Pressable
-            onPress={onRemove}
+            onPress={() => onRemove(item.medicineId)}
             accessibilityRole="button"
             accessibilityLabel={`Remove ${item.medicineName}`}
             hitSlop={8}
@@ -197,7 +198,7 @@ function CartRow({
           <Pressable
             key={quantity}
             disabled={quantity > maximum}
-            onPress={() => onQuantityChange(quantity)}
+            onPress={() => setQuantity(quantity)}
             accessibilityRole="button"
             accessibilityLabel={`Set ${item.medicineName} quantity to ${quantity}`}
             className={`flex-1 items-center rounded-lg py-2 ${item.quantity === quantity ? "bg-brand-green" : "bg-brand-softGreen"} disabled:opacity-30`}
@@ -213,7 +214,7 @@ function CartRow({
       <View className="flex-row items-center justify-between">
         <View className="flex-row items-center gap-4">
           <Pressable
-            onPress={() => onQuantityChange(Math.max(1, item.quantity - 1))}
+            onPress={() => setQuantity(Math.max(1, item.quantity - 1))}
             accessibilityRole="button"
             accessibilityLabel={`Decrease ${item.medicineName} quantity`}
             className="h-10 w-10 items-center justify-center rounded-lg border border-midGray active:opacity-70"
@@ -225,10 +226,10 @@ function CartRow({
             onChangeText={(value) => {
               const parsed = Number.parseInt(value, 10);
               if (Number.isInteger(parsed) && parsed > 0)
-                onQuantityChange(parsed);
+                setQuantity(parsed);
             }}
             onBlur={() => {
-              if (item.quantity < 1) onQuantityChange(1);
+              if (item.quantity < 1) setQuantity(1);
             }}
             selectTextOnFocus
             keyboardType="number-pad"
@@ -236,7 +237,7 @@ function CartRow({
             className="h-10 w-16 rounded-lg border border-brand-green text-center font-mono text-base text-richBlack"
           />
           <Pressable
-            onPress={() => onQuantityChange(item.quantity + 1)}
+            onPress={() => setQuantity(item.quantity + 1)}
             disabled={item.quantity >= maximum}
             accessibilityRole="button"
             accessibilityLabel={`Increase ${item.medicineName} quantity`}
@@ -264,4 +265,4 @@ function CartRow({
       ) : null}
     </View>
   );
-}
+});

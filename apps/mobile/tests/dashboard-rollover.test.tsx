@@ -254,6 +254,25 @@ describe("dashboard day rollover modal sequence", () => {
   });
 });
 
+describe("dashboard first open", () => {
+  it("draws the dashboard frame at once — no loading screen — and fills it when the read lands", async () => {
+    let finish: (data: typeof DASHBOARD_DATA) => void = () => undefined;
+    deps.getOwnerDashboard.mockImplementation(
+      () => new Promise<typeof DASHBOARD_DATA>((resolve) => (finish = resolve)),
+    );
+    useSessionStore.getState().login({ shopId: SHOP_ID, userId: OWNER_ID, role: "owner" });
+
+    render(createElement(Dashboard));
+    expect(screen.getByText("PHARMAPOS")).toBeTruthy();
+    expect(screen.queryByText("Loading dashboard…")).toBeNull();
+    expect(screen.queryByText(/Owner/)).toBeNull();
+
+    await waitFor(() => expect(deps.getOwnerDashboard).toHaveBeenCalled());
+    await act(async () => finish(DASHBOARD_DATA));
+    await waitFor(() => expect(screen.getByText(/Owner/)).toBeTruthy());
+  });
+});
+
 describe("dashboard downgrade recovery: return to primary shop", () => {
   const login = () =>
     useSessionStore

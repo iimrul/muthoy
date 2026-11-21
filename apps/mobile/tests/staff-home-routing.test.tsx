@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement, useEffect, type ReactNode } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface StubProps {
@@ -103,8 +103,12 @@ describe("StaffHome role branch", () => {
     };
     render(createElement(StaffHomeScreen));
 
-    expect(screen.getByText("dashboardLoading")).toBeTruthy();
-    expect(await screen.findByText("newSale")).toBeTruthy();
+    // No loading screen (founder 2026-11-21): the cashier screen is there at
+    // once, its figures pending ("—", never a fake zero) until the read lands.
+    expect(screen.queryByText("dashboardLoading")).toBeNull();
+    expect(screen.getByText("newSale")).toBeTruthy();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.queryAllByText("—")).toHaveLength(0));
     expect(screen.queryByText("MANAGER_DASHBOARD")).toBeNull();
   });
 
