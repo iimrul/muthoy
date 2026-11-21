@@ -72,6 +72,13 @@
           "recordAudioAndroid": false
         }
       ],
+      [
+        "react-native-vision-camera-ocr-plus",
+        {
+          "disableTranslate": true,
+          "disableNonLatinTextRecognition": true
+        }
+      ],
       "expo-background-task",
       "expo-image"
     ],
