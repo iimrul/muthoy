@@ -106,7 +106,7 @@ export function canAccessPath(session: Session | null, pathname: string): boolea
 
 export interface MoreRoute {
   key: string;
-  labelKey: 'salesHistory' | 'expiry' | 'cashDrawer' | 'endOfDay' | 'report' | 'expense' | 'supplierInvoices' | 'suppliers' | 'staff' | 'staffSales' | 'multiShop' | 'devicesTitle' | 'syncConflicts';
+  labelKey: 'salesHistory' | 'credit' | 'expiry' | 'cashDrawer' | 'endOfDay' | 'report' | 'expense' | 'supplierInvoices' | 'suppliers' | 'staff' | 'staffSales' | 'multiShop' | 'devicesTitle' | 'syncConflicts';
   href: Href;
   permission?: Permission;
   ownerOnly?: boolean;
@@ -163,6 +163,8 @@ export const OWNER_QUICK_LINKS: readonly OwnerQuickLink[] = [
 
 export const MORE_ROUTES: readonly MoreRoute[] = [
   { key: 'history', labelKey: 'salesHistory', href: '/reports/sales-history', permission: 'sale_history' },
+  // Founder 2026-11-21: whatever the owner grants is reachable from More.
+  { key: 'credit', labelKey: 'credit', href: '/credit/credit-sales', permission: 'credit_view' },
   { key: 'expiry', labelKey: 'expiry', href: '/inventory/expiry', permission: 'expiry_manage' },
   { key: 'cash', labelKey: 'cashDrawer', href: '/cash-summary', permission: 'cash_drawer' },
   { key: 'eod', labelKey: 'endOfDay', href: '/end-of-day', permission: 'cash_drawer' },

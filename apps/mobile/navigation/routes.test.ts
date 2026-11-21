@@ -51,11 +51,16 @@ describe('B1 routes', () => {
     // filtered per row by the affected table's read gate, so a cashier whose
     // own unpushed sale is in conflict has to be able to reach it. Settings is
     // owner-only, so this is the only route by which they can.
-    expect(visibleMoreRoutes(cashier).map((item) => item.key)).toEqual(['sync-conflicts']); expect(visibleMoreRoutes(manager).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','devices','sync-conflicts']); expect(visibleMoreRoutes(owner).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','devices','sync-conflicts']); expect(visibleMoreRoutes(owner, true).map((item) => item.key)).toEqual(['history','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','multi-shop','devices','sync-conflicts']);
+    expect(visibleMoreRoutes(cashier).map((item) => item.key)).toEqual(['sync-conflicts']); expect(visibleMoreRoutes(manager).map((item) => item.key)).toEqual(['history','credit','expiry','cash','eod','report','devices','sync-conflicts']); expect(visibleMoreRoutes(owner).map((item) => item.key)).toEqual(['history','credit','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','devices','sync-conflicts']); expect(visibleMoreRoutes(owner, true).map((item) => item.key)).toEqual(['history','credit','expiry','cash','eod','report','expense','invoices','suppliers','staff','staff-sales','multi-shop','devices','sync-conflicts']);
     // A2.3. Manager sees Devices and Staff does not, by ROLE — a Staff member
     // holding staff_manage must not reach it, which is why the entry is not
     // hung off that permission.
     expect(visibleMoreRoutes(cashier).map((item) => item.key)).not.toContain('devices'); });
+  it('shows a cashier exactly what the owner granted in More, and nothing owner-only', () => {
+    // Founder 2026-11-21: whatever the owner grants is reachable from More.
+    const granted: Session = { ...cashier, permissions: { ...PERMISSION_PRESETS.cashier, credit_view: true, sale_history: true } };
+    expect(visibleMoreRoutes(granted).map((item) => item.key)).toEqual(['history', 'credit', 'sync-conflicts']);
+  });
   it('keeps the approved Owner Quick Links in one exact registry', () => {
     // Widened to string pairs: CatalogKey × Href is now too large a union for
     // TypeScript to infer an array literal over (TS2590). The values compared
