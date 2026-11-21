@@ -682,6 +682,24 @@ export async function readLocalActorAuthority(
   };
 }
 /** Records an authenticated login without storing credential material. */
+/**
+ * Founder decision 2026-11-21: the PIN pad asks for the mobile number first.
+ * verifyPin still identifies and charges the attempt budget exactly as before;
+ * this only confirms that the person the PIN matched signs in with the number
+ * that was typed. Read-only. Both sides go through normalizeBdPhone, so any
+ * accepted spelling of the same Bangladeshi number matches.
+ */
+export async function localUserHasPhone(shopId: string, userId: string, phone: string): Promise<boolean> {
+  const row = await db
+    .select({ phone: users.phone })
+    .from(users)
+    .where(and(eq(users.shopId, shopId), eq(users.id, userId)))
+    .get();
+  const stored = row?.phone ? normalizeBdPhone(row.phone) : null;
+  const typed = normalizeBdPhone(phone);
+  return stored !== null && typed !== null && stored === typed;
+}
+
 export async function recordSuccessfulLogin(session: LocalPinSession): Promise<void> {
   const id = generateId();
   const now = new Date().toISOString();
