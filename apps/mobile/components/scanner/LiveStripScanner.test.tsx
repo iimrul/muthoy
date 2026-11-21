@@ -34,17 +34,34 @@ const camera = vi.hoisted(() => ({
   heldStrip: [] as OcrTextLine[],
   frameCount: 0,
   capturedUris: [] as string[],
+  isMounted: false,
+  barcodeEnabled: false,
+  onBarcodeScanned: null as ((result: { data: string; type: string }) => void) | null,
 }));
+
+vi.mock("@expo/vector-icons/Feather", () => ({ default: () => null }));
 
 vi.mock("../../native/ScannerCamera", () => ({
   ScannerCamera: ({
     onPermissionStateChange,
+    barcodeEnabled,
+    onBarcodeScanned,
     ref,
   }: {
     onPermissionStateChange: (state: "granted") => void;
+    barcodeEnabled?: boolean;
+    onBarcodeScanned?: (result: { data: string; type: string }) => void;
     ref?: React.Ref<unknown>;
   }) => {
     useEffect(() => onPermissionStateChange("granted"), [onPermissionStateChange]);
+    useEffect(() => {
+      camera.isMounted = true;
+      camera.barcodeEnabled = Boolean(barcodeEnabled);
+      camera.onBarcodeScanned = onBarcodeScanned ?? null;
+      return () => {
+        camera.isMounted = false;
+      };
+    });
     useImperativeHandle(ref, () => ({
       requestPermission: async () => true,
       captureAsync: async () => null,
@@ -392,14 +409,46 @@ describe("frame-processor camera: readings are pushed, no photo is taken", () =>
     expect(await screen.findByText("Can't read right now. Hold the strip steady.")).toBeTruthy();
   });
 
-  it("keeps the photo loop when the scanner also reads barcodes", async () => {
+  it("starts on fast frame OCR even when it can read barcodes, with a Barcode button", async () => {
     liveText.isAvailable = true;
     renderScanner({ onBarcodeRecognized: vi.fn() });
-    hold(NAPA_EXTRA_STRIP);
 
+    await pushReading(NAPA_EXTRA_STRIP);
     await waitFor(() => expect(quantityOf("napa-extra")).toBe(1));
-    expect(camera.frameCount).toBeGreaterThan(0);
-    expect(liveText.push).toBeNull();
+    expect(camera.isMounted).toBe(false);
+    expect(camera.frameCount).toBe(0);
+    expect(screen.getByText("Barcode")).toBeTruthy();
+  });
+
+  it("the Barcode button swaps to the barcode reader and Strip swaps back", async () => {
+    liveText.isAvailable = true;
+    const onBarcodeRecognized = vi.fn();
+    renderScanner({ onBarcodeRecognized });
+    await screen.findByText("Hold a medicine strip in front of the camera.");
+
+    await act(async () => fireEvent.click(screen.getByText("Barcode")));
+    expect(await screen.findByText("Point the camera at the barcode.")).toBeTruthy();
+    expect(camera.isMounted).toBe(true);
+    expect(camera.barcodeEnabled).toBe(true);
+    await act(async () => camera.onBarcodeScanned?.({ data: "8941234567890", type: "ean13" }));
+    expect(onBarcodeRecognized).toHaveBeenCalledWith("8941234567890", "ean13");
+
+    // Strip readings are ignored while the barcode reader is on, and no photo loop runs.
+    await act(async () => liveText.push?.(NAPA_EXTRA_STRIP));
+    expect(useCartStore.getState().items).toHaveLength(0);
+    expect(camera.frameCount).toBe(0);
+
+    await act(async () => fireEvent.click(screen.getByText("Strip")));
+    expect(camera.isMounted).toBe(false);
+    await pushReading(NAPA_EXTRA_STRIP);
+    await waitFor(() => expect(quantityOf("napa-extra")).toBe(1));
+  });
+
+  it("offers no Barcode button when the scanner does not read barcodes", async () => {
+    liveText.isAvailable = true;
+    renderScanner();
+    await screen.findByText("Hold a medicine strip in front of the camera.");
+    expect(screen.queryByText("Barcode")).toBeNull();
   });
 });
 

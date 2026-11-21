@@ -63,6 +63,7 @@
       ],
       "./plugins/withAndroidBackupProtection",
       "./plugins/withAndroidLightSystemBars",
+      "./plugins/withAndroidMinSdk",
       "expo-notifications",
       [
         "expo-camera",

@@ -155,6 +155,7 @@ export default defineConfig({
       "apps/mobile/db/transaction-atomicity.sqlite.test.ts",
       "apps/mobile/tests/windows-text-portability.test.ts",
       "apps/mobile/tests/android-system-bars.test.ts",
+      "apps/mobile/tests/android-min-sdk.test.ts",
       "apps/mobile/components/inventory/receiptless-batch.test.tsx",
       "apps/mobile/components/sync/sync-exposure.test.tsx",
       "apps/mobile/db/receiptless-restock.sqlite.test.ts",
