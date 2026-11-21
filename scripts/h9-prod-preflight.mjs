@@ -92,6 +92,9 @@ export const E4_MIGRATIONS = Object.freeze([
   '20261115172840_staff_sale_credit_reconciliation.sql',
   // Migration 40: server time bounds 39's Staff-supplied reconciliation clock.
   '20261116020000_staff_reconciliation_server_clock.sql',
+  // Migration 41: admin plan grants (founder-approved 2026-11-21); not applied
+  // to any hosted project yet, declared so the chain refusal stays accurate.
+  '20261121000000_admin_plan_grants.sql',
 ]);
 // The chain, pinned by NAME rather than by count.
 //

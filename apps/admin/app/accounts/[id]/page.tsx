@@ -67,6 +67,7 @@ interface AccountPageProps {
 // one not.
 const OUTCOME_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   reconcile: 'Plan limits reconciled.',
+  grant: 'Plan granted. The shop picks it up the next time its phone is online.',
 });
 
 export default async function AccountDetailPage({ params, searchParams }: AccountPageProps) {
@@ -133,6 +134,67 @@ export default async function AccountDetailPage({ params, searchParams }: Accoun
             hint="Re-applies the plan's shop and staff limits. Grants nothing."
           />
         </div>
+      ) : null}
+
+      {mayWrite ? (
+        // Founder decision 2026-11-21 (migration 41). A plain POST like every
+        // other write here; the shared schema and the RPC both re-check it.
+        <form
+          method="post"
+          action={ADMIN_FORM_PATHS.grantPlan}
+          className="mt-6 grid max-w-xl gap-3 rounded-xl border border-black/10 bg-white p-4"
+        >
+          <input type="hidden" name="accountId" value={account.id} />
+          <div>
+            <h2 className="text-sm font-semibold text-richBlack">Grant or extend a plan</h2>
+            <p className="mt-1 text-xs text-midGray">
+              Adds the days to the end of the current paid period, or starts one today. Recorded with your
+              name and the reason. The shop&apos;s phone picks it up the next time it is online.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <label className="flex flex-col gap-1 text-xs text-midGray">
+              Plan
+              <select
+                name="tier"
+                defaultValue="pro"
+                className="rounded border border-black/15 px-2 py-1.5 text-sm text-richBlack"
+              >
+                <option value="pro">Pro</option>
+                <option value="ultra">Ultra</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-midGray">
+              Days
+              <input
+                type="number"
+                name="days"
+                min={1}
+                max={366}
+                defaultValue={30}
+                required
+                className="w-24 rounded border border-black/15 px-2 py-1.5 text-sm text-richBlack"
+              />
+            </label>
+          </div>
+          <label className="flex flex-col gap-1 text-xs text-midGray">
+            Reason (required)
+            <textarea
+              name="reason"
+              required
+              minLength={5}
+              maxLength={500}
+              rows={2}
+              className="rounded border border-black/15 px-2 py-1.5 text-sm text-richBlack"
+            />
+          </label>
+          <button
+            type="submit"
+            className="justify-self-start rounded bg-brand-deepGreen px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+          >
+            Grant plan
+          </button>
+        </form>
       ) : null}
 
       <div className="mt-6">

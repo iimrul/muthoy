@@ -486,6 +486,7 @@ export default defineConfig({
       // ceiling, with the old unconditional body re-applied for real in its own
       // harness so the refusals are not free.
       "backend/supabase/pgtest/e11-entitlement-verification.pgtest.ts",
+      "backend/supabase/pgtest/admin-plan-grants.pgtest.ts",
       // W4-05. Both barriers proven INDEPENDENTLY — the owner gate with the pin
       // bypassed, the pin with the gate bypassed — plus the seven working paths.
       "backend/supabase/pgtest/w405-shop-identity.pgtest.ts",

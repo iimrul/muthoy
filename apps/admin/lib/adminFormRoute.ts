@@ -26,7 +26,7 @@ import 'server-only';
 import type { AdminWriteResult } from './adminAssignments';
 import { recordAdminAction, type AdminAuditSink } from './adminAudit';
 import { durableAuditSinks } from './adminAuditStore';
-import { expireStalePaymentOrder, reconcilePlanLimits } from './adminActions';
+import { expireStalePaymentOrder, grantPlan, reconcilePlanLimits } from './adminActions';
 import type { AdminEnvironment } from './adminAuthz';
 import { ADMIN_FORM_ACTION_PREFIX } from './adminFormPaths';
 import { assignAdminRole, revokeAdminSessions } from './adminIdentityActions';
@@ -51,6 +51,7 @@ export const MAX_ACTION_BODY_BYTES = 128 * 1024;
 /** The write functions, injectable so a test can see exactly what each form passes. */
 export interface AdminFormWriters {
   reconcilePlanLimits: (accountId: string) => Promise<AdminWriteResult>;
+  grantPlan: (payload: unknown) => Promise<AdminWriteResult>;
   expireStalePaymentOrder: (orderId: string) => Promise<AdminWriteResult>;
   setPlatformFeatureFlag: (payload: unknown) => Promise<AdminWriteResult>;
   openSupportCase: (payload: unknown) => Promise<AdminWriteResult>;
@@ -63,6 +64,7 @@ export interface AdminFormWriters {
 // Wrapped so a caller can never slip a second (deps) argument through.
 const REAL_WRITERS: AdminFormWriters = {
   reconcilePlanLimits: (accountId) => reconcilePlanLimits(accountId),
+  grantPlan: (payload) => grantPlan(payload),
   expireStalePaymentOrder: (orderId) => expireStalePaymentOrder(orderId),
   setPlatformFeatureFlag: (payload) => setPlatformFeatureFlag(payload),
   openSupportCase: (payload) => openSupportCase(payload),
@@ -105,6 +107,17 @@ export const ADMIN_FORM_ACTIONS: Readonly<Record<string, AdminFormAction>> = Obj
     run: (field, w) => w.reconcilePlanLimits(field('accountId')),
     destination: (field, outcome) =>
       '/accounts/' + encodeURIComponent(field('accountId')) + outcomeQuery('reconcile', outcome),
+  },
+  // Founder-approved 2026-11-21. The shared schema validates every field.
+  'grant-plan': {
+    run: (field, w) => w.grantPlan({
+      accountId: field('accountId'),
+      tier: field('tier'),
+      days: field('days'),
+      reason: field('reason'),
+    }),
+    destination: (field, outcome) =>
+      '/accounts/' + encodeURIComponent(field('accountId')) + outcomeQuery('grant', outcome),
   },
   'expire-order': {
     run: (field, w) => w.expireStalePaymentOrder(field('orderId')),

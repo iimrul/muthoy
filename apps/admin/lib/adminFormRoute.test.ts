@@ -33,6 +33,7 @@ const UNRECORDED: AdminWriteResult = {
 function writers(result: AdminWriteResult = DONE): AdminFormWriters {
   return {
     reconcilePlanLimits: vi.fn(async () => result),
+    grantPlan: vi.fn(async () => result),
     expireStalePaymentOrder: vi.fn(async () => result),
     setPlatformFeatureFlag: vi.fn(async () => result),
     openSupportCase: vi.fn(async () => result),
@@ -77,7 +78,7 @@ describe('the form paths and the handlers are the same set', () => {
       .map((path) => path.slice(ADMIN_FORM_ACTION_PREFIX.length))
       .sort();
     expect(fromPaths).toEqual(Object.keys(ADMIN_FORM_ACTIONS).sort());
-    expect(fromPaths).toHaveLength(8);
+    expect(fromPaths).toHaveLength(9);
   });
 });
 
@@ -149,6 +150,12 @@ describe('each form reaches its writer with its fields', () => {
     const w = writers();
     await handleAdminFormAction(post('reconcile-limits', { accountId: ACCOUNT }), 'reconcile-limits', { env: ENV, writers: w });
     expect(calledWith(w.reconcilePlanLimits)).toBe(ACCOUNT);
+  });
+
+  test('grant-plan', async () => {
+    const w = writers();
+    await handleAdminFormAction(post('grant-plan', { accountId: ACCOUNT, tier: 'ultra', days: '45', reason: 'Pilot pharmacy' }), 'grant-plan', { env: ENV, writers: w });
+    expect(calledWith(w.grantPlan)).toEqual({ accountId: ACCOUNT, tier: 'ultra', days: '45', reason: 'Pilot pharmacy' });
   });
 
   test('expire-order', async () => {
