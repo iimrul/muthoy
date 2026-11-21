@@ -409,7 +409,7 @@ export default function PinLoginScreen() {
     return (
       <AuthShell
         variant="secure"
-        header={<StandardHeader tone="auth" safeAreaTop title={t('pinLoginHeaderTitle')} />}
+        header={<StandardHeader tone="auth" safeAreaTop title={t('pinLoginPhoneHeaderTitle')} />}
         footer={<View className="w-full">{recovery}</View>}
       >
         <View className="items-center">
