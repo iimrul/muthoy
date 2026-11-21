@@ -18,6 +18,9 @@
 /scripts/*
 !/scripts/validate-mobile-environment.mjs
 !/packages
+# pnpm `patchedDependencies` (pnpm-workspace.yaml) — the frozen install fails
+# without them, so a build archive missing them cannot install at all.
+!/patches
 !/apps
 /apps/*
 !/apps/mobile

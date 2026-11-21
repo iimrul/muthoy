@@ -113,7 +113,7 @@ describe('strict archive allowlist against a real Git revision', { timeout: CASE
   test('approved inputs are exactly the mobile build inputs', () => {
     expect(approved).toEqual(expect.arrayContaining(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc', '.easignore', 'scripts/validate-mobile-environment.mjs', 'apps/mobile/app.config.js', 'apps/mobile/app.json', 'apps/mobile/eas.json', 'apps/mobile/plugins/withAndroidBackupProtection.js', 'packages/types/package.json']));
     for (const item of approved) {
-      expect(item).toMatch(/^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.nvmrc|\.easignore|scripts\/validate-mobile-environment\.mjs|apps\/mobile\/.+|packages\/.+)$/);
+      expect(item).toMatch(/^(?:package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|\.nvmrc|\.easignore|scripts\/validate-mobile-environment\.mjs|apps\/mobile\/.+|packages\/.+|patches\/.+)$/);
       expect(item).not.toMatch(/^(?:\.claude|\.github|backend|docs|apps\/(?:admin|prototype-web))\/|^apps\/mobile\/(?:android|ios|tests|db\/test)\/|\.test\.tsx?$/);
     }
   });
@@ -143,7 +143,7 @@ describe('strict archive allowlist against a real Git revision', { timeout: CASE
     mkdirSync(join(copy, item), { recursive: true });
     expect(reasonOf(() => validator.inspectArchive(copy, identity, source))).toBe(reason);
   });
-  test.each(['apps/mobile/plugins/withAndroidBackupProtection.js', 'apps/mobile/assets/images/icon.png', 'apps/mobile/modules/muthoy-db-key/android/src/main/java/com/muthoy/dbkey/MuthoyDbKeyModule.kt', 'packages/types/src/index.ts'])('missing approved input %s is refused', async item => {
+  test.each(['apps/mobile/plugins/withAndroidBackupProtection.js', 'apps/mobile/assets/images/icon.png', 'apps/mobile/modules/muthoy-db-key/android/src/main/java/com/muthoy/dbkey/MuthoyDbKeyModule.kt', 'packages/types/src/index.ts', 'patches/react-native-screens@4.26.2.patch'])('missing approved input %s is refused', async item => {
     const copy = await cloneArchive(archive);
     rmSync(join(copy, item));
     expect(reasonOf(() => validator.inspectArchive(copy, identity, source))).toBe('archive-missing-input');
