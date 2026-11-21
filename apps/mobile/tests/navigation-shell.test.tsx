@@ -63,7 +63,7 @@ vi.mock("@expo/vector-icons/MaterialCommunityIcons", () => ({
     createElement("span", { "data-testid": `material-${name}` }),
 }));
 
-const routerMock = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), navigate: vi.fn() }));
+const routerMock = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), navigate: vi.fn(), dismissTo: vi.fn() }));
 vi.mock("expo-router", () => ({
   router: routerMock,
   usePathname: () => route.pathname,
@@ -146,11 +146,37 @@ describe("tab taps reach the KEPT screens", () => {
     expect(routerMock.replace).not.toHaveBeenCalled();
   });
 
-  it("Scan, outside the tab group, is still replaced", () => {
+  it("Scan opens ON TOP of the tabs from a tab, so the tabs stay mounted and Back returns", () => {
+    render(createElement(AppNavigationShell, null, createElement("main", null, "content")));
+    fireEvent.click(screen.getByLabelText("Scan"));
+    expect(routerMock.push).toHaveBeenCalledWith("/scan");
+    expect(routerMock.replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("from a page above the tabs", () => {
+  // expo-router's StackRouter only reuses the CURRENT route on navigate(), so
+  // navigating to a tab from a page pushed a second copy of the whole tab
+  // group (A04s release build: 233–408 ms per return, and the stack grew).
+  it.each([
+    ["Home", "/dashboard"],
+    ["Sale", "/sale"],
+    ["Inventory", "/inventory"],
+  ])("%s pops back to the kept tab group", (label, href) => {
+    route.pathname = "/reports/sales-history";
+    render(createElement(AppNavigationShell, null, createElement("main", null, "content")));
+    fireEvent.click(screen.getByText(label));
+    expect(routerMock.dismissTo).toHaveBeenCalledWith(href);
+    expect(routerMock.navigate).not.toHaveBeenCalled();
+    expect(routerMock.push).not.toHaveBeenCalled();
+  });
+
+  it("another page swaps the open page instead of stacking a second one", () => {
+    route.pathname = "/reports/sales-history";
     render(createElement(AppNavigationShell, null, createElement("main", null, "content")));
     fireEvent.click(screen.getByLabelText("Scan"));
     expect(routerMock.replace).toHaveBeenCalledWith("/scan");
-    expect(routerMock.navigate).not.toHaveBeenCalled();
+    expect(routerMock.push).not.toHaveBeenCalled();
   });
 });
 

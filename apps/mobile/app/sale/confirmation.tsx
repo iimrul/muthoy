@@ -55,7 +55,7 @@ export default function SaleConfirmationScreen() {
           ) : null}
         </View>
         <Pressable
-          onPress={() => router.replace('/sale')}
+          onPress={() => router.dismissTo('/sale')}
           accessibilityRole="button"
           accessibilityLabel={t('startNewSale')}
           className="w-full items-center rounded-lg bg-brand-green py-3.5 active:opacity-80"

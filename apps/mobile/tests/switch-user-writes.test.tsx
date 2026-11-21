@@ -165,6 +165,7 @@ vi.mock("react-native", () => ({
 }));
 
 const routerMock = vi.hoisted(() => ({
+  dismissTo: vi.fn(),
   replace: vi.fn(),
   push: vi.fn(),
   back: vi.fn(),

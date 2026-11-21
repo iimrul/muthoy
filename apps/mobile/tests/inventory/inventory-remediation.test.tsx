@@ -123,7 +123,7 @@ vi.mock("react-native", () => ({
   Alert: { alert: vi.fn() },
 }));
 
-const routerMock = vi.hoisted(() => ({ push: vi.fn(), back: vi.fn() }));
+const routerMock = vi.hoisted(() => ({ push: vi.fn(), back: vi.fn(), dismissTo: vi.fn() }));
 const routeFixture = vi.hoisted(() => ({ mode: undefined as string | undefined }));
 vi.mock("../../state/usePlan", () => ({ usePlan: () => ({effectiveTier:"pro",loading:false}) }));
 vi.mock("expo-router", () => ({

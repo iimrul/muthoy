@@ -70,7 +70,7 @@ export default function CartScreen() {
             title={t("cartEmptyTitle")}
             message={t("cartEmptyMessage")}
             actionLabel={t("findMedicinesLabel")}
-            onAction={() => router.replace("/sale")}
+            onAction={() => router.dismissTo("/sale")}
           />
         }
         renderItem={({ item }) => (
@@ -115,7 +115,7 @@ export default function CartScreen() {
             </Text>
           </Pressable>
           <Pressable
-            onPress={() => router.replace("/sale")}
+            onPress={() => router.dismissTo("/sale")}
             accessibilityRole="button"
             accessibilityLabel={t("addMoreItemsLabel")}
             className="items-center py-2 active:opacity-70"

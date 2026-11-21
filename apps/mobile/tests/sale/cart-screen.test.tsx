@@ -51,7 +51,7 @@ vi.mock("react-native", () => ({
         : data.map((item, index) => createElement("div", { key: keyExtractor(item) }, renderItem({ item, index }))),
     ),
 }));
-vi.mock("expo-router", () => ({ router: { back: vi.fn(), push: vi.fn(), replace: vi.fn() } }));
+vi.mock("expo-router", () => ({ router: { back: vi.fn(), push: vi.fn(), replace: vi.fn(), dismissTo: vi.fn() } }));
 vi.mock("@expo/vector-icons/Feather", () => ({ default: () => null }));
 vi.mock("../../components/ui/StandardHeader", () => ({
   StandardHeader: ({ title }: { title: string }) => createElement("h1", null, title),
