@@ -69,6 +69,30 @@ placeholder when local data is available.
   every date field and the shared input style on 9 sheets (next commit).
 - **Needs a new native build** to verify OCR on the phone.
 
+## Release results (A04s, EAS build f59940f8 @ 6c48eeb, ms first frame / settled)
+
+| Tap | Baseline | Now |
+|---|---|---|
+| Add to cart | 132–177 / 165–219 | 43–67 / 43–67 |
+| Filter | 120–146 / 268–285 | 41–50 / 116–121 |
+| Home, first open | 279 / 2298 | 136 / 942 |
+| Kept tabs | 216–428 / 378–624 | 75–163 / 152–501 |
+| Open cart | 338 / 464 | 159 / 251 |
+| Cart + / − | 200–296 | 59–85 / 59–111 |
+| More menu | — | 67–131 |
+| More pages (12) | 157–438 / 306–820 (build 18b91f6) | 111–319 / 225–780 |
+| Back to Sale from a page | 233–408 (build 18b91f6) | 110–198 |
+| Calendar open | — | 245 / 375 |
+| PIN key | — | 22–51 |
+| Live scan, per reading | ~600 | ~170–190 (frame OCR) |
+
+Android Back on a More page now returns to the app. Staff side NOT measured:
+the staff PIN supplied by the founder does not belong to the preview build's
+test shop (one wrong-PIN attempt, then stopped); the preview app was left on
+the PIN pad. Still above 100 ms: Home first settle (942), Report page (319),
+Expense page (285), tab-switch first frame (75–194). The staff-sales calendar
+(26885f2) is not in this build.
+
 ## Dashboard query plan (for approval — rule 10)
 
 **Measured** (dev build, Galaxy A04s, sequential): `getOwnerDashboard` 829 ms —
