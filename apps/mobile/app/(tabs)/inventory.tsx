@@ -2,7 +2,8 @@ import { useCallback, useRef, useState } from "react";
 import { createLatestRequestGuard } from "../../domain/latestRequestGuard";
 import { Alert, FlatList, Pressable, ScrollView, Text, View } from "react-native";
 import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
-import { router, useFocusEffect } from "expo-router";
+import { router } from "expo-router";
+import { useFocusRefresh } from "../../navigation/useFocusRefresh";
 import Feather from "@expo/vector-icons/Feather";
 import { daysUntilExpiry } from "@muthoy/utils";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -83,7 +84,7 @@ export default function InventoryScreen() {
     setBatchesById({});
   }, [session]);
 
-  useFocusEffect(
+  useFocusRefresh(
     useCallback(() => {
       void reloadMedicines();
     }, [reloadMedicines]),

@@ -1,6 +1,7 @@
 import { useCallback, useContext, useEffect, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, Text, View } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import { router } from "expo-router";
+import { useFocusRefresh } from "../../navigation/useFocusRefresh";
 import { formatMoney } from "@muthoy/utils";
 import { ZERO_PAISA } from "@muthoy/types";
 import { LanguageToggle } from "../../components/ui/LanguageToggle";
@@ -109,7 +110,7 @@ export default function StaffHomeScreen() {
       guard?.ifLive(() => setLoading(false));
     }
   }, [session]);
-  useFocusEffect(
+  useFocusRefresh(
     useCallback(() => {
       void reload();
     }, [reload]),

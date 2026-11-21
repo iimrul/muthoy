@@ -95,14 +95,22 @@ export function useLiveStripScan({
 
     const runLoop = async () => {
       let failures = 0;
+      // PIPELINED: the recognition of one frame overlaps the capture of the
+      // next. The camera and ML Kit run on separate native threads, so a frame
+      // costs max(capture, read) instead of capture + read. Results are still
+      // handled strictly in capture order, and every frame is still deleted by
+      // readFrame whether or not its result is used.
+      let pendingRead: Promise<OcrTextLine[] | null> | null = null;
       while (!control.isCancelled) {
         const startedAt = Date.now();
         const uri = (await cameraRef.current?.captureFrameAsync()) ?? null;
-        if (!uri) {
-          await sleep(retryMs);
+        const previousRead = pendingRead;
+        pendingRead = uri ? readFrame(uri) : null;
+        if (!previousRead) {
+          if (!uri) await sleep(retryMs);
           continue;
         }
-        const lines = await readFrame(uri);
+        const lines = await previousRead;
         if (control.isCancelled) break;
         if (lines === null) {
           failures += 1;

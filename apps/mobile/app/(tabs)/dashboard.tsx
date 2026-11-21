@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
+import { useFocusRefresh } from "../../navigation/useFocusRefresh";
 import Feather from "@expo/vector-icons/Feather";
 import { formatMoney } from "@muthoy/utils";
 import type { Paisa } from "@muthoy/types";
@@ -145,7 +146,7 @@ export default function MorningDashboardScreen() {
     }
   }, [session, t]);
 
-  useFocusEffect(
+  useFocusRefresh(
     useCallback(() => {
       void reload();
     }, [reload]),

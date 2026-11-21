@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement, type ReactNode } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 interface StubProps {
@@ -63,8 +63,9 @@ vi.mock("@expo/vector-icons/MaterialCommunityIcons", () => ({
     createElement("span", { "data-testid": `material-${name}` }),
 }));
 
+const routerMock = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), navigate: vi.fn() }));
 vi.mock("expo-router", () => ({
-  router: { replace: vi.fn(), push: vi.fn() },
+  router: routerMock,
   usePathname: () => route.pathname,
 }));
 vi.mock("../domain/permissions", () => ({ resolvePermission: () => true }));
@@ -126,6 +127,30 @@ describe("status icons follow the header surface", () => {
     route.pathname = pathname!;
     render(createElement(AppNavigationShell, null, createElement("main", null, "content")));
     expect(awaitedStatusBar.setBarStyle).toHaveBeenLastCalledWith(style);
+  });
+});
+
+describe("tab taps reach the KEPT screens", () => {
+  // app/(tabs)/_layout.tsx keeps Home/Sale/Inventory mounted; a tab tap must
+  // navigate to the kept screen. replace() would tear it down and rebuild it
+  // (measured: Home 8.1 s to settle on a Galaxy A04s, dev mode).
+  it.each([
+    ["Home", "/dashboard"],
+    ["Sale", "/sale"],
+    ["Inventory", "/inventory"],
+  ])("%s navigates to %s", (label, href) => {
+    render(createElement(AppNavigationShell, null, createElement("main", null, "content")));
+    // The tab's name is its visible text; the click bubbles to its button.
+    fireEvent.click(screen.getByText(label));
+    expect(routerMock.navigate).toHaveBeenCalledWith(href);
+    expect(routerMock.replace).not.toHaveBeenCalled();
+  });
+
+  it("Scan, outside the tab group, is still replaced", () => {
+    render(createElement(AppNavigationShell, null, createElement("main", null, "content")));
+    fireEvent.click(screen.getByLabelText("Scan"));
+    expect(routerMock.replace).toHaveBeenCalledWith("/scan");
+    expect(routerMock.navigate).not.toHaveBeenCalled();
   });
 });
 

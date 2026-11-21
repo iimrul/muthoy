@@ -28,6 +28,9 @@ const MORE_ICONS: Readonly<Record<string, ComponentProps<typeof Feather>["name"]
   "multi-shop": "grid", devices: "smartphone", "sync-conflicts": "alert-triangle",
 };
 
+/** The screens kept mounted in app/(tabs)/_layout.tsx — reached by navigate, not replace. */
+export const TAB_ROUTES: ReadonlySet<string> = new Set(["/dashboard", "/staff-home", "/sale", "/inventory"]);
+
 export const LIGHT_STATUS_ROUTES: ReadonlySet<string> = new Set([
   "/role-select", "/dashboard", "/staff-home",
 ]);
@@ -250,8 +253,14 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
     session.permissions,
   );
   const deny = () => Alert.alert(t("accessDenied"), t("askOwner"));
-  const go = (href: Parameters<typeof router.replace>[0], allowed = true) =>
-    allowed ? router.replace(href) : deny();
+  // The primary screens are kept mounted in app/(tabs)/_layout.tsx's Tabs
+  // navigator, so a tab tap NAVIGATES to the kept screen (instant, no rebuild).
+  // Routes outside the tab group (Scan, Credit) are still replaced.
+  const go = (href: Parameters<typeof router.replace>[0], allowed = true) => {
+    if (!allowed) return deny();
+    if (typeof href === "string" && TAB_ROUTES.has(href)) return router.navigate(href);
+    return router.replace(href);
+  };
   const openMoreRoute = (href: Parameters<typeof router.push>[0]) => {
     // Dispatch the push FIRST, then close the sheet. Deferring the push behind
     // InteractionManager made it depend on the scan button's infinite

@@ -43,7 +43,10 @@ export interface ScannerCameraProps {
 }
 
 const CAPTURE_OPTIONS = { quality: 0.8, skipProcessing: true } as const;
-const FRAME_OPTIONS = { quality: 0.6, skipProcessing: true, shutterSound: false } as const;
+// Quality 0.5: every live frame is JPEG-encoded, written, read back and decoded,
+// so a smaller file is time saved twice per frame. Resolution is NOT lowered —
+// that is what keeps small print ("20 mg") legible (domain/scanPictureSize.ts).
+const FRAME_OPTIONS = { quality: 0.5, skipProcessing: true, shutterSound: false } as const;
 
 export function ScannerCamera({
   onPermissionStateChange,

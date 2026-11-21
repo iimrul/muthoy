@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FlatList, Modal, Pressable, Text, View } from "react-native";
 import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { asPaisa } from "@muthoy/types";
 import { daysUntilExpiry } from "@muthoy/utils";
@@ -60,6 +60,22 @@ export default function SaleEntryScreen() {
   >([]);
   const [searchGuard] = useState(() => createLatestRequestGuard());
   const hasRunHandedOverQuery = useRef(false);
+  // The Sale tab is now kept mounted (app/(tabs)/_layout.tsx), so coming back
+  // to it must refresh stock and prices — but only AFTER the tab has been
+  // shown, so the tap itself is answered at once. The first focus is the mount,
+  // which already loads.
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const hasFocusedOnce = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasFocusedOnce.current) {
+        hasFocusedOnce.current = true;
+        return undefined;
+      }
+      const timer = setTimeout(() => setRefreshNonce((value) => value + 1), 0);
+      return () => clearTimeout(timer);
+    }, []),
+  );
 
   useEffect(() => {
     if (!session || query.trim()) return;
@@ -81,7 +97,7 @@ export default function SaleEntryScreen() {
       current = false;
       clearTimeout(timer);
     };
-  }, [mode, query, session, t]);
+  }, [mode, query, session, t, refreshNonce]);
 
   // The typed search (and a query handed over from another screen). Returns
   // both the matches and whether this call is still the most recent one, so a
@@ -137,6 +153,15 @@ export default function SaleEntryScreen() {
     hasRunHandedOverQuery.current = true;
     void runSearch(handedOverQuery);
   }, [handedOverQuery, runSearch, session]);
+
+  // A typed search shown when the tab is left is re-run when it comes back,
+  // so its stock and prices are current. Typing itself searches per keystroke.
+  useEffect(() => {
+    if (refreshNonce === 0 || !query.trim()) return undefined;
+    const timer = setTimeout(() => void runSearch(query), 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refocus refresh only
+  }, [refreshNonce]);
 
   if (!session) {
     return null;
