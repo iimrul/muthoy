@@ -1,5 +1,5 @@
 import { and, eq, isNull } from 'drizzle-orm';
-import { DHAKA_SQL_OFFSET, dhakaBusinessDate } from '@muthoy/utils';
+import { dhakaBusinessDate } from '@muthoy/utils';
 import { generateId } from '../native/id';
 import { resolvePermission, type Permission } from '../domain/permissions';
 import { getActiveSessionContext, requireOwner } from './auth';
