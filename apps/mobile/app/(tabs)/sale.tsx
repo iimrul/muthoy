@@ -274,7 +274,7 @@ export default function SaleEntryScreen() {
           accessibilityLabel={t("heldSalesLabel")}
           className="flex-row items-center gap-1 rounded-lg border border-midGray bg-white px-3"
         >
-          <Feather name="clock" size={14} color="#111827" />
+          <Feather name="clock" size={14} color="#1A1A1A" />
           <Text className="text-xs text-richBlack">
             {t("heldSalesLabel")}
           </Text>

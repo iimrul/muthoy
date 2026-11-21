@@ -219,7 +219,7 @@ const CartRow = memo(function CartRow({
             accessibilityLabel={`Decrease ${item.medicineName} quantity`}
             className="h-10 w-10 items-center justify-center rounded-lg border border-midGray active:opacity-70"
           >
-            <Feather name="minus" size={16} color="#111827" />
+            <Feather name="minus" size={16} color="#1A1A1A" />
           </Pressable>
           <TextInput
             value={String(item.quantity)}

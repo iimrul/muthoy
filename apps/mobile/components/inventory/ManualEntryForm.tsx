@@ -556,7 +556,7 @@ export function ManualEntryForm({
       />
 
       <View className="gap-2">
-        <Text className="font-sans-bold text-xs text-[#374151]">
+        <Text className="font-sans-bold text-xs text-richBlack">
           {t("addMedicinePaymentMethodLabel")}
         </Text>
         <View className="flex-row gap-3">
