@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { AppTextInput as TextInput } from '../../components/ui/AppTextInput';
 import Feather from '@expo/vector-icons/Feather';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
+import { DateField } from '../../components/ui/DateField';
 import { currentBusinessDate } from '../../db/cash';
 import { addDays, assertDateRange } from '../../domain/reporting';
 import type { ExportFormat } from '../../native/reportExport';
@@ -45,7 +45,7 @@ export default function DataExportScreen() {
     <View className="flex-1 bg-brand-softGreen">
       <StandardHeader title={bn ? 'ডেটা এক্সপোর্ট' : 'Data Export'} onBackPress={() => router.back()} />
       <ScrollView contentContainerClassName="gap-4 p-4 pb-28" keyboardShouldPersistTaps="handled">
-        <View className="gap-3 rounded-2xl bg-white p-4"><Text className="font-sans-bold text-sm">{bn ? 'তারিখের পরিসীমা' : 'Date Range'}</Text><View className="flex-row gap-3">{[{ label: bn ? 'শুরু' : 'Start', value: startDate, set: setStartDate }, { label: bn ? 'শেষ' : 'End', value: endDate, set: setEndDate }].map((field) => <View className="flex-1 gap-1" key={field.label}><Text className="font-sans text-xs text-midGray">{field.label}</Text><TextInput value={field.value} onChangeText={field.set} maxLength={10} className="h-11 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] px-3 font-sans text-sm" /></View>)}</View></View>
+        <View className="gap-3 rounded-2xl bg-white p-4"><Text className="font-sans-bold text-sm">{bn ? 'তারিখের পরিসীমা' : 'Date Range'}</Text><View className="flex-row gap-3">{[{ label: bn ? 'শুরু' : 'Start', value: startDate, set: setStartDate }, { label: bn ? 'শেষ' : 'End', value: endDate, set: setEndDate }].map((field) => <View className="flex-1 gap-1" key={field.label}><Text className="font-sans text-xs text-midGray">{field.label}</Text><DateField value={field.value} onChange={field.set} accessibilityLabel={field.label} className="h-11 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] px-3" textClassName="font-sans text-sm" /></View>)}</View></View>
         <View className="gap-3 rounded-2xl bg-white p-4"><Text className="font-sans-bold text-sm">{bn ? 'ডাটাসেট নির্বাচন করুন' : 'Select Datasets'}</Text><View className="flex-row flex-wrap gap-2">{META.map((item) => { const active = datasets[item.key]; return <Pressable key={item.key} onPress={() => setDatasets({ ...datasets, [item.key]: !active })} className={`w-[48%] flex-row items-center gap-3 rounded-xl border-2 p-3 ${active ? 'border-brand-green bg-brand-softGreen' : 'border-[#E5E7EB] bg-white'}`}><View className="h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: item.bg }}><Feather name={item.icon} size={16} color={item.tint} /></View><Text className="flex-1 font-sans-semibold text-sm">{bn ? item.bn : item.en}</Text></Pressable>; })}</View></View>
         <View className="gap-3 rounded-2xl bg-white p-4"><Text className="font-sans-bold text-sm">{bn ? 'ফরম্যাট' : 'Format'}</Text><View className="flex-row gap-2">{(['csv','xlsx'] as const).map((value) => <Pressable key={value} onPress={() => setFormat(value)} className={`flex-1 items-center rounded-xl border-2 py-2 ${format === value ? 'border-brand-green bg-brand-softGreen' : 'border-[#E5E7EB]'}`}><Text className="font-sans-bold text-sm text-brand-deepGreen">{value === 'csv' ? 'CSV' : 'Excel (.xlsx)'}</Text></Pressable>)}</View></View>
         {busy ? <View className="gap-2 rounded-2xl bg-white p-4"><View className="flex-row justify-between"><Text className="font-sans text-xs text-midGray">{bn ? 'এক্সপোর্ট হচ্ছে…' : 'Exporting…'}</Text><Text className="font-sans text-xs">{formatNumber(progress)}%</Text></View><View className="h-2 overflow-hidden rounded-full bg-[#F3F4F6]"><View className="h-full bg-brand-green" style={{ width: `${progress}%` }} /></View></View> : null}

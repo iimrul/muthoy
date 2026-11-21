@@ -183,6 +183,12 @@ vi.mock("expo-router", () => ({
   },
 }));
 
+// The calendar (components/ui/DateField.tsx) has its own tests; dates are entered
+// directly here so the write-safety paths stay the thing under test.
+vi.mock("../components/ui/DateField", () => ({
+  DateField: ({ value, onChange, accessibilityLabel }: { value: string; onChange: (v: string) => void; accessibilityLabel: string }) =>
+    createElement("input", { value, "aria-label": accessibilityLabel, onChange: (e: { target: { value: string } }) => onChange(e.target.value) }),
+}));
 vi.mock("../components/ui/StandardHeader", () => ({
   // B3 Group 4: credit-sales.tsx's "+" add-customer button lives in
   // rightAccessory — dropped silently before, so it could never be found.

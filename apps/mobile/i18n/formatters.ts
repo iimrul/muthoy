@@ -53,6 +53,36 @@ export function dateTimeFormatter(locale: FormatterLocale): Intl.DateTimeFormat 
   );
 }
 
+// The calendar (components/ui/DateField.tsx) works on calendar dates built at
+// UTC midnight, so these format in UTC: a stored "2027-01-15" always reads as
+// the 15th, whatever the device zone.
+// English is pinned to en-GB here: Bangladesh writes the day first
+// ("15 Jan 2027"), while en-BD falls back to US order ("Jan 15, 2027") on some
+// ICU builds.
+export function calendarDateFormatter(locale: FormatterLocale): Intl.DateTimeFormat {
+  return cached(
+    `calendarDate|${locale}`,
+    () =>
+      new Intl.DateTimeFormat(locale === "bn" ? "bn-BD" : "en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      }),
+  );
+}
+
+export function monthYearFormatter(locale: FormatterLocale): Intl.DateTimeFormat {
+  return cached(
+    `monthYear|${locale}`,
+    () => new Intl.DateTimeFormat(dateTag(locale), { month: "long", year: "numeric", timeZone: "UTC" }),
+  );
+}
+
+export function weekdayFormatter(locale: FormatterLocale): Intl.DateTimeFormat {
+  return cached(`weekday|${locale}`, () => new Intl.DateTimeFormat(dateTag(locale), { weekday: "narrow", timeZone: "UTC" }));
+}
+
 export function timeFormatter(locale: FormatterLocale): Intl.DateTimeFormat {
   return cached(`time|${locale}`, () => new Intl.DateTimeFormat(dateTag(locale), { hour: "2-digit", minute: "2-digit" }));
 }

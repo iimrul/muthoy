@@ -6,6 +6,7 @@ import { parseTakaTextToPaisa } from "@muthoy/utils";
 import Feather from "@expo/vector-icons/Feather";
 import { StandardHeader } from "../../components/ui/StandardHeader";
 import { AccessDenied } from "../../components/ui/AccessDenied";
+import { DateField } from "../../components/ui/DateField";
 import {
   adjustBatchStock,
   archiveBatch,
@@ -94,12 +95,16 @@ export default function EditBatchScreen() {
             value={batchNo}
             onChange={setBatchNo}
           />
-          <Field
-            label={t("expiryDateLabel")}
-            value={expiryDate}
-            onChange={setExpiryDate}
-            placeholder="YYYY-MM-DD"
-          />
+          <View className="gap-1.5">
+            <Text className="font-sans-semibold text-sm text-richBlack">{t("expiryDateLabel")}</Text>
+            <DateField
+              value={expiryDate}
+              onChange={setExpiryDate}
+              accessibilityLabel={t("expiryDateLabel")}
+              className="h-12 rounded-xl border border-[#D1D5DB] bg-white px-3"
+              textClassName="font-sans text-sm"
+            />
+          </View>
           <View className="flex-row gap-3">
             <View className="flex-1">
               <Field

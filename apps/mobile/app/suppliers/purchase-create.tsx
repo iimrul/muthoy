@@ -12,6 +12,7 @@ import {
 import { addPaisa, fromTaka, multiplyPaisa, ZERO_PAISA, type Paisa } from '@muthoy/types';
 import { dhakaBusinessDate, formatMoney } from '@muthoy/utils';
 import { FormField } from '../../components/forms/FormField';
+import { DateField } from '../../components/ui/DateField';
 import { MedicineTextScanner } from '../../components/scanner/MedicineTextScanner';
 import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
@@ -469,12 +470,12 @@ export default function PurchaseCreateScreen() {
                 </Pressable>
               ))}
               <Text className="font-sans-medium text-sm text-richBlack">{t('invoiceDateLabel')}</Text>
-              <TextInput
+              <DateField
                 value={invoiceDateText}
-                onChangeText={setInvoiceDateText}
-                placeholder="YYYY-MM-DD"
-                accessibilityLabel="Invoice date"
-                className="rounded-lg border border-midGray px-4 py-3 font-mono text-base text-richBlack"
+                onChange={setInvoiceDateText}
+                accessibilityLabel={t('invoiceDateLabel')}
+                isClearable
+                className="h-12 rounded-lg border border-midGray bg-white px-4"
               />
               <Text className="font-sans text-xs text-midGray">{t('invoiceDateHint')}</Text>
             </View>
@@ -577,7 +578,7 @@ export default function PurchaseCreateScreen() {
               ))}
               {selectedMedicine ? <Text className="font-sans-medium text-brand-green">{t('selectedLabel')}: {selectedMedicine.name}</Text> : null}
               <FormField control={control} name="batchNo" label={t('batchNumberLabel')} />
-              <FormField control={control} name="expiryDate" label={t('expiryDateLabel')} placeholder="YYYY-MM-DD" />
+              <FormField control={control} name="expiryDate" label={t('expiryDateLabel')} date />
               <FormField control={control} name="quantity" label={t('quantityLabel')} numeric />
               <FormField control={control} name="purchasePrice" label={t('purchasePriceLabel')} numeric money />
               <FormField control={control} name="salePrice" label={t('salePriceLabel')} numeric money />

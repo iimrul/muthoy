@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import { Controller, useFormState, type Control, type FieldPath, type FieldValues } from 'react-hook-form';
 import { Text, View, type KeyboardTypeOptions } from 'react-native';
 import { AppTextInput as TextInput } from "../ui/AppTextInput";
+import { DateField } from "../ui/DateField";
 import { localizeValidationMessage } from '../../i18n/display';
 import { useI18n } from '../../state/localeStore';
 
@@ -23,6 +24,8 @@ export interface FormFieldProps<TFieldValues extends FieldValues> {
   money?: boolean;
   /** Add Medicine's prototype uses a taller, lighter-bordered input shell. */
   prototypeStyle?: boolean;
+  /** A "YYYY-MM-DD" value picked from the in-app calendar, never typed. */
+  date?: boolean;
 }
 
 // Keep editing text separate from RHF's numeric value: Number('1.') would
@@ -76,11 +79,35 @@ export function FormField<TFieldValues extends FieldValues>({
   numeric = false,
   money = false,
   prototypeStyle = false,
+  date = false,
 }: FormFieldProps<TFieldValues>) {
   const { t } = useI18n();
   const { defaultValues } = useFormState({ control });
   const isNumeric = numeric || money;
   const Input = isNumeric ? NumericTextInput : TextInput;
+  if (date) {
+    return (
+      <View className="gap-2">
+        <Text className={`${prototypeStyle ? 'font-sans-semibold' : 'font-sans-medium'} text-sm text-richBlack`}>{label}</Text>
+        <Controller
+          control={control}
+          name={name}
+          render={({ field: { value, onChange }, fieldState: { error } }) => (
+            <>
+              <DateField
+                value={typeof value === 'string' ? value : ''}
+                onChange={onChange}
+                accessibilityLabel={label}
+                placeholder={placeholder}
+                className={prototypeStyle ? 'h-12 rounded-xl border border-[#D1D5DB] bg-white px-4' : 'h-12 rounded-lg border border-midGray bg-white px-4'}
+              />
+              {error ? <Text className="font-sans text-sm text-error">{localizeValidationMessage(error.message, t)}</Text> : null}
+            </>
+          )}
+        />
+      </View>
+    );
+  }
   return (
     <View className="gap-2">
       <Text className={`${prototypeStyle ? 'font-sans-semibold' : 'font-sans-medium'} text-sm text-richBlack`}>{label}</Text>

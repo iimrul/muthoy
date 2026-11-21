@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Pressable, Text, TextInput, View } from 'react-native';
+import { Animated, Pressable, Text, View } from 'react-native';
+import { AppTextInput as TextInput } from '../ui/AppTextInput';
 import Feather from '@expo/vector-icons/Feather';
 import { parseTakaTextToPaisa } from '@muthoy/utils';
 import type { Paisa } from '@muthoy/types';

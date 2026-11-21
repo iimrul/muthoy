@@ -60,6 +60,47 @@ placeholder when local data is available.
    native dependency) and replace typed date inputs with it.
 7. EAS internal build → full release driver pass → numbers table → PR update.
 
+## Progress (2026-11-21)
+
+- **Done, committed:** frame-processor OCR (59c9373, fallback kept; the Sale tab
+  scanner stays on the photo loop because VisionCamera 5 has no Android barcode
+  output — founder decision pending); no dashboard / staff-home loading screen,
+  cached Intl formatters, one-row cart updates (316fe3d); in-app calendar for
+  every date field and the shared input style on 9 sheets (next commit).
+- **Needs a new native build** to verify OCR on the phone.
+
+## Dashboard query plan (for approval — rule 10)
+
+**Measured** (dev build, Galaxy A04s, sequential): `getOwnerDashboard` 829 ms —
+today 176, yesterday 189, supplier payable 101, credit 56, cash 55, staff 54,
+recent 51, expiry 35, owner check 29, low stock 25, shop name 17, settings 9,
+drawer 6.
+
+**Cause.** 42 day filters across 9 db files are written
+`date(s.created_at, '+6 hours') = $businessDate`. SQLite cannot use the existing
+`sales (shop_id, created_at)` index through a function, so each one reads every
+sale the shop ever made; one `getDaySummary` runs four of them and the dashboard
+calls it twice. It gets slower every day the shop trades. Supplier payable
+computes one position per supplier (N+1). The owner check runs once per
+sub-query (~10 times).
+
+**Proposal — results must stay identical:**
+1. Put an index range IN FRONT of each unchanged filter:
+   `s.created_at >= $from AND s.created_at < $to AND date(s.created_at, '+6 hours') = $businessDate`,
+   with `$from/$to` the business day widened by a day on each side. The exact
+   original condition stays, so no row can be added or lost; the range only lets
+   SQLite use the index.
+2. One owner check per dashboard load.
+3. Supplier payable: measure again after 1–2; change only if still slow.
+4. Not touched: the cash formula, any money arithmetic, the business-date rule.
+
+**Tests:** for every changed query, a SQLite test that runs old and new SQL on a
+fixture with sales at 23:59 / 00:00 Dhaka and at UTC midnight and asserts equal
+results; an `EXPLAIN QUERY PLAN` test that asserts the index is used; a check
+that every stored `created_at` is ISO text (the range relies on it).
+
+Status: **awaiting founder approval**.
+
 ## Sync plan (for approval — rule 10)
 
 **Problem.** A sync cycle runs ~20 s on the JS thread, and the local apply work

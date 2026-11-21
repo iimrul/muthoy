@@ -494,8 +494,8 @@ export function ManualEntryForm({
             control={control}
             name="firstBatch.expiryDate"
             label={`${t("expiryDateLabel")} *`}
-            placeholder="YYYY-MM-DD"
             prototypeStyle
+            date
           />
         </View>
       </View>

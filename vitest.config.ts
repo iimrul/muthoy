@@ -197,6 +197,7 @@ export default defineConfig({
       // screens previously each re-implemented, tested on the behaviour those
       // copies disagreed about rather than on their markup.
       "apps/mobile/components/ui/ui-primitives.test.tsx",
+      "apps/mobile/components/ui/DateField.test.tsx",
       "apps/mobile/components/ui/standard-header.test.tsx",
       "apps/mobile/components/expenses/*.test.ts",
       "apps/mobile/components/expenses/*.test.tsx",

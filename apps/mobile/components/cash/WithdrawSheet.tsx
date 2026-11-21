@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Modal, Pressable, Text, TextInput, View } from "react-native";
+import { Modal, Pressable, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../ui/AppTextInput";
 import { fromTaka, type Paisa } from "@muthoy/types";
 import { withdrawalFormSchema, hasExcessMoneyDecimals, moneyDraftValue } from "@muthoy/validation";
 import { useI18n } from "../../state/localeStore";
