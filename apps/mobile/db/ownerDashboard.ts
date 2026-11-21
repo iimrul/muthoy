@@ -27,6 +27,7 @@ import {
 } from "../domain/dashboard";
 import { type CashFormulaInput, expectedCash } from "../domain/cashFormula";
 import { requireOwner, requirePermission } from "./auth";
+import { onDhakaDay } from "./dhakaDay";
 import { permissionForDataGate } from "./dataAccessGates";
 import {
   currentBusinessDate,
@@ -74,7 +75,7 @@ function dayTransactionCount(shopId: string, businessDate: string): number {
       `SELECT COUNT(*) AS count
          FROM sales
         WHERE shop_id = $shopId AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate`,
+          AND ${onDhakaDay("created_at", "$businessDate")}`,
       { $shopId: shopId, $businessDate: businessDate },
     )?.count ?? 0
   );
@@ -86,7 +87,7 @@ function dayTotalSales(shopId: string, businessDate: string): Paisa {
       `SELECT COALESCE(SUM(total), 0) AS total
          FROM sales
         WHERE shop_id = $shopId AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate`,
+          AND ${onDhakaDay("created_at", "$businessDate")}`,
       { $shopId: shopId, $businessDate: businessDate },
     )?.total ?? 0,
   );
@@ -108,7 +109,7 @@ function dayTopItems(
        JOIN sales AS s ON s.id = si.sale_id AND s.shop_id = si.shop_id
        LEFT JOIN medicines AS m ON m.id = si.medicine_id AND m.shop_id = si.shop_id
       WHERE si.shop_id = $shopId AND si.is_deleted = 0 AND s.is_deleted = 0
-        AND date(s.created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
+        AND ${onDhakaDay("s.created_at", "$businessDate")}
       GROUP BY medicineName, unit
       ORDER BY quantity DESC, medicineName ASC
       LIMIT $limit`,

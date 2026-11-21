@@ -21,6 +21,7 @@ import { DHAKA_SQL_OFFSET, dhakaBusinessDate } from "@muthoy/utils";
 import { expectedCash, type CashFormulaInput } from "../domain/cashFormula";
 import { generateId } from "../native/id";
 import { requireOwner, requirePermission } from "./auth";
+import { onDhakaDay } from "./dhakaDay";
 import { requirePremiumFeature } from "./commercial";
 import { permissionForDataGate } from "./dataAccessGates";
 import { getEndOfDayReportSnapshot } from "./reports";
@@ -363,7 +364,7 @@ export async function listExpenses(
     `SELECT id, category, amount, description, created_at AS createdAt
        FROM expenses
       WHERE shop_id = $shopId AND is_deleted = 0
-        AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
+        AND ${onDhakaDay("created_at", "$businessDate")}
       ORDER BY created_at DESC, id DESC`,
     { $shopId: shopId, $businessDate: businessDate },
   );
@@ -447,7 +448,7 @@ export async function findDuplicateExpense(
        FROM expenses
       WHERE shop_id = $shopId AND is_deleted = 0
         AND category = $category AND amount = $amount
-        AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
+        AND ${onDhakaDay("created_at", "$businessDate")}
       ORDER BY created_at DESC, id DESC
       LIMIT 1`,
     {
@@ -697,27 +698,27 @@ export function getCashSummarySync(
         WHERE shop_id = $shopId AND business_date = $businessDate AND is_deleted = 0 LIMIT 1), 0) AS openingCash,
       COALESCE((SELECT SUM(cash_applied) FROM sales
         WHERE shop_id = $shopId AND cash_applied > 0 AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS cashSales,
+          AND ${onDhakaDay("created_at", "$businessDate")}), 0) AS cashSales,
       COALESCE((SELECT SUM(amount) FROM payments
         WHERE shop_id = $shopId AND type = 'customer_payment' AND method = 'cash' AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS creditCollections,
+          AND ${onDhakaDay("created_at", "$businessDate")}), 0) AS creditCollections,
       COALESCE((SELECT SUM(amount) FROM expenses
         WHERE shop_id = $shopId AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS expenses,
+          AND ${onDhakaDay("created_at", "$businessDate")}), 0) AS expenses,
       COALESCE((SELECT SUM(amount) FROM refund_tenders
         WHERE shop_id = $shopId
           AND (kind = 'cash' OR (kind = 'collection_refund' AND method = 'cash'))
           AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0)
+          AND ${onDhakaDay("created_at", "$businessDate")}), 0)
       + COALESCE((SELECT SUM(refund_amount) FROM sales_returns
         WHERE shop_id = $shopId AND refund_id IS NULL AND refund_method = 'cash' AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS refunds,
+          AND ${onDhakaDay("created_at", "$businessDate")}), 0) AS refunds,
       COALESCE((SELECT SUM(amount) FROM payments
         WHERE shop_id = $shopId AND type = 'supplier_payment' AND method = 'cash' AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS supplierPayments,
+          AND ${onDhakaDay("created_at", "$businessDate")}), 0) AS supplierPayments,
       COALESCE((SELECT SUM(amount) FROM payments
         WHERE shop_id = $shopId AND type = 'withdrawal' AND method = 'cash' AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS withdrawals`,
+          AND ${onDhakaDay("created_at", "$businessDate")}), 0) AS withdrawals`,
     { $shopId: shopId, $businessDate: businessDate },
   );
 
@@ -1062,7 +1063,7 @@ export async function getCashBreakdown(
        JOIN users u ON u.id = s.staff_id
        JOIN roles r ON r.id = u.role_id
       WHERE s.shop_id = $shopId AND s.cash_applied > 0 AND s.is_deleted = 0
-        AND date(s.created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
+        AND ${onDhakaDay("s.created_at", "$businessDate")}
       GROUP BY s.staff_id, u.name, r.name`,
     { $shopId: shopId, $businessDate: businessDate },
   );
@@ -1090,7 +1091,7 @@ export async function getCashBreakdown(
        FROM payments p
        JOIN customers c ON c.id = p.party_id
       WHERE p.shop_id = $shopId AND p.type = 'customer_payment' AND p.method = 'cash' AND p.is_deleted = 0
-        AND date(p.created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
+        AND ${onDhakaDay("p.created_at", "$businessDate")}
       ORDER BY p.created_at ASC, p.id ASC`,
     { $shopId: shopId, $businessDate: businessDate },
   );
@@ -1099,7 +1100,7 @@ export async function getCashBreakdown(
     `SELECT id, category, description, amount
        FROM expenses
       WHERE shop_id = $shopId AND is_deleted = 0
-        AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
+        AND ${onDhakaDay("created_at", "$businessDate")}
       ORDER BY created_at ASC, id ASC`,
     { $shopId: shopId, $businessDate: businessDate },
   );
@@ -1236,10 +1237,10 @@ export async function getEndOfDaySummary(
     `SELECT
       COALESCE((SELECT SUM(amount) FROM credits
         WHERE shop_id = $shopId AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS newCreditGiven,
+          AND ${onDhakaDay("created_at", "$businessDate")}), 0) AS newCreditGiven,
       COALESCE((SELECT SUM(amount) FROM payments
         WHERE shop_id = $shopId AND type = 'customer_payment' AND is_deleted = 0
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate), 0) AS creditCollected`,
+          AND ${onDhakaDay("created_at", "$businessDate")}), 0) AS creditCollected`,
     { $shopId: shopId, $businessDate: businessDate },
   );
   if (!aggregates) {

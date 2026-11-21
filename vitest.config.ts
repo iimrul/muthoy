@@ -166,6 +166,7 @@ export default defineConfig({
       "apps/mobile/db/w203-shop-medicine-search.sqlite.test.ts",
       "apps/mobile/db/scan-vocabulary.sqlite.test.ts",
       "apps/mobile/db/sale-insights.sqlite.test.ts",
+      "apps/mobile/db/dhaka-day.sqlite.test.ts",
       "apps/mobile/tests/environment-policy.test.ts",
       // H-9 archive controls on a real Git revision; the EAS CLI 21.8.0 half
       // runs EAS's own copy/workflow code when that pinned CLI is installed.

@@ -99,9 +99,22 @@ fixture with sales at 23:59 / 00:00 Dhaka and at UTC midnight and asserts equal
 results; an `EXPLAIN QUERY PLAN` test that asserts the index is used; a check
 that every stored `created_at` is ISO text (the range relies on it).
 
-Status: **awaiting founder approval**.
+Status: **APPROVED by the founder 2026-11-21; item 1 implemented** —
+`db/dhakaDay.ts` `onDhakaDay()`, applied to the 22 day-equality filters in
+cash.ts, ownerDashboard.ts, staffDashboard.ts, notifications.ts and purchases.ts
+(overdue `<` filters, month ranges and sales-history filters left unchanged).
+Equivalence pinned on 7 timestamp shapes × 5 days × both Dhaka-midnight edges;
+`EXPLAIN QUERY PLAN` shows `sales_shop_created_idx (shop_id=? AND created_at>? AND created_at<?)`.
+Synthetic year of sales (60,000 rows, same 165-row answer): 53.4 ms → 0.47 ms per
+query on the dev PC. Items 2–3 not done yet.
+
+Other founder decisions 2026-11-21: **Android 8.0 (API 26) minimum** (the OCR
+package needs it; EAS build 7a5b9287 failed below it); **Sale tab scanner = fast
+OCR + a Barcode button**.
 
 ## Sync plan (for approval — rule 10)
+
+Founder 2026-11-21: **NOT approved** in this round — sync code stays untouched.
 
 **Problem.** A sync cycle runs ~20 s on the JS thread, and the local apply work
 is synchronous SQLite. A tap that lands during it waits (one filter tap measured
