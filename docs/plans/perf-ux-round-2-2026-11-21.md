@@ -86,10 +86,14 @@ placeholder when local data is available.
 | PIN key | — | 22–51 |
 | Live scan, per reading | ~600 | ~170–190 (frame OCR) |
 
-Android Back on a More page now returns to the app. Staff side NOT measured:
-the staff PIN supplied by the founder does not belong to the preview build's
-test shop (one wrong-PIN attempt, then stopped); the preview app was left on
-the PIN pad. Still above 100 ms: Home first settle (942), Report page (319),
+Android Back on a More page now returns to the app.
+
+**Staff side** (same build; the founder signed in as the cashier):
+Sale tab first 136/254; add to cart 49–61; filter 41–47 / 100–101;
+Inventory first 121/433; kept tabs 88–152 / 154–259; New sale 146/248;
+inventory link 83/215; cart + / − 57–73; More → Sync conflicts 151/272;
+back to Sale 148/244; **Scan open 350/810** (camera start + scanner sheet) —
+frame OCR running, no crash. Still above 100 ms: Home first settle (942), Report page (319),
 Expense page (285), tab-switch first frame (75–194). The staff-sales calendar
 (26885f2) is not in this build.
 
