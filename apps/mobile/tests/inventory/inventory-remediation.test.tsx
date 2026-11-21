@@ -123,7 +123,7 @@ vi.mock("react-native", () => ({
   Alert: { alert: vi.fn() },
 }));
 
-const routerMock = vi.hoisted(() => ({ push: vi.fn(), back: vi.fn() }));
+const routerMock = vi.hoisted(() => ({ push: vi.fn(), back: vi.fn(), dismissTo: vi.fn() }));
 const routeFixture = vi.hoisted(() => ({ mode: undefined as string | undefined }));
 vi.mock("../../state/usePlan", () => ({ usePlan: () => ({effectiveTier:"pro",loading:false}) }));
 vi.mock("expo-router", () => ({
@@ -135,6 +135,12 @@ vi.mock("expo-router", () => ({
 vi.mock("../../components/ui/StandardHeader", () => ({
   StandardHeader: ({ title }: { title: string }) =>
     createElement("h1", null, title),
+}));
+// The calendar (components/ui/DateField.tsx) has its own tests; dates are entered
+// directly here so restock identity stays the thing under test.
+vi.mock("../../components/ui/DateField", () => ({
+  DateField: ({ value, onChange, accessibilityLabel }: { value: string; onChange: (v: string) => void; accessibilityLabel: string }) =>
+    createElement("input", { value, "aria-label": accessibilityLabel, onChange: (e: { target: { value: string } }) => onChange(e.target.value) }),
 }));
 vi.mock("../../components/scanner/MedicineTextScanner", () => ({
   MedicineTextScanner: ({ visible }: { visible: boolean }) =>

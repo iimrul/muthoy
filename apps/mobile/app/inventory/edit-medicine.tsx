@@ -97,7 +97,7 @@ export default function EditMedicineScreen() {
         guard.isStillActive,
       );
       void triggerSyncNow(session.shopId);
-      guard.ifLive(() => router.replace("/inventory"));
+      guard.ifLive(() => router.dismissTo("/inventory"));
     } catch (caught) {
       if (!guard.isStale())
         Alert.alert(

@@ -11,10 +11,14 @@ import { type Paisa, toTaka } from '@muthoy/types';
 // wherever it renders; never hand-format money inline (CLAUDE.md rule 6).
 const MONEY_LOCALE = 'en-IN';
 
+// Built once on first use: constructing an Intl formatter costs far more than
+// formatting with one, and a screen formats many amounts per render.
+let moneyFormat: Intl.NumberFormat | null = null;
+
 export function formatMoney(amount: Paisa): string {
-  const formatted = new Intl.NumberFormat(MONEY_LOCALE, {
+  moneyFormat ??= new Intl.NumberFormat(MONEY_LOCALE, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(toTaka(amount));
-  return `৳${formatted}`;
+  });
+  return `৳${moneyFormat.format(toTaka(amount))}`;
 }

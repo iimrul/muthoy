@@ -63,6 +63,7 @@
       ],
       "./plugins/withAndroidBackupProtection",
       "./plugins/withAndroidLightSystemBars",
+      "./plugins/withAndroidMinSdk",
       "expo-notifications",
       [
         "expo-camera",
@@ -70,6 +71,13 @@
           "cameraPermission": "Muthoy needs camera access to scan medicine strips.",
           "microphonePermission": false,
           "recordAudioAndroid": false
+        }
+      ],
+      [
+        "react-native-vision-camera-ocr-plus",
+        {
+          "disableTranslate": true,
+          "disableNonLatinTextRecognition": true
         }
       ],
       "expo-background-task",

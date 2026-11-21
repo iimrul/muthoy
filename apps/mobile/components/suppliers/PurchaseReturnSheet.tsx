@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { AppTextInput as TextInput } from '../ui/AppTextInput';
 import { ZERO_PAISA } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
 import {

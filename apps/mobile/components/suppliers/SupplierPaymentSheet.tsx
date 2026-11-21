@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { AppTextInput as TextInput } from '../ui/AppTextInput';
 import { ZERO_PAISA, toTaka, type Paisa } from '@muthoy/types';
 import { formatMoney, parseTakaTextToPaisa } from '@muthoy/utils';
 import type { CustomerPaymentMethod } from '../../db/customers';

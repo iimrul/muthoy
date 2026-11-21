@@ -92,7 +92,7 @@ export function LedgerTab({ monthLabel, isCurrentMonth, onPrevMonth, onNextMonth
           style={{ minHeight: 48, minWidth: 48 }}
           className="items-center justify-center rounded-full active:bg-brand-softGreen"
         >
-          <Feather name="chevron-left" size={20} color="#111827" />
+          <Feather name="chevron-left" size={20} color="#1A1A1A" />
         </Pressable>
         <Text className="font-sans-semibold text-sm text-richBlack">{monthLabel}</Text>
         <Pressable
@@ -104,7 +104,7 @@ export function LedgerTab({ monthLabel, isCurrentMonth, onPrevMonth, onNextMonth
           style={{ minHeight: 48, minWidth: 48 }}
           className="items-center justify-center rounded-full active:bg-brand-softGreen"
         >
-          <Feather name="chevron-right" size={20} color={isCurrentMonth ? '#D1D5DB' : '#111827'} />
+          <Feather name="chevron-right" size={20} color={isCurrentMonth ? '#D1D5DB' : '#1A1A1A'} />
         </Pressable>
       </View>
 

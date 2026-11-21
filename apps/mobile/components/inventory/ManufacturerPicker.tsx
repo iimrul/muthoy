@@ -1,4 +1,5 @@
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
+import { AppTextInput as TextInput } from '../ui/AppTextInput';
 import { colors } from '@muthoy/constants';
 import { useI18n } from '../../state/localeStore';
 

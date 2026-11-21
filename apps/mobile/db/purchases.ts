@@ -16,6 +16,7 @@ import { expectedCash } from '../domain/cashFormula';
 import { effectivePayableFor } from '../domain/supplierPosition';
 import { generateId } from '../native/id';
 import { requireOwner } from './auth';
+import { onDhakaDay } from './dhakaDay';
 import { requirePremiumFeature } from './commercial';
 import { assertBusinessDateOpen, getCashSummarySync } from './cash';
 import { db, sqliteConnection } from './client';
@@ -918,7 +919,7 @@ export async function findDuplicatePurchase(
     `SELECT id, invoice_no AS invoiceNo, total, created_at AS createdAt
        FROM purchases
       WHERE shop_id = $shopId AND supplier_id = $supplierId AND is_deleted = 0 AND voided_at IS NULL
-        AND date(created_at, '${DHAKA_SQL_OFFSET}') = $businessDate
+        AND ${onDhakaDay("created_at", "$businessDate")}
         AND ABS(total - $total) <= $tolerance
       ORDER BY created_at DESC LIMIT 1`,
     { $shopId: shopId, $supplierId: supplierId, $businessDate: businessDate, $total: total, $tolerance: tolerance },

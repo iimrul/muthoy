@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement, useEffect, type ReactNode } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface StubProps {
@@ -60,7 +60,8 @@ vi.mock("../dev/runtimeDiagnostics", () => ({
   runtimeDiagnosticError: vi.fn(),
   sessionDiagnosticContext: vi.fn(() => ({})),
 }));
-vi.mock("../domain/permissions", () => ({ resolvePermission: () => true }));
+// The REAL permission rules: the cashier screen must show exactly what the
+// owner granted, so the rule itself is part of what is under test.
 vi.mock("../state/sessionGuard", () => ({
   captureSessionFor: () => ({ ifLive: (callback: () => void) => callback() }),
 }));
@@ -103,9 +104,32 @@ describe("StaffHome role branch", () => {
     };
     render(createElement(StaffHomeScreen));
 
-    expect(screen.getByText("dashboardLoading")).toBeTruthy();
-    expect(await screen.findByText("newSale")).toBeTruthy();
+    // No loading screen (founder 2026-11-21): the cashier screen is there at
+    // once, its figures pending ("—", never a fake zero) until the read lands.
+    expect(screen.queryByText("dashboardLoading")).toBeNull();
+    expect(screen.getByText("newSale")).toBeTruthy();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.queryAllByText("—")).toHaveLength(0));
     expect(screen.queryByText("MANAGER_DASHBOARD")).toBeNull();
+  });
+
+  it("shows a cashier exactly the tools the owner granted, and no locked tiles", async () => {
+    // Founder 2026-11-21: nothing beyond the grant is shown — not even as a
+    // locked "ask the owner" tile.
+    deps.session = {
+      shopId: "shop-1",
+      userId: "staff-1",
+      role: "staff",
+      permissions: { credit_view: true, cash_drawer: false, reports: false },
+    };
+    render(createElement(StaffHomeScreen));
+
+    expect(screen.getByText("credit")).toBeTruthy();
+    expect(screen.queryByText("cashDrawer")).toBeNull();
+    expect(screen.queryByText("endOfDay")).toBeNull();
+    expect(screen.queryByText("report")).toBeNull();
+    expect(screen.queryByText(/🔒/)).toBeNull();
+    await waitFor(() => expect(screen.queryAllByText("—")).toHaveLength(0));
   });
 
   it("branches Manager to ManagerDashboard and never renders cashier StaffHome", () => {

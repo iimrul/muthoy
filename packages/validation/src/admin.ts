@@ -76,6 +76,20 @@ export const adminPaymentOrderIdActionSchema = z.object({ orderId: adminUuid });
 export type AdminAccountIdAction = z.infer<typeof adminAccountIdActionSchema>;
 export type AdminPaymentOrderIdAction = z.infer<typeof adminPaymentOrderIdActionSchema>;
 
+/**
+ * Founder decision 2026-11-21: an admin may give an account Pro or Ultra, or
+ * extend it, by 1–366 days, and must say why. Same bounds as admin_grant_plan
+ * (migration 41), which refuses anything this lets through anyway.
+ */
+export const adminGrantPlanActionSchema = z.object({
+  accountId: adminUuid,
+  tier: z.enum(['pro', 'ultra']),
+  days: z.coerce.number().int('Days must be a whole number').min(1, 'At least 1 day').max(366, 'At most 366 days'),
+  reason: z.string().trim().min(5, 'Write a reason of at least 5 characters').max(500, 'Keep the reason under 500 characters'),
+});
+
+export type AdminGrantPlanAction = z.infer<typeof adminGrantPlanActionSchema>;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Support (§8.7)
 // ─────────────────────────────────────────────────────────────────────────────

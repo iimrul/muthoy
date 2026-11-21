@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
+import { useFocusRefresh } from "../../navigation/useFocusRefresh";
 import Feather from "@expo/vector-icons/Feather";
 import { formatMoney } from "@muthoy/utils";
 import type { Paisa } from "@muthoy/types";
@@ -22,6 +23,7 @@ import { OpeningCashModal } from "../../components/cash/OpeningCashModal";
 import { PreviousDaySummaryModal } from "../../components/cash/PreviousDaySummaryModal";
 import { AccessDenied } from "../../components/ui/AccessDenied";
 import { DashboardLoadState } from "../../components/staff/DashboardLoadState";
+import { DashboardSkeleton } from "../../components/dashboard/DashboardSkeleton";
 import { LanguageToggle } from "../../components/ui/LanguageToggle";
 import { PlanBadge } from "../../components/ui/PlanBadge";
 import { TrialBanner } from "../../components/ui/TrialBanner";
@@ -145,7 +147,7 @@ export default function MorningDashboardScreen() {
     }
   }, [session, t]);
 
-  useFocusEffect(
+  useFocusRefresh(
     useCallback(() => {
       void reload();
     }, [reload]),
@@ -382,27 +384,21 @@ export default function MorningDashboardScreen() {
   if (session.role !== "owner") {
     return <AccessDenied homeHref="/staff-home" />;
   }
-  if (isLoading && !data) {
-    return (
-      <DashboardLoadState
-        loading
-        message={t("dashboardLoading")}
-        retryLabel={t("retry")}
-        onRetry={() => void reload()}
-      />
-    );
+  if (!data) {
+    // No "Loading dashboard…" screen (founder 2026-11-21): the dashboard's own
+    // shape is drawn at once and the first local read fills it in.
+    if (error && !isLoading) {
+      return (
+        <DashboardLoadState
+          loading={false}
+          message={`${t("dashboardLoadFailed")} ${error}`}
+          retryLabel={t("retry")}
+          onRetry={() => void reload()}
+        />
+      );
+    }
+    return <DashboardSkeleton topInset={topInset} label={t("dashboardLoading")} />;
   }
-  if (error && !data) {
-    return (
-      <DashboardLoadState
-        loading={false}
-        message={`${t("dashboardLoadFailed")} ${error}`}
-        retryLabel={t("retry")}
-        onRetry={() => void reload()}
-      />
-    );
-  }
-  if (!data) return null;
 
   const greeting = t(greetingKeyForHour(new Date().getHours()));
   const hasOpeningCash = data.hasCashDrawer;

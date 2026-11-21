@@ -7,6 +7,14 @@ import {
 } from "zustand/middleware";
 import { createMMKV } from "react-native-mmkv";
 import { catalog, type CatalogKey } from "../i18n/catalog";
+import {
+  dateTimeFormatter,
+  dayMonthFormatter,
+  moneyFormatter,
+  numberFormatter,
+  percentFormatter,
+  timeFormatter,
+} from "../i18n/formatters";
 import { toTaka, type Paisa } from "@muthoy/types";
 
 export type Locale = "bn" | "en";
@@ -42,52 +50,31 @@ export function useI18n() {
     (key: CatalogKey): string => catalog[locale][key],
     [locale],
   );
+  // Cached formatters (i18n/formatters.ts): one per locale and style, never
+  // one per figure.
   const formatNumber = useCallback(
-    (value: number): string =>
-      new Intl.NumberFormat(locale === "bn" ? "bn-BD" : "en-IN").format(value),
+    (value: number): string => numberFormatter(locale).format(value),
     [locale],
   );
   const formatDate = useCallback(
-    (value: string | Date): string =>
-      new Intl.DateTimeFormat(locale === "bn" ? "bn-BD" : "en-BD", {
-        day: "numeric",
-        month: "short",
-      }).format(new Date(value)),
+    (value: string | Date): string => dayMonthFormatter(locale).format(new Date(value)),
     [locale],
   );
   const formatDateTime = useCallback(
-    (value: string | Date): string =>
-      new Intl.DateTimeFormat(locale === "bn" ? "bn-BD" : "en-BD", {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(new Date(value)),
+    (value: string | Date): string => dateTimeFormatter(locale).format(new Date(value)),
     [locale],
   );
   const formatTime = useCallback(
-    (value: string | Date): string =>
-      new Intl.DateTimeFormat(locale === "bn" ? "bn-BD" : "en-BD", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(new Date(value)),
+    (value: string | Date): string => timeFormatter(locale).format(new Date(value)),
     [locale],
   );
   const formatPercent = useCallback(
-    (value: number, signDisplay: 'auto' | 'always' = 'auto'): string =>
-      new Intl.NumberFormat(locale === "bn" ? "bn-BD" : "en-BD", {
-        style: 'percent',
-        maximumFractionDigits: 0,
-        signDisplay,
-      }).format(value),
+    (value: number, signDisplay: "auto" | "always" = "auto"): string =>
+      percentFormatter(locale, signDisplay).format(value),
     [locale],
   );
   const formatMoney = useCallback(
-    (value: Paisa): string => {
-      const formatted = new Intl.NumberFormat(
-        locale === "bn" ? "bn-BD" : "en-IN",
-        { minimumFractionDigits: 2, maximumFractionDigits: 2 },
-      ).format(toTaka(value));
-      return `৳${formatted}`;
-    },
+    (value: Paisa): string => `৳${moneyFormatter(locale).format(toTaka(value))}`,
     [locale],
   );
   return {

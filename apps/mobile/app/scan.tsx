@@ -25,7 +25,7 @@ export default function ScanSaleScreen() {
         userId={session.userId}
         onClose={() => router.back()}
         onDone={() => router.replace("/sale/cart")}
-        onManualSearch={() => router.replace("/sale")}
+        onManualSearch={() => router.dismissTo("/sale")}
       />
     </View>
   );

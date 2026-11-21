@@ -521,7 +521,9 @@ describe('admin write power is bounded at the source', () => {
     // device's offline grace window — legitimate for the device's own online
     // billing check (functions/sync/billing.ts:60), never for an admin asserting
     // a verification that did not happen.
-    expect(rpcNames.sort()).toEqual(['b4_reconcile_plan_limits']);
+    // Migration 41 (founder-approved 2026-11-21): admin_grant_plan, which writes
+    // tier/paid_through exactly as a verified payment does and never verified_at.
+    expect(rpcNames.sort()).toEqual(['admin_grant_plan', 'b4_reconcile_plan_limits']);
     for (const name of rpcNames) {
       expect(MIGRATIONS_SQL).toMatch(
         new RegExp(String.raw`create or replace function ${name}\(`, 'i'),

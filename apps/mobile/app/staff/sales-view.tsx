@@ -4,6 +4,7 @@ import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router } from "expo-router";
 import { formatMoney } from "@muthoy/utils";
 import { AccessDenied } from "../../components/ui/AccessDenied";
+import { DateField } from "../../components/ui/DateField";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { StandardHeader } from "../../components/ui/StandardHeader";
 import {
@@ -62,17 +63,23 @@ export default function StaffSalesViewScreen() {
       <StandardHeader title={t("staffSales")} onBackPress={() => router.back()} />
       <View className="gap-3 p-4 pb-0">
         <View className="flex-row gap-3">
-          <TextInput
+          <DateField
             value={from}
-            onChangeText={setFrom}
+            onChange={setFrom}
+            accessibilityLabel={t("staffSalesFromDate")}
             placeholder={t("staffSalesFromDate")}
-            className="flex-1 rounded border border-midGray bg-white p-3"
+            isClearable
+            className="h-12 flex-1 rounded-lg border border-midGray bg-white px-3"
+            textClassName="font-sans text-sm"
           />
-          <TextInput
+          <DateField
             value={to}
-            onChangeText={setTo}
+            onChange={setTo}
+            accessibilityLabel={t("staffSalesToDate")}
             placeholder={t("staffSalesToDate")}
-            className="flex-1 rounded border border-midGray bg-white p-3"
+            isClearable
+            className="h-12 flex-1 rounded-lg border border-midGray bg-white px-3"
+            textClassName="font-sans text-sm"
           />
         </View>
         <TextInput

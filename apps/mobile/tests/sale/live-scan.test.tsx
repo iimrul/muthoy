@@ -21,7 +21,7 @@ vi.mock("react-native", () => ({
   View: ({ children }: { children?: ReactNode }) => createElement("div", null, children),
 }));
 
-const routerMock = vi.hoisted(() => ({ replace: vi.fn(), back: vi.fn(), push: vi.fn() }));
+const routerMock = vi.hoisted(() => ({ replace: vi.fn(), back: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }));
 vi.mock("expo-router", () => ({ router: routerMock }));
 
 interface ScannerProps {
@@ -76,10 +76,11 @@ describe("app/scan.tsx opens the live scanner for the signed-in shop", () => {
     expect(routerMock.push).not.toHaveBeenCalled();
   });
 
-  it("manual search replaces the route with the Sale tab; close goes back", () => {
+  it("manual search returns to the kept Sale tab (never a second tab group); close goes back", () => {
     render(createElement(ScanSaleScreen));
     scanner.props?.onManualSearch?.();
-    expect(routerMock.replace).toHaveBeenCalledWith("/sale");
+    expect(routerMock.dismissTo).toHaveBeenCalledWith("/sale");
+    expect(routerMock.replace).not.toHaveBeenCalled();
     scanner.props?.onClose();
     expect(routerMock.back).toHaveBeenCalledTimes(1);
   });

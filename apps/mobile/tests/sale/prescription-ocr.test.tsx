@@ -112,7 +112,7 @@ vi.mock('react-native', () => ({
     }),
 }));
 
-const routerMock = vi.hoisted(() => ({ replace: vi.fn(), back: vi.fn(), push: vi.fn() }));
+const routerMock = vi.hoisted(() => ({ replace: vi.fn(), back: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }));
 vi.mock('expo-router', () => ({ router: routerMock }));
 
 vi.mock('../../components/ui/StandardHeader', () => ({

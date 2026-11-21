@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Modal, Pressable, StatusBar, Text, View } from "react-native";
+import Feather from "@expo/vector-icons/Feather";
 import type { CameraPermissionState } from "../../domain/cameraPermissionState";
 import { buildStripIndex, type ScanVocabularyEntry, type StripIndex } from "../../domain/stripMatcher";
 import { getActiveBatchForMedicine } from "../../db/sales";
 import { listScanVocabulary } from "../../db/scanVocabulary";
+import { isLiveTextCameraAvailable, LiveTextCamera, type LiveTextCameraHandle } from "../../native/LiveTextCamera";
 import { ScannerCamera, type ScannerCameraHandle } from "../../native/ScannerCamera";
 import { scanBarcode } from "../../native/scanner";
 import { playScanBeep } from "../../native/scanSound";
@@ -77,7 +79,17 @@ function LiveStripScannerModal({
   frameIntervalMs,
 }: LiveStripScannerProps) {
   const { t } = useI18n();
+  // Frame-processor OCR (no photo per reading) whenever the build has it; a
+  // build without it keeps the expo-camera capture loop, which reads strips and
+  // barcodes together. VisionCamera 5 has no barcode output on Android, so with
+  // frame OCR a scanner that reads barcodes offers a Barcode button that swaps
+  // to the expo-camera barcode reader (founder decision 2026-11-21).
+  const [isFrameOcr] = useState(() => isLiveTextCameraAvailable());
+  const [isBarcodeMode, setIsBarcodeMode] = useState(false);
+  const canSwitchToBarcode = isFrameOcr && Boolean(onBarcodeRecognized);
+  const showsFrameCamera = isFrameOcr && !isBarcodeMode;
   const cameraRef = useRef<ScannerCameraHandle>(null);
+  const liveTextRef = useRef<LiveTextCameraHandle>(null);
   const barcodeLockedRef = useRef(false);
   const [permissionState, setPermissionState] = useState<CameraPermissionState>("checking");
   const [cameraKey, setCameraKey] = useState(0);
@@ -164,9 +176,9 @@ function LiveStripScannerModal({
     [addToCart, showNotice, t],
   );
 
-  const { isReadFailing, lockMedicines } = useLiveStripScan({
-    isEnabled: permissionState === "granted" && loadState === "ready" && choices === null,
-    cameraRef,
+  const { isReadFailing, isAppActive, lockMedicines, pushLines } = useLiveStripScan({
+    isEnabled: permissionState === "granted" && loadState === "ready" && choices === null && !isBarcodeMode,
+    cameraRef: isFrameOcr ? undefined : cameraRef,
     index,
     onAction: handleAction,
     frameIntervalMs,
@@ -208,9 +220,11 @@ function LiveStripScannerModal({
       ? t("liveScanLoading")
       : loadState === "failed"
         ? t("liveScanLoadFailed")
-        : isReadFailing
-          ? t("liveScanReadFailed")
-          : t("liveScanHint");
+        : isBarcodeMode
+          ? t("liveScanBarcodeHint")
+          : isReadFailing
+            ? t("liveScanReadFailed")
+            : t("liveScanHint");
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
@@ -218,16 +232,39 @@ function LiveStripScannerModal({
       <View className="flex-1 bg-white">
         <View pointerEvents="none" className="bg-white" style={{ height: StatusBar?.currentHeight ?? 0 }} />
         <View className="flex-1 bg-richBlack">
-          <ScannerCamera
-            key={cameraKey}
-            ref={cameraRef}
-            isContinuous
-            onPermissionStateChange={setPermissionState}
-            barcodeEnabled={Boolean(onBarcodeRecognized)}
-            onBarcodeScanned={(result) => void handleBarcode(result)}
-          />
+          {showsFrameCamera ? (
+            <LiveTextCamera
+              key={cameraKey}
+              ref={liveTextRef}
+              isActive={isAppActive}
+              onLines={pushLines}
+              onPermissionStateChange={setPermissionState}
+            />
+          ) : (
+            <ScannerCamera
+              key={cameraKey}
+              ref={cameraRef}
+              isContinuous={!isFrameOcr}
+              onPermissionStateChange={setPermissionState}
+              barcodeEnabled={Boolean(onBarcodeRecognized)}
+              onBarcodeScanned={(result) => void handleBarcode(result)}
+            />
+          )}
           <View className="absolute inset-0">
-            <View className="flex-row justify-end p-4">
+            <View className={`flex-row p-4 ${canSwitchToBarcode ? "justify-between" : "justify-end"}`}>
+              {canSwitchToBarcode ? (
+                <Pressable
+                  onPress={() => setIsBarcodeMode((current) => !current)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isBarcodeMode }}
+                  className="h-10 flex-row items-center gap-2 rounded-full bg-white/10 px-4 active:opacity-70"
+                >
+                  <Feather name={isBarcodeMode ? "type" : "maximize"} size={16} color="#FFFFFF" />
+                  <Text className="font-sans-semibold text-sm text-white">
+                    {isBarcodeMode ? t("liveScanStripModeLabel") : t("barcodeLabel")}
+                  </Text>
+                </Pressable>
+              ) : null}
               <Pressable
                 onPress={onClose}
                 accessibilityRole="button"
@@ -252,7 +289,9 @@ function LiveStripScannerModal({
             <View className="gap-4 p-6 pb-10">
               <ScannerPermissionPanel
                 permissionState={permissionState}
-                onRequestPermission={async () => (await cameraRef.current?.requestPermission()) ?? false}
+                onRequestPermission={async () =>
+                  (await (showsFrameCamera ? liveTextRef : cameraRef).current?.requestPermission()) ?? false
+                }
                 onRetryMount={() => setCameraKey((key) => key + 1)}
               />
               {permissionState === "granted" && choices ? (

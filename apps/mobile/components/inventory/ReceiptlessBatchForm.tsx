@@ -81,7 +81,7 @@ export function ReceiptlessBatchForm({ session, medicineId, onSaved }: {
     <Text className="font-sans-semibold text-lg text-richBlack">{medicine?.name ?? t("addBatchLabel")}</Text>
     <Text className="font-sans text-sm text-midGray">{t("receiptlessBatchHint")}</Text>
     <FormField control={control} name="batchNo" label={t("batchNumberLabel")} />
-    <FormField control={control} name="expiryDate" label={t("expiryDateLabel")} placeholder="YYYY-MM-DD" />
+    <FormField control={control} name="expiryDate" label={t("expiryDateLabel")} date />
     <FormField control={control} name="quantity" label={t("quantityLabel")} numeric keyboardType="number-pad" />
     <FormField control={control} name="purchasePrice" label={t("purchasePriceLabel")} numeric money />
     <FormField control={control} name="salePrice" label={t("salePriceLabel")} numeric money />

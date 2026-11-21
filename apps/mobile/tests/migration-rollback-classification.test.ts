@@ -142,11 +142,11 @@ describe('a volatile ADD COLUMN default is a backfill', () => {
 
 describe('the corrected PostgreSQL classification', () => {
   it('covers every migration on disk exactly once', () => {
-    expect(pg.length).toBe(40);
-    expect(new Set(pg.map((row) => row.name)).size).toBe(40);
+    expect(pg.length).toBe(41);
+    expect(new Set(pg.map((row) => row.name)).size).toBe(41);
   });
 
-  it('is A 8 / B 23 / C 9 — not the 14 forward-only the first audit claimed', () => {
+  it('is A 8 / B 24 / C 9 — not the 14 forward-only the first audit claimed', () => {
     // Hardcoded on purpose. A migration that changes class has to change this
     // number too, which is the point at which somebody looks at it.
     // A2.3 added the registry plus its persistent-hold hotfix: function and
@@ -179,7 +179,7 @@ describe('the corrected PostgreSQL classification', () => {
     // definition out of 20260831000000, which is a deploy, not a data
     // operation -- so B, and the suite executes that reversal rather than
     // claiming it.
-    expect(classCounts(pg)).toEqual({ A: 8, B: 23, C: 9 });
+    expect(classCounts(pg)).toEqual({ A: 8, B: 24, C: 9 });
   });
 
   it('declares its two judgements instead of inferring them', () => {
@@ -214,7 +214,7 @@ describe('the corrected PostgreSQL classification', () => {
   );
 
   it('states the corrected headline count in the document itself', () => {
-    expect(ROLLBACK_DOC).toContain('**A: 8 · B: 23 · C: 9 — of 40.**');
+    expect(ROLLBACK_DOC).toContain('**A: 8 · B: 24 · C: 9 — of 41.**');
   });
 
   it('carries no OTHER headline anywhere in any of the three documents', () => {
