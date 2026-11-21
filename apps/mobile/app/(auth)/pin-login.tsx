@@ -35,6 +35,7 @@ import {
 } from '../../state/signOutNotice';
 import { inspectCloudActorBinding } from '../../sync/authActorBinding';
 import { networkReachability } from '../../sync/connectivity';
+import { readSessionAuthorityLease } from '../../sync/sessionAuthorityStore';
 import { DeviceLoginError, loginOnNewDevice } from '../../sync/deviceAuth';
 import {
   DeviceRegistryError,
@@ -267,8 +268,22 @@ export default function PinLoginScreen() {
         && binding.actorUserId === result.userId
         && binding.shopId === result.shopId;
       const isOnline = reachability !== 'offline';
+      // H-10. A lock on this actor is lifted ONLY by number + PIN proof plus a
+      // full authoritative pull (sync/deviceAuth activateHydratedDevice). The
+      // PIN-only switch below mints a session but leaves the lock, so the root
+      // layout's authority gate signed the person straight back out after every
+      // correct PIN — the sign-in loop of 2026-11-21. Both are already typed on
+      // this screen, so a locked actor goes to the relink. Offline the lock
+      // cannot be lifted at all; saying so beats a login that is undone at once.
+      const lease = readSessionAuthorityLease(result.shopId, result.userId);
+      const isQuarantined = lease.status === 'valid' && lease.record.quarantineReason !== null;
+      if (isQuarantined && !isOnline) {
+        setRelinkFailure('authErrorNetwork');
+        timing?.mark('authority_quarantined_offline', 'error');
+        return;
+      }
 
-      if (!bindingMatches && isOnline) {
+      if (!bindingMatches && isOnline && !isQuarantined) {
         // A2.3, and the reason this batch exists.
         //
         // A shared pharmacy till hands over between Owner, Manager and Staff
@@ -304,7 +319,7 @@ export default function PinLoginScreen() {
         }
       }
 
-      if (!bindingMatches && isOnline) {
+      if ((!bindingMatches || isQuarantined) && isOnline) {
         timing?.mark('cloud_relink_required');
         // The number and PIN were both typed on THIS screen, so the relink is
         // done here with them — the same call Device Login makes — instead of

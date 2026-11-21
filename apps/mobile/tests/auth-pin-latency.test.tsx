@@ -33,6 +33,7 @@ const deps = vi.hoisted(() => ({
   inspectCloudActorBinding: vi.fn(),
   networkReachability: vi.fn(),
   switchActorOnDevice: vi.fn(),
+  readSessionAuthorityLease: vi.fn(),
 }));
 
 vi.mock('expo-router', () => ({
@@ -54,6 +55,10 @@ vi.mock('../sync/authActorBinding', () => ({
 }));
 vi.mock('../sync/connectivity', () => ({
   networkReachability: deps.networkReachability,
+}));
+vi.mock('../sync/sessionAuthorityStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../sync/sessionAuthorityStore')>()),
+  readSessionAuthorityLease: deps.readSessionAuthorityLease,
 }));
 
 // A2.3. Stubbed rather than left to load the real module, which reaches
@@ -164,6 +169,8 @@ beforeEach(() => {
   // switch declines and every pre-A2.3 case behaves exactly as it did.
   deps.switchActorOnDevice.mockReset();
   deps.switchActorOnDevice.mockResolvedValue(null);
+  deps.readSessionAuthorityLease.mockReset();
+  deps.readSessionAuthorityLease.mockReturnValue({ status: 'absent', record: null });
   useLocaleStore.setState({ locale: 'en' });
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
 });
@@ -350,6 +357,58 @@ describe('PIN authentication loading state', () => {
     )).toBeTruthy());
     expect(deps.login).not.toHaveBeenCalled();
     expect(deps.replace).not.toHaveBeenCalled();
+  });
+
+  // 2026-11-21 sign-in loop. An H-10 lock on this actor is lifted ONLY by
+  // number + PIN proof plus a full pull (activateHydratedDevice). The PIN-only
+  // device switch left it in place, so the root gate signed the person straight
+  // back out after every correct PIN.
+  it('sends a locked actor through the number-and-PIN relink, never the PIN-only switch', async () => {
+    deps.verifyPin.mockResolvedValueOnce({
+      shopId: SHOP_ID,
+      userId: USER_ID,
+      role: 'owner',
+      permissions: {},
+    });
+    deps.readSessionAuthorityLease.mockReturnValue({
+      status: 'valid',
+      record: { v: 1, confirmedAtMs: 1, highWaterAtMs: 1, quarantineReason: 'auth_session_invalid' },
+    });
+    renderPinLogin();
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    await waitFor(() => expect(deps.loginOnNewDevice).toHaveBeenCalledWith(
+      expect.stringContaining('1712345678'), '1234', expect.anything(),
+    ));
+    await waitFor(() => expect(deps.replace).toHaveBeenCalledWith('/'));
+    expect(deps.readSessionAuthorityLease).toHaveBeenCalledWith(SHOP_ID, USER_ID);
+    expect(deps.switchActorOnDevice).not.toHaveBeenCalled();
+    expect(deps.login).not.toHaveBeenCalled();
+  });
+
+  it('says a locked actor needs the internet instead of signing them in to be thrown out', async () => {
+    deps.verifyPin.mockResolvedValueOnce({
+      shopId: SHOP_ID,
+      userId: USER_ID,
+      role: 'owner',
+      permissions: {},
+    });
+    deps.readSessionAuthorityLease.mockReturnValue({
+      status: 'valid',
+      record: { v: 1, confirmedAtMs: 1, highWaterAtMs: 1, quarantineReason: 'authority_quarantined' },
+    });
+    deps.networkReachability.mockResolvedValueOnce('offline');
+    renderPinLogin();
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    expect(await screen.findByText(catalog.en.authErrorNetwork)).toBeTruthy();
+    expect(deps.login).not.toHaveBeenCalled();
+    expect(deps.loginOnNewDevice).not.toHaveBeenCalled();
+    expect(deps.switchActorOnDevice).not.toHaveBeenCalled();
   });
 
   it('keeps a mismatched actor offline-capable without claiming cloud confirmation', async () => {
