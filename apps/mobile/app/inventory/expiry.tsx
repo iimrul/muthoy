@@ -1,4 +1,4 @@
-import { memo, useCallback, useContext, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,7 +12,6 @@ import {
 import { router } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 import { colors } from "@muthoy/constants";
 import { formatMoney } from "@muthoy/utils";
 import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
@@ -45,8 +44,13 @@ import { triggerSyncNow } from "../../sync";
 const PENDING = "—";
 const PRESET_PERCENTS = [10, 20, 30, 50] as const;
 const MAX_PERCENT = 100;
-const FAB_CLEARANCE = 112;
-const LIST_CLEARANCE = 32;
+// AppNavigationShell draws an h-20 (80) bar over the bottom of every page,
+// with the Scan button rising above it. The bulk action floats clear of both,
+// where Sale's cart button sits, and the list scrolls clear of whichever is lower.
+const SHELL_NAV_HEIGHT = 80;
+const FAB_BOTTOM = SHELL_NAV_HEIGHT + 24;
+const FAB_CLEARANCE = FAB_BOTTOM + 72;
+const LIST_CLEARANCE = SHELL_NAV_HEIGHT + 24;
 
 /** Every band a row can carry has a name (localization test reads this map). */
 const BAND_CHIP_KEYS: Record<ExpiringBand, CatalogKey> = {
@@ -82,6 +86,7 @@ const CARD_SHADOW: ViewStyle = {
   shadowRadius: 6,
   shadowOffset: { width: 0, height: 2 },
 };
+const FAB_POSITION: ViewStyle = { bottom: FAB_BOTTOM };
 const FAB_SHADOW: ViewStyle = {
   elevation: 6,
   shadowColor: colors.brandGreen,
@@ -110,7 +115,6 @@ export default function ExpiryManagementScreen() {
   const { isAllowed: canDiscountPermission } = usePermission("sale_discount");
   const { isAllowed: isOwner } = useOwnerAccess();
   const canDiscount = canManageExpiry && canDiscountPermission;
-  const bottomInset = useContext(SafeAreaInsetsContext)?.bottom ?? 0;
   const [result, setResult] = useState<ExpiringBatches | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [target, setTarget] = useState<DiscountTarget | null>(null);
@@ -155,8 +159,8 @@ export default function ExpiryManagementScreen() {
   );
   const showFab = canDiscount && discountable.length > 0;
   const contentStyle = useMemo<ViewStyle>(
-    () => ({ paddingHorizontal: 16, paddingBottom: (showFab ? FAB_CLEARANCE : LIST_CLEARANCE) + bottomInset }),
-    [bottomInset, showFab],
+    () => ({ paddingHorizontal: 16, paddingBottom: showFab ? FAB_CLEARANCE : LIST_CLEARANCE }),
+    [showFab],
   );
 
   const openDiscount = useCallback((row: ExpiringBatchRow) => setTarget({ kind: "one", row }), []);
@@ -246,7 +250,7 @@ export default function ExpiryManagementScreen() {
         removeClippedSubviews
       />
       {showFab ? (
-        <View className="absolute left-0 right-0 items-center px-4" style={{ bottom: 24 + bottomInset }} pointerEvents="box-none">
+        <View className="absolute left-0 right-0 items-center px-4" style={FAB_POSITION} pointerEvents="box-none">
           <Pressable
             onPress={() => setTarget({ kind: "all", rows: discountable })}
             accessibilityRole="button"
