@@ -1,4 +1,6 @@
 import { SyncExposureStatus } from "../../components/sync/SyncExposureStatus";
+import { SyncStatusDot, syncButtonLabel } from "../../components/sync/SyncStatusDot";
+import { useLiveSyncState } from "../../state/liveSyncState";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -258,6 +260,9 @@ export default function MorningDashboardScreen() {
     setOpeningCashOpen(true);
   }, [openCashAfterPreviousDay, session]);
 
+  // The header button's blinking dot: yellow = waiting, red = cannot send.
+  const liveSync = useLiveSyncState(session?.shopId);
+
   const handleSync = useCallback(async () => {
     if (!session) return;
     setIsSyncing(true);
@@ -440,14 +445,15 @@ export default function MorningDashboardScreen() {
               onPress={() => void handleSync()}
               accessibilityRole="button"
               accessibilityState={{ disabled: isSyncing }}
-              accessibilityLabel={`${t("sync")}. ${lastSyncedAt ? `${t("lastSynced")} ${formatTime(lastSyncedAt)}` : t("notSyncedYet")}`}
-              className="h-9 w-9 items-center justify-center rounded-full active:bg-white/10"
+              accessibilityLabel={`${syncButtonLabel(t, liveSync)}. ${lastSyncedAt ? `${t("lastSynced")} ${formatTime(lastSyncedAt)}` : t("notSyncedYet")}`}
+              className="relative h-9 w-9 items-center justify-center rounded-full active:bg-white/10"
             >
               {isSyncing ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Feather name="refresh-cw" size={17} color="#FFFFFF" />
               )}
+              <SyncStatusDot state={liveSync} />
             </Pressable>
             <Pressable
               onPress={() => router.push("/notifications")}

@@ -19,6 +19,8 @@ import { reportError } from '../monitoring';
 import { inspectCloudActorBinding } from './authActorBinding';
 import { useSessionStore } from '../state/sessionStore';
 import { clearDeviceRelinkRequired, markDeviceRelinkRequired } from '../state/deviceRelinkStore';
+import { installLiveSyncSource } from '../state/liveSyncState';
+import { getSyncExposure } from '../db/sync-helpers';
 import {
   completePendingAuthTimingStage,
   startPendingAuthTimingStage,
@@ -68,6 +70,14 @@ export function subscribeToSyncCompletion(
     if (listeners.size === 0) completionListeners.delete(shopId);
   };
 }
+
+// The header's blinking sync dot (state/liveSyncState.ts) reads the queue
+// counts through this source. Read-only: it counts rows and listens for the
+// same completion event the sync card already uses; it never starts a cycle.
+installLiveSyncSource({
+  read: (shopId) => getSyncExposure(shopId),
+  subscribe: (shopId, listener) => subscribeToSyncCompletion(shopId, () => listener()),
+});
 
 async function notifySyncCompletion(
   shopId: string,

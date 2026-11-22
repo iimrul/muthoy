@@ -158,6 +158,8 @@ export default defineConfig({
       "apps/mobile/tests/android-min-sdk.test.ts",
       "apps/mobile/components/inventory/receiptless-batch.test.tsx",
       "apps/mobile/components/sync/sync-exposure.test.tsx",
+      "apps/mobile/components/sync/sync-status-dot.test.tsx",
+      "apps/mobile/state/liveSyncState.test.ts",
       "apps/mobile/db/receiptless-restock.sqlite.test.ts",
       "apps/mobile/db/environment-binding.test.ts",
       "apps/mobile/db/medicine-catalog.sqlite.test.ts",

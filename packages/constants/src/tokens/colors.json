@@ -16,6 +16,8 @@
   "accentBg": "#F3E8FF",
   "canvas": "#F5F5F5",
   "liveDot": "#22C55E",
+  "syncPendingDot": "#FACC15",
+  "syncFailedDot": "#EF4444",
   "authCanvasFrom": "#F9F9FF",
   "authHeroEnd": "#047857",
   "authButtonEnd": "#10B981",

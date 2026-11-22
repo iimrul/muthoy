@@ -33,12 +33,11 @@ afterEach(cleanup);
 
 describe("sync state at a glance",()=>{
   it("reads failing before waiting, and waiting before sent",()=>{
-    const shopId="shop-a";
     expect(syncStateOf(null)).toBe("unavailable");
-    expect(syncStateOf({shopId,pending:0,failed:0,stuck:0})).toBe("sent");
-    expect(syncStateOf({shopId,pending:4,failed:0,stuck:0})).toBe("waiting");
-    expect(syncStateOf({shopId,pending:4,failed:0,stuck:1})).toBe("failing");
-    expect(syncStateOf({shopId,pending:0,failed:2,stuck:0})).toBe("failing");
+    expect(syncStateOf({pending:0,failed:0,stuck:0})).toBe("sent");
+    expect(syncStateOf({pending:4,failed:0,stuck:0})).toBe("waiting");
+    expect(syncStateOf({pending:4,failed:0,stuck:1})).toBe("failing");
+    expect(syncStateOf({pending:0,failed:2,stuck:0})).toBe("failing");
   });
 });
 

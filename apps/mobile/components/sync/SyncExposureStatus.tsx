@@ -9,21 +9,12 @@ import { subscribeToSyncCompletion } from "../../sync";
 import type { Session } from "../../state/sessionStore";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useI18n } from "../../state/localeStore";
+import { syncStateOf, type SyncCounts, type SyncState } from "./syncState";
 
-interface SyncExposure {
+export { syncStateOf };
+
+interface SyncExposure extends SyncCounts {
   shopId: string;
-  pending: number;
-  failed: number;
-  stuck: number;
-}
-
-/** What the owner should understand at a glance; the counts stay underneath. */
-type SyncState = "unavailable" | "sent" | "waiting" | "failing";
-
-export function syncStateOf(exposure: SyncExposure | null): SyncState {
-  if (!exposure) return "unavailable";
-  if (exposure.failed > 0 || exposure.stuck > 0) return "failing";
-  return exposure.pending > 0 ? "waiting" : "sent";
 }
 
 interface StateLook {
