@@ -28,7 +28,7 @@ export function DashboardSkeleton({ topInset, label }: DashboardSkeletonProps) {
         style={{ elevation: 4, paddingTop: topInset, height: 56 + topInset }}
       >
         <View className="h-9 w-9" />
-        <Text className="font-sans-bold text-base uppercase tracking-wider text-white">PHARMAPOS</Text>
+        <Text className="font-sans-extrabold text-base uppercase tracking-wide text-white">MUTHOY</Text>
       </View>
       <View className="rounded-b-[18px] bg-auth-heroEnd pb-20 pt-6">
         <View className="mb-6 gap-2 px-4">

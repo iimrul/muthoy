@@ -30,11 +30,44 @@ if (path.relative(workspaceRoot, expoPackageRoot).startsWith('..')) {
 const generatedAndroidDirectories =
   /[/\\]android[/\\](?:[^/\\]+[/\\])*(?:build|\.cxx)(?:[/\\]|$)/;
 const existingBlockList = config.resolver.blockList;
+// Workspace folders the app bundle never resolves from (2026-11-22). Without a
+// watchman, Metro's fallback watcher opens one handle per watched directory, so
+// crawling these — the admin app, the web prototype, backend, docs evidence
+// trees with their own node_modules, the pnpm content store, the native
+// android project, Expo's local snapshots — ran Metro out of file handles on
+// Windows (EMFILE while reading its own cache, which then broke LogBox
+// symbolication) and past its watch-mode start-up deadline. blockList is also
+// the file map's ignore pattern, so these are neither crawled nor watched.
+const escapeForRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Windows reports the drive letter either way. Expo refuses to combine
+// blockList patterns with different flags, so no `i` flag: the drive letter
+// alone is matched in both cases.
+const workspacePattern = (absolutePath) => {
+  const escaped = escapeForRegExp(absolutePath);
+  return /^[A-Za-z]:/.test(absolutePath)
+    ? `[${absolutePath[0].toLowerCase()}${absolutePath[0].toUpperCase()}]${escaped.slice(1)}`
+    : escaped;
+};
+const unwatchedWorkspaceFolders = [
+  '.git',
+  'backend',
+  'docs',
+  'scripts',
+  path.join('apps', 'admin'),
+  path.join('apps', 'prototype-web'),
+  path.join('apps', 'mobile', '.expo'),
+  path.join('apps', 'mobile', 'android'),
+  path.join('apps', 'mobile', 'dist'),
+  path.join('node_modules', '.integration-store'),
+].map(
+  (folder) => new RegExp(`^${workspacePattern(path.join(workspaceRoot, folder))}(?:[/\\\\]|$)`),
+);
 config.resolver.blockList = [
   ...(Array.isArray(existingBlockList)
     ? existingBlockList
     : existingBlockList ? [existingBlockList] : []),
   generatedAndroidDirectories,
+  ...unwatchedWorkspaceFolders,
 ];
 
 config.resolver.nodeModulesPaths = [

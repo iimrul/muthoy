@@ -263,7 +263,7 @@ describe("dashboard first open", () => {
     useSessionStore.getState().login({ shopId: SHOP_ID, userId: OWNER_ID, role: "owner" });
 
     render(createElement(Dashboard));
-    expect(screen.getByText("PHARMAPOS")).toBeTruthy();
+    expect(screen.getByText("MUTHOY")).toBeTruthy();
     expect(screen.queryByText("Loading dashboard…")).toBeNull();
     expect(screen.queryByText(/Owner/)).toBeNull();
 
@@ -284,14 +284,14 @@ describe("dashboard downgrade recovery: return to primary shop", () => {
     multiShopAccess.entitled = true;
     multiShopAccess.primaryShopId = "some-other-shop";
     render(createElement(Dashboard));
-    await waitFor(() => expect(screen.getByText("PHARMAPOS")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("MUTHOY")).toBeTruthy());
     expect(screen.queryByText("Return to primary shop")).toBeNull();
 
     cleanup();
     multiShopAccess.entitled = false;
     multiShopAccess.primaryShopId = SHOP_ID;
     render(createElement(Dashboard));
-    await waitFor(() => expect(screen.getByText("PHARMAPOS")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("MUTHOY")).toBeTruthy());
     expect(screen.queryByText("Return to primary shop")).toBeNull();
   });
 
@@ -328,7 +328,7 @@ describe("dashboard downgrade recovery: return to primary shop", () => {
     multiShopAccess.primaryShopId = SHOP_ID;
     cleanup();
     render(createElement(Dashboard));
-    await waitFor(() => expect(screen.getByText("PHARMAPOS")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("MUTHOY")).toBeTruthy());
     expect(screen.queryByText("Return to primary shop")).toBeNull();
   });
 

@@ -431,7 +431,7 @@ export default function MorningDashboardScreen() {
               <Feather name="menu" size={20} color="#FFFFFF" />
             </Pressable>
             <Text className="font-sans-extrabold text-base uppercase tracking-wide text-white">
-              PHARMAPOS
+              MUTHOY
             </Text>
           </View>
           <View className="flex-row items-center gap-1">
