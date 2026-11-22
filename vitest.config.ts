@@ -23,6 +23,9 @@ export default defineConfig({
     alias: {
       "expo-constants": resolve(process.cwd(), "apps/mobile/db/test/expo-constants.ts"),
       "expo-application": resolve(process.cwd(), "apps/mobile/db/test/expo-application.ts"),
+      // Never the real SDK in a test: it would initialise against the real
+      // Sentry project. crashReporting/ reads this recorder instead.
+      "@sentry/react-native": resolve(process.cwd(), "apps/mobile/db/test/sentry-react-native.ts"),
       "./client": resolve(process.cwd(), "apps/mobile/db/test/client.ts"),
       "expo-sqlite": resolve(
         process.cwd(),
@@ -159,6 +162,7 @@ export default defineConfig({
       "apps/mobile/components/inventory/receiptless-batch.test.tsx",
       "apps/mobile/components/sync/sync-exposure.test.tsx",
       "apps/mobile/components/sync/sync-status-dot.test.tsx",
+      "apps/mobile/crashReporting/crash-reporting.test.ts",
       "apps/mobile/state/liveSyncState.test.ts",
       "apps/mobile/db/receiptless-restock.sqlite.test.ts",
       "apps/mobile/db/environment-binding.test.ts",

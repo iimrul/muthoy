@@ -54,6 +54,7 @@ import { AuthStatusScreen } from '../components/auth/AuthStatusScreen';
 import { BrandLoader } from '../components/auth/BrandLoader';
 import type { AuthorityBlockReason } from '../components/auth/authorityGateCopy';
 import { EnvironmentRefusalError } from '../config/environmentPolicy';
+import { initCrashReporting } from '../crashReporting';
 
 const FOREGROUND_CHECK_DEBOUNCE_MS = 60_000;
 const AUTHORITY_RETRY_DELAY_MS = 5_000;
@@ -63,6 +64,9 @@ let lastForegroundCheckAt = 0;
 type AuthorityGate =
   | { epoch: number; status: 'checking' | 'retrying' | 'allowed' }
   | { epoch: number; status: 'blocked'; reason: AuthorityBlockReason };
+// First, so a crash during start-up is reported too (crashReporting/index.ts:
+// allowlisted events only — never a message, breadcrumb or identity).
+initCrashReporting();
 // Keep the splash screen visible while brand fonts load — CLAUDE.md rule 6
 // requires the correct font family from first paint, never a system-font flash.
 SplashScreen.preventAutoHideAsync();
