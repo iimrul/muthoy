@@ -18,7 +18,8 @@ export interface FuzzyMatch<T extends FuzzyMatchable> {
   score: number;
 }
 
-function levenshteinDistance(a: string, b: string): number {
+/** Edit distance. Shared with domain/stripMatcher.ts so there is one implementation, not two. */
+export function levenshteinDistance(a: string, b: string): number {
   const rows = a.length + 1;
   const cols = b.length + 1;
   const matrix: number[][] = [];

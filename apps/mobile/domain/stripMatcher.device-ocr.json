@@ -1,0 +1,394 @@
+{
+  "capturedOn": "2026-11-20",
+  "device": "Samsung Galaxy A04s (SM-A047F), Android 14",
+  "recognizer": "native/scanner.ts scanTextLines -> ML Kit text-recognition 16.0.1 (Latin), run inside com.muthoy.pos.dev",
+  "note": "REAL on-device ML Kit output for the five strip photos the founder sent on 2026-11-20, captured verbatim. Not hand-edited.",
+  "strips": {
+    "napaExtra": {
+      "photo": 1,
+      "ms": 2599,
+      "lines": [
+        {
+          "text": "9EKICO",
+          "height": 26
+        },
+        {
+          "text": "PHARA",
+          "height": 24
+        },
+        {
+          "text": "MANo. 186-480-UUD",
+          "height": 58
+        },
+        {
+          "text": "a Extra",
+          "height": 106
+        },
+        {
+          "text": "amol 500 1rig &",
+          "height": 59
+        },
+        {
+          "text": "feine 65 mg",
+          "height": 49
+        },
+        {
+          "text": "io.186480-006",
+          "height": 57
+        },
+        {
+          "text": "ra",
+          "height": 50
+        },
+        {
+          "text": "3010001904",
+          "height": 31
+        },
+        {
+          "text": "BEXIMCO",
+          "height": 29
+        },
+        {
+          "text": "PHARIMA",
+          "height": 28
+        },
+        {
+          "text": "Napa Extra",
+          "height": 137
+        },
+        {
+          "text": "Mig. Lic",
+          "height": 36
+        },
+        {
+          "text": "Paracetamol 500 rmg &",
+          "height": 70
+        },
+        {
+          "text": "Calteine 65 mg",
+          "height": 60
+        },
+        {
+          "text": "M Lic. No. 379 & 119",
+          "height": 63
+        },
+        {
+          "text": "Napa Extra",
+          "height": 111
+        },
+        {
+          "text": "Paracetarmol 500 ng &",
+          "height": 64
+        },
+        {
+          "text": "Cafeine 65 mg",
+          "height": 40
+        },
+        {
+          "text": "Nap",
+          "height": 89
+        },
+        {
+          "text": "Paraceta",
+          "height": 41
+        },
+        {
+          "text": "Calfe",
+          "height": 34
+        }
+      ]
+    },
+    "smcOrsaline": {
+      "photo": 2,
+      "ms": 861,
+      "lines": [
+        {
+          "text": "SM",
+          "height": 33
+        },
+        {
+          "text": "SMC",
+          "height": 45
+        },
+        {
+          "text": "OsMc0RSaine",
+          "height": 14
+        }
+      ]
+    },
+    "flacol": {
+      "photo": 3,
+      "ms": 745,
+      "lines": [
+        {
+          "text": "Simethicone USP 40 mg",
+          "height": 51
+        },
+        {
+          "text": "Sugar free Chewable tablet",
+          "height": 46
+        },
+        {
+          "text": "Fiaco",
+          "height": 92
+        },
+        {
+          "text": "Flacol",
+          "height": 84
+        },
+        {
+          "text": "Simethi",
+          "height": 42
+        },
+        {
+          "text": "Sue",
+          "height": 35
+        },
+        {
+          "text": "ee Chew",
+          "height": 34
+        }
+      ]
+    },
+    "napaExtend": {
+      "photo": 4,
+      "ms": 2556,
+      "lines": [
+        {
+          "text": "'NapaExtend",
+          "height": 342
+        },
+        {
+          "text": "ANo. 186-646-006",
+          "height": 198
+        },
+        {
+          "text": "Paracetamol 665 mg",
+          "height": 209
+        },
+        {
+          "text": "Napa°tend",
+          "height": 318
+        },
+        {
+          "text": "MA No. 186-646-006",
+          "height": 202
+        },
+        {
+          "text": "Paracetamol 665 mg",
+          "height": 201
+        },
+        {
+          "text": "o002147",
+          "height": 65
+        },
+        {
+          "text": "PHARMA",
+          "height": 78
+        },
+        {
+          "text": "BEXIMCO",
+          "height": 81
+        },
+        {
+          "text": "4A No. 186-646-006",
+          "height": 184
+        },
+        {
+          "text": "Paracetamol 665 mg",
+          "height": 185
+        },
+        {
+          "text": "PHAF",
+          "height": 54
+        },
+        {
+          "text": "4ARMA",
+          "height": 57
+        },
+        {
+          "text": "BEXIMco",
+          "height": 82
+        },
+        {
+          "text": "NapaExten",
+          "height": 254
+        },
+        {
+          "text": "PHARMA",
+          "height": 79
+        },
+        {
+          "text": "BEXIMCo",
+          "height": 78
+        },
+        {
+          "text": "3010002147",
+          "height": 86
+        },
+        {
+          "text": "Mig. Lic. No. 379& 119",
+          "height": 234
+        },
+        {
+          "text": "Paracetamol 665 mg",
+          "height": 206
+        },
+        {
+          "text": "NapaCxtend",
+          "height": 326
+        },
+        {
+          "text": "Mfg. Lic. No. 379 & 119",
+          "height": 222
+        },
+        {
+          "text": "Paracetamol 665 mg",
+          "height": 197
+        },
+        {
+          "text": "Napaxtend",
+          "height": 312
+        },
+        {
+          "text": "3010002147",
+          "height": 76
+        },
+        {
+          "text": "Mfg. Lic. No. 379 & 119",
+          "height": 209
+        },
+        {
+          "text": "Paracetamol 665 mg",
+          "height": 182
+        },
+        {
+          "text": "Napa°Exten",
+          "height": 287
+        },
+        {
+          "text": "PHARMA",
+          "height": 80
+        },
+        {
+          "text": "REXIMCO",
+          "height": 75
+        },
+        {
+          "text": "RCO",
+          "height": 36
+        },
+        {
+          "text": "A",
+          "height": 6
+        },
+        {
+          "text": "PHARMA",
+          "height": 82
+        },
+        {
+          "text": "BEXIMCO",
+          "height": 74
+        },
+        {
+          "text": "PHAH",
+          "height": 44
+        },
+        {
+          "text": "ARN",
+          "height": 31
+        },
+        {
+          "text": "iBEXIMCo",
+          "height": 74
+        },
+        {
+          "text": "No. 186-646-006",
+          "height": 149
+        },
+        {
+          "text": "cetamol 665 mg",
+          "height": 142
+        },
+        {
+          "text": "0002147",
+          "height": 57
+        },
+        {
+          "text": "Napa",
+          "height": 133
+        },
+        {
+          "text": "MA No. 186-646-006",
+          "height": 207
+        },
+        {
+          "text": "Paracetamol 665 mg",
+          "height": 207
+        },
+        {
+          "text": "3010002147",
+          "height": 82
+        },
+        {
+          "text": "Napa",
+          "height": 133
+        },
+        {
+          "text": "Paracetamol 665 mg",
+          "height": 196
+        },
+        {
+          "text": "MA No. 186-646-006",
+          "height": 196
+        },
+        {
+          "text": "Paracetamol 665 mg",
+          "height": 179
+        },
+        {
+          "text": "MA No. 186-646-006",
+          "height": 174
+        },
+        {
+          "text": "Napa c",
+          "height": 135
+        }
+      ]
+    },
+    "progutMups20": {
+      "photo": 5,
+      "ms": 2178,
+      "lines": [
+        {
+          "text": "Esomeprazole 20 m",
+          "height": 60
+        },
+        {
+          "text": "POPULAR",
+          "height": 26
+        },
+        {
+          "text": "POPULAR",
+          "height": 19
+        },
+        {
+          "text": "Progut MUPS 20",
+          "height": 86
+        },
+        {
+          "text": "Esomeprazole 20 mg",
+          "height": 45
+        },
+        {
+          "text": "POPULAR",
+          "height": 19
+        },
+        {
+          "text": "7 Mig. Lic No.473 & 250 MANO 336-802-067 Mfg. Lic. No.;473 & 250 MA No.338-a",
+          "height": 1287
+        }
+      ]
+    }
+  }
+}

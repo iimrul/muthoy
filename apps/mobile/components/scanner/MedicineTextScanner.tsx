@@ -1,18 +1,13 @@
 import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Linking,
   Modal,
   Pressable,
   StatusBar,
   Text,
   View,
 } from "react-native";
-import {
-  openSettingsErrorMessage,
-  requestPermissionErrorMessage,
-  type CameraPermissionState,
-} from "../../domain/cameraPermissionState";
+import type { CameraPermissionState } from "../../domain/cameraPermissionState";
 import {
   ScannerCamera,
   type ScannerCameraHandle,
@@ -21,6 +16,7 @@ import { scanBarcode, scanText } from "../../native/scanner";
 import { removeTemporaryCapture } from "../../native/prescriptionAttachment";
 import { reportEvent } from "../../monitoring";
 import { useI18n } from "../../state/localeStore";
+import { ScannerPermissionPanel } from "./ScannerPermissionPanel";
 
 // components/scanner/MedicineTextScanner.tsx — polished, reusable full-screen
 // scan modal (docs/plans/ocr.md). Imports ONLY native/ScannerCamera +
@@ -96,8 +92,6 @@ export function MedicineTextScanner({
     useState<CameraPermissionState>("checking");
   const [captureState, setCaptureState] = useState<CaptureState>("ready");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [requestError, setRequestError] = useState<string | null>(null);
-  const [settingsError, setSettingsError] = useState<string | null>(null);
   // Bumped to force ScannerCamera to fully remount (via its `key`) after a
   // native mount failure — a fresh mount re-runs its permission check and
   // clears its internal hasMountError, giving the 'unavailable' state a real
@@ -113,29 +107,16 @@ export function MedicineTextScanner({
     setCaptureState("ready");
     setErrorMessage(null);
     setPermissionState("checking");
-    setRequestError(null);
-    setSettingsError(null);
     onClose();
   }, [onClose]);
 
-  const handleRequestPermission = useCallback(async () => {
-    setRequestError(null);
-    const succeeded = (await cameraRef.current?.requestPermission()) ?? false;
-    setRequestError(requestPermissionErrorMessage(succeeded));
-  }, []);
-
-  // Linking.openSettings() can reject (no resolvable Settings activity on some
-  // Android OEM builds). Awaited and caught so the failure is visible with a
-  // manual fallback path instead of the button silently doing nothing.
-  const handleOpenSettings = useCallback(async () => {
-    setSettingsError(null);
-    try {
-      await Linking.openSettings();
-      setSettingsError(openSettingsErrorMessage(true));
-    } catch {
-      setSettingsError(openSettingsErrorMessage(false));
-    }
-  }, []);
+  // The permission panel's request/Settings error text lives in
+  // ScannerPermissionPanel, which unmounts with this modal, so a closed and
+  // reopened scanner starts clean exactly as it did when the state lived here.
+  const requestCameraPermission = useCallback(
+    async () => (await cameraRef.current?.requestPermission()) ?? false,
+    [],
+  );
 
   const handleRetryMount = useCallback(() => {
     setCameraInstanceKey((key) => key + 1);
@@ -281,69 +262,11 @@ export function MedicineTextScanner({
           )}
 
           <View className="gap-4 p-6 pb-10">
-            {permissionState === "deniable" ? (
-              <View className="items-center gap-3">
-                <Text className="text-center font-sans text-sm text-white">
-                  {t("cameraNeeded")}
-                </Text>
-                <Pressable
-                  onPress={handleRequestPermission}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("grantCameraAccess")}
-                  className="items-center rounded-lg bg-brand-green px-5 py-3 active:opacity-80"
-                >
-                  <Text className="font-sans-semibold text-base text-white">
-                    {t("grantAccess")}
-                  </Text>
-                </Pressable>
-                {requestError ? (
-                  <Text className="text-center font-sans text-xs text-white/80">
-                    {requestError}
-                  </Text>
-                ) : null}
-              </View>
-            ) : null}
-
-            {permissionState === "blocked" ? (
-              <View className="items-center gap-3">
-                <Text className="text-center font-sans text-sm text-white">
-                  {t("cameraDenied")}
-                </Text>
-                <Pressable
-                  onPress={handleOpenSettings}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("openSettings")}
-                  className="items-center rounded-lg bg-brand-green px-5 py-3 active:opacity-80"
-                >
-                  <Text className="font-sans-semibold text-base text-white">
-                    {t("openSettings")}
-                  </Text>
-                </Pressable>
-                {settingsError ? (
-                  <Text className="text-center font-sans text-xs text-white/80">
-                    {settingsError}
-                  </Text>
-                ) : null}
-              </View>
-            ) : null}
-
-            {permissionState === "unavailable" ? (
-              <View className="items-center gap-3">
-                <Text className="text-center font-sans text-sm text-white">
-                  {t("cameraUnavailable")}
-                </Text>
-                <Pressable
-                  onPress={handleRetryMount}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("retryCamera")}
-                  className="items-center rounded-lg bg-brand-green px-5 py-3 active:opacity-80"
-                >
-                  <Text className="font-sans-semibold text-base text-white">
-                    {t("retry")}
-                  </Text>
-                </Pressable>
-              </View>
-            ) : null}
+            <ScannerPermissionPanel
+              permissionState={permissionState}
+              onRequestPermission={requestCameraPermission}
+              onRetryMount={handleRetryMount}
+            />
 
             {permissionState === "granted" && captureState === "ready" ? (
               <View className="gap-1">
