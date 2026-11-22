@@ -20,7 +20,9 @@ const config = getDefaultConfig(projectRoot);
 // natively (ReadDirectoryChangesW); Expo enables it only on macOS. Its
 // remaining Windows rough edges (duplicate or directory events) cost at most
 // an extra rebuild. Bundling for a build (export) never starts a watcher.
-if (process.platform === 'win32') {
+// `typeof` first: tests evaluate this file in a bare VM context with no
+// `process`, and the watcher choice is irrelevant there.
+if (typeof process !== 'undefined' && process.platform === 'win32') {
   try {
     const expoCliRoot = path.dirname(
       require.resolve('@expo/cli/package.json', { paths: [expoPackageRoot] }),
