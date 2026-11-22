@@ -355,6 +355,7 @@ describe('labels and formatting', () => {
   test('billingCycleLabel covers both cycles and passes anything else through', () => {
     expect(billingCycleLabel('monthly')).toBe('Monthly');
     expect(billingCycleLabel('annual')).toBe('Annual');
+    expect(billingCycleLabel('grant')).toBe('Admin grant');
     expect(billingCycleLabel('weekly')).toBe('weekly');
   });
 

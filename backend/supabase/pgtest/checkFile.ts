@@ -93,6 +93,7 @@ export const POST_E4_MIGRATIONS: readonly string[] = Object.freeze([
   // RPC that grants or extends Pro/Ultra exactly as a verified payment would,
   // without stamping verified_at, recording every grant with its reason.
   '20261121000000_admin_plan_grants.sql',
+  '20261122000000_admin_grant_cycle.sql',
 ]);
 
 /**

@@ -42,6 +42,7 @@ backend/supabase/migrations/post-e4-source-hashes.json text eol=lf
 backend/supabase/migrations/20261115172840_staff_sale_credit_reconciliation.sql text eol=lf
 backend/supabase/migrations/20261116020000_staff_reconciliation_server_clock.sql text eol=lf
 backend/supabase/migrations/20261121000000_admin_plan_grants.sql text eol=lf
+backend/supabase/migrations/20261122000000_admin_grant_cycle.sql text eol=lf
 backend/supabase/held-migrations/staff-sale-credit-reconciliation.sql text eol=lf
 scripts/render-rollback-docs.mjs text eol=lf
 scripts/post-e4-evidence-manifest.mjs text eol=lf

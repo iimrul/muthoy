@@ -84,7 +84,8 @@ const COLUMNS: readonly DataColumn<SubscriptionDetailRow>[] = [
   { heading: 'Entitlement status', cell: (row) => statusLabel(row.entitlementStatus) },
   {
     heading: 'Billed amount',
-    cell: (row) => formatMoney(row.billedAmountPaisa),
+    // An admin grant bills nothing, so it shows no plan price (migration 42).
+    cell: (row) => (row.billedAmountPaisa === null ? 'No charge' : formatMoney(row.billedAmountPaisa)),
     isMoney: true,
     align: 'right',
   },

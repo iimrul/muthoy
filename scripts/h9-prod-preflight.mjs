@@ -95,6 +95,7 @@ export const E4_MIGRATIONS = Object.freeze([
   // Migration 41: admin plan grants (founder-approved 2026-11-21); not applied
   // to any hosted project yet, declared so the chain refusal stays accurate.
   '20261121000000_admin_plan_grants.sql',
+  '20261122000000_admin_grant_cycle.sql',
 ]);
 // The chain, pinned by NAME rather than by count.
 //

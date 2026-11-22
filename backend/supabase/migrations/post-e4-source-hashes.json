@@ -3,7 +3,7 @@
   "gate": "E4-B",
   "supersedesManifest": "backend/supabase/migrations/e4-source-hashes.json",
   "counts": {
-    "migrations": 6,
+    "migrations": 7,
     "supersededEvidenceFiles": 7
   },
   "files": {
@@ -12,36 +12,37 @@
     "20261111000000_role_switch_credit_link_contract.sql": "011dfdcfb169f7788bca2b7a36852c3f9b50cb425d42b322092253b3c69ab609",
     "20261115172840_staff_sale_credit_reconciliation.sql": "a60acce006b39bcd0a9c5e66d7cfb8510b8de3fb5653da81157e689416d544c2",
     "20261116020000_staff_reconciliation_server_clock.sql": "f5f7ffe3ce42fd88d64e0de30d7614d519ee79c2b0ef41f396dbfc19aec915eb",
-    "20261121000000_admin_plan_grants.sql": "e2719d5d49b6cd1549ae3e2479ba302d18418dc7739146baece81462364502e9"
+    "20261121000000_admin_plan_grants.sql": "e2719d5d49b6cd1549ae3e2479ba302d18418dc7739146baece81462364502e9",
+    "20261122000000_admin_grant_cycle.sql": "6df4752b09ebd2b811bc984c190223018499c115e235919e3da9b9c2af11b467"
   },
   "supersedes": {
     "scripts/h9-prod-preflight.mjs": {
       "e4": "bac816d16d670af8ed464e75cafeb2a85455610f733afcd8aabcb5e5c44ad41d",
-      "now": "aedcffc7e702c70a934505fbfdb127838cc5cb969b09619fc0dd2983091205a2"
+      "now": "3044ef051af2ff2c513dd9ef75260eed246fa063241af743df1e5ea0f09814c9"
     },
     "backend/supabase/migrations/rollback-classification.json": {
       "e4": "08c50fd579a5d6e0a24ffdefade12d8ac126503c15765b081e286b7d5f010d75",
-      "now": "a18d5b8d38fa79fe62a07b8b0dae1f0a4e107258dce73d53b9c0325fe2e6191d"
+      "now": "b66fa69cd193d9cb127df77235ef56490ce0575ddfcc275d2af7ba19524e3c49"
     },
     "backend/supabase/migrations/ROLLBACK.md": {
       "e4": "9b61681b89bee9394b9093b4932d39a70cac31f699931419f1619f084f9f5d0a",
-      "now": "c6f1a25dad4482e0525219d7a6ecfaaf2fb8257b90d563a8dbe4da0ec4c82a7e"
+      "now": "a12d299fb5db9b27a0d1aff69c3ee2246ba6f02d97e88241ea42ff68f34e32f1"
     },
     "backend/supabase/migrations/README.md": {
       "e4": "9114aafed4be01c0abe3ff4f4e0388d868ebb7fcabd9221278ec528d0c80f51f",
-      "now": "6b8511ec99d7d7f6f0df90e565503566ae5c9e2800cfbca310dea366d60a7c43"
+      "now": "00874aaa138e95836a4a2f0a1f8c58014bdefca856ff41a078a0a85c207dc6fc"
     },
     "apps/mobile/tests/migration-rollback-classification.test.ts": {
       "e4": "17db87a58ea6242d4f8fbbcb60651fbc3f8ba7244bdeed83b470debda7c5c9ce",
-      "now": "b674b90f93977aa7c65ad1994b9f0164684f38205cde35641884a7bd98d45e43"
+      "now": "4d58c9608339abb75e7180cba37d54910a1130a6cac7e61dad2c7187fde2d090"
     },
     "backend/supabase/pgtest/checkFile.ts": {
       "e4": "4157698d9275e4e77003f879bffdb39a27b7dad81094b37de43ac8523f4deff4",
-      "now": "aa11fbd4a90a583ad1bd57a61efe0b8c94b4288ea42291cd8599060cf09c11f6"
+      "now": "3ea005b69e185e04d2b7735e1f4095023fb1ce1a8ed146cc19440ead7f31b379"
     },
     ".gitattributes": {
       "e4": "1fb9331e11aaebe9786d9364b874985a3a274f7b2afb67050e51adcf2dc331a4",
-      "now": "106ffc378663224a0f0ccbf722b08acb91317ba54aed0ebafd454bb458d66361"
+      "now": "404b317d8c14e4c653fe8b65482ad231a38f1a6e632790fa377cdc39da6d385e"
     }
   }
 }

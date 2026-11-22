@@ -12,6 +12,10 @@ import { createHarness, OWNER_A, seedShops, SHOP_A, type Harness } from './harne
  *  - an extension runs from the end of what was already paid for;
  *  - bad input and unknown accounts are refused and write nothing;
  *  - only the service role can call it, and only it can read the grant log.
+ *
+ * Migration 42 (founder 2026-11-22): a grant is billing_cycle 'grant', never
+ * a fabricated monthly/annual, while an extended PAID subscription keeps its
+ * own cycle; plan_offerings still sell monthly/annual only.
  */
 
 const GRANT = 'select admin_grant_plan($1::uuid,$2::text,$3::integer,$4::text,$5::text) as snapshot';
@@ -54,7 +58,7 @@ async function grantCount(h: Harness, accountId: string): Promise<number> {
   )).n;
 }
 
-describe('admin_grant_plan (migration 41)', () => {
+describe('admin_grant_plan (migrations 41 + 42)', () => {
   let h: Harness;
   let accountId: string;
 
@@ -89,10 +93,10 @@ describe('admin_grant_plan (migration 41)', () => {
     )).toEqual({ days: 30 });
 
     expect(await h.one(`
-      select s.provider,s.tier,s.status,(s.paid_through=e.paid_through) as same_paid_through
+      select s.provider,s.tier,s.status,s.billing_cycle,(s.paid_through=e.paid_through) as same_paid_through
       from billing_subscriptions s join entitlement_snapshots e using (billing_account_id)
       where s.billing_account_id=$1::uuid`, [accountId]))
-      .toEqual({ provider: 'admin_grant', tier: 'pro', status: 'active', same_paid_through: true });
+      .toEqual({ provider: 'admin_grant', tier: 'pro', status: 'active', billing_cycle: 'grant', same_paid_through: true });
     expect(await h.one('select plan from shops where id=$1::uuid', [SHOP_A])).toEqual({ plan: 'pro' });
     expect(await h.one('select b4_effective_tier($1::uuid) as tier', [accountId])).toEqual({ tier: 'pro' });
 
@@ -158,6 +162,37 @@ describe('admin_grant_plan (migration 41)', () => {
         [role],
       )).toEqual({ ok: false });
     }
+  });
+
+  it('keeps a paid subscription on its own cycle and provider when a grant extends it', async () => {
+    // The shape b4_apply_verified_payment leaves behind once the account pays.
+    await h.one(`
+      update billing_subscriptions set provider='sslcommerz',provider_reference='txn-42',billing_cycle='monthly'
+      where billing_account_id=$1::uuid returning id`, [accountId]);
+
+    await h.one(GRANT, [accountId, 'ultra', 15, 'Goodwill extension', 'admin@muthoy']);
+
+    expect(await h.one(`
+      select billing_cycle,provider,provider_reference from billing_subscriptions
+      where billing_account_id=$1::uuid`, [accountId]))
+      .toEqual({ billing_cycle: 'monthly', provider: 'sslcommerz', provider_reference: 'txn-42' });
+    expect(await refusal(h, REFRESH, [accountId])).toBeNull();
+  });
+
+  it('allows grant as a subscription cycle only, and nothing else new', async () => {
+    expect(await refusal(
+      h,
+      `update billing_subscriptions set billing_cycle='weekly' where billing_account_id=$1::uuid returning id`,
+      [accountId],
+    )).toBe('23514');
+    // A grant is never sold: offerings and orders keep monthly/annual only.
+    expect(await refusal(
+      h,
+      `update plan_offerings set billing_cycle='grant' where tier='pro' and billing_cycle='monthly' returning tier`,
+    )).toBe('23514');
+    expect(await h.one(`
+      select pg_get_constraintdef(oid) as def from pg_constraint where conname='payment_orders_billing_cycle_check'`))
+      .toEqual({ def: "CHECK ((billing_cycle = ANY (ARRAY['monthly'::text, 'annual'::text])))" });
   });
 
   it('accepts admin_grant as a subscription provider and still refuses any other', async () => {

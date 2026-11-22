@@ -41,7 +41,8 @@
     "20261111000000_role_switch_credit_link_contract.sql": "B",
     "20261115172840_staff_sale_credit_reconciliation.sql": "B",
     "20261116020000_staff_reconciliation_server_clock.sql": "B",
-    "20261121000000_admin_plan_grants.sql": "B"
+    "20261121000000_admin_plan_grants.sql": "B",
+    "20261122000000_admin_grant_cycle.sql": "C"
   },
   "postgresDeclaredOverrides": [
     "20260813000000_initial_schema.sql",

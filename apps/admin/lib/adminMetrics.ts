@@ -47,6 +47,7 @@
 
 import { addPaisa, asPaisa, type Paisa } from '@muthoy/types';
 import { dhakaMonthLabel } from './adminDashboard';
+import { isAdminGrantCycle } from './adminViews';
 import type {
   AccountRow,
   EntitlementVerdictRow,
@@ -88,10 +89,13 @@ function isAfter(timestamp: string | null, nowMs: number): boolean {
  * have made one of the two figures wrong.
  */
 export function isMrrEligible(
-  row: Pick<SubscriptionRow, 'tier' | 'status' | 'paidThrough' | 'graceEndsAt'>,
+  row: Pick<SubscriptionRow, 'tier' | 'status' | 'paidThrough' | 'graceEndsAt'> & { billingCycle?: string },
   nowMs: number,
 ): boolean {
   if (!PAID_TIERS.includes(row.tier)) return false;
+  // An admin grant is entitlement without revenue (migration 42): it is not
+  // run rate, and not an "unpriced" gap either.
+  if (isAdminGrantCycle(row.billingCycle)) return false;
   if (row.status === 'active' && isAfter(row.paidThrough, nowMs)) return true;
   return ['active', 'past_due', 'grace'].includes(row.status) && isAfter(row.graceEndsAt, nowMs);
 }
