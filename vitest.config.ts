@@ -428,6 +428,7 @@ export default defineConfig({
       "apps/mobile/tests/auth-onboarding.test.tsx",
       "apps/mobile/tests/auth-signin.test.tsx",
       "apps/mobile/tests/staff-home-routing.test.tsx",
+      "apps/mobile/tests/expiry-screen.test.tsx",
       "apps/mobile/tests/staff-management-pin.test.tsx",
       "apps/mobile/sync/**/*.test.ts",
       // Auto-hydration end-to-end: real SQLite + real usePlan/useMultiShopAccess,
