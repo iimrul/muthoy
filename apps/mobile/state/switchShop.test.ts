@@ -310,6 +310,15 @@ describe('the device binding travels with the shop switch', () => {
     expect(deviceRegistry.recordBoundInstallation).toHaveBeenCalledBefore(vi.mocked(pullChanges));
   });
 
+  it('pulls with the shop\'s own stored cursor, so a hydrated shop fetches only its changes', async () => {
+    // `undefined` lets pull.ts use getLastPulledCursor(shopId): full hydration
+    // when the shop has never been pulled here, incremental otherwise. `null`
+    // forced a full re-download on every switch (~15 requests).
+    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({ data: SWITCHED, error: null } as never);
+    await switchActiveShop('shop-2', true);
+    expect(vi.mocked(pullChanges)).toHaveBeenCalledWith('shop-2', undefined, expect.any(Function));
+  });
+
   it('does not write a secret when the server re-pointed an existing registration', async () => {
     vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({
       data: { ...SWITCHED, device: { deviceAuthority: { shopId: 'shop-2' } } }, error: null,

@@ -155,11 +155,19 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
       { userId: response.actor_user_id, shopId },
     );
     if (!ownsTransition()) throw new Error('The active user changed.');
-    await pullChanges(shopId, null, () => !ownsTransition());
+    // `undefined` = this shop's own stored cursor. A shop never hydrated on
+    // this device has none and gets the full hydration; a shop already
+    // hydrated pulls only what changed since, exactly as the background
+    // engine does every cycle (including its access-change rehydration). A
+    // stored cursor can only exist after a COMPLETE hydration: pull.ts
+    // applies it in one transaction and writes the cursor last. This took the
+    // switch from ~15 pull requests to ~1-2 (founder-approved 2026-11-22).
+    await pullChanges(shopId, undefined, () => !ownsTransition());
     if (!ownsTransition()) throw new Error('The active user changed.');
     // The shop is linked at exactly this point, not one step earlier: the
     // server confirmed this owner may act in it, the claims were refreshed, and
-    // a FULL hydration then completed. Recording it here is the same fact
+    // the shop is hydrated (fully just now, or earlier with this pull bringing
+    // it up to date). Recording it here is the same fact
     // deviceAuth records after its own hydration — not a client-side guess.
     // Without it the shop keeps `cloud_linked_at = NULL`, which the root gate
     // reads on the next cold start as an unfinished registration and answers
