@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useState } from "react";
-import { Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
 import { router } from "expo-router";
 import { useFocusRefresh } from "../../navigation/useFocusRefresh";
 import { formatMoney } from "@muthoy/utils";
@@ -30,39 +30,118 @@ import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 
 const FIGURE_PENDING = "—";
 
-function Stat({ label, value }: { label: string; value: string }) {
+type FeatherIcon = keyof typeof Feather.glyphMap;
+interface Tint {
+  background: string;
+  ink: string;
+}
+
+/**
+ * Everything a cashier MAY be granted, in the order a till uses them. The
+ * tints are the prototype StaffHome's Quick Access palette, as tokens.
+ */
+const STAFF_TOOLS = [
+  { key: "history", labelKey: "salesHistory", icon: "clock", permission: "sale_history", href: "/reports/sales-history", tint: { background: colors.softGreen, ink: colors.authHeroEnd } },
+  { key: "credit", labelKey: "credit", icon: "users", permission: "credit_view", href: "/credit/credit-sales", tint: { background: colors.infoBg, ink: colors.info } },
+  { key: "inventory", labelKey: "inventory", icon: "package", permission: "inventory_view", href: "/inventory", tint: { background: colors.warningBg, ink: colors.warning } },
+  { key: "expiry", labelKey: "expiry", icon: "calendar", permission: "expiry_manage", href: "/inventory/expiry", tint: { background: colors.errorBg, ink: colors.error } },
+  { key: "eod", labelKey: "endOfDay", icon: "moon", permission: "cash_drawer", href: "/end-of-day", tint: { background: colors.authNeutralFill, ink: colors.richBlack } },
+  { key: "report", labelKey: "report", icon: "bar-chart-2", permission: "reports", href: "/reports/report", tint: { background: colors.accentBg, ink: colors.authOwnerAccent } },
+  { key: "staff", labelKey: "staff", icon: "user-check", permission: "staff_manage", href: "/staff/management", tint: { background: colors.softGreen, ink: colors.deepGreen } },
+] as const satisfies readonly {
+  key: string;
+  labelKey: CatalogKey;
+  icon: FeatherIcon;
+  permission: Permission;
+  href: string;
+  tint: Tint;
+}[];
+
+const SCAN_TINT: Tint = { background: colors.softGreen, ink: colors.authHeroEnd };
+const CASH_TINT: Tint = { background: colors.softGreen, ink: colors.brandGreen };
+
+// Module-scope, so no style object is rebuilt per render.
+const styles = {
+  canvas: { backgroundColor: colors.canvas },
+  summary: {
+    elevation: 6,
+    shadowColor: colors.richBlack,
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  newSale: {
+    elevation: 5,
+    shadowColor: colors.brandGreen,
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  endShift: {
+    elevation: 5,
+    shadowColor: colors.error,
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+  },
+} as const satisfies Record<string, ViewStyle>;
+
+/** One figure in the white strip over the hero. Money is DM Mono (rule 6). */
+function SummaryFigure({ label, value, color, isMoney }: { label: string; value: string; color: string; isMoney: boolean }) {
   return (
-    <View className="flex-1 gap-1 px-2">
-      <Text
-        numberOfLines={1}
-        className="font-sans text-[10px] uppercase text-midGray"
-      >
+    <View className="flex-1 px-2">
+      <Text numberOfLines={1} className="font-sans text-[10px] uppercase tracking-wide text-midGray">
         {label}
       </Text>
-      <Text numberOfLines={1} className="font-mono text-base text-richBlack">
+      <Text
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        className={`mt-1 text-base ${isMoney ? "font-mono-medium" : "font-sans-extrabold"}`}
+        style={{ color }}
+      >
         {value}
       </Text>
     </View>
   );
 }
 
-/** Everything a cashier MAY be granted, in the order a till uses them. */
-const STAFF_TOOLS = [
-  { key: "history", labelKey: "salesHistory", icon: "clock", permission: "sale_history", href: "/reports/sales-history" },
-  { key: "credit", labelKey: "credit", icon: "users", permission: "credit_view", href: "/credit/credit-sales" },
-  { key: "inventory", labelKey: "inventory", icon: "package", permission: "inventory_view", href: "/inventory" },
-  { key: "expiry", labelKey: "expiry", icon: "calendar", permission: "expiry_manage", href: "/inventory/expiry" },
-  { key: "cash", labelKey: "cashDrawer", icon: "dollar-sign", permission: "cash_drawer", href: "/cash-summary" },
-  { key: "eod", labelKey: "endOfDay", icon: "moon", permission: "cash_drawer", href: "/end-of-day" },
-  { key: "report", labelKey: "report", icon: "bar-chart-2", permission: "reports", href: "/reports/report" },
-  { key: "staff", labelKey: "staff", icon: "user-check", permission: "staff_manage", href: "/staff/management" },
-] as const satisfies readonly {
-  key: string;
-  labelKey: CatalogKey;
-  icon: keyof typeof Feather.glyphMap;
-  permission: Permission;
-  href: string;
-}[];
+function ActionTile({ label, icon, tint, onPress }: { label: string; icon: FeatherIcon; tint: Tint; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      className="h-20 flex-1 items-center justify-center gap-1.5 rounded-2xl border border-auth-fieldBorder bg-white active:opacity-80"
+    >
+      <View className="h-10 w-10 items-center justify-center rounded-xl" style={{ backgroundColor: tint.background }}>
+        <Feather name={icon} size={18} color={tint.ink} />
+      </View>
+      <Text className="font-sans-semibold text-xs text-richBlack">{label}</Text>
+    </Pressable>
+  );
+}
+
+function SectionLabel({ children }: { children: string }) {
+  return (
+    <Text className="mb-2 px-1 font-sans-semibold text-[11px] uppercase tracking-wider text-midGray">
+      {children}
+    </Text>
+  );
+}
+
+function SheetStat({ label, value, isMoney }: { label: string; value: string; isMoney: boolean }) {
+  return (
+    <View className="flex-1 items-center rounded-lg bg-brand-softGreen p-2">
+      <Text className="font-sans text-[10px] uppercase tracking-wide text-auth-heroEnd">{label}</Text>
+      <Text
+        numberOfLines={1}
+        className={`mt-0.5 text-auth-heroEnd ${isMoney ? "font-mono-medium" : "font-sans-extrabold"}`}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
 
 export default function StaffHomeScreen() {
   // D11. Same status-bar overlap as the owner dashboard: the language toggle
@@ -196,6 +275,7 @@ export default function StaffHomeScreen() {
   // the same resolvePermission the route gates use.
   const tools = STAFF_TOOLS.filter((tool) => can(tool.permission));
   const canSell = can("sale_entry");
+  const canCash = can("cash_drawer");
   const unreadLabel = unread > 0 ? (unread > 9 ? "9+" : formatNumber(unread)) : null;
   // The shift summary above is the context; the one shared confirmation
   // (LogoutConfirmSheet) replaces the Alert that asked "Shift Summary".
@@ -205,20 +285,21 @@ export default function StaffHomeScreen() {
   };
 
   return (
-    <View className="flex-1 bg-[#F6F7F6]">
-      <ScrollView contentContainerClassName="gap-6 pb-32">
-        <View className="bg-white px-5 pb-5" style={{ paddingTop: topInset + 16 }}>
+    <View className="flex-1" style={styles.canvas}>
+      <ScrollView contentContainerClassName="pb-32">
+        {/* Brand hero — the owner dashboard's green, rounded at the foot. */}
+        <View className="rounded-b-[18px] bg-auth-heroEnd px-5 pb-20" style={{ paddingTop: topInset + 20 }}>
           <View className="flex-row items-start justify-between gap-3">
             <View className="flex-1">
-              <Text className="font-sans text-xs text-midGray">{t("welcomeBack")}</Text>
-              <Text numberOfLines={1} className="mt-0.5 font-sans-bold text-2xl text-richBlack">
+              <Text className="font-sans text-xs text-white/80">{t("welcomeBack")}</Text>
+              <Text numberOfLines={1} className="mt-0.5 font-sans-bold text-xl text-white">
                 {t(greetingKey)}{data?.actorName ? `, ${data.actorName}` : ""}
               </Text>
-              <View className="mt-2 flex-row items-center gap-2">
-                <View className="rounded-full bg-brand-softGreen px-2.5 py-1">
-                  <Text className="font-sans-semibold text-[11px] text-brand-deepGreen">{t("cashier")}</Text>
+              <View className="mt-2 flex-row flex-wrap items-center gap-2">
+                <View className="rounded-full bg-white/20 px-2.5 py-1">
+                  <Text className="font-sans-bold text-[10px] uppercase tracking-wide text-white">{t("cashier")}</Text>
                 </View>
-                <Text className="font-sans text-xs text-midGray">
+                <Text className="font-sans text-[11px] text-white/80">
                   {t("shiftStarted")} {formatTime(shiftStart)}
                 </Text>
               </View>
@@ -228,128 +309,137 @@ export default function StaffHomeScreen() {
                 onPress={() => router.push("/notifications")}
                 accessibilityRole="button"
                 accessibilityLabel={`${t("notifications")}${unreadLabel ? ` ${unreadLabel}` : ""}`}
-                className="h-11 w-11 items-center justify-center rounded-full active:bg-black/5"
+                className="h-11 w-11 items-center justify-center rounded-full bg-white/15 active:bg-white/25"
               >
-                <Feather name="bell" size={20} color={colors.richBlack} />
+                <Feather name="bell" size={18} color={colors.white} />
                 {unreadLabel ? (
-                  <View className="absolute right-1.5 top-1.5 min-w-[18px] items-center rounded-full bg-error px-1">
+                  <View className="absolute right-1 top-1 min-w-[18px] items-center rounded-full bg-error px-1">
                     <Text className="font-sans-bold text-[10px] text-white">{unreadLabel}</Text>
                   </View>
                 ) : null}
               </Pressable>
-              <LanguageToggle />
+              <LanguageToggle onDark />
             </View>
           </View>
         </View>
 
-        <View className="mx-4 rounded-3xl bg-richBlack p-5">
-          <Text className="font-sans text-xs text-white/60">{t("todaysSales")}</Text>
-          <Text numberOfLines={1} className="mt-1 font-mono text-[32px] leading-[40px] text-white">
-            {salesValue}
-          </Text>
-          <View className="mt-4 flex-row border-t border-white/10 pt-4">
-            <View className="flex-1">
-              <Text className="font-sans text-[11px] text-white/60">{t("transactions")}</Text>
-              <Text className="mt-0.5 font-sans-semibold text-lg text-white">{countValue}</Text>
-            </View>
-            <View className="flex-1">
-              <Text className="font-sans text-[11px] text-white/60">{t("averageBill")}</Text>
-              <Text numberOfLines={1} className="mt-0.5 font-mono text-lg text-white">{averageValue}</Text>
-            </View>
+        {/* Today's figures, lifted over the hero exactly as the owner's cards are. */}
+        <View className="-mt-12 px-4">
+          <View className="flex-row rounded-2xl border border-auth-fieldBorder bg-white py-3" style={styles.summary}>
+            <SummaryFigure label={t("todaysSales")} value={salesValue} color={colors.brandGreen} isMoney />
+            <View className="w-px bg-auth-fieldBorder" />
+            <SummaryFigure label={t("transactions")} value={countValue} color={colors.info} isMoney={false} />
+            <View className="w-px bg-auth-fieldBorder" />
+            <SummaryFigure label={t("averageBill")} value={averageValue} color={colors.authOwnerAccent} isMoney />
           </View>
         </View>
 
-        {error ? <Text className="px-5 font-sans text-sm text-error">{error}</Text> : null}
+        {error ? <Text className="mt-3 px-5 font-sans text-sm text-error">{error}</Text> : null}
 
-        {canSell ? (
-          <View className="mx-4 flex-row gap-3">
-            <Pressable
-              onPress={() => router.push("/sale")}
-              accessibilityRole="button"
-              accessibilityLabel={t("newSale")}
-              className="flex-[2] flex-row items-center gap-3 rounded-2xl bg-brand-green px-4 py-4 active:opacity-90"
-            >
-              <View className="h-11 w-11 items-center justify-center rounded-xl bg-white/15">
-                <Feather name="shopping-cart" size={20} color="#FFFFFF" />
-              </View>
-              <View className="flex-1">
-                <Text className="font-sans-bold text-base text-white">{t("newSale")}</Text>
-                <Text numberOfLines={1} className="font-sans text-xs text-white/80">{t("addItems")}</Text>
-              </View>
-            </Pressable>
-            <Pressable
-              onPress={() => router.push("/scan" as never)}
-              accessibilityRole="button"
-              accessibilityLabel={t("scan")}
-              className="flex-1 items-center justify-center gap-1.5 rounded-2xl border border-black/5 bg-white py-4 active:opacity-80"
-            >
-              <Feather name="maximize" size={20} color={colors.brandGreen} />
-              <Text className="font-sans-semibold text-sm text-richBlack">{t("scan")}</Text>
-            </Pressable>
+        {canSell || canCash ? (
+          <View className="mt-5 gap-3 px-4">
+            {canSell ? (
+              <Pressable
+                onPress={() => router.push("/sale")}
+                accessibilityRole="button"
+                accessibilityLabel={t("newSale")}
+                className="h-20 flex-row items-center justify-between rounded-2xl bg-brand-green px-5 active:opacity-90"
+                style={styles.newSale}
+              >
+                <View className="flex-row items-center gap-3">
+                  <View className="h-11 w-11 items-center justify-center rounded-xl bg-white/15">
+                    <Feather name="shopping-bag" size={20} color={colors.white} />
+                  </View>
+                  <View>
+                    <Text className="font-sans-bold text-base text-white">{t("newSale")}</Text>
+                    <Text numberOfLines={1} className="font-sans text-[11px] text-white/80">{t("addItems")}</Text>
+                  </View>
+                </View>
+                <Feather name="arrow-right" size={20} color={colors.white} />
+              </Pressable>
+            ) : null}
+            <View className="flex-row gap-3">
+              {canSell ? (
+                <ActionTile label={t("scan")} icon="maximize" tint={SCAN_TINT} onPress={() => router.push("/scan" as never)} />
+              ) : null}
+              {canCash ? (
+                <ActionTile label={t("cashDrawer")} icon="credit-card" tint={CASH_TINT} onPress={() => router.push("/cash-summary")} />
+              ) : null}
+            </View>
           </View>
         ) : null}
 
         {tools.length ? (
-          <View className="mx-4 gap-3">
-            <Text className="px-1 font-sans-semibold text-sm text-richBlack">{t("staffToolsTitle")}</Text>
-            <View className="flex-row flex-wrap justify-between gap-y-3">
-              {tools.map((tool) => (
+          <View className="mt-6 px-4">
+            <SectionLabel>{t("quickAccess")}</SectionLabel>
+            <View className="overflow-hidden rounded-2xl border border-auth-fieldBorder bg-white">
+              {tools.map((tool, position) => (
                 <Pressable
                   key={tool.key}
                   onPress={() => router.push(tool.href as never)}
                   accessibilityRole="button"
                   accessibilityLabel={t(tool.labelKey)}
-                  className="w-[48.5%] flex-row items-center gap-3 rounded-2xl border border-black/5 bg-white p-3.5 active:opacity-80"
+                  className={`flex-row items-center gap-3 px-4 py-3 active:bg-auth-neutralFill ${position > 0 ? "border-t border-auth-neutralFill" : ""}`}
                 >
-                  <View className="h-10 w-10 items-center justify-center rounded-xl bg-brand-softGreen">
-                    <Feather name={tool.icon} size={18} color={colors.deepGreen} />
+                  <View className="h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: tool.tint.background }}>
+                    <Feather name={tool.icon} size={16} color={tool.tint.ink} />
                   </View>
-                  <Text numberOfLines={2} className="flex-1 font-sans-semibold text-[13px] text-richBlack">
+                  <Text numberOfLines={1} className="flex-1 font-sans-semibold text-sm text-richBlack">
                     {t(tool.labelKey)}
                   </Text>
+                  <Feather name="chevron-right" size={16} color={colors.authPlaceholder} />
                 </Pressable>
               ))}
             </View>
           </View>
         ) : null}
 
-        <View className="mx-4 gap-3">
-          <Text className="px-1 font-sans-semibold text-sm text-richBlack">{t("todaysTransactions")}</Text>
-          <View className="overflow-hidden rounded-2xl border border-black/5 bg-white">
+        <View className="mt-6 px-4">
+          <SectionLabel>{t("todaysTransactions")}</SectionLabel>
+          <View className="overflow-hidden rounded-2xl border border-auth-fieldBorder bg-white">
             {data?.recent.length ? (
               data.recent.map((item, position) => (
                 <View
                   key={item.id}
-                  className={`flex-row items-center gap-3 px-4 py-3.5 ${position > 0 ? "border-t border-black/5" : ""}`}
+                  className={`flex-row items-center gap-3 px-4 py-3 ${position > 0 ? "border-t border-auth-neutralFill" : ""}`}
                 >
                   <View className="flex-1">
                     <Text numberOfLines={1} className="font-sans-semibold text-sm text-richBlack">
                       {item.medicineNames}
                     </Text>
-                    <Text className="mt-0.5 font-sans text-xs text-midGray">
+                    <Text className="mt-0.5 font-sans text-[11px] text-auth-placeholder">
                       {formatTime(item.createdAt)} · {item.paymentType}
                     </Text>
                   </View>
-                  <Text className="font-mono text-sm text-richBlack">{formatMoney(item.total)}</Text>
+                  <Text className="font-mono-medium text-sm text-auth-heroEnd">{formatMoney(item.total)}</Text>
                 </View>
               ))
             ) : data ? (
-              <View className="items-center gap-2 px-6 py-8">
-                <Feather name="file-text" size={22} color={colors.midGray} />
+              <View className="items-center gap-2 px-6 py-6">
+                <Feather name="file-text" size={28} color={colors.fieldBorder} />
                 <Text className="text-center font-sans text-sm text-midGray">{t("firstSale")}</Text>
               </View>
             ) : null}
           </View>
         </View>
 
-        <Pressable
-          onPress={() => setEndShiftOpen(true)}
-          accessibilityRole="button"
-          className="mx-4 flex-row items-center justify-center gap-2 rounded-2xl border border-error/25 bg-white py-4 active:opacity-80"
-        >
-          <Feather name="log-out" size={18} color={colors.error} />
-          <Text className="font-sans-semibold text-error">{t("endShift")}</Text>
-        </Pressable>
+        <View className="mt-6 px-4">
+          <Pressable
+            onPress={() => setEndShiftOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t("endShift")}
+            className="h-14 flex-row items-center justify-center gap-2.5 rounded-2xl bg-error active:opacity-90"
+            style={styles.endShift}
+          >
+            <View className="h-7 w-7 items-center justify-center rounded-full bg-white/20">
+              <Feather name="log-out" size={15} color={colors.white} />
+            </View>
+            <Text className="font-sans-bold text-base text-white">{t("endShift")}</Text>
+            <View className="rounded-full bg-white/20 px-2 py-0.5">
+              <Text className="font-sans-bold text-[10px] tracking-wide text-white">{t("onShift")}</Text>
+            </View>
+          </Pressable>
+        </View>
       </ScrollView>
       <Modal
         visible={endShiftOpen}
@@ -362,38 +452,32 @@ export default function StaffHomeScreen() {
           className="flex-1 justify-end bg-black/40"
         >
           <Pressable className="gap-4 rounded-t-3xl bg-white p-5">
-            <Text className="font-sans-bold text-lg">{t("shiftSummary")}</Text>
-            <Text className="font-sans text-xs text-midGray">
-              {data?.actorName} · {t("started")} {formatTime(shiftStart)}
-            </Text>
-            <View className="flex-row">
-              <Stat
-                label={t("sales")}
-                value={salesValue}
-              />
-              <Stat
-                label={t("txns")}
-                value={countValue}
-              />
-              <Stat
-                label={t("average")}
-                value={averageValue}
-              />
+            <View className="h-1 w-10 self-center rounded-full bg-auth-fieldBorder" />
+            <View>
+              <Text className="font-sans-bold text-lg text-richBlack">{t("shiftSummary")}</Text>
+              <Text className="mt-1 font-sans text-xs text-midGray">
+                {data?.actorName} · {t("started")} {formatTime(shiftStart)}
+              </Text>
             </View>
-            <View className="rounded-xl bg-brand-softGreen p-3">
+            <View className="flex-row gap-2">
+              <SheetStat label={t("sales")} value={salesValue} isMoney />
+              <SheetStat label={t("txns")} value={countValue} isMoney={false} />
+              <SheetStat label={t("average")} value={averageValue} isMoney />
+            </View>
+            <View className="rounded-xl bg-auth-neutralFill p-3">
               {data?.recent.length ? (
                 data.recent.map((item) => (
-                  <View key={item.id} className="flex-row justify-between py-1">
-                    <Text className="text-xs text-midGray">
+                  <View key={item.id} className="flex-row justify-between py-1.5">
+                    <Text className="font-sans text-xs text-midGray">
                       {formatTime(item.createdAt)}
                     </Text>
-                    <Text className="font-mono text-xs">
+                    <Text className="font-mono-medium text-xs text-richBlack">
                       {formatMoney(item.total)}
                     </Text>
                   </View>
                 ))
               ) : (
-                <Text className="text-center text-xs">
+                <Text className="py-2 text-center font-sans text-xs text-midGray">
                   {t("noTransactions")}
                 </Text>
               )}
@@ -401,15 +485,17 @@ export default function StaffHomeScreen() {
             <View className="flex-row gap-3">
               <Pressable
                 onPress={() => setEndShiftOpen(false)}
-                className="flex-1 items-center rounded-xl bg-brand-softGreen py-3"
+                accessibilityRole="button"
+                className="h-12 flex-1 items-center justify-center rounded-xl bg-auth-neutralFill active:opacity-80"
               >
-                <Text>{t("cancel")}</Text>
+                <Text className="font-sans-bold text-richBlack">{t("cancel")}</Text>
               </Pressable>
               <Pressable
                 onPress={finish}
-                className="flex-1 items-center rounded-xl bg-error py-3"
+                accessibilityRole="button"
+                className="h-12 flex-1 items-center justify-center rounded-xl bg-error active:opacity-90"
               >
-                <Text className="text-white">{t("logout")}</Text>
+                <Text className="font-sans-bold text-white">{t("logout")}</Text>
               </Pressable>
             </View>
           </Pressable>

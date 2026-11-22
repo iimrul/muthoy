@@ -132,6 +132,21 @@ describe("StaffHome role branch", () => {
     await waitFor(() => expect(screen.queryAllByText("—")).toHaveLength(0));
   });
 
+  it("shows the cash drawer and end of day once the owner grants the drawer", async () => {
+    deps.session = {
+      shopId: "shop-1",
+      userId: "staff-1",
+      role: "staff",
+      permissions: { cash_drawer: true },
+    };
+    render(createElement(StaffHomeScreen));
+
+    expect(screen.getByText("cashDrawer")).toBeTruthy();
+    expect(screen.getByText("endOfDay")).toBeTruthy();
+    expect(screen.getByText("quickAccess")).toBeTruthy();
+    await waitFor(() => expect(screen.queryAllByText("—")).toHaveLength(0));
+  });
+
   it("branches Manager to ManagerDashboard and never renders cashier StaffHome", () => {
     deps.session = {
       shopId: "shop-1",
