@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, Text, View, type ViewStyle } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
+import { colors } from "@muthoy/constants";
 
 // Presentational Owner Dashboard primitives. No DB, no session, no
 // navigation decisions — dashboard.tsx owns all three and passes results in.
@@ -27,6 +28,8 @@ interface KpiCardProps {
   accessibilityLabel: string;
 }
 
+const LIVE_DOT: ViewStyle = { backgroundColor: colors.liveDot };
+
 export function KpiCard({
   label,
   value,
@@ -47,18 +50,18 @@ export function KpiCard({
         : "min-w-[170px]";
   const body = (
     <View
-      className={`h-[88px] justify-between rounded-xl border border-white/20 px-4 py-3 ${widthClass} ${highlight ? "bg-[#1FC294A1]" : "bg-brand-deepGreen"}`}
+      className={`h-[88px] justify-between border px-4 py-3 ${widthClass} ${highlight ? "rounded-[15px] border-white/20 bg-[#1FC294A1]" : "rounded-xl border-white/15 bg-brand-deepGreen"}`}
     >
       <View className="flex-row items-center justify-between gap-2">
         <Text
           numberOfLines={1}
-          className="flex-1 font-sans text-[10px] uppercase tracking-wide text-white/80"
+          className="flex-1 font-sans-medium text-[10px] uppercase tracking-wide text-white/85"
         >
           {label}
         </Text>
         {isLive ? (
           <View className="flex-row items-center gap-1">
-            <View className="h-1.5 w-1.5 rounded-full bg-success" />
+            <View className="h-1.5 w-1.5 rounded-full" style={LIVE_DOT} />
             <Text className="font-sans text-[9px] uppercase text-white/80">
               {liveLabel}
             </Text>
@@ -66,7 +69,7 @@ export function KpiCard({
         ) : null}
         {accessory}
       </View>
-      <Text numberOfLines={1} className="font-mono text-xl text-white">
+      <Text numberOfLines={1} className="font-mono-medium text-[20px] leading-6 text-white">
         {value}
       </Text>
       {footer ? (

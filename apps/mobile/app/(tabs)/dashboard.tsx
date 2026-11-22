@@ -430,7 +430,7 @@ export default function MorningDashboardScreen() {
             >
               <Feather name="menu" size={20} color="#FFFFFF" />
             </Pressable>
-            <Text className="font-sans-bold text-base uppercase tracking-wider text-white">
+            <Text className="font-sans-extrabold text-base uppercase tracking-wide text-white">
               PHARMAPOS
             </Text>
           </View>
@@ -476,7 +476,7 @@ export default function MorningDashboardScreen() {
         <View className="rounded-b-[18px] bg-auth-heroEnd pb-20 pt-6">
           <View className="mb-6 px-4">
             <View className="flex-row flex-wrap items-center gap-2">
-              <Text className="font-sans-semibold text-lg text-white">
+              <Text className="font-sans-bold text-lg text-white">
                 {greeting}, {data.ownerName}
               </Text>
               <PlanBadge plan={plan.plan} daysLeft={plan.daysLeft} compact expired={plan.reason === 'paid_expired' || plan.reason === 'verification_stale'} grace={plan.reason === 'paid_grace'} />
@@ -504,7 +504,6 @@ export default function MorningDashboardScreen() {
             <KpiCard
               label={t("todaysSales")}
               value={formatMoney(data.today.totalSales)}
-              footer={`${formatNumber(data.today.transactionCount)} ${t("transactions")}`}
               isLive
               liveLabel={t("live")}
               accessibilityLabel={`${t("todaysSales")} ${formatMoney(data.today.totalSales)}`}
