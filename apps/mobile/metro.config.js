@@ -9,6 +9,31 @@ const externalVirtualStoreRoot = path.resolve(expoPackageRoot, '../../..');
 
 const config = getDefaultConfig(projectRoot);
 
+// Windows dev server only (2026-11-22). Without a watchman, Expo's file map
+// picks its FallbackWatcher on Windows, which opens one fs.watch handle per
+// DIRECTORY: ~29,000 for this workspace's pnpm store. Start-up then ran past
+// the 240 s "Failed to start watch mode" deadline, the handles exhausted the
+// process (EMFILE), and a long-running server sat at 100% CPU and stopped
+// answering — so the dev app's lazily bundled modules (sync, device registry)
+// never arrived and screens such as the shop switch spun forever. The
+// NativeWatcher uses one recursive fs.watch per root, which Windows supports
+// natively (ReadDirectoryChangesW); Expo enables it only on macOS. Its
+// remaining Windows rough edges (duplicate or directory events) cost at most
+// an extra rebuild. Bundling for a build (export) never starts a watcher.
+if (process.platform === 'win32') {
+  try {
+    const expoCliRoot = path.dirname(
+      require.resolve('@expo/cli/package.json', { paths: [expoPackageRoot] }),
+    );
+    const nativeWatcherModule = require(
+      require.resolve('@expo/metro-file-map/build/watchers/NativeWatcher', { paths: [expoCliRoot] }),
+    );
+    nativeWatcherModule.default.isSupported = () => true;
+  } catch {
+    // A different Expo layout: keep Expo's own watcher choice.
+  }
+}
+
 // Monorepo resolution: Metro only watches projectRoot by default, so edits to
 // packages/* wouldn't trigger a rebuild without this.
 // NOT setting disableHierarchicalLookup or unstable_enableSymlinks: SDK 57's
@@ -59,6 +84,11 @@ const unwatchedWorkspaceFolders = [
   path.join('apps', 'mobile', 'android'),
   path.join('apps', 'mobile', 'dist'),
   path.join('node_modules', '.integration-store'),
+  // Tool caches other processes rewrite constantly (Next, Vite/Vitest): their
+  // write storms kept Metro's watcher busy at 100% CPU.
+  path.join('node_modules', '.cache'),
+  path.join('node_modules', '.vite'),
+  path.join('apps', 'mobile', 'node_modules', '.cache'),
 ].map(
   (folder) => new RegExp(`^${workspacePattern(path.join(workspaceRoot, folder))}(?:[/\\\\]|$)`),
 );
