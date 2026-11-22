@@ -1,8 +1,10 @@
 import { useCallback, useContext, useEffect, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, Text, View } from "react-native";
-import { router, useFocusEffect } from "expo-router";
+import { Modal, Pressable, ScrollView, Text, View, type ViewStyle } from "react-native";
+import { router } from "expo-router";
+import { useFocusRefresh } from "../../navigation/useFocusRefresh";
 import { formatMoney } from "@muthoy/utils";
-import { ZERO_PAISA } from "@muthoy/types";
+import Feather from "@expo/vector-icons/Feather";
+import { colors } from "@muthoy/constants";
 import { LanguageToggle } from "../../components/ui/LanguageToggle";
 import { AccessDenied } from "../../components/ui/AccessDenied";
 import { DashboardLoadState } from "../../components/staff/DashboardLoadState";
@@ -16,7 +18,8 @@ import {
   runtimeDiagnosticError,
   sessionDiagnosticContext,
 } from "../../dev/runtimeDiagnostics";
-import { resolvePermission } from "../../domain/permissions";
+import { resolvePermission, type Permission } from "../../domain/permissions";
+import type { CatalogKey } from "../../i18n/catalog";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
@@ -25,16 +28,115 @@ import { endShiftToPinPad } from "../../navigation/endShift";
 import { useUnreadCount } from "../../state/useUnreadCount";
 import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 
-function Stat({ label, value }: { label: string; value: string }) {
+const FIGURE_PENDING = "—";
+
+type FeatherIcon = keyof typeof Feather.glyphMap;
+interface Tint {
+  background: string;
+  ink: string;
+}
+
+/**
+ * Everything a cashier MAY be granted, in the order a till uses them. The
+ * tints are the prototype StaffHome's Quick Access palette, as tokens.
+ */
+const STAFF_TOOLS = [
+  { key: "history", labelKey: "salesHistory", icon: "clock", permission: "sale_history", href: "/reports/sales-history", tint: { background: colors.softGreen, ink: colors.authHeroEnd } },
+  { key: "credit", labelKey: "credit", icon: "users", permission: "credit_view", href: "/credit/credit-sales", tint: { background: colors.infoBg, ink: colors.info } },
+  { key: "inventory", labelKey: "inventory", icon: "package", permission: "inventory_view", href: "/inventory", tint: { background: colors.warningBg, ink: colors.warning } },
+  { key: "expiry", labelKey: "expiry", icon: "calendar", permission: "expiry_manage", href: "/inventory/expiry", tint: { background: colors.errorBg, ink: colors.error } },
+  { key: "eod", labelKey: "endOfDay", icon: "moon", permission: "cash_drawer", href: "/end-of-day", tint: { background: colors.authNeutralFill, ink: colors.richBlack } },
+  { key: "report", labelKey: "report", icon: "bar-chart-2", permission: "reports", href: "/reports/report", tint: { background: colors.accentBg, ink: colors.authOwnerAccent } },
+  { key: "staff", labelKey: "staff", icon: "user-check", permission: "staff_manage", href: "/staff/management", tint: { background: colors.softGreen, ink: colors.deepGreen } },
+] as const satisfies readonly {
+  key: string;
+  labelKey: CatalogKey;
+  icon: FeatherIcon;
+  permission: Permission;
+  href: string;
+  tint: Tint;
+}[];
+
+const SCAN_TINT: Tint = { background: colors.softGreen, ink: colors.authHeroEnd };
+const CASH_TINT: Tint = { background: colors.softGreen, ink: colors.brandGreen };
+
+// Module-scope, so no style object is rebuilt per render.
+const styles = {
+  canvas: { backgroundColor: colors.canvas },
+  summary: {
+    elevation: 6,
+    shadowColor: colors.richBlack,
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  newSale: {
+    elevation: 5,
+    shadowColor: colors.brandGreen,
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  endShift: {
+    elevation: 5,
+    shadowColor: colors.error,
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+  },
+} as const satisfies Record<string, ViewStyle>;
+
+/** One figure in the white strip over the hero. Money is DM Mono (rule 6). */
+function SummaryFigure({ label, value, color, isMoney }: { label: string; value: string; color: string; isMoney: boolean }) {
   return (
-    <View className="flex-1 gap-1 px-2">
-      <Text
-        numberOfLines={1}
-        className="font-sans text-[10px] uppercase text-midGray"
-      >
+    <View className="flex-1 px-2">
+      <Text numberOfLines={1} className="font-sans text-[10px] uppercase tracking-wide text-midGray">
         {label}
       </Text>
-      <Text numberOfLines={1} className="font-mono text-base text-richBlack">
+      <Text
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        className={`mt-1 text-base ${isMoney ? "font-mono-medium" : "font-sans-extrabold"}`}
+        style={{ color }}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function ActionTile({ label, icon, tint, onPress }: { label: string; icon: FeatherIcon; tint: Tint; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      className="h-20 flex-1 items-center justify-center gap-1.5 rounded-2xl border border-auth-fieldBorder bg-white active:opacity-80"
+    >
+      <View className="h-10 w-10 items-center justify-center rounded-xl" style={{ backgroundColor: tint.background }}>
+        <Feather name={icon} size={18} color={tint.ink} />
+      </View>
+      <Text className="font-sans-semibold text-xs text-richBlack">{label}</Text>
+    </Pressable>
+  );
+}
+
+function SectionLabel({ children }: { children: string }) {
+  return (
+    <Text className="mb-2 px-1 font-sans-semibold text-[11px] uppercase tracking-wider text-midGray">
+      {children}
+    </Text>
+  );
+}
+
+function SheetStat({ label, value, isMoney }: { label: string; value: string; isMoney: boolean }) {
+  return (
+    <View className="flex-1 items-center rounded-lg bg-brand-softGreen p-2">
+      <Text className="font-sans text-[10px] uppercase tracking-wide text-auth-heroEnd">{label}</Text>
+      <Text
+        numberOfLines={1}
+        className={`mt-0.5 text-auth-heroEnd ${isMoney ? "font-mono-medium" : "font-sans-extrabold"}`}
+      >
         {value}
       </Text>
     </View>
@@ -50,7 +152,6 @@ export default function StaffHomeScreen() {
   const session = useSessionStore((state) => state.session);
   const { t, formatNumber, formatTime } = useI18n();
   const [data, setData] = useState<StaffDashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [endShiftOpen, setEndShiftOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
@@ -79,7 +180,6 @@ export default function StaffHomeScreen() {
 
   const reload = useCallback(async () => {
     if (!session || session.role !== "staff") return;
-    setLoading(true);
     const guard = captureSessionFor(session);
     markRuntimeDiagnosticStep(
       "cashier_dashboard_db_query_started",
@@ -105,11 +205,9 @@ export default function StaffHomeScreen() {
           cause instanceof Error ? cause.message : "Dashboard failed to load",
         );
       });
-    } finally {
-      guard?.ifLive(() => setLoading(false));
     }
   }, [session]);
-  useFocusEffect(
+  useFocusRefresh(
     useCallback(() => {
       void reload();
     }, [reload]),
@@ -144,15 +242,6 @@ export default function StaffHomeScreen() {
     );
   if (session.role === "manager") return <ManagerDashboard />;
   if (session.role !== "staff") return <AccessDenied homeHref="/dashboard" />;
-  if (loading && !data)
-    return (
-      <DashboardLoadState
-        loading
-        message={t("dashboardLoading")}
-        retryLabel={t("retry")}
-        onRetry={() => void reload()}
-      />
-    );
   if (error && !data)
     return (
       <DashboardLoadState
@@ -163,6 +252,12 @@ export default function StaffHomeScreen() {
       />
     );
 
+  // No full-screen loader (founder 2026-11-21): the shift screen renders at
+  // once and its figures read "—" for the moment before the first local read
+  // lands — never a zero that looks like a real takings figure.
+  const salesValue = data ? formatMoney(data.sales) : FIGURE_PENDING;
+  const countValue = data ? formatNumber(data.transactionCount) : FIGURE_PENDING;
+  const averageValue = data ? formatMoney(data.averageBill) : FIGURE_PENDING;
   const can = (permission: Parameters<typeof resolvePermission>[1]) =>
     resolvePermission(session.role, permission, session.permissions);
   const shiftStart = session.startedAt ?? new Date().toISOString();
@@ -175,32 +270,13 @@ export default function StaffHomeScreen() {
         : hour < 20
           ? "goodEvening"
           : "goodNight";
-  const quick = [
-    {
-      key: "history",
-      label: t("salesHistory"),
-      permission: "sale_history" as const,
-      href: "/reports/sales-history" as const,
-    },
-    {
-      key: "credit",
-      label: t("credit"),
-      permission: "credit_view" as const,
-      href: "/credit/credit-sales" as const,
-    },
-    {
-      key: "inventory",
-      label: t("inventory"),
-      permission: "inventory_view" as const,
-      href: "/inventory" as const,
-    },
-    {
-      key: "report",
-      label: t("report"),
-      permission: "reports" as const,
-      href: "/reports/report" as const,
-    },
-  ].filter((item) => can(item.permission));
+  // Founder 2026-11-21: a cashier sees exactly what the owner granted — no
+  // locked tiles, no "ask the owner" teasers. Every tool below is filtered by
+  // the same resolvePermission the route gates use.
+  const tools = STAFF_TOOLS.filter((tool) => can(tool.permission));
+  const canSell = can("sale_entry");
+  const canCash = can("cash_drawer");
+  const unreadLabel = unread > 0 ? (unread > 9 ? "9+" : formatNumber(unread)) : null;
   // The shift summary above is the context; the one shared confirmation
   // (LogoutConfirmSheet) replaces the Alert that asked "Shift Summary".
   const finish = () => {
@@ -209,155 +285,161 @@ export default function StaffHomeScreen() {
   };
 
   return (
-    <View className="flex-1 bg-brand-softGreen">
-      <ScrollView contentContainerClassName="gap-5 pb-28">
-        <View className="gap-2 bg-brand-green px-5 pb-20" style={{ paddingTop: topInset + 24 }}>
-          <View className="flex-row justify-between">
+    <View className="flex-1" style={styles.canvas}>
+      <ScrollView contentContainerClassName="pb-32">
+        {/* Brand hero — the owner dashboard's green, rounded at the foot. */}
+        <View className="rounded-b-[18px] bg-auth-heroEnd px-5 pb-20" style={{ paddingTop: topInset + 20 }}>
+          <View className="flex-row items-start justify-between gap-3">
             <View className="flex-1">
-              <Text className="font-sans text-xs text-white/80">
-                {t("welcomeBack")}
+              <Text className="font-sans text-xs text-white/80">{t("welcomeBack")}</Text>
+              <Text numberOfLines={1} className="mt-0.5 font-sans-bold text-xl text-white">
+                {t(greetingKey)}{data?.actorName ? `, ${data.actorName}` : ""}
               </Text>
-              <Text className="font-sans-bold text-xl text-white">
-                {t(greetingKey)}, {data?.actorName ?? ""}!
-              </Text>
-              <Text className="mt-1 font-sans text-xs text-white">
-                {t("cashier")} · {t("shiftStarted")} {formatTime(shiftStart)}
-              </Text>
-            </View>
-            <View className="flex-row items-center gap-2">
-              <Pressable onPress={() => router.push("/notifications")}>
-                <Text className="text-lg text-white">
-                  🔔
-                  {unread > 0
-                    ? unread > 10
-                      ? "10+"
-                      : formatNumber(unread)
-                    : ""}
+              <View className="mt-2 flex-row flex-wrap items-center gap-2">
+                <View className="rounded-full bg-white/20 px-2.5 py-1">
+                  <Text className="font-sans-bold text-[10px] uppercase tracking-wide text-white">{t("cashier")}</Text>
+                </View>
+                <Text className="font-sans text-[11px] text-white/80">
+                  {t("shiftStarted")} {formatTime(shiftStart)}
                 </Text>
+              </View>
+            </View>
+            <View className="flex-row items-center gap-1">
+              <Pressable
+                onPress={() => router.push("/notifications")}
+                accessibilityRole="button"
+                accessibilityLabel={`${t("notifications")}${unreadLabel ? ` ${unreadLabel}` : ""}`}
+                className="h-11 w-11 items-center justify-center rounded-full bg-white/15 active:bg-white/25"
+              >
+                <Feather name="bell" size={18} color={colors.white} />
+                {unreadLabel ? (
+                  <View className="absolute right-1 top-1 min-w-[18px] items-center rounded-full bg-error px-1">
+                    <Text className="font-sans-bold text-[10px] text-white">{unreadLabel}</Text>
+                  </View>
+                ) : null}
               </Pressable>
-              <LanguageToggle />
+              <LanguageToggle onDark />
             </View>
           </View>
         </View>
-        <View className="mx-4 -mt-16 flex-row divide-x divide-midGray rounded-2xl bg-white p-3">
-          <Stat
-            label={t("todaysSales")}
-            value={formatMoney(data?.sales ?? ZERO_PAISA)}
-          />
-          <Stat
-            label={t("transactions")}
-            value={formatNumber(data?.transactionCount ?? 0)}
-          />
-          <Stat
-            label={t("averageBill")}
-            value={formatMoney(data?.averageBill ?? ZERO_PAISA)}
-          />
-        </View>
-        {error ? (
-          <Text className="px-4 font-sans text-sm text-error">{error}</Text>
-        ) : null}
-        <View className="mx-4 gap-3">
-          {can("sale_entry") ? (
-            <Pressable
-              onPress={() => router.push("/sale")}
-              className="items-center rounded-2xl bg-brand-green py-5"
-            >
-              <Text className="font-sans-bold text-lg text-white">
-                {t("newSale")}
-              </Text>
-              <Text className="font-sans text-xs text-white/80">
-                {t("addItems")}
-              </Text>
-            </Pressable>
-          ) : null}
-          <View className="flex-row gap-3">
-            <Pressable
-              onPress={() =>
-                can("sale_entry")
-                  ? router.push("/scan" as never)
-                  : Alert.alert(t("accessDenied"), t("askOwner"))
-              }
-              className={`flex-1 items-center rounded-2xl bg-white py-5 ${can("sale_entry") ? "" : "opacity-40"}`}
-            >
-              <Text className="font-sans-semibold text-brand-green">
-                ⌗ {t("scan")} {can("sale_entry") ? "" : "🔒"}
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() =>
-                can("cash_drawer")
-                  ? router.push("/cash-summary")
-                  : Alert.alert(t("accessDenied"), t("askOwner"))
-              }
-              className={`flex-1 items-center rounded-2xl bg-white py-5 ${can("cash_drawer") ? "" : "opacity-40"}`}
-            >
-              <Text className="font-sans-semibold">
-                {t("cashDrawer")} {can("cash_drawer") ? "" : "🔒"}
-              </Text>
-            </Pressable>
+
+        {/* Today's figures, lifted over the hero exactly as the owner's cards are. */}
+        <View className="-mt-12 px-4">
+          <View className="flex-row rounded-2xl border border-auth-fieldBorder bg-white py-3" style={styles.summary}>
+            <SummaryFigure label={t("todaysSales")} value={salesValue} color={colors.brandGreen} isMoney />
+            <View className="w-px bg-auth-fieldBorder" />
+            <SummaryFigure label={t("transactions")} value={countValue} color={colors.info} isMoney={false} />
+            <View className="w-px bg-auth-fieldBorder" />
+            <SummaryFigure label={t("averageBill")} value={averageValue} color={colors.authOwnerAccent} isMoney />
           </View>
         </View>
-        {quick.length ? (
-          <View className="mx-4 gap-2">
-            <Text className="font-sans-semibold text-xs uppercase text-midGray">
-              {t("quickAccess")}
-            </Text>
-            <View className="rounded-2xl bg-white">
-              {quick.map((item) => (
+
+        {error ? <Text className="mt-3 px-5 font-sans text-sm text-error">{error}</Text> : null}
+
+        {canSell || canCash ? (
+          <View className="mt-5 gap-3 px-4">
+            {canSell ? (
+              <Pressable
+                onPress={() => router.push("/sale")}
+                accessibilityRole="button"
+                accessibilityLabel={t("newSale")}
+                className="h-20 flex-row items-center justify-between rounded-2xl bg-brand-green px-5 active:opacity-90"
+                style={styles.newSale}
+              >
+                <View className="flex-row items-center gap-3">
+                  <View className="h-11 w-11 items-center justify-center rounded-xl bg-white/15">
+                    <Feather name="shopping-bag" size={20} color={colors.white} />
+                  </View>
+                  <View>
+                    <Text className="font-sans-bold text-base text-white">{t("newSale")}</Text>
+                    <Text numberOfLines={1} className="font-sans text-[11px] text-white/80">{t("addItems")}</Text>
+                  </View>
+                </View>
+                <Feather name="arrow-right" size={20} color={colors.white} />
+              </Pressable>
+            ) : null}
+            <View className="flex-row gap-3">
+              {canSell ? (
+                <ActionTile label={t("scan")} icon="maximize" tint={SCAN_TINT} onPress={() => router.push("/scan" as never)} />
+              ) : null}
+              {canCash ? (
+                <ActionTile label={t("cashDrawer")} icon="credit-card" tint={CASH_TINT} onPress={() => router.push("/cash-summary")} />
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
+        {tools.length ? (
+          <View className="mt-6 px-4">
+            <SectionLabel>{t("quickAccess")}</SectionLabel>
+            <View className="overflow-hidden rounded-2xl border border-auth-fieldBorder bg-white">
+              {tools.map((tool, position) => (
                 <Pressable
-                  key={item.key}
-                  onPress={() => router.push(item.href)}
-                  className="flex-row justify-between border-b border-brand-softGreen p-4"
+                  key={tool.key}
+                  onPress={() => router.push(tool.href as never)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(tool.labelKey)}
+                  className={`flex-row items-center gap-3 px-4 py-3 active:bg-auth-neutralFill ${position > 0 ? "border-t border-auth-neutralFill" : ""}`}
                 >
-                  <Text className="font-sans-semibold">{item.label}</Text>
-                  <Text>›</Text>
+                  <View className="h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: tool.tint.background }}>
+                    <Feather name={tool.icon} size={16} color={tool.tint.ink} />
+                  </View>
+                  <Text numberOfLines={1} className="flex-1 font-sans-semibold text-sm text-richBlack">
+                    {t(tool.labelKey)}
+                  </Text>
+                  <Feather name="chevron-right" size={16} color={colors.authPlaceholder} />
                 </Pressable>
               ))}
             </View>
           </View>
         ) : null}
-        <View className="mx-4 flex-1 gap-2">
-          <Text className="font-sans-semibold text-xs uppercase text-midGray">
-            {t("todaysTransactions")}
-          </Text>
-          <View className="rounded-2xl bg-white">
+
+        <View className="mt-6 px-4">
+          <SectionLabel>{t("todaysTransactions")}</SectionLabel>
+          <View className="overflow-hidden rounded-2xl border border-auth-fieldBorder bg-white">
             {data?.recent.length ? (
-              data.recent.map((item) => (
+              data.recent.map((item, position) => (
                 <View
                   key={item.id}
-                  className="flex-row justify-between border-b border-brand-softGreen p-3"
+                  className={`flex-row items-center gap-3 px-4 py-3 ${position > 0 ? "border-t border-auth-neutralFill" : ""}`}
                 >
                   <View className="flex-1">
-                    <Text
-                      numberOfLines={1}
-                      className="font-sans-semibold text-sm"
-                    >
+                    <Text numberOfLines={1} className="font-sans-semibold text-sm text-richBlack">
                       {item.medicineNames}
                     </Text>
-                    <Text className="font-sans text-xs text-midGray">
+                    <Text className="mt-0.5 font-sans text-[11px] text-auth-placeholder">
                       {formatTime(item.createdAt)} · {item.paymentType}
                     </Text>
                   </View>
-                  <Text className="font-mono text-sm text-brand-green">
-                    {formatMoney(item.total)}
-                  </Text>
+                  <Text className="font-mono-medium text-sm text-auth-heroEnd">{formatMoney(item.total)}</Text>
                 </View>
               ))
-            ) : (
-              <Text className="p-6 text-center font-sans text-sm text-midGray">
-                {t("firstSale")}
-              </Text>
-            )}
+            ) : data ? (
+              <View className="items-center gap-2 px-6 py-6">
+                <Feather name="file-text" size={28} color={colors.fieldBorder} />
+                <Text className="text-center font-sans text-sm text-midGray">{t("firstSale")}</Text>
+              </View>
+            ) : null}
           </View>
         </View>
-        <Pressable
-          onPress={() => setEndShiftOpen(true)}
-          className="mx-4 items-center rounded-2xl bg-error py-4"
-        >
-          <Text className="font-sans-bold text-white">
-            {t("endShift")} · {t("onShift")}
-          </Text>
-        </Pressable>
+
+        <View className="mt-6 px-4">
+          <Pressable
+            onPress={() => setEndShiftOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={t("endShift")}
+            className="h-14 flex-row items-center justify-center gap-2.5 rounded-2xl bg-error active:opacity-90"
+            style={styles.endShift}
+          >
+            <View className="h-7 w-7 items-center justify-center rounded-full bg-white/20">
+              <Feather name="log-out" size={15} color={colors.white} />
+            </View>
+            <Text className="font-sans-bold text-base text-white">{t("endShift")}</Text>
+            <View className="rounded-full bg-white/20 px-2 py-0.5">
+              <Text className="font-sans-bold text-[10px] tracking-wide text-white">{t("onShift")}</Text>
+            </View>
+          </Pressable>
+        </View>
       </ScrollView>
       <Modal
         visible={endShiftOpen}
@@ -370,38 +452,32 @@ export default function StaffHomeScreen() {
           className="flex-1 justify-end bg-black/40"
         >
           <Pressable className="gap-4 rounded-t-3xl bg-white p-5">
-            <Text className="font-sans-bold text-lg">{t("shiftSummary")}</Text>
-            <Text className="font-sans text-xs text-midGray">
-              {data?.actorName} · {t("started")} {formatTime(shiftStart)}
-            </Text>
-            <View className="flex-row">
-              <Stat
-                label={t("sales")}
-                value={formatMoney(data?.sales ?? ZERO_PAISA)}
-              />
-              <Stat
-                label={t("txns")}
-                value={formatNumber(data?.transactionCount ?? 0)}
-              />
-              <Stat
-                label={t("average")}
-                value={formatMoney(data?.averageBill ?? ZERO_PAISA)}
-              />
+            <View className="h-1 w-10 self-center rounded-full bg-auth-fieldBorder" />
+            <View>
+              <Text className="font-sans-bold text-lg text-richBlack">{t("shiftSummary")}</Text>
+              <Text className="mt-1 font-sans text-xs text-midGray">
+                {data?.actorName} · {t("started")} {formatTime(shiftStart)}
+              </Text>
             </View>
-            <View className="rounded-xl bg-brand-softGreen p-3">
+            <View className="flex-row gap-2">
+              <SheetStat label={t("sales")} value={salesValue} isMoney />
+              <SheetStat label={t("txns")} value={countValue} isMoney={false} />
+              <SheetStat label={t("average")} value={averageValue} isMoney />
+            </View>
+            <View className="rounded-xl bg-auth-neutralFill p-3">
               {data?.recent.length ? (
                 data.recent.map((item) => (
-                  <View key={item.id} className="flex-row justify-between py-1">
-                    <Text className="text-xs text-midGray">
+                  <View key={item.id} className="flex-row justify-between py-1.5">
+                    <Text className="font-sans text-xs text-midGray">
                       {formatTime(item.createdAt)}
                     </Text>
-                    <Text className="font-mono text-xs">
+                    <Text className="font-mono-medium text-xs text-richBlack">
                       {formatMoney(item.total)}
                     </Text>
                   </View>
                 ))
               ) : (
-                <Text className="text-center text-xs">
+                <Text className="py-2 text-center font-sans text-xs text-midGray">
                   {t("noTransactions")}
                 </Text>
               )}
@@ -409,15 +485,17 @@ export default function StaffHomeScreen() {
             <View className="flex-row gap-3">
               <Pressable
                 onPress={() => setEndShiftOpen(false)}
-                className="flex-1 items-center rounded-xl bg-brand-softGreen py-3"
+                accessibilityRole="button"
+                className="h-12 flex-1 items-center justify-center rounded-xl bg-auth-neutralFill active:opacity-80"
               >
-                <Text>{t("cancel")}</Text>
+                <Text className="font-sans-bold text-richBlack">{t("cancel")}</Text>
               </Pressable>
               <Pressable
                 onPress={finish}
-                className="flex-1 items-center rounded-xl bg-error py-3"
+                accessibilityRole="button"
+                className="h-12 flex-1 items-center justify-center rounded-xl bg-error active:opacity-90"
               >
-                <Text className="text-white">{t("logout")}</Text>
+                <Text className="font-sans-bold text-white">{t("logout")}</Text>
               </Pressable>
             </View>
           </Pressable>

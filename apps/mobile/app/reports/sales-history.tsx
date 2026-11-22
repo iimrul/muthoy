@@ -5,6 +5,7 @@ import { router } from "expo-router";
 import { formatMoney } from "@muthoy/utils";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { StandardHeader } from "../../components/ui/StandardHeader";
+import { DateField } from "../../components/ui/DateField";
 import {
   createFullSaleRefund,
   getRefundEligibility,
@@ -234,17 +235,23 @@ export default function SalesHistoryScreen() {
           className="rounded-lg border border-midGray bg-white p-3"
         />
         <View className="flex-row gap-2">
-          <TextInput
+          <DateField
             value={fromDate}
-            onChangeText={setFromDate}
+            onChange={setFromDate}
+            accessibilityLabel={t("dateFromPlaceholder")}
             placeholder={t("dateFromPlaceholder")}
-            className="flex-1 rounded border border-midGray bg-white p-3"
+            isClearable
+            className="h-12 flex-1 rounded-lg border border-midGray bg-white px-3"
+            textClassName="font-sans text-sm"
           />
-          <TextInput
+          <DateField
             value={toDate}
-            onChangeText={setToDate}
+            onChange={setToDate}
+            accessibilityLabel={t("dateToPlaceholder")}
             placeholder={t("dateToPlaceholder")}
-            className="flex-1 rounded border border-midGray bg-white p-3"
+            isClearable
+            className="h-12 flex-1 rounded-lg border border-midGray bg-white px-3"
+            textClassName="font-sans text-sm"
           />
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>

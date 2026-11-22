@@ -1,8 +1,8 @@
-// Volume 0 Day 9: Expiry Management. Proves listBatchesByExpiry (db/inventory.ts)
-// returns every non-deleted batch for the shop, nearest-real-expiry-first,
-// with the correct status derived via the shared domain/notificationRules
-// helpers — not a second hand-rolled calculation.
-
+// Expiry Management (Volume 0 Day 9; windowed read founder-approved
+// 2026-11-22). Proves listExpiringBatches (db/inventory.ts) returns only
+// batches with stock whose REAL expiry date is past or inside the shop's Far
+// window, nearest first, with the band derived by the shared domain helpers —
+// and that shop isolation (rule 7) holds on every join it makes.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -10,17 +10,28 @@ import { asPaisa } from '@muthoy/types';
 
 const { db } = await import('./client');
 const schema = await import('./schema');
-const { batches, inventoryMovements, medicines, roles, shops, users } = schema;
-const { listBatchesByExpiry } = await import('./inventory');
+const {
+  batchPromotions, batches, inventoryMovements, medicines, purchaseItems, purchases,
+  roles, shopB2Settings, shops, suppliers, users,
+} = schema;
+const { listExpiringBatches } = await import('./inventory');
 const { sqlite } = await import('./test/expo-sqlite');
 
-function applyMigration(fileName: string): void {
-  sqlite.exec(readFileSync(resolve('apps/mobile/db/migrations', fileName), 'utf8'));
+const MIGRATIONS_DIR = 'apps/mobile/db/migrations';
+
+function applyAllMigrations(): void {
+  const journal = JSON.parse(
+    readFileSync(resolve(MIGRATIONS_DIR, 'meta', '_journal.json'), 'utf8'),
+  ) as { entries: { tag: string }[] };
+  for (const entry of journal.entries) {
+    sqlite.exec(readFileSync(resolve(MIGRATIONS_DIR, `${entry.tag}.sql`), 'utf8'));
+  }
 }
 
 const NOW = new Date('2027-01-15T09:00:00');
 const SHOP_ID = '40000001-0000-4000-8000-000000000001';
 const OTHER_SHOP_ID = '40000002-0000-4000-8000-000000000001';
+const TIGHT_SHOP_ID = '40000003-0000-4000-8000-000000000001';
 
 function iso(offsetDays: number): string {
   const d = new Date(NOW);
@@ -28,26 +39,34 @@ function iso(offsetDays: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function seedShop(id: string, name: string): void {
+function stamp(): { createdAt: string; updatedAt: string } {
   const now = new Date().toISOString();
-  db.insert(shops).values({ id, ownerId: `${id}-owner`, name, phone: '01700000000', createdAt: now, updatedAt: now }).run();
-  // An owner row so opening-stock movements have a real created_by to point
-  // at — inventory_movements.created_by is a restricted FK.
-  db.insert(roles).values({ id: `${id}-role`, shopId: id, name: 'owner', isSystem: true, createdAt: now, updatedAt: now }).run();
-  db.insert(users).values({ id: `${id}-owner`, shopId: id, name: 'Owner', pinHash: 'hash', pinSetAt: now, roleId: `${id}-role`, isActive: true, createdAt: now, updatedAt: now }).run();
+  return { createdAt: now, updatedAt: now };
 }
 
-function seedMedicine(id: string, shopId: string, name: string): void {
-  const now = new Date().toISOString();
-  db.insert(medicines).values({ id, shopId, name, createdAt: now, updatedAt: now }).run();
+function seedShop(id: string, name: string): void {
+  db.insert(shops).values({ id, ownerId: `${id}-owner`, name, phone: '01700000000', ...stamp() }).run();
+  // An owner row so opening-stock movements have a real created_by to point
+  // at — inventory_movements.created_by is a restricted FK.
+  db.insert(roles).values({ id: `${id}-role`, shopId: id, name: 'owner', isSystem: true, ...stamp() }).run();
+  db.insert(users).values({ id: `${id}-owner`, shopId: id, name: 'Owner', pinHash: 'hash', pinSetAt: stamp().createdAt, roleId: `${id}-role`, isActive: true, ...stamp() }).run();
+  db.insert(suppliers).values({ id: `${id}-supplier`, shopId: id, name: 'Supplier', ...stamp() }).run();
+}
+
+function seedMedicine(
+  id: string,
+  shopId: string,
+  name: string,
+  extra: { generic?: string; manufacturer?: string; type?: string } = {},
+): void {
+  db.insert(medicines).values({ id, shopId, name, ...extra, ...stamp() }).run();
 }
 
 function seedBatch(id: string, shopId: string, medicineId: string, batchNo: string, expiryDate: string | null, stock: number, isDeleted = false): void {
-  const now = new Date().toISOString();
   db.insert(batches).values({
     id, shopId, medicineId, batchNo, expiryDate, stock: 0,
     purchasePrice: asPaisa(100), salePrice: asPaisa(200), isDeleted,
-    createdAt: now, updatedAt: now,
+    ...stamp(),
   }).run();
   // Opening quantity arrives as a movement, never as a directly-written
   // absolute — migration 0006's triggers reject the latter outright.
@@ -55,132 +74,159 @@ function seedBatch(id: string, shopId: string, medicineId: string, batchNo: stri
     db.insert(inventoryMovements).values({
       id: `${id}-opening`, shopId, batchId: id, changeQty: stock,
       reason: 'purchase', createdBy: `${shopId}-owner`,
-      createdAt: now, updatedAt: now,
+      ...stamp(),
     }).run();
   }
 }
 
+function seedPurchase(
+  id: string,
+  shopId: string,
+  createdAt: string,
+  line: { medicineId: string; batchNo: string; status?: 'received' | 'pending' },
+  voided = false,
+): void {
+  db.insert(purchases).values({
+    id, shopId, invoiceNo: `INV-${id}`, supplierId: `${shopId}-supplier`,
+    total: asPaisa(1000), paymentTerms: 'cod',
+    voidedAt: voided ? createdAt : null, voidedBy: voided ? `${shopId}-owner` : null,
+    createdAt, updatedAt: createdAt,
+  }).run();
+  db.insert(purchaseItems).values({
+    id: `${id}-line`, shopId, purchaseId: id, medicineId: line.medicineId, batchNo: line.batchNo,
+    qty: 10, purchasePrice: asPaisa(100), salePrice: asPaisa(200), status: line.status ?? 'received',
+    createdAt, updatedAt: createdAt,
+  }).run();
+}
+
 beforeAll(() => {
-  applyMigration('0000_open_senator_kelly.sql');
-  applyMigration('0001_medicines_fts.sql');
-  applyMigration('0002_furry_celestials.sql');
-  applyMigration('0003_curious_wild_pack.sql');
-  applyMigration('0004_deep_boomer.sql');
-  applyMigration('0005_eminent_legion.sql');
-  applyMigration('0006_inventory_movement_ledger.sql');
-  applyMigration('0007_staff_device_login.sql');
-  applyMigration('0008_native_pin_lookup.sql');
-  applyMigration('0009_strong_gargoyle.sql');
-  applyMigration('0010_known_ares.sql');
-  // H-7: users.access_locked_at, the device-local revocation marker.
-  applyMigration('0027_h7_local_access_lock.sql');
-  applyMigration('0028_shop_scoped_pin_lookup.sql');
-  applyMigration('0029_pin_reserved_while_inactive.sql');
-  applyMigration('0033_medicine_search_key.sql');
+  applyAllMigrations();
 
   seedShop(SHOP_ID, 'Expiry Test Shop');
   seedShop(OTHER_SHOP_ID, 'Other Shop');
-  seedMedicine('med-1', SHOP_ID, 'Napa');
+  seedShop(TIGHT_SHOP_ID, 'Tight Window Shop');
+
+  seedMedicine('med-1', SHOP_ID, 'Napa', { generic: 'Paracetamol', manufacturer: 'Beximco', type: 'tablet' });
   seedMedicine('med-2', SHOP_ID, 'Amoxicillin');
   seedMedicine('med-other', OTHER_SHOP_ID, 'Not Visible');
+  seedMedicine('med-tight', TIGHT_SHOP_ID, 'Tight');
 
-  // Deliberately inserted out of expiry order to prove the query re-sorts.
-  seedBatch('batch-warning', SHOP_ID, 'med-2', 'W1', iso(20), 40); // inside window, past critical cutoff
+  // Deliberately inserted out of expiry order to prove the read re-sorts.
+  seedBatch('batch-near', SHOP_ID, 'med-2', 'W1', iso(20), 40); // inside Near (30)
   seedBatch('batch-expired', SHOP_ID, 'med-1', 'E1', iso(-3), 10); // already past
   seedBatch('batch-null', SHOP_ID, 'med-1', 'N1', null, 5); // no expiry recorded
-  seedBatch('batch-ok', SHOP_ID, 'med-2', 'O1', iso(90), 25); // outside the window
-  seedBatch('batch-critical', SHOP_ID, 'med-1', 'C1', iso(2), 15); // inside critical sub-window
-  seedBatch('batch-deleted', SHOP_ID, 'med-1', 'D1', iso(1), 1, true); // soft-deleted, must never appear
-  seedBatch('batch-other-shop', OTHER_SHOP_ID, 'med-other', 'X1', iso(1), 1); // different shop, must never appear
-
+  seedBatch('batch-later', SHOP_ID, 'med-2', 'O1', iso(90), 25); // outside Far (60)
+  seedBatch('batch-far-edge', SHOP_ID, 'med-2', 'F60', iso(60), 3); // exactly Far: included
+  seedBatch('batch-past-edge', SHOP_ID, 'med-2', 'F61', iso(61), 3); // one day past Far
+  seedBatch('batch-far', SHOP_ID, 'med-1', 'F1', iso(45), 8); // inside Far
+  seedBatch('batch-critical', SHOP_ID, 'med-1', 'C1', iso(2), 15);
+  seedBatch('batch-empty', SHOP_ID, 'med-1', 'Z1', iso(5), 0); // nothing on the shelf
+  seedBatch('batch-deleted', SHOP_ID, 'med-1', 'D1', iso(1), 1, true); // soft-deleted
+  seedBatch('batch-other-shop', OTHER_SHOP_ID, 'med-other', 'X1', iso(1), 1);
   // ADVERSARIAL: a batch stamped with THIS shop's shop_id whose medicine_id
-  // points at ANOTHER shop's medicine. The batches.medicine_id FK constrains
-  // only medicines.id — never the shop — so a corrupted or hostile sync
-  // payload can produce exactly this row. Filtering on batches.shop_id alone
-  // would join it and render 'Not Visible', leaking the other shop's
-  // medicine name (CLAUDE.md rule 7). Dated earliest of all, so a leak would
-  // also break the nearest-first ordering assertion loudly.
+  // points at ANOTHER shop's medicine. The FK constrains only medicines.id, so
+  // a corrupted or hostile sync payload can produce exactly this row. Dated
+  // earliest of all, so a leak would also break the ordering assertion.
   seedBatch('batch-cross-shop-medicine', SHOP_ID, 'med-other', 'XS1', iso(-10), 7);
+
+  // A live promotion on C1, a reversed one on W1.
+  db.insert(batchPromotions).values({
+    id: 'promo-live', shopId: SHOP_ID, batchId: 'batch-critical', discountBps: 2000,
+    isActive: true, createdBy: `${SHOP_ID}-owner`, ...stamp(),
+  }).run();
+  db.insert(batchPromotions).values({
+    id: 'promo-reversed', shopId: SHOP_ID, batchId: 'batch-near', discountBps: 1500,
+    isActive: false, createdBy: `${SHOP_ID}-owner`, ...stamp(),
+  }).run();
+
+  // C1 arrived on two invoices; the newer one is the link.
+  seedPurchase('pur-old', SHOP_ID, '2026-10-01T00:00:00.000Z', { medicineId: 'med-1', batchNo: 'C1' });
+  seedPurchase('pur-new', SHOP_ID, '2026-11-01T00:00:00.000Z', { medicineId: 'med-1', batchNo: 'C1' });
+  // W1's only line is still pending: nothing to return against.
+  seedPurchase('pur-pending', SHOP_ID, '2026-11-02T00:00:00.000Z', { medicineId: 'med-2', batchNo: 'W1', status: 'pending' });
+  // E1's only invoice was voided.
+  seedPurchase('pur-void', SHOP_ID, '2026-11-03T00:00:00.000Z', { medicineId: 'med-1', batchNo: 'E1' }, true);
+  // Another shop received a batch with F1's number for a medicine id it
+  // does not own — must never link.
+  seedPurchase('pur-foreign', OTHER_SHOP_ID, '2026-11-04T00:00:00.000Z', { medicineId: 'med-other', batchNo: 'F1' });
+
+  // A shop with its own, tighter window.
+  db.insert(shopB2Settings).values({
+    id: 'tight-settings', shopId: TIGHT_SHOP_ID, expiryNearDays: 5, expiryFarDays: 10, ...stamp(),
+  }).run();
+  seedBatch('tight-near', TIGHT_SHOP_ID, 'med-tight', 'T5', iso(5), 1);
+  seedBatch('tight-far', TIGHT_SHOP_ID, 'med-tight', 'T8', iso(8), 1);
+  seedBatch('tight-out', TIGHT_SHOP_ID, 'med-tight', 'T12', iso(12), 1);
 });
 
-describe('listBatchesByExpiry', () => {
-  it('sorts nearest real expiry first, with null-expiry last', async () => {
-    const rows = await listBatchesByExpiry(SHOP_ID, NOW);
-    expect(rows.map((r) => r.id)).toEqual(['batch-expired', 'batch-critical', 'batch-warning', 'batch-ok', 'batch-null']);
+describe('listExpiringBatches', () => {
+  it('returns only stocked batches past or inside the Far window, nearest real expiry first', async () => {
+    const { rows } = await listExpiringBatches(SHOP_ID, { now: NOW });
+    expect(rows.map((r) => r.id)).toEqual([
+      'batch-expired', 'batch-critical', 'batch-near', 'batch-far', 'batch-far-edge',
+    ]);
   });
 
-  it('marks a past expiry date as expired', async () => {
-    const rows = await listBatchesByExpiry(SHOP_ID, NOW);
-    const row = rows.find((r) => r.id === 'batch-expired');
-    expect(row?.status).toBe('expired');
-    expect(row?.daysUntilExpiry).toBe(-3);
+  it('bands each row from its real date with the shop default 30/60', async () => {
+    const { rows, nearDays, farDays } = await listExpiringBatches(SHOP_ID, { now: NOW });
+    expect({ nearDays, farDays }).toEqual({ nearDays: 30, farDays: 60 });
+    const band = (id: string) => rows.find((r) => r.id === id);
+    expect(band('batch-expired')).toMatchObject({ band: 'expired', daysUntilExpiry: -3 });
+    expect(band('batch-critical')).toMatchObject({ band: 'near', daysUntilExpiry: 2 });
+    expect(band('batch-near')).toMatchObject({ band: 'near', daysUntilExpiry: 20 });
+    expect(band('batch-far')).toMatchObject({ band: 'far', daysUntilExpiry: 45 });
+    expect(band('batch-far-edge')).toMatchObject({ band: 'far', daysUntilExpiry: 60 });
   });
 
-  it('marks a batch inside the critical sub-window as critical', async () => {
-    const rows = await listBatchesByExpiry(SHOP_ID, NOW);
-    const row = rows.find((r) => r.id === 'batch-critical');
-    expect(row?.status).toBe('critical');
-    expect(row?.daysUntilExpiry).toBe(2);
+  it('leaves out the empty, the far-dated, the undated and the deleted', async () => {
+    const ids = (await listExpiringBatches(SHOP_ID, { now: NOW })).rows.map((r) => r.id);
+    for (const absent of ['batch-empty', 'batch-later', 'batch-past-edge', 'batch-null', 'batch-deleted']) {
+      expect(ids, absent).not.toContain(absent);
+    }
   });
 
-  it('uses the B2 Near=30 day default', async () => {
-    const rows = await listBatchesByExpiry(SHOP_ID, NOW);
-    const row = rows.find((r) => r.id === 'batch-warning');
-    expect(row?.status).toBe('critical');
-    expect(row?.daysUntilExpiry).toBe(20);
+  it("uses the shop's own Near/Far settings", async () => {
+    const result = await listExpiringBatches(TIGHT_SHOP_ID, { now: NOW });
+    expect({ near: result.nearDays, far: result.farDays }).toEqual({ near: 5, far: 10 });
+    expect(result.rows.map((r) => [r.id, r.band])).toEqual([['tight-near', 'near'], ['tight-far', 'far']]);
   });
 
-  it('marks a batch outside the configured window as ok', async () => {
-    const rows = await listBatchesByExpiry(SHOP_ID, NOW);
-    const row = rows.find((r) => r.id === 'batch-ok');
-    expect(row?.status).toBe('ok');
-    expect(row?.daysUntilExpiry).toBe(90);
+  it('carries what the card shows: names, batch, stock and the live promotion only', async () => {
+    const { rows } = await listExpiringBatches(SHOP_ID, { now: NOW });
+    expect(rows.find((r) => r.id === 'batch-critical')).toMatchObject({
+      medicineName: 'Napa', generic: 'Paracetamol', manufacturer: 'Beximco', form: 'tablet',
+      batchNo: 'C1', quantityAvailable: 15, expiryDate: iso(2), promotionBps: 2000,
+    });
+    expect(rows.find((r) => r.id === 'batch-near')).toMatchObject({
+      generic: null, manufacturer: null, form: null, promotionBps: 0,
+    });
   });
 
-  it('marks a batch with no expiry date recorded as unknown, not a crash', async () => {
-    const rows = await listBatchesByExpiry(SHOP_ID, NOW);
-    const row = rows.find((r) => r.id === 'batch-null');
-    expect(row?.status).toBe('unknown');
-    expect(row?.daysUntilExpiry).toBeNull();
-    expect(row?.expiryDate).toBeNull();
+  it('links a batch to the newest invoice that received it, only when asked', async () => {
+    const plain = await listExpiringBatches(SHOP_ID, { now: NOW });
+    expect(plain.rows.every((r) => r.purchaseId === null)).toBe(true);
+
+    const { rows } = await listExpiringBatches(SHOP_ID, { now: NOW, includePurchaseLinks: true });
+    const link = (id: string) => rows.find((r) => r.id === id)?.purchaseId;
+    expect(link('batch-critical')).toBe('pur-new');
+    expect(link('batch-near'), 'a pending line cannot be returned').toBeNull();
+    expect(link('batch-expired'), 'a voided invoice cannot be returned against').toBeNull();
+    expect(link('batch-far'), "another shop's invoice never links").toBeNull();
   });
 
-  it('carries medicine name, batch number, and remaining stock for display', async () => {
-    const rows = await listBatchesByExpiry(SHOP_ID, NOW);
-    const row = rows.find((r) => r.id === 'batch-critical');
-    expect(row?.medicineName).toBe('Napa');
-    expect(row?.batchNo).toBe('C1');
-    expect(row?.quantityAvailable).toBe(15);
-  });
-
-  it('never returns a soft-deleted batch', async () => {
-    const rows = await listBatchesByExpiry(SHOP_ID, NOW);
-    expect(rows.some((r) => r.id === 'batch-deleted')).toBe(false);
-  });
-
-  it('preserves shop isolation — never returns another shop\'s batches', async () => {
-    const rows = await listBatchesByExpiry(SHOP_ID, NOW);
+  it("preserves shop isolation — never returns another shop's batches", async () => {
+    const { rows } = await listExpiringBatches(SHOP_ID, { now: NOW });
     expect(rows.some((r) => r.id === 'batch-other-shop')).toBe(false);
-
-    const otherRows = await listBatchesByExpiry(OTHER_SHOP_ID, NOW);
-    expect(otherRows.map((r) => r.id)).toEqual(['batch-other-shop']);
+    const other = await listExpiringBatches(OTHER_SHOP_ID, { now: NOW });
+    expect(other.rows.map((r) => r.id)).toEqual(['batch-other-shop']);
   });
 
   it('never exposes a cross-shop medicine through a dangling batch reference', async () => {
-    const rows = await listBatchesByExpiry(SHOP_ID, NOW);
-
-    // The batch itself is dropped — an inner join scoped to this shop's
-    // medicines matches nothing for it.
+    const { rows } = await listExpiringBatches(SHOP_ID, { now: NOW, includePurchaseLinks: true });
     expect(rows.some((r) => r.id === 'batch-cross-shop-medicine')).toBe(false);
-    // And the other shop's medicine name never reaches the caller by any route.
     expect(rows.some((r) => r.medicineName === 'Not Visible')).toBe(false);
     expect(rows.some((r) => r.medicineId === 'med-other')).toBe(false);
-  });
-
-  it('does not leak the victim shop\'s batch into the attacking shop either', async () => {
-    // Same row viewed from the other side: OTHER_SHOP owns the medicine but
-    // not the batch, so it must not inherit a batch stamped to another shop.
-    const otherRows = await listBatchesByExpiry(OTHER_SHOP_ID, NOW);
-    expect(otherRows.some((r) => r.id === 'batch-cross-shop-medicine')).toBe(false);
+    const other = await listExpiringBatches(OTHER_SHOP_ID, { now: NOW });
+    expect(other.rows.some((r) => r.id === 'batch-cross-shop-medicine')).toBe(false);
   });
 });

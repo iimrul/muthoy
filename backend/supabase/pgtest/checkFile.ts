@@ -89,6 +89,11 @@ export const POST_E4_MIGRATIONS: readonly string[] = Object.freeze([
   // Migration 40: server time bounds 39's Staff-supplied reconciliation clock,
   // so a handset whose clock runs ahead cannot win every later LWW comparison.
   '20261116020000_staff_reconciliation_server_clock.sql',
+  // Migration 41: admin plan grants (founder-approved 2026-11-21). Service-role
+  // RPC that grants or extends Pro/Ultra exactly as a verified payment would,
+  // without stamping verified_at, recording every grant with its reason.
+  '20261121000000_admin_plan_grants.sql',
+  '20261122000000_admin_grant_cycle.sql',
 ]);
 
 /**

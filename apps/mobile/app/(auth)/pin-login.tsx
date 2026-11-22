@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { router } from 'expo-router';
+import { deviceLoginSchema } from '@muthoy/validation';
 import { AuthButton } from '../../components/auth/AuthButton';
 import { AuthIconTile } from '../../components/auth/AuthIconTile';
 import { AuthNotice } from '../../components/auth/AuthNotice';
 import { AuthShell } from '../../components/auth/AuthShell';
 import { AuthTitleBlock } from '../../components/auth/AuthTitleBlock';
+import { deviceLoginErrorKey } from '../../components/auth/authMessages';
+import { PhoneField } from '../../components/auth/PhoneField';
+import { authPhoneForSubmit, formatPhoneForDisplay } from '../../components/auth/phoneInput';
 import { AUTH_CHIP_LABELS, SecureChip } from '../../components/auth/SecureChip';
-import { useCopyFont } from '../../components/auth/typography';
+import { latinFont, useCopyFont } from '../../components/auth/typography';
 import { PinPad, usePinEntry, type PinCompletionMeta } from '../../components/ui/PinPad';
 import { StandardHeader } from '../../components/ui/StandardHeader';
-import { recordSuccessfulLogin, verifyPin } from '../../db/auth';
+import { localUserHasPhone, recordSuccessfulLogin, verifyPin } from '../../db/auth';
 import { DeviceAccessRevokedError, PinAccountRefusedError, PinLockedOutError } from '../../db/errors';
 import { pinAttemptScope, pinAttemptStatus } from '../../db/pinAttemptLock';
 import { handoffAuthTiming, startAuthTiming } from '../../dev/authTiming';
@@ -20,7 +24,7 @@ import {
 } from '../../dev/runtimeDiagnostics';
 import { toRole } from '../../domain/permissions';
 import type { CatalogKey } from '../../i18n/catalog';
-import { fillTemplate } from '../../i18n/display';
+import { fillTemplate, localizeValidationMessage } from '../../i18n/display';
 import { authenticatedHome } from '../../navigation/routes';
 import { useI18n, type Locale } from '../../state/localeStore';
 import { readLastShopIdSync, useSessionStore } from '../../state/sessionStore';
@@ -31,6 +35,8 @@ import {
 } from '../../state/signOutNotice';
 import { inspectCloudActorBinding } from '../../sync/authActorBinding';
 import { networkReachability } from '../../sync/connectivity';
+import { readSessionAuthorityLease } from '../../sync/sessionAuthorityStore';
+import { DeviceLoginError, loginOnNewDevice } from '../../sync/deviceAuth';
 import {
   DeviceRegistryError,
   switchActorOnDevice,
@@ -105,9 +111,34 @@ export default function PinLoginScreen() {
     return status.isLocked ? Date.now() + status.retryAfterMs : null;
   });
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // Founder decision 2026-11-21: the mobile number comes first, then the PIN.
+  // The number step is local (no network); the PIN is still verified offline.
+  const [step, setStep] = useState<'phone' | 'pin'>('phone');
+  const [phone, setPhone] = useState('');
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  // A relink that failed, shown on this screen instead of sending the person to
+  // Device Login to type the same number and PIN a second time.
+  const [relinkFailure, setRelinkFailure] = useState<CatalogKey | null>(null);
   const login = useSessionStore((s) => s.login);
   const { t, locale } = useI18n();
   const font = useCopyFont();
+
+  const handlePhoneNext = () => {
+    const parsed = deviceLoginSchema.shape.phone.safeParse(authPhoneForSubmit(phone));
+    if (!parsed.success) {
+      setPhoneError(localizeValidationMessage(parsed.error.issues[0]?.message ?? '', t) ?? t('deviceLoginGenericFailure'));
+      return;
+    }
+    setPhoneError(null);
+    setSignedOut(null);
+    setStep('pin');
+  };
+
+  const handleChangeNumber = () => {
+    setError(false);
+    setRelinkFailure(null);
+    setStep('phone');
+  };
 
   useEffect(() => {
     clearSignOutNotice();
@@ -201,26 +232,58 @@ export default function PinLoginScreen() {
         return;
       }
 
+      // Founder decision 2026-11-21: the number typed first must be the
+      // matched person's own. verifyPin above still identified them and
+      // charged the attempt budget exactly as before; a PIN that belongs to
+      // someone else is answered with the same "incorrect" message.
+      if (!(await localUserHasPhone(result.shopId, result.userId, authPhoneForSubmit(phone)))) {
+        setError(true);
+        setRevoked(null);
+        setRefused(null);
+        setShakeKey((value) => value + 1);
+        timing?.mark('login_rejected', 'error');
+        return;
+      }
+
       setError(false);
       setRevoked(null);
       setRefused(null);
+      setRelinkFailure(null);
       // PIN login remains offline-capable. Online, however, a missing or
       // different cloud actor must be re-linked BEFORE a local session exists.
       // Letting the authenticated navigator mount first makes the authority
       // gate compare the incoming Staff against the outgoing Owner token and
       // persist a false quarantine for an ordinary shared-device handoff.
-      const binding = await inspectCloudActorBinding(result);
+      //
+      // Reachability is asked ONCE and reused by both branches below. Two
+      // separate calls can disagree — the radio genuinely drops between them —
+      // and a handover that decided it was offline for the switch and online
+      // for the relink would bounce a staff member for no reason. Both reads
+      // are local and independent, so they run together.
+      const [binding, reachability] = await Promise.all([
+        inspectCloudActorBinding(result),
+        networkReachability(),
+      ]);
       let bindingMatches = binding.status === 'matched'
         && binding.actorUserId === result.userId
         && binding.shopId === result.shopId;
+      const isOnline = reachability !== 'offline';
+      // H-10. A lock on this actor is lifted ONLY by number + PIN proof plus a
+      // full authoritative pull (sync/deviceAuth activateHydratedDevice). The
+      // PIN-only switch below mints a session but leaves the lock, so the root
+      // layout's authority gate signed the person straight back out after every
+      // correct PIN — the sign-in loop of 2026-11-21. Both are already typed on
+      // this screen, so a locked actor goes to the relink. Offline the lock
+      // cannot be lifted at all; saying so beats a login that is undone at once.
+      const lease = readSessionAuthorityLease(result.shopId, result.userId);
+      const isQuarantined = lease.status === 'valid' && lease.record.quarantineReason !== null;
+      if (isQuarantined && !isOnline) {
+        setRelinkFailure('authErrorNetwork');
+        timing?.mark('authority_quarantined_offline', 'error');
+        return;
+      }
 
-      // Asked ONCE and reused by both branches below. Two separate calls can
-      // disagree — the radio genuinely drops between them — and a handover
-      // that decided it was offline for the switch and online for the relink
-      // would bounce a staff member to a phone-number screen for no reason.
-      const isOnline = await networkReachability() !== 'offline';
-
-      if (!bindingMatches && isOnline) {
+      if (!bindingMatches && isOnline && !isQuarantined) {
         // A2.3, and the reason this batch exists.
         //
         // A shared pharmacy till hands over between Owner, Manager and Staff
@@ -256,11 +319,20 @@ export default function PinLoginScreen() {
         }
       }
 
-      if (!bindingMatches && isOnline) {
+      if ((!bindingMatches || isQuarantined) && isOnline) {
         timing?.mark('cloud_relink_required');
-        // `reason` only lets Device Login explain why a correct PIN was not
-        // enough this time; it grants nothing.
-        router.replace({ pathname: '/device-login', params: { role: result.role, reason: 'relink' } });
+        // The number and PIN were both typed on THIS screen, so the relink is
+        // done here with them — the same call Device Login makes — instead of
+        // sending the person there to type both again. The root gate then
+        // re-derives the destination from SQLite, exactly as Device Login does.
+        try {
+          await loginOnNewDevice(authPhoneForSubmit(phone), pin, timing);
+          router.replace('/');
+        } catch (cause) {
+          setRelinkFailure(
+            cause instanceof DeviceLoginError ? deviceLoginErrorKey(cause.code) : 'deviceLoginGenericFailure',
+          );
+        }
         return;
       }
       const boundResult = {
@@ -290,7 +362,7 @@ export default function PinLoginScreen() {
         sessionDiagnosticContext(boundResult, '/pin-login'),
       );
     },
-    [login],
+    [login, phone],
   );
 
   const { pin, isSubmitting, handleDigitPress, handleBackspace } = usePinEntry(handleComplete);
@@ -301,6 +373,7 @@ export default function PinLoginScreen() {
       setSignedOut(null);
       setError(false);
       setRefused(null);
+      setRelinkFailure(null);
       handleDigitPress(digit);
     },
     [handleDigitPress],
@@ -325,16 +398,64 @@ export default function PinLoginScreen() {
     />
   ) : refused ? (
     <AuthNotice tone="error" message={t(refused === 'staff_limit' ? 'pinRefusedStaffLimit' : 'pinRefusedRole')} />
+  ) : relinkFailure ? (
+    <AuthNotice tone="error" message={t(relinkFailure)} />
   ) : error ? (
     <AuthNotice tone="warning" message={t('pinIncorrect')} detail={t('pinIncorrectHint')} />
   ) : signedOut ? (
     <AuthNotice tone="info" title={t('signedOutTitle')} message={t(SIGNED_OUT_KEYS[signedOut])} />
   ) : null;
 
+  const recovery = (
+    <View className="mt-2.5 items-center gap-1">
+      <AuthButton
+        variant="link"
+        label={t('pinRecoveryAction')}
+        accessibilityLabel={t('pinRecoveryAction')}
+        onPress={() => router.push(step === 'pin' ? { pathname: '/forgot-pin', params: { phone: authPhoneForSubmit(phone) } } : '/forgot-pin')}
+      />
+      <Text className={`${font()} px-4 text-center text-[11px] leading-5 text-secure-footnote`}>
+        {t('pinRecoveryGuidance')}
+      </Text>
+    </View>
+  );
+
+  if (step === 'phone') {
+    return (
+      <AuthShell
+        variant="secure"
+        header={<StandardHeader tone="auth" safeAreaTop title={t('pinLoginPhoneHeaderTitle')} />}
+        footer={<View className="w-full">{recovery}</View>}
+      >
+        <View className="items-center">
+          <SecureChip label={AUTH_CHIP_LABELS.secure} />
+          <AuthIconTile icon="shield-check" />
+          <AuthTitleBlock eyebrow={t('pinLoginEyebrow')} title={t('pinLoginTitle')} body={t('pinLoginPhoneBody')} />
+        </View>
+        <View className="mt-6 gap-3">
+          <PhoneField variant="secure" value={phone} onChangeText={setPhone} autoFocus onSubmitEditing={handlePhoneNext} />
+          {phoneError ? (
+            <AuthNotice tone="error" message={phoneError} />
+          ) : signedOut ? (
+            <AuthNotice tone="info" title={t('signedOutTitle')} message={t(SIGNED_OUT_KEYS[signedOut])} />
+          ) : null}
+          <AuthButton variant="secure" label={t('deviceLoginContinue')} onPress={handlePhoneNext} />
+        </View>
+      </AuthShell>
+    );
+  }
+
   return (
     <AuthShell
       variant="secure"
-      header={<StandardHeader tone="auth" safeAreaTop title={t('pinLoginHeaderTitle')} />}
+      header={
+        <StandardHeader
+          tone="auth"
+          safeAreaTop
+          title={t('pinLoginHeaderTitle')}
+          onBackPress={isSubmitting ? undefined : handleChangeNumber}
+        />
+      }
       footer={
         <View className="w-full">
           <PinPad
@@ -342,33 +463,17 @@ export default function PinLoginScreen() {
             value={pin}
             onDigitPress={handleDigit}
             onBackspace={handleBackspace}
-            error={error || isLocked || revoked !== null || refused !== null}
+            error={error || isLocked || revoked !== null || refused !== null || relinkFailure !== null}
             disabled={isSubmitting || isLocked}
             shakeKey={shakeKey}
           />
-          {/* H-4. Owner recovery has to be reachable FROM HERE, not only from
-              Device Login: a successful PIN no longer refills the attempt
-              budget, so an owner who has forgotten theirs can lock the pad and,
-              without this, would have no way forward but waiting. The route is
-              the existing OTP recovery flow (app/(auth)/forgot-pin.tsx) — no
-              phone param, because this pad never asked for one.
-
-              Shown whether or not the pad is locked, and deliberately not
-              disabled while it is: the lock is on guessing, not on recovering. */}
-          <View className="mt-2.5 items-center gap-1">
-            <AuthButton
-              variant="link"
-              label={t('pinRecoveryAction')}
-              accessibilityLabel={t('pinRecoveryAction')}
-              onPress={() => router.push('/forgot-pin')}
-            />
-            {/* The pad cannot know who is holding the phone, so both audiences
-                are addressed: recovery proves an OWNER's phone number, and
-                Volume 4 gives staff none of their own. */}
-            <Text className={`${font()} px-4 text-center text-[11px] leading-5 text-secure-footnote`}>
-              {t('pinRecoveryGuidance')}
-            </Text>
-          </View>
+          {/* H-4. Owner recovery has to be reachable FROM HERE: a successful
+              PIN no longer refills the attempt budget, so an owner who has
+              forgotten theirs can lock the pad and, without this, would have no
+              way forward but waiting. Shown whether or not the pad is locked,
+              and deliberately not disabled while it is: the lock is on
+              guessing, not on recovering. */}
+          {recovery}
         </View>
       }
     >
@@ -376,6 +481,8 @@ export default function PinLoginScreen() {
         <SecureChip label={AUTH_CHIP_LABELS.secure} />
         <AuthIconTile icon="shield-check" />
         <AuthTitleBlock eyebrow={t('pinLoginEyebrow')} title={t('pinLoginTitle')} body={t('pinLoginBody')} />
+        <Text className={`${latinFont('medium')} text-[13px] text-secure-chipText`}>{formatPhoneForDisplay(phone)}</Text>
+        <AuthButton variant="link" label={t('authChangeNumber')} disabled={isSubmitting} onPress={handleChangeNumber} />
       </View>
       <View className="mt-1 min-h-[26px] w-full">{notice}</View>
     </AuthShell>

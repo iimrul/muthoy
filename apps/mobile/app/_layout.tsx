@@ -46,6 +46,7 @@ import { AppNavigationShell } from '../components/navigation/AppNavigationShell'
 import { AuthenticatedRuntimeErrorBoundary } from '../components/navigation/AuthenticatedRuntimeErrorBoundary';
 import { NavigationBoundary } from '../components/navigation/NavigationBoundary';
 import { ToastHost } from '../components/ui/Toast';
+import { isTapLatencyProbeEnabled, TapLatencyProbe } from '../monitoring/tapLatencyProbe';
 import { DatabaseRecoveryScreen } from '../components/database/DatabaseRecoveryScreen';
 import { DatabaseKeyUnrecoverableError, DatabaseRecoveryPendingError } from '../db/errors';
 import { AuthorityBlockedScreen } from '../components/auth/AuthorityBlockedScreen';
@@ -416,13 +417,22 @@ export default function RootLayout() {
     );
   }
 
+  const navigation = (
+    <AppNavigationShell>
+      <NavigationBoundary>
+        {/* freezeOnBlur: a screen covered by another (Sale under the cart,
+            the cart under checkout) stops re-rendering until it is shown
+            again. Measured: every cart +/- re-rendered the whole Sale screen
+            underneath (0.8–1.0 s per tap on a Galaxy A04s, dev mode). */}
+        <Stack screenOptions={{ headerShown: false, freezeOnBlur: true }} />
+      </NavigationBoundary>
+    </AppNavigationShell>
+  );
+
   return (
     <AuthenticatedRuntimeErrorBoundary>
-      <AppNavigationShell>
-        <NavigationBoundary>
-          <Stack screenOptions={{ headerShown: false }} />
-        </NavigationBoundary>
-      </AppNavigationShell>
+      {/* Internal builds only (EXPO_PUBLIC_PERF_PROBE=1): logs tap latency. */}
+      {isTapLatencyProbeEnabled ? <TapLatencyProbe>{navigation}</TapLatencyProbe> : navigation}
       {/* Phase C Pass 1. Mounted ONCE, and outside the navigator on purpose: a
           confirmation raised just before a route change used to be unmounted by
           the screen that raised it, because the toast lived in that screen. */}

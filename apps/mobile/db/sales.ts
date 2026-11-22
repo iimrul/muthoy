@@ -120,6 +120,19 @@ export async function searchMedicinesForSale(
     },
   );
 
+  return quoteSaleRows(shopId, medicineRows);
+}
+
+/**
+ * The FEFO active batch, sellable stock and promotion price for a set of
+ * medicines — in ONE batch query, whatever the number of medicines. Shared by
+ * the typed search and listSaleInsights so both price a line identically.
+ * Medicines with no sellable batch are dropped; input order is kept.
+ */
+function quoteSaleRows(
+  shopId: string,
+  medicineRows: readonly FtsMedicineRow[],
+): MedicineSearchResult[] {
   if (medicineRows.length === 0) {
     return [];
   }
@@ -308,21 +321,21 @@ export async function listSaleInsights(
         : mode === "favorites"
           ? "count(distinct si.sale_id) DESC"
           : "m.name COLLATE NOCASE";
-  const rows = sqliteConnection.getAllSync<{ id: string; name: string }>(
-    `SELECT m.id,m.name FROM medicines m
+  // One ranked read plus ONE batch quote. This used to run a full
+  // searchMedicinesForSale per row — up to 1 + 20 × 3 synchronous queries on
+  // every Sale tab open and filter tap — and matched rows back by name, which
+  // could drop a medicine whose name search returned more than 50 hits.
+  const rows = sqliteConnection.getAllSync<FtsMedicineRow>(
+    `SELECT m.id AS medicineId, m.name, m.generic, m.manufacturer,
+            m.requires_prescription AS requiresPrescription
+       FROM medicines m
        LEFT JOIN sale_items si ON si.medicine_id=m.id AND si.shop_id=m.shop_id AND si.is_deleted=0
       WHERE m.shop_id=$shopId AND m.is_deleted=0
       GROUP BY m.id,m.name
       ORDER BY ${order},m.id LIMIT 20`,
     { $shopId: shopId },
   );
-  const matches = await Promise.all(
-    rows.map((row) => searchMedicinesForSale(shopId, row.name)),
-  );
-  return rows.flatMap(
-    (row, index) =>
-      matches[index]?.find((match) => match.medicineId === row.id) ?? [],
-  );
+  return quoteSaleRows(shopId, rows);
 }
 
 type LegacySaleLine = {

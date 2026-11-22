@@ -30,7 +30,7 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 const { recentAdminAudit } = await import('./adminAudit');
 const { newSessionPayload, signAdminSession } = await import('./adminSession');
 const { AdminForbiddenError, AdminDataError } = await import('./errors');
-const { expireStalePaymentOrder, reconcilePlanLimits } =
+const { expireStalePaymentOrder, grantPlan, reconcilePlanLimits } =
   await import('./adminActions');
 
 const SECRET = 'a'.repeat(32);
@@ -225,6 +225,60 @@ describe('reconcilePlanLimits', () => {
     await reconcilePlanLimits(ACCOUNT, deps('billing', client));
 
     expect(recentAdminAudit.entries()[0]).toMatchObject({ action: 'subscription.reconcile_limits' });
+  });
+});
+
+// Founder decision 2026-11-21 (migration 41).
+describe('grantPlan', () => {
+  const VALID = { accountId: ACCOUNT, tier: 'pro', days: '30', reason: 'Beta pilot pharmacy' };
+
+  test('passes the validated grant and the VERIFIED admin as the granter', async () => {
+    await signInAs('billing');
+    const { client, rpcCalls } = createClient();
+
+    const result = await grantPlan(VALID, deps('billing', client));
+
+    expect(result.ok).toBe(true);
+    expect(rpcCalls).toEqual([{
+      name: 'admin_grant_plan',
+      args: { p_billing_account_id: ACCOUNT, p_tier: 'pro', p_days: 30, p_reason: 'Beta pilot pharmacy', p_granted_by: 'founder' },
+    }]);
+    expect(recentAdminAudit.entries()[0]).toMatchObject({
+      action: 'subscription.grant_plan',
+      target: ACCOUNT,
+      outcome: 'success',
+      meta: { tier: 'pro', days: 30, reason: 'Beta pilot pharmacy' },
+    });
+  });
+
+  test.each(['read_only', 'support'] as const)('%s cannot grant, and no RPC is reached', async (role) => {
+    await signInAs(role);
+    const { client, rpcCalls } = createClient();
+    await expect(grantPlan(VALID, deps(role, client))).rejects.toBeInstanceOf(AdminForbiddenError);
+    expect(rpcCalls).toEqual([]);
+  });
+
+  test.each([
+    ['a free tier', { ...VALID, tier: 'free' }],
+    ['zero days', { ...VALID, days: '0' }],
+    ['a year and a day', { ...VALID, days: '367' }],
+    ['a fractional day', { ...VALID, days: '1.5' }],
+    ['no reason', { ...VALID, reason: '  ok  ' }],
+    ['a bad account id', { ...VALID, accountId: 'not-a-uuid' }],
+  ])('refuses %s before any RPC, with an audited failure', async (_label, payload) => {
+    await signInAs('billing');
+    const { client, rpcCalls } = createClient();
+    await expect(grantPlan(payload, deps('billing', client))).rejects.toBeInstanceOf(AdminDataError);
+    expect(rpcCalls).toEqual([]);
+    expect(recentAdminAudit.entries()[0]).toMatchObject({ action: 'subscription.grant_plan', outcome: 'failure' });
+  });
+
+  test('a failed RPC is reported, audited, and not claimed as granted', async () => {
+    await signInAs('billing');
+    const { client } = createClient({ rpcError: 'billing account not found' });
+    const result = await grantPlan(VALID, deps('billing', client));
+    expect(result.ok).toBe(false);
+    expect(recentAdminAudit.entries()[0]).toMatchObject({ outcome: 'failure', meta: { reason: 'rpc_failed', tier: 'pro', days: 30 } });
   });
 });
 

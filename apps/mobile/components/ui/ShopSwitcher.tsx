@@ -10,6 +10,23 @@ import { useSessionStore } from '../../state/sessionStore';
 import { useBillingAccountId } from '../../state/useBillingAccountId';
 import { useMultiShopAccess } from '../../state/useMultiShopAccess';
 import { switchActiveShop } from '../../state/switchShop';
+import { syncRefusalCode } from '../../sync/invoke';
+
+/** What the owner is told when the TARGET shop refuses this phone. */
+function shopSwitchFailureMessage(code: string | null, bn: boolean): string {
+  switch (code) {
+    case 'shop_switch_device_removed':
+      return bn
+        ? 'এই ফোনটি ওই দোকান থেকে সরানো হলো। ওই দোকানের Owner বা Manager আবার চালু করলে তবেই বদলানো যাবে।'
+        : 'This phone was removed from that shop. Its Owner or Manager must restore it first.';
+    case 'shop_switch_approval_required':
+      return bn
+        ? 'ওই দোকানের অন্য একটি Owner বা Manager ফোন থেকে আগে এই ফোনটি অনুমোদন দিতে হবে।'
+        : 'Another Owner or Manager phone in that shop must approve this phone first.';
+    default:
+      return bn ? 'দোকান বদলানো যায়নি। আবার চেষ্টা করুন।' : 'Could not switch shop. Try again.';
+  }
+}
 
 export function ShopSwitcher() {
   const session = useSessionStore((state) => state.session);
@@ -66,8 +83,8 @@ export function ShopSwitcher() {
       await switchActiveShop(shopId, await hasNetworkConnection());
       setOpen(false);
       router.replace('/dashboard');
-    } catch {
-      setError(bn ? 'দোকান বদলানো যায়নি। আবার চেষ্টা করুন।' : 'Could not switch shop. Try again.');
+    } catch (failure) {
+      setError(shopSwitchFailureMessage(await syncRefusalCode(failure).catch(() => null), bn));
     } finally {
       setBusy(null);
     }

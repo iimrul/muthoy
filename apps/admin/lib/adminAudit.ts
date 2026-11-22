@@ -102,6 +102,10 @@ export const ALLOWED_META_KEYS: readonly string[] = [
   'source',
   'subscriptionId',
   'targetUsername',
+  // Founder-approved plan grants (migration 41): which tier, for how many days.
+  // The written reason rides on the existing scrubbed `reason` key.
+  'tier',
+  'days',
   'toRole',
 ];
 
@@ -148,10 +152,11 @@ const META_VALUE_RULES: Readonly<Record<string, (value: string) => boolean>> = O
   targetUsername: (value) => USERNAME_SHAPE.test(value),
   fromRole: (value) => ROLE_VALUES.includes(value),
   toRole: (value) => ROLE_VALUES.includes(value),
+  tier: (value) => value === 'pro' || value === 'ultra',
 });
 
 /** Keys whose value must be a finite INTEGER, not merely a finite number. */
-const INTEGER_META_KEYS: readonly string[] = ['rowCount', 'durationMs'];
+const INTEGER_META_KEYS: readonly string[] = ['rowCount', 'durationMs', 'days'];
 
 const MAX_VALUE_LENGTH = 200;
 const RING_CAPACITY = 200;

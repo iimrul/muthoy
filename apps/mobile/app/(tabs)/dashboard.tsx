@@ -1,4 +1,6 @@
 import { SyncExposureStatus } from "../../components/sync/SyncExposureStatus";
+import { SyncStatusDot, syncButtonLabel } from "../../components/sync/SyncStatusDot";
+import { useLiveSyncState } from "../../state/liveSyncState";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -9,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
+import { useFocusRefresh } from "../../navigation/useFocusRefresh";
 import Feather from "@expo/vector-icons/Feather";
 import { formatMoney } from "@muthoy/utils";
 import type { Paisa } from "@muthoy/types";
@@ -22,6 +25,7 @@ import { OpeningCashModal } from "../../components/cash/OpeningCashModal";
 import { PreviousDaySummaryModal } from "../../components/cash/PreviousDaySummaryModal";
 import { AccessDenied } from "../../components/ui/AccessDenied";
 import { DashboardLoadState } from "../../components/staff/DashboardLoadState";
+import { DashboardSkeleton } from "../../components/dashboard/DashboardSkeleton";
 import { LanguageToggle } from "../../components/ui/LanguageToggle";
 import { PlanBadge } from "../../components/ui/PlanBadge";
 import { TrialBanner } from "../../components/ui/TrialBanner";
@@ -145,7 +149,7 @@ export default function MorningDashboardScreen() {
     }
   }, [session, t]);
 
-  useFocusEffect(
+  useFocusRefresh(
     useCallback(() => {
       void reload();
     }, [reload]),
@@ -255,6 +259,9 @@ export default function MorningDashboardScreen() {
     setIsOpeningCashPrompt(true);
     setOpeningCashOpen(true);
   }, [openCashAfterPreviousDay, session]);
+
+  // The header button's blinking dot: yellow = waiting, red = cannot send.
+  const liveSync = useLiveSyncState(session?.shopId);
 
   const handleSync = useCallback(async () => {
     if (!session) return;
@@ -382,27 +389,21 @@ export default function MorningDashboardScreen() {
   if (session.role !== "owner") {
     return <AccessDenied homeHref="/staff-home" />;
   }
-  if (isLoading && !data) {
-    return (
-      <DashboardLoadState
-        loading
-        message={t("dashboardLoading")}
-        retryLabel={t("retry")}
-        onRetry={() => void reload()}
-      />
-    );
+  if (!data) {
+    // No "Loading dashboard…" screen (founder 2026-11-21): the dashboard's own
+    // shape is drawn at once and the first local read fills it in.
+    if (error && !isLoading) {
+      return (
+        <DashboardLoadState
+          loading={false}
+          message={`${t("dashboardLoadFailed")} ${error}`}
+          retryLabel={t("retry")}
+          onRetry={() => void reload()}
+        />
+      );
+    }
+    return <DashboardSkeleton topInset={topInset} label={t("dashboardLoading")} />;
   }
-  if (error && !data) {
-    return (
-      <DashboardLoadState
-        loading={false}
-        message={`${t("dashboardLoadFailed")} ${error}`}
-        retryLabel={t("retry")}
-        onRetry={() => void reload()}
-      />
-    );
-  }
-  if (!data) return null;
 
   const greeting = t(greetingKeyForHour(new Date().getHours()));
   const hasOpeningCash = data.hasCashDrawer;
@@ -434,8 +435,8 @@ export default function MorningDashboardScreen() {
             >
               <Feather name="menu" size={20} color="#FFFFFF" />
             </Pressable>
-            <Text className="font-sans-bold text-base uppercase tracking-wider text-white">
-              PHARMAPOS
+            <Text className="font-sans-extrabold text-base uppercase tracking-wide text-white">
+              MUTHOY
             </Text>
           </View>
           <View className="flex-row items-center gap-1">
@@ -444,14 +445,15 @@ export default function MorningDashboardScreen() {
               onPress={() => void handleSync()}
               accessibilityRole="button"
               accessibilityState={{ disabled: isSyncing }}
-              accessibilityLabel={`${t("sync")}. ${lastSyncedAt ? `${t("lastSynced")} ${formatTime(lastSyncedAt)}` : t("notSyncedYet")}`}
-              className="h-9 w-9 items-center justify-center rounded-full active:bg-white/10"
+              accessibilityLabel={`${syncButtonLabel(t, liveSync)}. ${lastSyncedAt ? `${t("lastSynced")} ${formatTime(lastSyncedAt)}` : t("notSyncedYet")}`}
+              className="relative h-9 w-9 items-center justify-center rounded-full active:bg-white/10"
             >
               {isSyncing ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Feather name="refresh-cw" size={17} color="#FFFFFF" />
               )}
+              <SyncStatusDot state={liveSync} />
             </Pressable>
             <Pressable
               onPress={() => router.push("/notifications")}
@@ -480,7 +482,7 @@ export default function MorningDashboardScreen() {
         <View className="rounded-b-[18px] bg-auth-heroEnd pb-20 pt-6">
           <View className="mb-6 px-4">
             <View className="flex-row flex-wrap items-center gap-2">
-              <Text className="font-sans-semibold text-lg text-white">
+              <Text className="font-sans-bold text-lg text-white">
                 {greeting}, {data.ownerName}
               </Text>
               <PlanBadge plan={plan.plan} daysLeft={plan.daysLeft} compact expired={plan.reason === 'paid_expired' || plan.reason === 'verification_stale'} grace={plan.reason === 'paid_grace'} />
@@ -508,7 +510,6 @@ export default function MorningDashboardScreen() {
             <KpiCard
               label={t("todaysSales")}
               value={formatMoney(data.today.totalSales)}
-              footer={`${formatNumber(data.today.transactionCount)} ${t("transactions")}`}
               isLive
               liveLabel={t("live")}
               accessibilityLabel={`${t("todaysSales")} ${formatMoney(data.today.totalSales)}`}

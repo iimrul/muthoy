@@ -7,6 +7,7 @@ export const ADMIN_FORM_ACTION_PREFIX = '/api/admin/actions/';
 
 export const ADMIN_FORM_PATHS = Object.freeze({
   reconcileLimits: ADMIN_FORM_ACTION_PREFIX + 'reconcile-limits',
+  grantPlan: ADMIN_FORM_ACTION_PREFIX + 'grant-plan',
   expireOrder: ADMIN_FORM_ACTION_PREFIX + 'expire-order',
   setFeatureFlag: ADMIN_FORM_ACTION_PREFIX + 'set-feature-flag',
   openSupportCase: ADMIN_FORM_ACTION_PREFIX + 'open-support-case',

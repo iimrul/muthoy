@@ -645,75 +645,34 @@ describe('no test in this suite carries a control byte', () => {
 });
 
 // ── W3-08: the expiry band names are ours, so they are translated ──────
-describe('W3-08 — every expiry band the domain can report has a label', () => {
-  it('STATUS_LABEL_KEYS covers the whole ExpiryStatus union', () => {
-    // Same shape of guarantee as the sale-status check: a slug rendered from a
-    // dynamic expression, which no literal scan can see. Derived from the union
-    // itself so a new band cannot ship unlabelled.
-    // ExpiryStatus is composite: 'expired' | ExpiryNotificationSeverity | 'ok'
-    // | 'unknown'. Both unions are resolved, because reading only the outer one
-    // would miss 'critical' and 'warning' and quietly pass.
-    const domain = readFileSync(
-      resolve('apps/mobile/domain/notificationRules.ts'),
-      'utf8',
-    );
-    function unionMembers(name: string): string[] {
-      const start = domain.indexOf(`export type ${name} =`);
-      expect(start, `${name} must be declared in domain/notificationRules.ts`)
-        .toBeGreaterThan(-1);
-      const body = domain.slice(start, domain.indexOf(';', start));
-      return [...body.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]!);
-    }
-    const members = [
-      ...unionMembers('ExpiryStatus'),
-      ...unionMembers('ExpiryNotificationSeverity'),
-    ];
-    expect(new Set(members).size, 'the union parser must find every band')
-      .toBeGreaterThanOrEqual(5);
+describe('W3-08 — every expiry band the screen can show has a label', () => {
+  it('BAND_CHIP_KEYS covers the whole ExpiringBand union', () => {
+    // A slug rendered from a dynamic expression, which no literal scan can
+    // see. Derived from the union the read returns (db/inventory.ts
+    // listExpiringBatches, founder-approved 2026-11-22), so a new band cannot
+    // ship unlabelled. The old ExpiryStatus / ExpiryBand filter maps went with
+    // the filter chips the prototype layout does not have.
+    const source = readFileSync(resolve('apps/mobile/db/inventory.ts'), 'utf8');
+    const start = source.indexOf('export type ExpiringBand =');
+    expect(start, 'ExpiringBand must be declared in db/inventory.ts').toBeGreaterThan(-1);
+    const members = [...source.slice(start, source.indexOf(';', start)).matchAll(/"([a-z_]+)"/g)]
+      .map((match) => match[1]!);
+    expect(members, 'the union parser must find every band').toEqual(['expired', 'near', 'far']);
 
     const screen = code(read('app/inventory/expiry.tsx'));
     const map = screen.slice(
-      screen.indexOf('const STATUS_LABEL_KEYS'),
-      screen.indexOf('};', screen.indexOf('const STATUS_LABEL_KEYS')),
+      screen.indexOf('const BAND_CHIP_KEYS'),
+      screen.indexOf('};', screen.indexOf('const BAND_CHIP_KEYS')),
     );
     for (const member of members) {
-      expect(map, `ExpiryStatus can be "${member}" — give it a catalog key`)
+      expect(map, `the expiry screen can show "${member}" — give it a catalog key`)
         .toContain(`${member}:`);
     }
   });
 });
 
-// ── W3-08: the other two dynamic vocabularies ──────────────────────────
-describe('W3-08 — the filter bands and draft statuses are translated too', () => {
-  /** Reads a string-literal union from source, so the test cannot drift. */
-  function unionFrom(file: string, name: string, quote: string): string[] {
-    const source = readFileSync(resolve(file), 'utf8');
-    const start = source.indexOf(`export type ${name} =`);
-    expect(start, `${name} must be declared in ${file}`).toBeGreaterThan(-1);
-    const body = source.slice(start, source.indexOf(';', start));
-    const pattern = new RegExp(`${quote}([a-z_]+)${quote}`, 'g');
-    return [...body.matchAll(pattern)].map((match) => match[1]!);
-  }
-
-  it('BAND_LABEL_KEYS covers the whole ExpiryBand union', () => {
-    // ExpiryBand ('expired' | 'near' | 'far' | 'later' | 'unknown') is a
-    // DIFFERENT union from ExpiryStatus, and the filter chips render it. Reading
-    // only one of the two would have left the other rendering raw slugs.
-    const members = unionFrom('apps/mobile/domain/inventoryRules.ts', 'ExpiryBand', "'");
-    expect(members.length, 'the union parser must find the bands').toBeGreaterThanOrEqual(5);
-    const screen = code(read('app/inventory/expiry.tsx'));
-    const map = screen.slice(
-      screen.indexOf('const BAND_LABEL_KEYS'),
-      screen.indexOf('};', screen.indexOf('const BAND_LABEL_KEYS')),
-    );
-    for (const member of members) {
-      expect(map, `the expiry filter can be "${member}" — give it a catalog key`)
-        .toContain(`${member}:`);
-    }
-    // Plus the synthetic 'all' chip, which is not part of the domain union.
-    expect(map).toContain('all:');
-  });
-
+// ── W3-08: the other dynamic vocabulary ────────────────────────────────
+describe('W3-08 — the draft statuses are translated too', () => {
   it('DRAFT_STATUS_KEYS covers every status a held cart can carry', () => {
     const drafts = readFileSync(resolve('apps/mobile/db/saleDrafts.ts'), 'utf8');
     const start = drafts.indexOf('status:');

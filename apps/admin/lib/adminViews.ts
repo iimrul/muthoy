@@ -426,9 +426,23 @@ export function statusLabel(status: string): string {
   return ownLabel(STATUS_LABELS, status) ?? status;
 }
 
+/**
+ * Migration 42 (founder 2026-11-22): an admin plan grant is stored with
+ * billing_cycle 'grant'. Nothing is billed for it, so no price, run rate or
+ * "next billing" may be read off it. A verified payment later overwrites the
+ * cycle with the order's monthly/annual, so this marks exactly the rows that
+ * are still free grants.
+ */
+export const ADMIN_GRANT_CYCLE = 'grant';
+
+export function isAdminGrantCycle(cycle: string | undefined): boolean {
+  return cycle === ADMIN_GRANT_CYCLE;
+}
+
 export function billingCycleLabel(cycle: string): string {
   if (cycle === 'monthly') return 'Monthly';
   if (cycle === 'annual') return 'Annual';
+  if (isAdminGrantCycle(cycle)) return 'Admin grant';
   return cycle;
 }
 

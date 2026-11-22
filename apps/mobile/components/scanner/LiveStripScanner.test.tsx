@@ -34,17 +34,34 @@ const camera = vi.hoisted(() => ({
   heldStrip: [] as OcrTextLine[],
   frameCount: 0,
   capturedUris: [] as string[],
+  isMounted: false,
+  barcodeEnabled: false,
+  onBarcodeScanned: null as ((result: { data: string; type: string }) => void) | null,
 }));
+
+vi.mock("@expo/vector-icons/Feather", () => ({ default: () => null }));
 
 vi.mock("../../native/ScannerCamera", () => ({
   ScannerCamera: ({
     onPermissionStateChange,
+    barcodeEnabled,
+    onBarcodeScanned,
     ref,
   }: {
     onPermissionStateChange: (state: "granted") => void;
+    barcodeEnabled?: boolean;
+    onBarcodeScanned?: (result: { data: string; type: string }) => void;
     ref?: React.Ref<unknown>;
   }) => {
     useEffect(() => onPermissionStateChange("granted"), [onPermissionStateChange]);
+    useEffect(() => {
+      camera.isMounted = true;
+      camera.barcodeEnabled = Boolean(barcodeEnabled);
+      camera.onBarcodeScanned = onBarcodeScanned ?? null;
+      return () => {
+        camera.isMounted = false;
+      };
+    });
     useImperativeHandle(ref, () => ({
       requestPermission: async () => true,
       captureAsync: async () => null,
@@ -55,6 +72,30 @@ vi.mock("../../native/ScannerCamera", () => ({
         return uri;
       },
     }));
+    return null;
+  },
+}));
+
+// The frame-processor camera (native/LiveTextCamera.tsx): off unless a test
+// turns it on; when on, the test pushes readings the way the frame worklet does.
+const liveText = vi.hoisted(() => ({
+  isAvailable: false,
+  push: null as ((lines: OcrTextLine[] | null) => void) | null,
+}));
+
+vi.mock("../../native/LiveTextCamera", () => ({
+  isLiveTextCameraAvailable: () => liveText.isAvailable,
+  LiveTextCamera: ({
+    onPermissionStateChange,
+    onLines,
+  }: {
+    onPermissionStateChange: (state: "granted") => void;
+    onLines: (lines: OcrTextLine[] | null) => void;
+  }) => {
+    useEffect(() => onPermissionStateChange("granted"), [onPermissionStateChange]);
+    useEffect(() => {
+      liveText.push = onLines;
+    });
     return null;
   },
 }));
@@ -130,7 +171,9 @@ function quantityOf(medicineId: string): number {
   return useCartStore.getState().items.find((item) => item.medicineId === medicineId)?.quantity ?? 0;
 }
 
-function renderScanner(props: { onDone?: () => void } = {}) {
+function renderScanner(
+  props: { onDone?: () => void; onBarcodeRecognized?: (data: string, format: string) => void } = {},
+) {
   const onDone = props.onDone ?? vi.fn();
   render(
     createElement(LiveStripScanner, {
@@ -139,15 +182,26 @@ function renderScanner(props: { onDone?: () => void } = {}) {
       userId: "user-1",
       onClose: vi.fn(),
       onDone,
+      onBarcodeRecognized: props.onBarcodeRecognized,
       frameIntervalMs: 5,
     }),
   );
   return { onDone };
 }
 
+/** One reading from the frame-processor camera, once scanning is ready. */
+async function pushReading(lines: OcrTextLine[] | null): Promise<void> {
+  await screen.findByText("Hold a medicine strip in front of the camera.");
+  await act(async () => {
+    liveText.push?.(lines);
+  });
+}
+
 beforeEach(() => {
   useLocaleStore.setState({ locale: "en" });
   useCartStore.setState({ items: [] });
+  liveText.isAvailable = false;
+  liveText.push = null;
   hold(NOTHING);
   camera.frameCount = 0;
   camera.capturedUris = [];
@@ -296,6 +350,105 @@ describe("what does not go into the cart", () => {
     expect(await screen.findByText("Couldn't load inventory for scanning.")).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(camera.frameCount).toBe(0);
+  });
+});
+
+describe("frame-processor camera: readings are pushed, no photo is taken", () => {
+  it("adds Napa Extra once from pushed readings, without capturing a single frame", async () => {
+    liveText.isAvailable = true;
+    renderScanner();
+
+    await pushReading(NAPA_EXTRA_STRIP);
+    await waitFor(() => expect(quantityOf("napa-extra")).toBe(1));
+    expect(screen.getByText("Added: Napa Extra")).toBeTruthy();
+
+    // The same strip, still in view, is not added again.
+    await pushReading(NAPA_EXTRA_STRIP);
+    await pushReading(NAPA_EXTRA_STRIP);
+    expect(quantityOf("napa-extra")).toBe(1);
+    expect(deps.playScanBeep).toHaveBeenCalledTimes(1);
+    expect(camera.frameCount).toBe(0);
+  });
+
+  it("re-adds the strip after it left the view and came back", async () => {
+    liveText.isAvailable = true;
+    renderScanner();
+    await pushReading(NAPA_EXTRA_STRIP);
+    await waitFor(() => expect(quantityOf("napa-extra")).toBe(1));
+
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    try {
+      await pushReading(NOTHING);
+      vi.setSystemTime(Date.now() + 2_000);
+      await pushReading(NOTHING);
+      await pushReading(NAPA_EXTRA_STRIP);
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => expect(quantityOf("napa-extra")).toBe(2));
+  });
+
+  it("asks which one on an ambiguous strip and ignores readings while the question is open", async () => {
+    liveText.isAvailable = true;
+    renderScanner();
+    const progut = strip("Progut MUPS", "Esomeprazole");
+
+    await pushReading(progut);
+    await pushReading(progut);
+    expect(await screen.findByText("Which medicine is this?")).toBeTruthy();
+
+    await pushReading(NAPA_EXTRA_STRIP);
+    expect(useCartStore.getState().items).toHaveLength(0);
+  });
+
+  it("says it cannot read after repeated recognition failures", async () => {
+    liveText.isAvailable = true;
+    renderScanner();
+    for (let attempt = 0; attempt < 5; attempt += 1) await pushReading(null);
+
+    expect(await screen.findByText("Can't read right now. Hold the strip steady.")).toBeTruthy();
+  });
+
+  it("starts on fast frame OCR even when it can read barcodes, with a Barcode button", async () => {
+    liveText.isAvailable = true;
+    renderScanner({ onBarcodeRecognized: vi.fn() });
+
+    await pushReading(NAPA_EXTRA_STRIP);
+    await waitFor(() => expect(quantityOf("napa-extra")).toBe(1));
+    expect(camera.isMounted).toBe(false);
+    expect(camera.frameCount).toBe(0);
+    expect(screen.getByText("Barcode")).toBeTruthy();
+  });
+
+  it("the Barcode button swaps to the barcode reader and Strip swaps back", async () => {
+    liveText.isAvailable = true;
+    const onBarcodeRecognized = vi.fn();
+    renderScanner({ onBarcodeRecognized });
+    await screen.findByText("Hold a medicine strip in front of the camera.");
+
+    await act(async () => fireEvent.click(screen.getByText("Barcode")));
+    expect(await screen.findByText("Point the camera at the barcode.")).toBeTruthy();
+    expect(camera.isMounted).toBe(true);
+    expect(camera.barcodeEnabled).toBe(true);
+    await act(async () => camera.onBarcodeScanned?.({ data: "8941234567890", type: "ean13" }));
+    expect(onBarcodeRecognized).toHaveBeenCalledWith("8941234567890", "ean13");
+
+    // Strip readings are ignored while the barcode reader is on, and no photo loop runs.
+    await act(async () => liveText.push?.(NAPA_EXTRA_STRIP));
+    expect(useCartStore.getState().items).toHaveLength(0);
+    expect(camera.frameCount).toBe(0);
+
+    await act(async () => fireEvent.click(screen.getByText("Strip")));
+    expect(camera.isMounted).toBe(false);
+    await pushReading(NAPA_EXTRA_STRIP);
+    await waitFor(() => expect(quantityOf("napa-extra")).toBe(1));
+  });
+
+  it("offers no Barcode button when the scanner does not read barcodes", async () => {
+    liveText.isAvailable = true;
+    renderScanner();
+    await screen.findByText("Hold a medicine strip in front of the camera.");
+    expect(screen.queryByText("Barcode")).toBeNull();
   });
 });
 

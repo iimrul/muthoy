@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
+import { AppTextInput as TextInput } from "../ui/AppTextInput";
 import Feather from "@expo/vector-icons/Feather";
 import { useI18n } from "../../state/localeStore";
 import { createLatestRequestGuard } from "../../domain/latestRequestGuard";

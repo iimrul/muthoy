@@ -20,7 +20,7 @@
 // thing structurally.
 
 import { asPaisa, type Paisa } from '@muthoy/types';
-import type { EntitlementRow, PaymentOrderRow, SubscriptionRow } from './adminViews';
+import { isAdminGrantCycle, type EntitlementRow, type PaymentOrderRow, type SubscriptionRow } from './adminViews';
 
 /**
  * §8.3(i), in substance.
@@ -37,7 +37,10 @@ export const LIFECYCLE_OVERRIDE_UNAVAILABLE =
   + 'unapproved: a trial derives from its original server grant and cannot be reset or '
   + 'extended through client retry, reinstall or login. Any future admin override requires '
   + 'a separately approved audited server API — that is gate E10. No control on this page '
-  + 'writes to a subscription, an entitlement or a billing account.';
+  + 'writes to a subscription, an entitlement or a billing account. The one approved audited '
+  + 'API is the plan grant on each account page (founder decision 2026-11-21): Pro or Ultra '
+  + 'for a number of days, with a reason. A grant is never charged, so it shows here with the '
+  + 'cycle "Admin grant", no billed amount and no next billing, and it is left out of the run rate.';
 
 /**
  * The ENTITLEMENT statuses, in lifecycle order rather than alphabetical.
@@ -69,7 +72,7 @@ export const SUBSCRIPTION_STATUS_FILTERS = Object.freeze([
 /** The statuses for which NO next billing date exists. */
 const TERMINAL_STATUSES: readonly string[] = ['canceled', 'expired'];
 
-export type NextBillingBasis = 'paid_through' | 'trial_ends_at' | 'grace_ends_at' | 'none';
+export type NextBillingBasis = 'paid_through' | 'trial_ends_at' | 'grace_ends_at' | 'grant_ends_at' | 'none';
 
 export interface NextBilling {
   /** The ISO timestamp, or null when nothing is scheduled. */
@@ -105,6 +108,13 @@ export function nextBillingDate(
 ): NextBilling {
   if (TERMINAL_STATUSES.includes(subscription.status)) {
     return { on: null, basis: 'none' };
+  }
+
+  // An admin grant bills nothing. Its paid_through is when the grant runs
+  // out, which is an expiry an operator needs to see, not a charge date.
+  if (isAdminGrantCycle(subscription.billingCycle)) {
+    const grantEnds = present(subscription.paidThrough);
+    return grantEnds === null ? { on: null, basis: 'none' } : { on: grantEnds, basis: 'grant_ends_at' };
   }
 
   if (subscription.status === 'trialing') {
@@ -202,8 +212,11 @@ export interface SubscriptionDetailRow {
   tier: string;
   billingCycle: string;
   status: string;
-  /** The plan_offerings amount for this tier and cycle. NOT a charged amount. */
-  billedAmountPaisa: Paisa;
+  /**
+   * The plan_offerings amount for this tier and cycle. NOT a charged amount.
+   * Null for an admin grant: nothing is billed, so no plan price is shown.
+   */
+  billedAmountPaisa: Paisa | null;
   startsAt: string;
   paidThrough: string;
   graceEndsAt: string | null;
@@ -270,9 +283,9 @@ export function subscriptionDetailRows(
         tier: subscription.tier,
         billingCycle: subscription.billingCycle,
         status: subscription.status,
-        billedAmountPaisa:
-          offeringAmounts.get(subscription.tier + ':' + subscription.billingCycle)
-          ?? ZERO_BILLED,
+        billedAmountPaisa: isAdminGrantCycle(subscription.billingCycle)
+          ? null
+          : offeringAmounts.get(subscription.tier + ':' + subscription.billingCycle) ?? ZERO_BILLED,
         startsAt: subscription.startsAt,
         paidThrough: subscription.paidThrough,
         graceEndsAt: subscription.graceEndsAt,
@@ -325,6 +338,8 @@ export function nextBillingBasisLabel(basis: NextBillingBasis): string {
       return 'end of the trial';
     case 'grace_ends_at':
       return 'end of the grace period';
+    case 'grant_ends_at':
+      return 'admin grant ends, nothing is billed';
     default:
       return 'nothing scheduled';
   }

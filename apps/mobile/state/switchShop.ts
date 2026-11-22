@@ -8,8 +8,68 @@ import { isSupabaseConfigured, supabase } from '../sync/supabaseClient';
 import { hasNetworkConnection } from '../sync/connectivity';
 import { assertCloudActorBinding, inspectCloudActorBinding } from '../sync/authActorBinding';
 import { withAuthMutation } from '../sync/authMutation';
+import {
+  installationClaim,
+  isDeviceEnrolled,
+  recordBoundInstallation,
+  type BoundInstallationResponse,
+} from '../sync/deviceRegistry';
 import { useCartStore } from './cartStore';
 import { useSessionStore, type Session } from './sessionStore';
+
+async function refreshCloudSession(): Promise<void> {
+  const refreshed = await withAuthMutation(() => supabase.auth.refreshSession());
+  if (refreshed.error) throw refreshed.error;
+}
+
+/**
+ * The shop-switch request. The server carries this session's device binding
+ * into the target shop (backend shopSwitchDevice.ts) and derives WHICH
+ * installation from the session itself; the installation fields sent here
+ * only label it in the target shop's device list.
+ */
+async function shopSwitchRequest(shopId: string): Promise<Record<string, unknown>> {
+  // Unknown counts as enrolled: asking for a re-keyed secret rotates the
+  // target registration, which is only worth doing when it is truly absent.
+  const enrolled = await isDeviceEnrolled(shopId).catch(() => true);
+  return {
+    action: 'shop-switch',
+    shopId,
+    ...installationClaim(),
+    deviceSecretMissing: !enrolled,
+  };
+}
+
+/**
+ * Saves the target-shop device secret when the server just created (or
+ * re-keyed) this installation's registration there. A re-pointed existing
+ * registration carries no secret; the pull that follows brings its snapshot.
+ */
+async function persistCarriedInstallation(
+  shopId: string,
+  actorUserId: string,
+  device: unknown,
+): Promise<void> {
+  if (!device || typeof device !== 'object' || Array.isArray(device)) return;
+  const carried = device as BoundInstallationResponse;
+  if (carried.deviceSecret === undefined) return;
+  await recordBoundInstallation(shopId, carried, { required: true, expectedActorUserId: actorUserId });
+}
+
+/**
+ * Puts the server back on `shopId` after a failed switch.
+ *
+ * Refresh FIRST: the failed attempt may already have moved this session — its
+ * active shop and its device binding — to the target, and a token still naming
+ * the source shop is then refused by the device gate. That refusal is what
+ * made the old rollback fail and the app retry the switch forever.
+ */
+async function restoreServerShop(shopId: string): Promise<void> {
+  await refreshCloudSession();
+  const { error } = await invokeSyncWithClaimRefresh(await shopSwitchRequest(shopId));
+  if (error) throw error;
+  await refreshCloudSession();
+}
 
 export async function switchActiveShop(shopId: string, online: boolean): Promise<void> {
   const initialState = useSessionStore.getState();
@@ -73,15 +133,22 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     return state.epoch === transitionEpoch && state.authorityTransitioning;
   };
   try {
-    const { data, error } = await invokeSyncWithClaimRefresh({ action: 'shop-switch', shopId });
+    // An unconfirmed shop means an earlier attempt may have stopped between
+    // the server's switch and this device's token refresh. Refresh first so
+    // the token names the shop the server actually has this session on.
+    if (current.cloudShopConfirmed === false) await refreshCloudSession();
+    const { data, error } = await invokeSyncWithClaimRefresh(await shopSwitchRequest(shopId));
     if (error) throw error;
-    const response = data as { actor_user_id?: unknown; role?: unknown; billing_account_id?: unknown };
+    const response = data as {
+      actor_user_id?: unknown; role?: unknown; billing_account_id?: unknown; device?: unknown;
+    };
     if (typeof response?.actor_user_id !== 'string' || response.role !== 'owner' || typeof response.billing_account_id !== 'string') {
       throw new Error('Invalid shop switch response');
     }
     if (!ownsTransition()) throw new Error('The active user changed.');
-    const refreshed = await withAuthMutation(() => supabase.auth.refreshSession());
-    if (refreshed.error) throw refreshed.error;
+    await persistCarriedInstallation(shopId, response.actor_user_id, response.device);
+    if (!ownsTransition()) throw new Error('The active user changed.');
+    await refreshCloudSession();
     if (!ownsTransition()) throw new Error('The active user changed.');
     assertCloudActorBinding(
       await inspectCloudActorBinding({ userId: response.actor_user_id, shopId }),
@@ -128,8 +195,7 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     // first hydration fails. Roll it back before restoring the local session,
     // otherwise the old shop would restart sync with a target-shop JWT.
     try {
-      await invokeSyncWithClaimRefresh({ action: 'shop-switch', shopId: current.shopId });
-      await withAuthMutation(() => supabase.auth.refreshSession());
+      await restoreServerShop(current.shopId);
     } catch {
       // Keep sync stopped when the server identity could not be restored.
       useSessionStore.getState().login({
@@ -144,14 +210,49 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
   }
 }
 
+/**
+ * Automatic re-link attempts are spaced at least this far apart.
+ *
+ * A failed switch logs the previous session back in, which re-runs
+ * RootLayout's authority check, which calls revalidateOfflineSelectedShop
+ * again. On 2026-11-22 that cycle sent the server about two refused requests a
+ * second, forever, behind "Checking your access…". With the pause, the second
+ * automatic attempt stops at the gate's blocked screen, whose Retry still works.
+ */
+export const OFFLINE_SHOP_RELINK_RETRY_MS = 10_000;
+
+let lastRelinkAttempt: { shopId: string; userId: string; at: number } | null = null;
+
+export class ShopRelinkPausedError extends Error {
+  constructor() {
+    super('This shop could not be re-linked just now. Try again shortly.');
+    this.name = 'ShopRelinkPausedError';
+  }
+}
+
 export async function revalidateOfflineSelectedShop(dependencies: {
   isOnline?: () => Promise<boolean>;
   switchShop?: (shopId: string, online: boolean) => Promise<void>;
+  now?: () => number;
 } = {}): Promise<boolean> {
   const session = useSessionStore.getState().session;
   if (!session || session.role !== 'owner' || session.cloudShopConfirmed !== false) return false;
   const online = await (dependencies.isOnline ?? hasNetworkConnection)();
   if (!online) return false;
+  const now = (dependencies.now ?? Date.now)();
+  const previous = lastRelinkAttempt;
+  if (
+    previous
+    && previous.shopId === session.shopId
+    && previous.userId === session.userId
+    && now - previous.at < OFFLINE_SHOP_RELINK_RETRY_MS
+  ) {
+    throw new ShopRelinkPausedError();
+  }
+  // Recorded BEFORE the attempt: the failing switch re-logs-in synchronously,
+  // and the re-run it triggers must already see this attempt.
+  lastRelinkAttempt = { shopId: session.shopId, userId: session.userId, at: now };
   await (dependencies.switchShop ?? switchActiveShop)(session.shopId, true);
+  lastRelinkAttempt = null;
   return true;
 }

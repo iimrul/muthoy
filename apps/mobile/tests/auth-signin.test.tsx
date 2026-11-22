@@ -24,6 +24,7 @@ const deps = vi.hoisted(() => ({
   canDismiss: vi.fn(() => true),
   verifyPin: vi.fn(),
   recordSuccessfulLogin: vi.fn(),
+  localUserHasPhone: vi.fn(async () => true),
   loginOnNewDevice: vi.fn(),
   recoverOwnerPin: vi.fn(),
   sendOtp: vi.fn(),
@@ -46,7 +47,11 @@ vi.mock('expo-router', () => ({
   },
   useLocalSearchParams: () => deps.params,
 }));
-vi.mock('../db/auth', () => ({ verifyPin: deps.verifyPin, recordSuccessfulLogin: deps.recordSuccessfulLogin }));
+vi.mock('../db/auth', () => ({
+  verifyPin: deps.verifyPin,
+  recordSuccessfulLogin: deps.recordSuccessfulLogin,
+  localUserHasPhone: deps.localUserHasPhone,
+}));
 vi.mock('../sync/deviceAuth', () => {
   class DeviceLoginError extends Error {
     constructor(message: string, readonly isCredentialFailure: boolean, readonly code: string) {
@@ -124,6 +129,14 @@ async function paintAndSubmit(): Promise<void> {
   await act(async () => frameQueue.shift()?.(16));
 }
 
+// Founder decision 2026-11-21: the PIN pad asks for the mobile number first.
+function renderPinLogin(): void {
+  render(createElement(PinLoginScreen));
+  const locale = useLocaleStore.getState().locale;
+  fireEvent.change(screen.getByLabelText(catalog[locale].authPhoneA11y), { target: { value: '01712345678' } });
+  fireEvent.click(screen.getByText(catalog[locale].deviceLoginContinue));
+}
+
 // A wall clock whose millisecond advances on every read: the boundary a
 // lockout countdown must not straddle, made deterministic instead of waiting
 // for machine load to land it between two reads.
@@ -136,7 +149,7 @@ function tickOnEveryRead(): void {
 describe('PIN Login', () => {
   it('says a correct-but-refused PIN is refused, not incorrect', async () => {
     deps.verifyPin.mockRejectedValueOnce(new PinAccountRefusedError('staff_limit'));
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
     pressPin('4321');
     await paintAndSubmit();
 
@@ -150,7 +163,7 @@ describe('PIN Login', () => {
   it('counts the lockout down in Bangla digits, and never shows attempts left', async () => {
     useLocaleStore.setState({ locale: 'bn' });
     deps.verifyPin.mockRejectedValueOnce(new PinLockedOutError(245_000));
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
     pressPin('1111', 'bn');
     await paintAndSubmit();
 
@@ -163,7 +176,7 @@ describe('PIN Login', () => {
     tickOnEveryRead();
     useLocaleStore.setState({ locale: 'bn' });
     deps.verifyPin.mockRejectedValueOnce(new PinLockedOutError(245_000));
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
     pressPin('1111', 'bn');
     await paintAndSubmit();
 
@@ -185,7 +198,7 @@ describe('PIN Login', () => {
       for (let failure = 0; failure < PIN_FREE_ATTEMPTS; failure += 1) recordPinAttemptFailure(scope, ahead);
       return null;
     });
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
     pressPin('9999', 'bn');
     await paintAndSubmit();
 
@@ -202,18 +215,46 @@ describe('PIN Login', () => {
     expect(peekSignOutNotice()).toBeNull();
     unmount();
 
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
     expect(screen.queryByText(catalog.en.signedOutTitle)).toBeNull();
   });
 
   it('warns on a wrong PIN without adding any delay of its own', async () => {
     deps.verifyPin.mockResolvedValueOnce(null);
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
     pressPin('9999');
     await paintAndSubmit();
     expect(await screen.findByText(catalog.en.pinIncorrect)).toBeTruthy();
     expect(screen.getByText(catalog.en.pinIncorrectHint)).toBeTruthy();
     expect(deps.verifyPin).toHaveBeenCalledTimes(1);
+  });
+
+  // Founder decision 2026-11-21: the mobile number first, then the PIN.
+  it('asks for the mobile number first and refuses an invalid one before any PIN pad', () => {
+    render(createElement(PinLoginScreen));
+    expect(screen.queryByLabelText(`${catalog.en.pinDigitA11y} 1`)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(catalog.en.authPhoneA11y), { target: { value: '12345' } });
+    fireEvent.click(screen.getByText(catalog.en.deviceLoginContinue));
+    expect(screen.queryByLabelText(`${catalog.en.pinDigitA11y} 1`)).toBeNull();
+    expect(deps.verifyPin).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText(catalog.en.authPhoneA11y), { target: { value: '01712345678' } });
+    fireEvent.click(screen.getByText(catalog.en.deviceLoginContinue));
+    expect(screen.getByLabelText(`${catalog.en.pinDigitA11y} 1`)).toBeTruthy();
+  });
+
+  it('answers a PIN that belongs to someone else as incorrect, and signs nobody in', async () => {
+    deps.verifyPin.mockResolvedValueOnce({ shopId: 'shop-1', userId: 'staff-2', role: 'staff', permissions: {} });
+    deps.localUserHasPhone.mockResolvedValueOnce(false);
+    renderPinLogin();
+    pressPin('4321');
+    await paintAndSubmit();
+
+    expect(await screen.findByText(catalog.en.pinIncorrect)).toBeTruthy();
+    expect(deps.localUserHasPhone).toHaveBeenCalledWith('shop-1', 'staff-2', expect.stringContaining('1712345678'));
+    expect(deps.recordSuccessfulLogin).not.toHaveBeenCalled();
+    expect(deps.replace).not.toHaveBeenCalled();
   });
 });
 

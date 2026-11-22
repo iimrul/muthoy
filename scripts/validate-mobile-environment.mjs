@@ -46,7 +46,8 @@ export function assertNativeProjects(root, identity) {
 
 // The only inputs an archive may contain; mirrors the root allowlist in .easignore.
 const ARCHIVE_ROOT_FILES = new Set(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc', '.nvmrc', '.easignore', 'scripts/validate-mobile-environment.mjs']);
-const isApprovedArchiveInput = item => ARCHIVE_ROOT_FILES.has(item) || item.startsWith('apps/mobile/') || item.startsWith('packages/');
+// patches/: pnpm patchedDependencies the frozen install reads (pnpm-workspace.yaml).
+const isApprovedArchiveInput = item => ARCHIVE_ROOT_FILES.has(item) || item.startsWith('apps/mobile/') || item.startsWith('packages/') || item.startsWith('patches/');
 const gitFiles = (root, args) => capture('git', ['ls-files', '-z', ...args], { cwd: root }, 'git-listing-failed').split('\0').filter(Boolean);
 
 /** Tracked files of the clean revision that .easignore keeps — exactly what EAS may upload. */

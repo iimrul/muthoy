@@ -6,6 +6,9 @@ import { colors } from "@muthoy/constants";
 import { LanguageToggle } from "./LanguageToggle";
 import { fillTemplate } from "../../i18n/display";
 import { useI18n } from "../../state/localeStore";
+import { useLiveSyncState } from "../../state/liveSyncState";
+import { useSessionStore } from "../../state/sessionStore";
+import { SyncStatusDot, syncButtonLabel } from "../sync/SyncStatusDot";
 
 // StandardHeader — Volume 4 NAVIGATION: "standardized header component
 // (translucent soft-green, back chevron, centered title, language toggle)
@@ -109,6 +112,9 @@ export function StandardHeader({
   const { t, locale, formatNumber } = useI18n();
   const insets = useContext(SafeAreaInsetsContext);
   const topInset = safeAreaTop ? (insets?.top ?? 0) : 0;
+  // Only a header that HAS a sync button watches the queue.
+  const shopId = useSessionStore((state) => state.session?.shopId);
+  const syncState = useLiveSyncState(onSyncPress && tone !== "auth" ? shopId : null);
   if (tone === "auth") {
     return (
       <AuthToneHeader
@@ -172,11 +178,12 @@ export function StandardHeader({
               disabled={syncing}
               onPress={onSyncPress}
               accessibilityRole="button"
-              accessibilityLabel={t("sync")}
+              accessibilityLabel={syncButtonLabel(t, syncState)}
               hitSlop={8}
-              className="h-11 w-11 items-center justify-center active:opacity-70"
+              className="relative h-11 w-11 items-center justify-center active:opacity-70"
             >
               <Feather name="refresh-cw" size={18} color={colors.brandGreen} />
+              <SyncStatusDot state={syncState} />
             </Pressable>
           ) : null}
           {rightAccessory}

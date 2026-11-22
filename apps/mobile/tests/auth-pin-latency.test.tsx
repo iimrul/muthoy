@@ -33,6 +33,7 @@ const deps = vi.hoisted(() => ({
   inspectCloudActorBinding: vi.fn(),
   networkReachability: vi.fn(),
   switchActorOnDevice: vi.fn(),
+  readSessionAuthorityLease: vi.fn(),
 }));
 
 vi.mock('expo-router', () => ({
@@ -41,6 +42,7 @@ vi.mock('expo-router', () => ({
 }));
 
 vi.mock('../db/auth', () => ({
+  localUserHasPhone: async () => true,
   verifyPin: deps.verifyPin,
   recordSuccessfulLogin: deps.recordSuccessfulLogin,
   setOwnerPin: deps.setOwnerPin,
@@ -53,6 +55,10 @@ vi.mock('../sync/authActorBinding', () => ({
 }));
 vi.mock('../sync/connectivity', () => ({
   networkReachability: deps.networkReachability,
+}));
+vi.mock('../sync/sessionAuthorityStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../sync/sessionAuthorityStore')>()),
+  readSessionAuthorityLease: deps.readSessionAuthorityLease,
 }));
 
 // A2.3. Stubbed rather than left to load the real module, which reaches
@@ -90,6 +96,15 @@ const { default: DeviceLoginScreen } = await import('../app/(auth)/device-login'
 const { default: PinLoginScreen } = await import('../app/(auth)/pin-login');
 const { default: PinSetupScreen } = await import('../app/(auth)/pin-setup');
 const { useLocaleStore } = await import('../state/localeStore');
+const { catalog } = await import('../i18n/catalog');
+
+// Founder decision 2026-11-21: the PIN pad asks for the mobile number first.
+function renderPinLogin(): void {
+  render(createElement(PinLoginScreen));
+  const locale = useLocaleStore.getState().locale;
+  fireEvent.change(screen.getByLabelText(catalog[locale].authPhoneA11y), { target: { value: '01712345678' } });
+  fireEvent.click(screen.getByText(catalog[locale].deviceLoginContinue));
+}
 
 let frameQueue: FrameRequestCallback[];
 
@@ -154,6 +169,8 @@ beforeEach(() => {
   // switch declines and every pre-A2.3 case behaves exactly as it did.
   deps.switchActorOnDevice.mockReset();
   deps.switchActorOnDevice.mockResolvedValue(null);
+  deps.readSessionAuthorityLease.mockReset();
+  deps.readSessionAuthorityLease.mockReturnValue({ status: 'absent', record: null });
   useLocaleStore.setState({ locale: 'en' });
   vi.spyOn(console, 'info').mockImplementation(() => undefined);
 });
@@ -173,7 +190,7 @@ describe('PIN authentication loading state', () => {
       permissions: Record<string, never>;
     } | null>();
     deps.verifyPin.mockReturnValueOnce(verification.promise);
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
 
     pressPin('1234');
 
@@ -201,7 +218,7 @@ describe('PIN authentication loading state', () => {
 
   it('recovers from a rejected offline PIN and re-enables retry', async () => {
     deps.verifyPin.mockResolvedValueOnce(null);
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
 
     pressPin('9999');
     await paintAndSubmit();
@@ -222,7 +239,7 @@ describe('PIN authentication loading state', () => {
       role,
       permissions: {},
     });
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
 
     pressPin('1234');
     await paintAndSubmit();
@@ -230,7 +247,7 @@ describe('PIN authentication loading state', () => {
     await waitFor(() => expect(deps.replace).toHaveBeenCalledWith(destination));
   });
 
-  it('routes an online shared-device actor mismatch to authoritative re-link before login', async () => {
+  it('re-links an online shared-device actor mismatch with the number and PIN already typed, before login', async () => {
     deps.verifyPin.mockResolvedValueOnce({
       shopId: SHOP_ID,
       userId: USER_ID,
@@ -240,14 +257,19 @@ describe('PIN authentication loading state', () => {
     deps.inspectCloudActorBinding.mockResolvedValueOnce({
       status: 'mismatched', actorUserId: 'outgoing-owner', shopId: SHOP_ID,
     });
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
 
     pressPin('1234');
     await paintAndSubmit();
 
-    await waitFor(() => expect(deps.replace).toHaveBeenCalledWith({
-      pathname: '/device-login', params: { role: 'staff', reason: 'relink' },
-    }));
+    // Founder decision 2026-11-21: the person is never sent to type the same
+    // number and PIN a second time — the relink happens here, then the root
+    // gate routes from SQLite exactly as Device Login would.
+    await waitFor(() => expect(deps.loginOnNewDevice).toHaveBeenCalledWith(
+      expect.stringContaining('1712345678'), '1234', expect.anything(),
+    ));
+    await waitFor(() => expect(deps.replace).toHaveBeenCalledWith('/'));
+    expect(deps.replace).not.toHaveBeenCalledWith(expect.objectContaining({ pathname: '/device-login' }));
     expect(deps.recordSuccessfulLogin).not.toHaveBeenCalled();
     expect(deps.login).not.toHaveBeenCalled();
   });
@@ -274,7 +296,7 @@ describe('PIN authentication loading state', () => {
     deps.inspectCloudActorBinding.mockResolvedValueOnce({
       status: 'matched', actorUserId: USER_ID, shopId: SHOP_ID,
     });
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
 
     pressPin('1234');
     await paintAndSubmit();
@@ -305,7 +327,7 @@ describe('PIN authentication loading state', () => {
         'binding_revoked', 'removed',
       ),
     );
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
 
     pressPin('1234');
     await paintAndSubmit();
@@ -325,7 +347,7 @@ describe('PIN authentication loading state', () => {
     // charged. The pad must say so rather than showing "Incorrect PIN".
     const { DeviceAccessRevokedError } = await import('../db/errors');
     deps.verifyPin.mockRejectedValueOnce(new DeviceAccessRevokedError('device_revoked'));
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
 
     pressPin('1234');
     await paintAndSubmit();
@@ -335,6 +357,58 @@ describe('PIN authentication loading state', () => {
     )).toBeTruthy());
     expect(deps.login).not.toHaveBeenCalled();
     expect(deps.replace).not.toHaveBeenCalled();
+  });
+
+  // 2026-11-21 sign-in loop. An H-10 lock on this actor is lifted ONLY by
+  // number + PIN proof plus a full pull (activateHydratedDevice). The PIN-only
+  // device switch left it in place, so the root gate signed the person straight
+  // back out after every correct PIN.
+  it('sends a locked actor through the number-and-PIN relink, never the PIN-only switch', async () => {
+    deps.verifyPin.mockResolvedValueOnce({
+      shopId: SHOP_ID,
+      userId: USER_ID,
+      role: 'owner',
+      permissions: {},
+    });
+    deps.readSessionAuthorityLease.mockReturnValue({
+      status: 'valid',
+      record: { v: 1, confirmedAtMs: 1, highWaterAtMs: 1, quarantineReason: 'auth_session_invalid' },
+    });
+    renderPinLogin();
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    await waitFor(() => expect(deps.loginOnNewDevice).toHaveBeenCalledWith(
+      expect.stringContaining('1712345678'), '1234', expect.anything(),
+    ));
+    await waitFor(() => expect(deps.replace).toHaveBeenCalledWith('/'));
+    expect(deps.readSessionAuthorityLease).toHaveBeenCalledWith(SHOP_ID, USER_ID);
+    expect(deps.switchActorOnDevice).not.toHaveBeenCalled();
+    expect(deps.login).not.toHaveBeenCalled();
+  });
+
+  it('says a locked actor needs the internet instead of signing them in to be thrown out', async () => {
+    deps.verifyPin.mockResolvedValueOnce({
+      shopId: SHOP_ID,
+      userId: USER_ID,
+      role: 'owner',
+      permissions: {},
+    });
+    deps.readSessionAuthorityLease.mockReturnValue({
+      status: 'valid',
+      record: { v: 1, confirmedAtMs: 1, highWaterAtMs: 1, quarantineReason: 'authority_quarantined' },
+    });
+    deps.networkReachability.mockResolvedValueOnce('offline');
+    renderPinLogin();
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    expect(await screen.findByText(catalog.en.authErrorNetwork)).toBeTruthy();
+    expect(deps.login).not.toHaveBeenCalled();
+    expect(deps.loginOnNewDevice).not.toHaveBeenCalled();
+    expect(deps.switchActorOnDevice).not.toHaveBeenCalled();
   });
 
   it('keeps a mismatched actor offline-capable without claiming cloud confirmation', async () => {
@@ -348,7 +422,7 @@ describe('PIN authentication loading state', () => {
       status: 'missing', actorUserId: null, shopId: null,
     });
     deps.networkReachability.mockResolvedValueOnce('offline');
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
 
     pressPin('1234');
     await paintAndSubmit();
@@ -450,7 +524,7 @@ describe('PIN authentication loading state', () => {
 
 describe('owner recovery is reachable from the PIN pad (H-4 #3)', () => {
   it('offers a visible recovery affordance', () => {
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
     // Not decorative. A successful PIN no longer refills the attempt budget,
     // so an owner who has forgotten theirs can lock the pad — and without
     // this, waiting out the cooldown would be their only way forward.
@@ -458,20 +532,24 @@ describe('owner recovery is reachable from the PIN pad (H-4 #3)', () => {
   });
 
   it('routes to the existing OTP recovery flow', () => {
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
     fireEvent.click(screen.getByLabelText('Forgot your PIN? Recover access'));
-    // The existing screen, with no phone param: this pad never asked for one.
-    expect(deps.push).toHaveBeenCalledWith('/forgot-pin');
+    // The existing screen, carrying the number this pad now asks for first, so
+    // the owner does not type it again.
+    expect(deps.push).toHaveBeenCalledWith({
+      pathname: '/forgot-pin',
+      params: { phone: expect.stringContaining('1712345678') },
+    });
   });
 
   it('tells staff what to do instead, since the pad cannot know who is holding it', () => {
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
     expect(screen.getByText(/Staff: ask the shop\s+owner to reset your PIN/)).toBeTruthy();
   });
 
   it('uses the Bangla catalog for visible recovery copy and its accessibility name', () => {
     useLocaleStore.setState({ locale: 'bn' });
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
 
     expect(screen.getByLabelText('PIN ভুলে গেছেন? অ্যাক্সেস পুনরুদ্ধার করুন')).toBeTruthy();
     expect(screen.getByText(
@@ -483,7 +561,7 @@ describe('owner recovery is reachable from the PIN pad (H-4 #3)', () => {
   it('stays reachable while the pad is locked out', async () => {
     const { PinLockedOutError } = await import('../db/errors');
     deps.verifyPin.mockRejectedValueOnce(new PinLockedOutError(30_000));
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
 
     pressPin('9999');
     await paintAndSubmit();
@@ -494,13 +572,13 @@ describe('owner recovery is reachable from the PIN pad (H-4 #3)', () => {
     const recover = screen.getByLabelText('Forgot your PIN? Recover access') as HTMLButtonElement;
     expect(recover.disabled).toBeFalsy();
     fireEvent.click(recover);
-    expect(deps.push).toHaveBeenCalledWith('/forgot-pin');
+    expect(deps.push).toHaveBeenCalledWith(expect.objectContaining({ pathname: '/forgot-pin' }));
   });
 
   it('disables the keypad while locked, but not the way out', async () => {
     const { PinLockedOutError } = await import('../db/errors');
     deps.verifyPin.mockRejectedValueOnce(new PinLockedOutError(30_000));
-    render(createElement(PinLoginScreen));
+    renderPinLogin();
 
     pressPin('9999');
     await paintAndSubmit();

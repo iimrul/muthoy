@@ -6,7 +6,7 @@
 // built once on Day 13 and every write site (including this one) is
 // backfilled together (see db/README.md).
 
-import { and, eq, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import type { Paisa } from "@muthoy/types";
 import {
   assertIsoDate,
@@ -21,6 +21,8 @@ import {
   batchPromotions,
   batches,
   medicines,
+  purchaseItems,
+  purchases,
   roles,
   shopB2Settings,
   shops,
@@ -34,7 +36,6 @@ import {
   sortByExpiry,
   type Batch,
 } from "../domain/fefo";
-import type { ExpiryStatus } from "../domain/notificationRules";
 import {
   fromStoragePermissionKey,
   resolvePermission,
@@ -54,6 +55,8 @@ import { writePurchaseEffects } from "./purchases";
 import { addStock, adjustStock } from "./stockLedger";
 import { recordChange, stampUpdatedAt } from "./sync-helpers";
 import {
+  DEFAULT_FAR_EXPIRY_DAYS,
+  DEFAULT_NEAR_EXPIRY_DAYS,
   effectiveLowStockThreshold,
   expiryBand,
 } from "../domain/inventoryRules";
@@ -823,97 +826,190 @@ export async function listBatchesForMedicine(
   return sortByExpiry(mapped);
 }
 
-// domain/fefo.ts's Batch plus the medicine's display name and the derived
-// (never stored — CLAUDE.md rule 3) days-to-expiry/status for one row of the
-// Expiry Management screen (Volume 0 Day 9).
-export interface ExpiryListRow extends Batch {
+/** The bands the Expiry screen shows; everything else is not "expiring". */
+export type ExpiringBand = "expired" | "near" | "far";
+
+// One row of the Expiry Management screen: domain/fefo.ts's Batch plus what
+// the card shows. Days and band are derived at read time from the REAL
+// expiry date (CLAUDE.md rule 3), never stored.
+export interface ExpiringBatchRow extends Batch {
   medicineName: string;
+  generic: string | null;
+  manufacturer: string | null;
+  /** Dosage form (tablet, syrup, injection...) - picks the card's icon. */
+  form: string | null;
   batchNo: string;
-  daysUntilExpiry: number | null;
-  status: ExpiryStatus;
+  expiryDate: string;
+  daysUntilExpiry: number;
+  band: ExpiringBand;
+  /** The live promotion on this batch, 0 when none. */
+  promotionBps: number;
+  /** The received supplier invoice this batch came in on, when one exists. */
+  purchaseId: string | null;
 }
 
-// Every non-deleted batch across the whole shop, nearest-real-expiry-first
-// (null-expiry last), for the Expiry Management screen. Sort order comes
-// from domain/fefo.ts's sortByExpiry — the same function the FEFO deduction
-// path uses — never a second hand-rolled sort. `now` defaults to the current
-// time but is overridable so callers (tests) can pin it; the days/status are
-// always recomputed from the real expiryDate, never persisted.
-//
-// Shop isolation (CLAUDE.md rule 7) is enforced on BOTH sides of the join:
-// the ON clause requires the medicine to belong to the same shop, so a batch
-// row whose medicine_id points at another shop's medicine — a corrupted or
-// hostile sync payload — matches nothing and is dropped, rather than
-// rendering that other shop's medicine name. Filtering only batches.shop_id
-// would leak it.
-//
-// Expiry status uses the shared notification default for legacy callers.
-// The B2 Expiry Management screen separately applies persisted Near/Far bands.
-export async function listBatchesByExpiry(
+export interface ExpiringBatches {
+  rows: ExpiringBatchRow[];
+  nearDays: number;
+  farDays: number;
+}
+
+/** SQLite's bound-parameter ceiling is 999 on older builds; stay well under. */
+const PURCHASE_LOOKUP_CHUNK = 400;
+
+/** The Dhaka calendar date `days` after today, as YYYY-MM-DD. */
+function dhakaDatePlusDays(now: Date, days: number): string {
+  const dhakaToday = new Date(now.getTime() + 6 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return new Date(Date.parse(`${dhakaToday}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * The batches the Expiry screen acts on - founder-approved 2026-11-22 (rule
+ * 10): only batches with stock on the shelf whose real expiry date is past or
+ * within the shop's Far window, nearest first. Read-only.
+ *
+ * The window is applied IN SQL so a shop with thousands of far-dated batches
+ * pays for the few dozen it shows, not for every row it owns. The cutoff is
+ * the same Dhaka calendar arithmetic as @muthoy/utils daysUntilExpiry, so a
+ * batch exactly `far` days out is included, and the band is still recomputed
+ * per row with the shared expiryBand - SQL narrows, it does not decide.
+ *
+ * Shop isolation (rule 7) holds on BOTH sides of the join: the ON clause pins
+ * the medicine to this shop, so a batch pointing at another shop's medicine (a
+ * corrupted or hostile sync payload) matches nothing.
+ *
+ * `includePurchaseLinks` adds one batched lookup for the invoice each batch
+ * arrived on (medicine + batch number, received lines only, latest invoice) -
+ * only the owner can open an invoice, so other callers skip the query.
+ */
+export async function listExpiringBatches(
   shopId: string,
-  now: Date = new Date(),
-): Promise<ExpiryListRow[]> {
-  const rows = await db
+  options: { now?: Date; includePurchaseLinks?: boolean } = {},
+): Promise<ExpiringBatches> {
+  const now = options.now ?? new Date();
+  const settings = db
+    .select({ near: shopB2Settings.expiryNearDays, far: shopB2Settings.expiryFarDays })
+    .from(shopB2Settings)
+    .where(and(eq(shopB2Settings.shopId, shopId), eq(shopB2Settings.isDeleted, false)))
+    .get();
+  const nearDays = settings?.near ?? DEFAULT_NEAR_EXPIRY_DAYS;
+  const farDays = settings?.far ?? DEFAULT_FAR_EXPIRY_DAYS;
+  const cutoff = dhakaDatePlusDays(now, farDays);
+
+  const found = db
     .select({
       id: batches.id,
       medicineId: batches.medicineId,
       medicineName: medicines.name,
+      generic: medicines.generic,
+      manufacturer: medicines.manufacturer,
+      form: medicines.type,
       batchNo: batches.batchNo,
       expiryDate: batches.expiryDate,
       stock: batches.stock,
       salePrice: batches.salePrice,
+      promotionBps: batchPromotions.discountBps,
     })
     .from(batches)
     .innerJoin(
       medicines,
       and(eq(batches.medicineId, medicines.id), eq(medicines.shopId, shopId)),
     )
+    .leftJoin(
+      batchPromotions,
+      and(
+        eq(batchPromotions.batchId, batches.id),
+        eq(batchPromotions.shopId, shopId),
+        eq(batchPromotions.isActive, true),
+        eq(batchPromotions.isDeleted, false),
+      ),
+    )
     .where(
       and(
         eq(batches.shopId, shopId),
         eq(batches.isDeleted, false),
         eq(medicines.isDeleted, false),
-      ),
-    );
-
-  const mapped = rows.map((row) => ({
-    id: row.id,
-    medicineId: row.medicineId,
-    medicineName: row.medicineName,
-    batchNo: row.batchNo,
-    expiryDate: row.expiryDate,
-    quantityAvailable: row.stock,
-    salePrice: row.salePrice,
-  }));
-
-  const settings = db
-    .select({
-      near: shopB2Settings.expiryNearDays,
-      far: shopB2Settings.expiryFarDays,
-    })
-    .from(shopB2Settings)
-    .where(
-      and(
-        eq(shopB2Settings.shopId, shopId),
-        eq(shopB2Settings.isDeleted, false),
+        gt(batches.stock, 0),
+        isNotNull(batches.expiryDate),
+        lte(batches.expiryDate, cutoff),
       ),
     )
-    .get();
-  return sortByExpiry(mapped).map((batch) => {
+    .all();
+
+  const rows: ExpiringBatchRow[] = [];
+  for (const batch of sortByExpiry(
+    found.map((row) => ({ ...row, quantityAvailable: row.stock })),
+  )) {
     const days = daysUntilExpiry(batch.expiryDate, now);
-    const band = expiryBand(days, settings?.near, settings?.far);
-    const status: ExpiryStatus =
-      band === "expired"
-        ? "expired"
-        : band === "near"
-          ? "critical"
-          : band === "far"
-            ? "warning"
-            : band === "unknown"
-              ? "unknown"
-              : "ok";
-    return { ...batch, daysUntilExpiry: days, status };
-  });
+    const band = expiryBand(days, nearDays, farDays);
+    if (days === null || (band !== "expired" && band !== "near" && band !== "far")) continue;
+    rows.push({
+      id: batch.id,
+      medicineId: batch.medicineId,
+      medicineName: batch.medicineName,
+      generic: batch.generic,
+      manufacturer: batch.manufacturer,
+      form: batch.form,
+      batchNo: batch.batchNo,
+      expiryDate: batch.expiryDate as string,
+      quantityAvailable: batch.quantityAvailable,
+      salePrice: batch.salePrice,
+      daysUntilExpiry: days,
+      band,
+      promotionBps: batch.promotionBps ?? 0,
+      purchaseId: null,
+    });
+  }
+
+  if (options.includePurchaseLinks && rows.length > 0) {
+    const links = latestPurchaseByBatch(shopId, [...new Set(rows.map((row) => row.medicineId))]);
+    for (const row of rows) {
+      row.purchaseId = links.get(purchaseLinkKey(row.medicineId, row.batchNo)) ?? null;
+    }
+  }
+  return { rows, nearDays, farDays };
+}
+
+function purchaseLinkKey(medicineId: string, batchNo: string): string {
+  return `${medicineId}\u0000${batchNo}`;
+}
+
+/** medicine+batch -> the latest non-deleted invoice that RECEIVED that batch. */
+function latestPurchaseByBatch(shopId: string, medicineIds: string[]): Map<string, string> {
+  const latest = new Map<string, { purchaseId: string; createdAt: string }>();
+  for (let start = 0; start < medicineIds.length; start += PURCHASE_LOOKUP_CHUNK) {
+    const lines = db
+      .select({
+        medicineId: purchaseItems.medicineId,
+        batchNo: purchaseItems.batchNo,
+        purchaseId: purchaseItems.purchaseId,
+        createdAt: purchases.createdAt,
+      })
+      .from(purchaseItems)
+      .innerJoin(
+        purchases,
+        and(eq(purchases.id, purchaseItems.purchaseId), eq(purchases.shopId, shopId)),
+      )
+      .where(
+        and(
+          eq(purchaseItems.shopId, shopId),
+          eq(purchaseItems.isDeleted, false),
+          eq(purchases.isDeleted, false),
+          isNull(purchases.voidedAt),
+          eq(purchaseItems.status, "received"),
+          inArray(purchaseItems.medicineId, medicineIds.slice(start, start + PURCHASE_LOOKUP_CHUNK)),
+        ),
+      )
+      .all();
+    for (const line of lines) {
+      const key = purchaseLinkKey(line.medicineId, line.batchNo);
+      const seen = latest.get(key);
+      if (!seen || line.createdAt > seen.createdAt) {
+        latest.set(key, { purchaseId: line.purchaseId, createdAt: line.createdAt });
+      }
+    }
+  }
+  return new Map([...latest].map(([key, value]) => [key, value.purchaseId]));
 }
 
 export async function listManufacturerSuggestions(

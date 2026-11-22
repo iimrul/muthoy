@@ -1,6 +1,7 @@
 import { assertCallerCurrent, type Caller, HttpError } from "./_shared/auth.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
 import { assertShopNotBlocked, blockedShopsForSession } from "./deviceGuard.ts";
+import { carryInstallationIntoShop, restoreSourceInstallation } from "./shopSwitchDevice.ts";
 
 /**
  * The stable auth identity, with NO fallback.
@@ -81,11 +82,34 @@ export async function switchShop(caller: Caller, body: Record<string, unknown>) 
   if (membership.role !== "owner" || membership.billing_account_id !== current.billingAccountId) {
     throw new HttpError(403, "Owner access only");
   }
+  // A2.3. The session's device binding moves WITH the shop. Without this the
+  // refreshed token names the target shop while the binding still names the
+  // source, and the device gate refuses every request that follows — the
+  // rollback included. See shopSwitchDevice.ts.
+  const source = { shopId: current.shopId, actorUserId: current.appUserId };
+  const carried = await carryInstallationIntoShop(
+    caller,
+    source,
+    { shopId, actorUserId: membership.actor_user_id },
+    body,
+  );
   const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(caller.authUserId, {
     app_metadata: { ...caller.raw.app_metadata, active_shop_id: shopId },
   });
-  if (authError) throw new HttpError(500, "Could not switch shop");
-  return membership;
+  if (authError) {
+    // The token will keep naming the source shop, so the binding must too.
+    if (carried) await restoreSourceInstallation(caller, source, carried.devicePublicId);
+    throw new HttpError(500, "Could not switch shop");
+  }
+  if (!carried) return membership;
+  return {
+    ...membership,
+    // The secret travels ONLY when the target registration was just created
+    // or re-keyed, exactly as device-login hands one back once.
+    device: carried.deviceSecret
+      ? { deviceAuthority: carried.authority, deviceSecret: carried.deviceSecret }
+      : { deviceAuthority: carried.authority },
+  };
 }
 
 export async function createOwnedShop(caller: Caller, body: Record<string, unknown>) {

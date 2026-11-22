@@ -28,6 +28,9 @@ const MORE_ICONS: Readonly<Record<string, ComponentProps<typeof Feather>["name"]
   "multi-shop": "grid", devices: "smartphone", "sync-conflicts": "alert-triangle",
 };
 
+/** The screens kept mounted in app/(tabs)/_layout.tsx — reached by navigate, not replace. */
+export const TAB_ROUTES: ReadonlySet<string> = new Set(["/dashboard", "/staff-home", "/sale", "/inventory"]);
+
 export const LIGHT_STATUS_ROUTES: ReadonlySet<string> = new Set([
   "/role-select", "/dashboard", "/staff-home",
 ]);
@@ -250,16 +253,34 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
     session.permissions,
   );
   const deny = () => Alert.alert(t("accessDenied"), t("askOwner"));
-  const go = (href: Parameters<typeof router.replace>[0], allowed = true) =>
-    allowed ? router.replace(href) : deny();
+  // The primary screens are kept mounted in app/(tabs)/_layout.tsx's Tabs
+  // navigator; every other screen sits ON TOP of that tab group in the root
+  // Stack, at most one page deep:
+  // - a tab tap on a tab switches tabs (navigate); on a page above the tabs it
+  //   pops back to the kept tab group (dismissTo). navigate() from a page
+  //   would PUSH a second copy of the whole tab group (expo-router StackRouter
+  //   only reuses the current route), rebuilding every screen: 233–408 ms per
+  //   "back to Sale" on the A04s release build, and a stack that never shrinks.
+  // - a page (Scan, Credit, More) opens on top of the tabs (push), or swaps
+  //   the page already open (replace) — so Android Back always returns to the
+  //   tabs instead of leaving the app, and the tabs are never torn down.
+  const isOnTab = TAB_ROUTES.has(pathname);
+  const go = (href: Parameters<typeof router.replace>[0], allowed = true) => {
+    if (!allowed) return deny();
+    if (typeof href === "string" && TAB_ROUTES.has(href)) {
+      return isOnTab ? router.navigate(href) : router.dismissTo(href);
+    }
+    return isOnTab ? router.push(href) : router.replace(href);
+  };
   const openMoreRoute = (href: Parameters<typeof router.push>[0]) => {
-    // Dispatch the push FIRST, then close the sheet. Deferring the push behind
+    // Dispatch the navigation FIRST, then close the sheet. Deferring it behind
     // InteractionManager made it depend on the scan button's infinite
     // Animated.loop draining, and closing the Modal first put a native
     // dismissal between the press and the navigation. Both were ordering
     // workarounds for a bug that was really NavigationBoundary unmounting the
-    // Stack; the push itself is synchronous and needs neither.
-    router.push(href);
+    // Stack; the navigation itself is synchronous and needs neither.
+    if (isOnTab) router.push(href);
+    else router.replace(href);
     setMoreContext(null);
   };
 

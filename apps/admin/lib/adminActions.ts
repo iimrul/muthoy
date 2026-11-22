@@ -7,8 +7,12 @@ import 'server-only';
 // | reconcile plan limits           | subscriptions.write | b4_reconcile_plan_limits(uuid, timestamptz), the same |
 // | expire a stale payment order    | support.write       | the exact guarded update billingStatus already performs |
 //
-// NO money edit, no entitlement grant, no plan change, no refund, no shop
-// write. The master plan's rule — admin writes must not bypass the money/stock
+// | grant or extend Pro/Ultra       | subscriptions.write | admin_grant_plan(...), migration 41 (founder-approved 2026-11-21) |
+//
+// NO money edit, no refund, no shop write. The one plan change is the
+// founder-approved grant above: N days of Pro/Ultra with a required reason,
+// recorded in admin_plan_grants AND this panel's audit log, and written the
+// same way a verified payment writes it (never stamping verified_at, E11). The master plan's rule — admin writes must not bypass the money/stock
 // invariants, prefer existing SECURITY DEFINER RPCs — is satisfied by calling
 // only RPCs that already exist and already carry their invariants, plus one
 // status transition the server already performs on its own schedule.
@@ -26,6 +30,7 @@ import 'server-only';
 import { revalidatePath } from 'next/cache';
 import {
   adminAccountIdActionSchema,
+  adminGrantPlanActionSchema,
   adminPaymentOrderIdActionSchema,
 } from '@muthoy/validation';
 import { type AdminAuditSink } from './adminAudit';
@@ -75,9 +80,15 @@ async function audit(
     target: string;
     outcome: 'success' | 'failure';
     reason?: string;
+    /** Extra audited facts — the grant's tier, days and reason. */
+    meta?: Readonly<Record<string, string | number>>;
   },
   sinks: readonly AdminAuditSink[] | undefined,
 ): Promise<AdminAuditDurability> {
+  const meta = {
+    ...(input.meta ?? {}),
+    ...(input.reason === undefined ? {} : { reason: input.reason }),
+  };
   const entry = {
     actor: input.actor,
     actorVerified: true,
@@ -85,7 +96,7 @@ async function audit(
     action: input.action,
     target: input.target,
     outcome: input.outcome,
-    meta: input.reason === undefined ? undefined : { reason: input.reason },
+    meta: Object.keys(meta).length === 0 ? undefined : meta,
   };
   const result = sinks
     ? await recordAdminActionDurably(entry, sinks)
@@ -184,6 +195,45 @@ export async function reconcilePlanLimits(
   // §8.9d. The RPC already committed, so a failed audit is reported as
   // applied-but-unrecorded rather than as a failure that invites a retry.
   return resultForDurability(durability, 'Plan limits reconciled.');
+}
+
+/**
+ * Founder decision 2026-11-21: gives an account Pro or Ultra, or extends the
+ * plan it has, by 1–366 days with a required reason. The RPC extends from the
+ * end of what is already paid for, records the grant in admin_plan_grants, and
+ * never stamps verified_at; this action adds the panel's own audit entry with
+ * the tier, days and reason.
+ */
+export async function grantPlan(payload: unknown, deps: AdminActionDeps = {}): Promise<AdminActionResult> {
+  const session = await requireAdminPermission('subscriptions.write', deps.env, {
+    readAssignment: deps.readAssignment,
+  });
+
+  const parsed = adminGrantPlanActionSchema.safeParse(payload);
+  if (!parsed.success) {
+    await audit({ actor: session.username, role: session.role, action: 'subscription.grant_plan', target: 'invalid', outcome: 'failure', reason: 'invalid_input' }, deps.sinks);
+    throw new AdminDataError(parsed.error.issues[0]?.message ?? 'The grant is not valid');
+  }
+
+  const { accountId, tier, days, reason } = parsed.data;
+  const client = deps.client ?? getSupabaseAdmin();
+  const { error } = await client.rpc('admin_grant_plan', {
+    p_billing_account_id: accountId,
+    p_tier: tier,
+    p_days: days,
+    p_reason: reason,
+    p_granted_by: session.username,
+  });
+
+  if (error) {
+    console.error('[admin] grant plan failed:', error.message);
+    await audit({ actor: session.username, role: session.role, action: 'subscription.grant_plan', target: accountId, outcome: 'failure', reason: 'rpc_failed', meta: { tier, days } }, deps.sinks);
+    return { ok: false, message: 'Could not grant the plan. The server log has the details.' };
+  }
+
+  const durability = await audit({ actor: session.username, role: session.role, action: 'subscription.grant_plan', target: accountId, outcome: 'success', meta: { tier, days, reason } }, deps.sinks);
+  refreshCommittedPage('/accounts/' + accountId, deps);
+  return resultForDurability(durability, `${tier === 'pro' ? 'Pro' : 'Ultra'} granted for ${days} day${days === 1 ? '' : 's'}.`);
 }
 
 /**

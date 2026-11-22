@@ -6,6 +6,7 @@ import { EnvironmentRefusalError } from '../config/environmentPolicy';
 import { readEnvironmentConfiguration } from '../native/environmentIdentity';
 import { ensureEnvironmentAllowed, ENVIRONMENT_STORE_IDS } from '../db/environmentBinding';
 import { withoutPublishableKeyBearer } from './sessionlessSyncTransport';
+import { withFunctionRegion } from './functionRegion';
 
 export const supabaseUrl = publicEnvironment.url;
 export const missingSupabaseConfigKeys: readonly string[] = [
@@ -60,7 +61,12 @@ export const supabase = createClient(
         } catch { throw new EnvironmentRefusalError('configuration-invalid'); }
         // H-9 §4.2: a sessionless sync call never carries the publishable key
         // as its bearer; every other request is passed through unchanged.
-        const transport = withoutPublishableKeyBearer(input, init, supabaseUrl, publicEnvironment.publicKey);
+        // Then pin Edge Function calls to the database's region (sync/functionRegion.ts).
+        const transport = withFunctionRegion(
+          input,
+          withoutPublishableKeyBearer(input, init, supabaseUrl, publicEnvironment.publicKey),
+          supabaseUrl,
+        );
         const response = await globalThis.fetch(input, { ...transport, redirect: 'error' });
         // React Native's fetch (whatwg-fetch over XHR/OkHttp) ignores `redirect`
         // and follows redirects; only the final URL shows it happened. Never

@@ -155,8 +155,11 @@ export default defineConfig({
       "apps/mobile/db/transaction-atomicity.sqlite.test.ts",
       "apps/mobile/tests/windows-text-portability.test.ts",
       "apps/mobile/tests/android-system-bars.test.ts",
+      "apps/mobile/tests/android-min-sdk.test.ts",
       "apps/mobile/components/inventory/receiptless-batch.test.tsx",
       "apps/mobile/components/sync/sync-exposure.test.tsx",
+      "apps/mobile/components/sync/sync-status-dot.test.tsx",
+      "apps/mobile/state/liveSyncState.test.ts",
       "apps/mobile/db/receiptless-restock.sqlite.test.ts",
       "apps/mobile/db/environment-binding.test.ts",
       "apps/mobile/db/medicine-catalog.sqlite.test.ts",
@@ -164,6 +167,8 @@ export default defineConfig({
       // on real SQLite against a POPULATED pre-0033 fixture.
       "apps/mobile/db/w203-shop-medicine-search.sqlite.test.ts",
       "apps/mobile/db/scan-vocabulary.sqlite.test.ts",
+      "apps/mobile/db/sale-insights.sqlite.test.ts",
+      "apps/mobile/db/dhaka-day.sqlite.test.ts",
       "apps/mobile/tests/environment-policy.test.ts",
       // H-9 archive controls on a real Git revision; the EAS CLI 21.8.0 half
       // runs EAS's own copy/workflow code when that pinned CLI is installed.
@@ -196,6 +201,7 @@ export default defineConfig({
       // screens previously each re-implemented, tested on the behaviour those
       // copies disagreed about rather than on their markup.
       "apps/mobile/components/ui/ui-primitives.test.tsx",
+      "apps/mobile/components/ui/DateField.test.tsx",
       "apps/mobile/components/ui/standard-header.test.tsx",
       "apps/mobile/components/expenses/*.test.ts",
       "apps/mobile/components/expenses/*.test.tsx",
@@ -356,6 +362,7 @@ export default defineConfig({
       "apps/mobile/state/useMultiShopAccess.test.tsx",
       "apps/mobile/state/businessDayStore.test.ts",
       "apps/mobile/tests/sale/checkout.test.tsx",
+      "apps/mobile/tests/sale/cart-screen.test.tsx",
       // W2-01 / gate E9: the resumed-held-draft boundary, driven through the
       // real scanner and the real capture-cleanup helper.
       "apps/mobile/tests/sale/resumed-draft-capture.test.tsx",
@@ -423,6 +430,7 @@ export default defineConfig({
       "apps/mobile/tests/auth-onboarding.test.tsx",
       "apps/mobile/tests/auth-signin.test.tsx",
       "apps/mobile/tests/staff-home-routing.test.tsx",
+      "apps/mobile/tests/expiry-screen.test.tsx",
       "apps/mobile/tests/staff-management-pin.test.tsx",
       "apps/mobile/sync/**/*.test.ts",
       // Auto-hydration end-to-end: real SQLite + real usePlan/useMultiShopAccess,
@@ -481,6 +489,7 @@ export default defineConfig({
       // ceiling, with the old unconditional body re-applied for real in its own
       // harness so the refusals are not free.
       "backend/supabase/pgtest/e11-entitlement-verification.pgtest.ts",
+      "backend/supabase/pgtest/admin-plan-grants.pgtest.ts",
       // W4-05. Both barriers proven INDEPENDENTLY — the owner gate with the pin
       // bypassed, the pin with the gate bypassed — plus the seven working paths.
       "backend/supabase/pgtest/w405-shop-identity.pgtest.ts",

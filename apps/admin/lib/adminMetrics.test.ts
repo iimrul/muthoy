@@ -275,6 +275,22 @@ describe('MRR is forward-looking', () => {
     });
   });
 
+  test('an admin grant is entitlement without revenue: neither counted nor an unpriced gap (migration 42)', () => {
+    const grant = subscription({ tier: 'ultra', billingCycle: 'grant', provider: 'admin_grant', paidThrough: FUTURE });
+    expect(isMrrEligible(grant, NOW)).toBe(false);
+
+    const breakdown = monthlyRecurringRevenue({
+      subscriptions: [grant, subscription({ id: 's2', billingAccountId: 'a2', tier: 'pro' })],
+      offerings: OFFERINGS,
+      nowMs: NOW,
+    });
+    expect(breakdown).toMatchObject({
+      totalPaisa: 50_000,
+      countedSubscriptions: 1,
+      unpricedSubscriptions: 0,
+    });
+  });
+
   test('a tier outside pro/ultra never reaches the pricing step at all', () => {
     const breakdown = monthlyRecurringRevenue({
       subscriptions: [subscription({ tier: 'enterprise' })],

@@ -14,6 +14,7 @@ import {
 } from '../lib/adminDashboard';
 import {
   accountsEverPaid,
+  currentSubscriptionPerAccount,
   entitlementCounts,
   isActiveSubscriptionNow,
   monthlyRecurringRevenue,
@@ -27,7 +28,7 @@ import {
   withheldSide,
   type DaySides,
 } from '../lib/adminSuppression';
-import { EMPTY_VALUE, formatCount, formatDhakaDate } from '../lib/adminViews';
+import { EMPTY_VALUE, formatCount, formatDhakaDate, isAdminGrantCycle } from '../lib/adminViews';
 import { toDisplayMessage } from '../lib/errors';
 import type { PlatformStats } from '../lib/platformStats';
 import { getPlatformStats } from '../lib/queries';
@@ -133,6 +134,11 @@ export default async function DashboardPage() {
   // there is no date left here to judge; the server consumed them all at the
   // same instant this page's other figures were taken.
   const counts = entitlementCounts(overview.entitlementVerdicts);
+  // Migration 42: an admin grant is honoured like a paid plan, so it is in the
+  // entitled count, but nothing was paid for it. The tile says how many.
+  const grantedNow = currentSubscriptionPerAccount(subscriptions).filter(
+    (subscription) => isAdminGrantCycle(subscription.billingCycle) && isActiveSubscriptionNow(subscription, nowMs),
+  ).length;
 
   // GATE 5 FINDING 11. These counted the literal status, so a row left at
   // `active` with `paid_through` in the past was reported as active for ever,
@@ -355,6 +361,7 @@ export default async function DashboardPage() {
             + ' trialing, '
             + formatCount(counts.entitled)
             + ' entitled in total.'
+            + (grantedNow > 0 ? ' ' + formatCount(grantedNow) + ' by admin grant, unpaid.' : '')
           }
           href="/subscriptions"
         />

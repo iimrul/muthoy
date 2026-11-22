@@ -126,6 +126,15 @@ describe('the next billing date', () => {
     });
   });
 
+  test('an admin grant has no billing date, only the day the grant ends (migration 42)', () => {
+    const grantEnd = '2027-01-21T06:37:19.471Z';
+    expect(nextBillingDate(
+      subscription({ billingCycle: 'grant', provider: 'admin_grant', paidThrough: grantEnd }),
+      entitlement(),
+    )).toEqual({ on: grantEnd, basis: 'grant_ends_at' });
+    expect(nextBillingBasisLabel('grant_ends_at')).toContain('nothing is billed');
+  });
+
   test('an empty paid_through is absent, not an empty date', () => {
     expect(nextBillingDate(subscription({ paidThrough: '' }), entitlement())).toEqual({
       on: null,
@@ -134,7 +143,7 @@ describe('the next billing date', () => {
   });
 
   test('every basis has a sentence, including none', () => {
-    for (const basis of ['paid_through', 'trial_ends_at', 'grace_ends_at', 'none'] as const) {
+    for (const basis of ['paid_through', 'trial_ends_at', 'grace_ends_at', 'grant_ends_at', 'none'] as const) {
       expect(nextBillingBasisLabel(basis).length, basis).toBeGreaterThan(5);
     }
   });
@@ -212,6 +221,13 @@ describe('the page’s rows', () => {
     const rows = rowsFor([subscription({ tier: 'pro', billingCycle: 'monthly' })], []);
 
     expect(rows[0]?.billedAmountPaisa).toBe(50_000);
+  });
+
+  test('an admin grant shows no plan price at all — it was never billed (migration 42)', () => {
+    const rows = rowsFor([subscription({ tier: 'ultra', billingCycle: 'grant', provider: 'admin_grant' })], []);
+
+    expect(rows[0]?.billedAmountPaisa).toBeNull();
+    expect(rows[0]?.nextBilling.basis).toBe('grant_ends_at');
   });
 
   test('a tier and cycle matching NO offering is billed zero, not undefined', () => {

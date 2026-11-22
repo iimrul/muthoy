@@ -60,10 +60,16 @@ const MEMBERSHIP = {
   error: null,
 };
 
+/** A legacy session: no row in auth_session_devices. */
+const UNBOUND_GATE = {
+  bound: false, enforced: false, deviceStatus: null, bindingStatus: null, authority: null,
+};
+
 function tier(value: string | null, error: unknown = null) {
   mocks.rpc.mockImplementation(async (name: string) => {
     if (name === 'b4_effective_tier') return { data: value, error };
     if (name === 'b4_shop_summaries') return { data: [{ shop_id: 'shop-1' }], error: null };
+    if (name === 'a23_session_gate') return { data: UNBOUND_GATE, error: null };
     return { data: null, error: null };
   });
 }
@@ -202,5 +208,179 @@ describe('multi-shop server authority', () => {
     // 500, not 403: a broken lookup must not read as a plan decision.
     await expect(shopSummaries(caller, { businessDate: '2026-09-03' }))
       .rejects.toMatchObject({ status: 500 });
+  });
+});
+
+// ── A2.3: the session's device binding travels with the shop switch ────────
+//
+// The 2026-11-22 loop: shop-switch moved active_shop_id but left the session
+// bound to the SOURCE shop, so a23_session_gate read every later request as
+// "mismatched" and refused it — the rollback included.
+
+const boundCaller = { ...caller, authSessionId: 'session-1' } as unknown as Caller;
+
+const SOURCE_AUTHORITY = {
+  shopId: 'shop-1', devicePublicId: 'install-1', known: true, status: 'active',
+  registryVersion: 3, enforced: false,
+  bindings: [{ actorUserId: 'actor-1', status: 'active', bindingVersion: 1 }],
+};
+const TARGET_AUTHORITY = {
+  shopId: 'shop-2', devicePublicId: 'install-1', known: true, status: 'active',
+  registryVersion: 1, enforced: false,
+  bindings: [{ actorUserId: 'actor-2', status: 'active', bindingVersion: 1 }],
+};
+const BOUND_GATE = {
+  bound: true, enforced: false, deviceStatus: 'active', bindingStatus: 'active',
+  devicePublicId: 'install-1', authority: SOURCE_AUTHORITY,
+};
+const ENROLMENT_ALLOWED = { allowed: true, held: false, enforced: false, legacyUnbound: false };
+
+type RpcAnswer = { data: unknown; error: unknown };
+function registry(overrides: Record<string, (args: Record<string, unknown>) => RpcAnswer> = {}) {
+  mocks.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+    const override = overrides[name];
+    if (override) return override(args);
+    if (name === 'b4_effective_tier') return { data: 'ultra', error: null };
+    if (name === 'a23_session_gate') return { data: BOUND_GATE, error: null };
+    if (name === 'a23_authorize_actor_switch') return { data: TARGET_AUTHORITY, error: null };
+    if (name === 'a23_prepare_enrollment') return { data: ENROLMENT_ALLOWED, error: null };
+    if (name === 'a23_bind_auth_session') return { data: TARGET_AUTHORITY, error: null };
+    return { data: null, error: null };
+  });
+}
+
+function rpcCalls(name: string): Record<string, unknown>[] {
+  return mocks.rpc.mock.calls
+    .filter(([called]) => called === name)
+    .map(([, args]) => args as Record<string, unknown>);
+}
+
+describe('shop-switch carries the session device binding into the target shop', () => {
+  it('leaves a legacy unbound session exactly as before', async () => {
+    tier('ultra');
+    await expect(switchShop(caller, { shopId: 'shop-2' })).resolves.not.toHaveProperty('device');
+    expect(rpcCalls('a23_authorize_actor_switch')).toHaveLength(0);
+    expect(rpcCalls('a23_bind_auth_session')).toHaveLength(0);
+    expect(mocks.updateUserById).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-points the session at an existing target registration without rotating its secret', async () => {
+    registry();
+    const result = await switchShop(boundCaller, { shopId: 'shop-2' });
+
+    expect(rpcCalls('a23_session_gate')[0]).toEqual({
+      p_auth_session_id: 'session-1', p_shop_id: 'shop-1', p_actor_user_id: 'actor-1',
+    });
+    expect(rpcCalls('a23_authorize_actor_switch')).toEqual([{
+      p_shop_id: 'shop-2', p_device_public_id: 'install-1',
+      p_actor_user_id: 'actor-2', p_auth_session_id: 'session-1',
+    }]);
+    expect(rpcCalls('a23_bind_auth_session')).toHaveLength(0);
+    expect(result).toMatchObject({ shop_id: 'shop-2', device: { deviceAuthority: TARGET_AUTHORITY } });
+    expect((result as { device: Record<string, unknown> }).device).not.toHaveProperty('deviceSecret');
+  });
+
+  it('binds BEFORE the auth identity moves, so a refused target changes nothing', async () => {
+    registry();
+    await switchShop(boundCaller, { shopId: 'shop-2' });
+    const bindOrder = mocks.rpc.mock.invocationCallOrder[
+      mocks.rpc.mock.calls.findIndex(([name]) => name === 'a23_authorize_actor_switch')
+    ];
+    expect(bindOrder).toBeLessThan(mocks.updateUserById.mock.invocationCallOrder[0]);
+  });
+
+  it('registers the installation on its first visit and hands its new secret back once', async () => {
+    registry({
+      a23_authorize_actor_switch: () => ({ data: null, error: { code: 'MU066' } }),
+    });
+    const result = await switchShop(boundCaller, { shopId: 'shop-2', label: 'Counter', model: 'SM-A047F' });
+
+    expect(rpcCalls('a23_prepare_enrollment')).toEqual([{
+      p_shop_id: 'shop-2', p_actor_user_id: 'actor-2', p_device_public_id: 'install-1',
+    }]);
+    const [bind] = rpcCalls('a23_bind_auth_session');
+    expect(bind).toMatchObject({
+      p_auth_session_id: 'session-1', p_shop_id: 'shop-2', p_actor_user_id: 'actor-2',
+      p_device_public_id: 'install-1', p_label: 'Counter', p_model: 'SM-A047F',
+    });
+    expect(bind.p_secret_hash).toMatch(/^[0-9a-f]{64}$/);
+    const device = (result as { device: { deviceSecret: string; deviceAuthority: unknown } }).device;
+    expect(device.deviceSecret).toMatch(/^[0-9a-f]{64}$/);
+    // Only the digest is stored; the plaintext is never the value written.
+    expect(device.deviceSecret).not.toBe(bind.p_secret_hash);
+    expect(device.deviceAuthority).toEqual(TARGET_AUTHORITY);
+  });
+
+  it('also registers when the installation is known there but this owner has no binding yet', async () => {
+    registry({
+      a23_authorize_actor_switch: () => ({ data: null, error: { code: 'MU067' } }),
+    });
+    await switchShop(boundCaller, { shopId: 'shop-2' });
+    expect(rpcCalls('a23_bind_auth_session')).toHaveLength(1);
+  });
+
+  it('carries the SESSION installation, never one named in the request body', async () => {
+    registry({
+      a23_authorize_actor_switch: () => ({ data: null, error: { code: 'MU066' } }),
+    });
+    await switchShop(boundCaller, { shopId: 'shop-2', devicePublicId: 'another-phone' });
+    expect(rpcCalls('a23_prepare_enrollment')[0].p_device_public_id).toBe('install-1');
+    expect(rpcCalls('a23_bind_auth_session')[0].p_device_public_id).toBe('install-1');
+  });
+
+  it('re-keys on request when the device holds no secret for the target', async () => {
+    registry();
+    const result = await switchShop(boundCaller, { shopId: 'shop-2', deviceSecretMissing: true });
+    expect(rpcCalls('a23_authorize_actor_switch')).toHaveLength(0);
+    expect(rpcCalls('a23_bind_auth_session')).toHaveLength(1);
+    expect((result as { device: { deviceSecret?: string } }).device.deviceSecret).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it.each([
+    ['the installation was revoked there', 'MU064', 'shop_switch_device_removed'],
+    ['this owner was removed from the phone there', 'MU065', 'shop_switch_device_removed'],
+  ])('refuses when %s, with a code that cannot quarantine the CURRENT shop', async (_label, sqlstate, code) => {
+    registry({
+      a23_authorize_actor_switch: () => ({ data: null, error: { code: sqlstate } }),
+    });
+    await expect(switchShop(boundCaller, { shopId: 'shop-2' }))
+      .rejects.toMatchObject({ status: 403, code });
+    expect(mocks.updateUserById).not.toHaveBeenCalled();
+  });
+
+  it('refuses an enrolment the target shop is holding for approval', async () => {
+    registry({
+      a23_authorize_actor_switch: () => ({ data: null, error: { code: 'MU066' } }),
+      a23_prepare_enrollment: () => ({
+        data: { allowed: false, held: true, approved: false, enforced: true, legacyUnbound: false },
+        error: null,
+      }),
+    });
+    await expect(switchShop(boundCaller, { shopId: 'shop-2' }))
+      .rejects.toMatchObject({ status: 403, code: 'shop_switch_approval_required' });
+    expect(rpcCalls('a23_bind_auth_session')).toHaveLength(0);
+    expect(mocks.updateUserById).not.toHaveBeenCalled();
+  });
+
+  it('fails closed and transiently when the device gate cannot answer', async () => {
+    registry({
+      a23_session_gate: () => ({ data: null, error: { code: '08006' } }),
+    });
+    await expect(switchShop(boundCaller, { shopId: 'shop-2' }))
+      .rejects.toMatchObject({ status: 503, code: 'device_gate_unavailable' });
+    expect(mocks.updateUserById).not.toHaveBeenCalled();
+  });
+
+  it('puts the binding back on the source shop when the auth identity cannot move', async () => {
+    registry();
+    mocks.updateUserById.mockResolvedValueOnce({ error: { message: 'gotrue down' } });
+    await expect(switchShop(boundCaller, { shopId: 'shop-2' })).rejects.toMatchObject({ status: 500 });
+    expect(rpcCalls('a23_authorize_actor_switch')).toEqual([
+      expect.objectContaining({ p_shop_id: 'shop-2', p_actor_user_id: 'actor-2' }),
+      {
+        p_shop_id: 'shop-1', p_device_public_id: 'install-1',
+        p_actor_user_id: 'actor-1', p_auth_session_id: 'session-1',
+      },
+    ]);
   });
 });

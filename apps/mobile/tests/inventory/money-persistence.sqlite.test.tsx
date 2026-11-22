@@ -13,6 +13,10 @@ vi.mock("react-native", async () => ({
 vi.mock("expo-router", () => ({ router:{push:vi.fn(),back:vi.fn()} }));
 vi.mock("../../sync", () => ({ triggerSyncNow:vi.fn() }));
 vi.mock("../../components/scanner/MedicineTextScanner", () => ({ MedicineTextScanner:()=>null }));
+// The calendar (components/ui/DateField.tsx) has its own tests; the date is
+// entered directly here so the money-to-SQLite path stays the thing under test.
+vi.mock("../../components/ui/DateField", () => ({ DateField:({value,onChange,accessibilityLabel}:{value:string;onChange:(v:string)=>void;accessibilityLabel:string}) =>
+  createElement("input",{value,"aria-label":accessibilityLabel,onChange:(e:{target:{value:string}})=>onChange(e.target.value)}) }));
 const inventoryDb=await import("../../db/inventory");
 const receiptlessWriter=vi.spyOn(inventoryDb,"addBatchToMedicine");
 const manualWriter=vi.spyOn(inventoryDb,"createMedicineWithPurchase");

@@ -1,8 +1,9 @@
 import { and, eq, isNull } from 'drizzle-orm';
-import { DHAKA_SQL_OFFSET, dhakaBusinessDate } from '@muthoy/utils';
+import { dhakaBusinessDate } from '@muthoy/utils';
 import { generateId } from '../native/id';
 import { resolvePermission, type Permission } from '../domain/permissions';
 import { getActiveSessionContext, requireOwner } from './auth';
+import { onDhakaDay } from './dhakaDay';
 import { assertSessionLive } from './errors';
 import { db, sqliteConnection } from './client';
 import { notificationReceipts, notifications } from './schema';
@@ -155,7 +156,7 @@ export async function createNotification(
       `SELECT id FROM notifications
         WHERE shop_id = $shopId AND type = $type AND ref_id = $refId
           AND is_deleted = 0 AND resolved_at IS NULL
-          AND date(created_at, '${DHAKA_SQL_OFFSET}') = $today
+          AND ${onDhakaDay("created_at", "$today")}
         ORDER BY created_at DESC LIMIT 1`,
       { $shopId: shopId, $type: type, $refId: refId, $today: today },
     );

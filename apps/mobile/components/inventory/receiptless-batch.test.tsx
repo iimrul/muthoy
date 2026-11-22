@@ -31,6 +31,10 @@ vi.mock("../../state/usePlan",()=>({usePlan:()=>({effectiveTier:m.tier,loading:m
 vi.mock("./ManualEntryForm",()=>({ManualEntryForm:()=>createElement("div",null,"Supplier receipt form")}));
 vi.mock("../ui/StandardHeader",()=>({StandardHeader:()=>null}));
 vi.mock("../ui/AccessDenied",()=>({AccessDenied:()=>createElement("div",null,"Denied")}));
+// The calendar (components/ui/DateField.tsx) has its own tests; here the date is
+// entered directly so the form's own validation stays under test.
+vi.mock("../ui/DateField",()=>({DateField:({value,onChange,accessibilityLabel}:{value:string;onChange:(v:string)=>void;accessibilityLabel:string})=>
+  createElement("input",{value,"aria-label":accessibilityLabel,onChange:(e:{target:{value:string}})=>onChange(e.target.value)})}));
 const {ReceiptlessBatchForm}=await import("./ReceiptlessBatchForm");
 const {default:AddBatchScreen}=await import("../../app/inventory/add-batch");
 const {useLocaleStore}=await import("../../state/localeStore");

@@ -90,7 +90,7 @@ export function SupplierPickerField({
 
   return (
     <View className="gap-2">
-      <Text className="font-sans-semibold text-sm text-[#374151]">
+      <Text className="font-sans-semibold text-sm text-richBlack">
         {t("supplierLabel")} *
       </Text>
       <Pressable

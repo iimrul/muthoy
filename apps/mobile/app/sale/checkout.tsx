@@ -401,7 +401,7 @@ export default function CheckoutScreen() {
       if (guard.isStale()) return;
       clearCart();
       void triggerSyncNow(session.shopId);
-      router.replace("/sale");
+      router.dismissTo("/sale");
     } catch {
       if (!guard.isStale())
         Alert.alert(
@@ -457,7 +457,7 @@ export default function CheckoutScreen() {
       }
       if (guard.isStale()) return;
       clearCart();
-      router.replace("/sale");
+      router.dismissTo("/sale");
     } catch {
       if (!guard.isStale())
         Alert.alert(

@@ -131,6 +131,17 @@ describe('sync function transport with the real SDK', () => {
     expect(sent?.headers.get('authorization')).toBe(`Bearer ${PUBLISHABLE}`);
   }, 30_000);
 
+  test('a sync call runs next to the DEV database, in ap-northeast-1', async () => {
+    // 2026-11-22: unpinned, DEV sync ran in ap-south-1 against a Tokyo
+    // database and every request took ~1.8 s (sync/functionRegion.ts).
+    storeSession();
+    const module = await client(PUBLISHABLE);
+    await module.supabase.functions.invoke('sync', { body: { action: 'pull' } });
+    const sync = recorded().filter((request) => request.url === SYNC_URL);
+    expect(sync[0]?.headers.get('x-region')).toBe('ap-northeast-1');
+    expect(sync[0]?.headers.get('authorization')).toBe(`Bearer ${USER_JWT}`);
+  }, 30_000);
+
   test('function HTTP errors keep their SDK context and abort signal', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response('{"error":"refused"}', { status: 403, headers: { 'Content-Type': 'application/json' } }));
     const module = await client(PUBLISHABLE);
@@ -149,6 +160,7 @@ describe('Auth and REST traffic is untouched', () => {
     const [sent] = recorded();
     expect(new URL(sent?.url ?? '').pathname).toBe('/rest/v1/shops');
     expect(sent?.headers.get('authorization')).toBe(`Bearer ${PUBLISHABLE}`);
+    expect(sent?.headers.has('x-region')).toBe(false);
   }, 30_000);
 
   test('an OTP request keeps the Auth client\'s headers', async () => {
