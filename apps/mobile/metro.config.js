@@ -70,6 +70,48 @@ config.resolver.blockList = [
   ...unwatchedWorkspaceFolders,
 ];
 
+// Expo's binary cache store reads and writes each cached transform with an
+// unbounded fs.promises call. A warm rebuild asks for ~2,800 entries at once,
+// which on Windows runs past the open-file limit: EMFILE inside
+// binary-file-store.js, logged into the app's LogBox as errors. Capping the
+// store's concurrent reads and writes keeps the same cache, just queued.
+const MAX_CONCURRENT_CACHE_IO = 64;
+function limitCacheStoreConcurrency(store) {
+  let active = 0;
+  const waiting = [];
+  const acquire = () => {
+    if (active < MAX_CONCURRENT_CACHE_IO) {
+      active += 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => waiting.push(resolve));
+  };
+  const release = () => {
+    const next = waiting.shift();
+    if (next) next();
+    else active -= 1;
+  };
+  const limited = (operation) => async (...args) => {
+    await acquire();
+    try {
+      return await operation(...args);
+    } finally {
+      release();
+    }
+  };
+  return new Proxy(store, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (typeof value !== 'function') return value;
+      const bound = value.bind(target);
+      return property === 'get' || property === 'set' ? limited(bound) : bound;
+    },
+  });
+}
+if (Array.isArray(config.cacheStores)) {
+  config.cacheStores = config.cacheStores.map(limitCacheStoreConcurrency);
+}
+
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
