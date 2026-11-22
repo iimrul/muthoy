@@ -101,6 +101,17 @@ async function readFunctionsHttpErrorBody(error: unknown): Promise<FunctionError
 }
 
 /**
+ * The stable `code` a refused sync call carried, for screens that word the
+ * refusal. Halted errors carry it already; ordinary refusals keep it in the
+ * JSON body, which is cloned rather than consumed.
+ */
+export async function syncRefusalCode(error: unknown): Promise<string | null> {
+  if (error instanceof SyncHaltedError) return error.code;
+  const details = await readFunctionsHttpErrorBody(error);
+  return typeof details?.code === 'string' ? details.code : null;
+}
+
+/**
  * Retries one stale-claim request after a token refresh. Control-plane failures
  * throw before callers mutate any outbox row or consume its normal retry budget.
  */

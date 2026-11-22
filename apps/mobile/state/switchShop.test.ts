@@ -24,9 +24,20 @@ vi.mock('../sync/authActorBinding', () => ({
   },
 }));
 vi.mock('../sync/supabaseClient', () => ({ isSupabaseConfigured: true, supabase: {} }));
+const deviceRegistry = vi.hoisted(() => ({
+  installationClaim: vi.fn(() => ({ deviceRegistryVersion: 1, devicePublicId: 'install-1', label: 'Counter' })),
+  isDeviceEnrolled: vi.fn(async () => true),
+  recordBoundInstallation: vi.fn(async () => true),
+}));
+vi.mock('../sync/deviceRegistry', () => deviceRegistry);
 
 const { useSessionStore } = await import('./sessionStore');
-const { revalidateOfflineSelectedShop, switchActiveShop } = await import('./switchShop');
+const {
+  OFFLINE_SHOP_RELINK_RETRY_MS,
+  ShopRelinkPausedError,
+  revalidateOfflineSelectedShop,
+  switchActiveShop,
+} = await import('./switchShop');
 const { hasNetworkConnection } = await import('../sync/connectivity');
 const { invokeSyncWithClaimRefresh } = await import('../sync/invoke');
 const { getUserPermissionOverrides, markShopCloudLinked } = await import('../db/auth');
@@ -217,5 +228,124 @@ describe('offline multi-shop reconnect', () => {
     expect(switchShop).not.toHaveBeenCalled();
     useSessionStore.setState({ session: { shopId: 'shop-2', userId: 'owner-2', role: 'owner', cloudShopConfirmed: true } });
     await expect(revalidateOfflineSelectedShop({ isOnline: async () => true, switchShop })).resolves.toBe(false);
+  });
+
+  it('pauses automatic re-link attempts after a failure instead of looping', async () => {
+    // 2026-11-22: a failed switch re-logged-in the old session, which re-ran
+    // the root gate, which switched again — ~2 refused requests a second.
+    useSessionStore.setState({
+      session: {
+        shopId: 'shop-3', userId: 'owner-3', principalUserId: 'owner-1',
+        billingAccountId: 'account-1', role: 'owner', cloudShopConfirmed: false,
+      },
+    });
+    const switchShop = vi.fn().mockRejectedValue(new Error('refused'));
+    let clock = 1_000_000;
+    const now = () => clock;
+    const online = async () => true;
+
+    await expect(revalidateOfflineSelectedShop({ isOnline: online, switchShop, now })).rejects.toThrow('refused');
+    clock += 1_000;
+    await expect(revalidateOfflineSelectedShop({ isOnline: online, switchShop, now }))
+      .rejects.toBeInstanceOf(ShopRelinkPausedError);
+    expect(switchShop).toHaveBeenCalledTimes(1);
+
+    clock += OFFLINE_SHOP_RELINK_RETRY_MS;
+    switchShop.mockResolvedValueOnce(undefined);
+    await expect(revalidateOfflineSelectedShop({ isOnline: online, switchShop, now })).resolves.toBe(true);
+    expect(switchShop).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('the device binding travels with the shop switch', () => {
+  const SWITCHED = { actor_user_id: 'owner-2', role: 'owner', billing_account_id: 'account-1' };
+  let refreshSession: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useSessionStore.setState({ session: OWNER_SESSION, epoch: 0, authorityTransitioning: false });
+    commercial.requireShopSwitchAccess.mockResolvedValue(undefined);
+    commercial.membershipForSwitch.mockResolvedValue(undefined);
+    deviceRegistry.isDeviceEnrolled.mockResolvedValue(true);
+    vi.mocked(getUserPermissionOverrides).mockResolvedValue({} as never);
+    vi.mocked(pullChanges).mockResolvedValue(undefined as never);
+    vi.mocked(inspectCloudActorBinding)
+      .mockResolvedValueOnce({ status: 'matched', actorUserId: 'owner-1', shopId: 'shop-1' })
+      .mockResolvedValueOnce({ status: 'matched', actorUserId: 'owner-2', shopId: 'shop-2' });
+    refreshSession = vi.fn().mockResolvedValue({ error: null });
+    Object.assign(supabase, {
+      auth: {
+        getSession: vi.fn().mockResolvedValue({ data: { session: { access_token: 'token' } }, error: null }),
+        refreshSession,
+      },
+      functions: { invoke: vi.fn() },
+    });
+  });
+
+  it('sends the installation labels and asks for a re-key only when no secret is held', async () => {
+    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({ data: SWITCHED, error: null } as never);
+    await switchActiveShop('shop-2', true);
+    expect(vi.mocked(invokeSyncWithClaimRefresh)).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'shop-switch', shopId: 'shop-2', label: 'Counter', deviceSecretMissing: false,
+    }));
+    expect(deviceRegistry.isDeviceEnrolled).toHaveBeenCalledWith('shop-2');
+  });
+
+  it('asks the server to re-key when this phone holds no secret for the target shop', async () => {
+    deviceRegistry.isDeviceEnrolled.mockResolvedValue(false);
+    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({ data: SWITCHED, error: null } as never);
+    await switchActiveShop('shop-2', true);
+    expect(vi.mocked(invokeSyncWithClaimRefresh)).toHaveBeenCalledWith(
+      expect.objectContaining({ shopId: 'shop-2', deviceSecretMissing: true }),
+    );
+  });
+
+  it('saves the target-shop secret the server hands back, before hydrating that shop', async () => {
+    const device = { deviceSecret: 'a'.repeat(64), deviceAuthority: { shopId: 'shop-2' } };
+    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({ data: { ...SWITCHED, device }, error: null } as never);
+    await switchActiveShop('shop-2', true);
+    expect(deviceRegistry.recordBoundInstallation).toHaveBeenCalledWith(
+      'shop-2', device, { required: true, expectedActorUserId: 'owner-2' },
+    );
+    expect(deviceRegistry.recordBoundInstallation).toHaveBeenCalledBefore(vi.mocked(pullChanges));
+  });
+
+  it('does not write a secret when the server re-pointed an existing registration', async () => {
+    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({
+      data: { ...SWITCHED, device: { deviceAuthority: { shopId: 'shop-2' } } }, error: null,
+    } as never);
+    await switchActiveShop('shop-2', true);
+    expect(deviceRegistry.recordBoundInstallation).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the token BEFORE the rollback switch, so the device gate accepts it', async () => {
+    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({ data: SWITCHED, error: null } as never);
+    vi.mocked(pullChanges).mockRejectedValueOnce(new Error('pull failed'));
+
+    await expect(switchActiveShop('shop-2', true)).rejects.toThrow('pull failed');
+
+    const invokes = vi.mocked(invokeSyncWithClaimRefresh).mock;
+    expect(invokes.calls[1]?.[0]).toMatchObject({ action: 'shop-switch', shopId: 'shop-1' });
+    // refresh #1 follows the switch; #2 precedes the rollback; #3 follows it.
+    expect(refreshSession).toHaveBeenCalledTimes(3);
+    const [, beforeRollback = 0, afterRollback = 0] = refreshSession.mock.invocationCallOrder;
+    const rollback = invokes.invocationCallOrder[1] ?? 0;
+    expect(beforeRollback).toBeLessThan(rollback);
+    expect(afterRollback).toBeGreaterThan(rollback);
+    expect(useSessionStore.getState().session).toMatchObject({ shopId: 'shop-1', cloudShopConfirmed: true });
+  });
+
+  it('keeps the shop unconfirmed when the server refuses the rollback', async () => {
+    vi.mocked(invokeSyncWithClaimRefresh)
+      .mockResolvedValueOnce({ data: SWITCHED, error: null } as never)
+      .mockResolvedValueOnce({ data: null, error: new Error('refused') } as never);
+    vi.mocked(pullChanges).mockRejectedValueOnce(new Error('pull failed'));
+
+    await expect(switchActiveShop('shop-2', true)).rejects.toThrow('pull failed');
+    // A refused rollback used to be read as success and re-confirm a shop the
+    // server had already moved away from.
+    expect(useSessionStore.getState().session).toMatchObject({
+      shopId: 'shop-1', cloudShopConfirmed: false,
+    });
   });
 });
