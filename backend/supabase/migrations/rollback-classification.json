@@ -42,7 +42,8 @@
     "20261115172840_staff_sale_credit_reconciliation.sql": "B",
     "20261116020000_staff_reconciliation_server_clock.sql": "B",
     "20261121000000_admin_plan_grants.sql": "B",
-    "20261122000000_admin_grant_cycle.sql": "C"
+    "20261122000000_admin_grant_cycle.sql": "C",
+    "20261123000000_owner_session_shop_and_pin.sql": "B"
   },
   "postgresDeclaredOverrides": [
     "20260813000000_initial_schema.sql",

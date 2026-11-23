@@ -94,6 +94,10 @@ export const POST_E4_MIGRATIONS: readonly string[] = Object.freeze([
   // without stamping verified_at, recording every grant with its reason.
   '20261121000000_admin_plan_grants.sql',
   '20261122000000_admin_grant_cycle.sql',
+  // Migration 43: one owner, many shops (founder-approved plan 2026-11-23).
+  // The token hook names the SESSION's bound shop; owner_set_pin_all_shops
+  // writes one owner PIN to every owner actor.
+  '20261123000000_owner_session_shop_and_pin.sql',
 ]);
 
 /**
