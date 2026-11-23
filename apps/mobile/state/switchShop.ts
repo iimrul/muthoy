@@ -17,6 +17,29 @@ import {
 import { useCartStore } from './cartStore';
 import { useSessionStore, type Session } from './sessionStore';
 
+/**
+ * DEV-only stopwatch for the online switch: how long each step took, in ms.
+ * Logs durations only — never a shop id, user id or token. A no-op in a
+ * release build.
+ */
+function switchTiming() {
+  const startedAt = Date.now();
+  let last = startedAt;
+  const steps: Record<string, number> = {};
+  return {
+    mark(step: string) {
+      const now = Date.now();
+      steps[step] = now - last;
+      last = now;
+    },
+    done(outcome: 'ok' | 'failed') {
+      if (__DEV__) {
+        console.info('[shop-switch:timing]', JSON.stringify({ outcome, totalMs: Date.now() - startedAt, ...steps }));
+      }
+    },
+  };
+}
+
 async function refreshCloudSession(): Promise<void> {
   const refreshed = await withAuthMutation(() => supabase.auth.refreshSession());
   if (refreshed.error) throw refreshed.error;
@@ -132,12 +155,15 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     const state = useSessionStore.getState();
     return state.epoch === transitionEpoch && state.authorityTransitioning;
   };
+  // DEV-only stopwatch: step durations in ms, no shop or user ids.
+  const timing = switchTiming();
   try {
     // An unconfirmed shop means an earlier attempt may have stopped between
     // the server's switch and this device's token refresh. Refresh first so
     // the token names the shop the server actually has this session on.
     if (current.cloudShopConfirmed === false) await refreshCloudSession();
     const { data, error } = await invokeSyncWithClaimRefresh(await shopSwitchRequest(shopId));
+    timing.mark('server_switch');
     if (error) throw error;
     const response = data as {
       actor_user_id?: unknown; role?: unknown; billing_account_id?: unknown; device?: unknown;
@@ -149,6 +175,7 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     await persistCarriedInstallation(shopId, response.actor_user_id, response.device);
     if (!ownsTransition()) throw new Error('The active user changed.');
     await refreshCloudSession();
+    timing.mark('token_refresh');
     if (!ownsTransition()) throw new Error('The active user changed.');
     assertCloudActorBinding(
       await inspectCloudActorBinding({ userId: response.actor_user_id, shopId }),
@@ -163,6 +190,7 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     // applies it in one transaction and writes the cursor last. This took the
     // switch from ~15 pull requests to ~1-2 (founder-approved 2026-11-22).
     await pullChanges(shopId, undefined, () => !ownsTransition());
+    timing.mark('pull');
     if (!ownsTransition()) throw new Error('The active user changed.');
     // The shop is linked at exactly this point, not one step earlier: the
     // server confirmed this owner may act in it, the claims were refreshed, and
@@ -175,6 +203,7 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     await markShopCloudLinked(shopId);
     if (!ownsTransition()) throw new Error('The active user changed.');
     await refreshBillingStatus(shopId, undefined, { isCurrent: ownsTransition });
+    timing.mark('billing');
     if (!ownsTransition()) throw new Error('The active user changed.');
     const permissions = await getUserPermissionOverrides(shopId, response.actor_user_id);
     if (!ownsTransition()) throw new Error('The active user changed.');
@@ -189,7 +218,9 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
       cloudActorConfirmed: true,
     };
     useSessionStore.getState().login(next);
+    timing.done('ok');
   } catch (error) {
+    timing.done('failed');
     if (!ownsTransition()) {
       // Use the captured owner token only to restore that owner's cloud shop;
       // never touch the new local session established by the handover.
