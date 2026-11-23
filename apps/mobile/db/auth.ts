@@ -700,6 +700,43 @@ export async function localUserHasPhone(shopId: string, userId: string, phone: s
   return stored !== null && typed !== null && stored === typed;
 }
 
+/**
+ * The PIN pad's way back in for a multi-shop owner (2026-11-23).
+ *
+ * verifyPin is scoped to the last-opened shop. An owner's account in a SECOND
+ * shop is its own actor row, created without a phone — the number identifies
+ * the owner's primary account, which is also what the server's device-login
+ * resolves. So after an owner works in a second shop, a correct PIN there
+ * matched an account with no number, and the pad refused it as "incorrect".
+ *
+ * This finds the ONE live local account that carries the typed number and
+ * verifies the same PIN against it (verifyPinForUser: fixed work, the A2.3 and
+ * commercial eligibility backstops included). The person proves exactly what
+ * the pad always asked for — this number and this number's PIN — and signs in
+ * to that account's own shop, from which they switch. Null unless exactly one
+ * live account has the number and its PIN matches. Spends no attempt budget:
+ * it runs only after verifyPin has already done that accounting.
+ */
+export async function verifyPinForPhoneOwner(
+  rawPin: string,
+  phone: string,
+  timing?: AuthTimingTrace,
+): Promise<LocalPinSession | null> {
+  const typed = normalizeBdPhone(phone);
+  if (!typed) return null;
+  const rows = await db
+    .select({ id: users.id, shopId: users.shopId, phone: users.phone })
+    .from(users)
+    .innerJoin(shops, and(eq(shops.id, users.shopId), eq(shops.isDeleted, false)))
+    .where(and(liveLoginWhere(), isNotNull(users.phone)));
+  const owners = rows.filter((row) => row.phone !== null && normalizeBdPhone(row.phone) === typed);
+  // Two live accounts with one number cannot choose an identity by row order.
+  if (owners.length !== 1) return null;
+  const [owner] = owners;
+  if (!owner) return null;
+  return verifyPinForUser(rawPin, owner.shopId, owner.id, timing);
+}
+
 export async function recordSuccessfulLogin(session: LocalPinSession): Promise<void> {
   const id = generateId();
   const now = new Date().toISOString();

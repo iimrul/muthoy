@@ -14,7 +14,7 @@ import { AUTH_CHIP_LABELS, SecureChip } from '../../components/auth/SecureChip';
 import { latinFont, useCopyFont } from '../../components/auth/typography';
 import { PinPad, usePinEntry, type PinCompletionMeta } from '../../components/ui/PinPad';
 import { StandardHeader } from '../../components/ui/StandardHeader';
-import { localUserHasPhone, recordSuccessfulLogin, verifyPin } from '../../db/auth';
+import { localUserHasPhone, recordSuccessfulLogin, verifyPin, verifyPinForPhoneOwner } from '../../db/auth';
 import { DeviceAccessRevokedError, PinAccountRefusedError, PinLockedOutError } from '../../db/errors';
 import { pinAttemptScope, pinAttemptStatus } from '../../db/pinAttemptLock';
 import { handoffAuthTiming, startAuthTiming } from '../../dev/authTiming';
@@ -237,12 +237,21 @@ export default function PinLoginScreen() {
       // charged the attempt budget exactly as before; a PIN that belongs to
       // someone else is answered with the same "incorrect" message.
       if (!(await localUserHasPhone(result.shopId, result.userId, authPhoneForSubmit(phone)))) {
-        setError(true);
-        setRevoked(null);
-        setRefused(null);
-        setShakeKey((value) => value + 1);
-        timing?.mark('login_rejected', 'error');
-        return;
+        // 2026-11-23: a multi-shop owner's second-shop account has no number
+        // of its own, so the match above can be that owner in the last-opened
+        // shop. Sign in to the account the number belongs to instead — same
+        // number, same PIN — and the owner switches shops from there.
+        const owner = await verifyPinForPhoneOwner(pin, authPhoneForSubmit(phone), timing);
+        if (!owner) {
+          setError(true);
+          setRevoked(null);
+          setRefused(null);
+          setShakeKey((value) => value + 1);
+          timing?.mark('login_rejected', 'error');
+          return;
+        }
+        timing?.mark('phone_owner_fallback');
+        result = owner;
       }
 
       setError(false);

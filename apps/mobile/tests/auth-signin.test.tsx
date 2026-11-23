@@ -51,6 +51,9 @@ vi.mock('../db/auth', () => ({
   verifyPin: deps.verifyPin,
   recordSuccessfulLogin: deps.recordSuccessfulLogin,
   localUserHasPhone: deps.localUserHasPhone,
+  // The number belongs to nobody whose PIN this is: the multi-shop owner
+  // fallback (db/auth.ts verifyPinForPhoneOwner) finds no account either.
+  verifyPinForPhoneOwner: async () => null,
 }));
 vi.mock('../sync/deviceAuth', () => {
   class DeviceLoginError extends Error {
