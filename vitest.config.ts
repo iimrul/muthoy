@@ -317,6 +317,7 @@ export default defineConfig({
       // Multi-Shop physical defects: cloud-link persistence across a shop
       // switch/cold restart, and shop-scoped PIN uniqueness.
       "apps/mobile/db/multi-shop-restart-pin.sqlite.test.ts",
+      "apps/mobile/db/owner-pin-all-shops.sqlite.test.ts",
       "apps/mobile/db/sync-helpers.sqlite.test.ts",
       // H-6 (W3-01/W3-02). Detection through the real apply path, then the
       // resolver: force-apply past the LWW gate, outbox supersession with a
@@ -494,6 +495,7 @@ export default defineConfig({
       // harness so the refusals are not free.
       "backend/supabase/pgtest/e11-entitlement-verification.pgtest.ts",
       "backend/supabase/pgtest/admin-plan-grants.pgtest.ts",
+      "backend/supabase/pgtest/owner-session-shop.pgtest.ts",
       // W4-05. Both barriers proven INDEPENDENTLY — the owner gate with the pin
       // bypassed, the pin with the gate bypassed — plus the seven working paths.
       "backend/supabase/pgtest/w405-shop-identity.pgtest.ts",
@@ -610,6 +612,7 @@ export default defineConfig({
       // reaches no payment table on a refused attempt.
       "backend/supabase/functions/sync/payment-provider.test.ts",
       "backend/supabase/functions/sync/multiShop.test.ts",
+      "backend/supabase/functions/sync/ownerPin.test.ts",
       // billing-status self-heal: MU032 is the only failure that may answer
       // 404; every other RPC/database error stays a 500.
       "backend/supabase/functions/sync/billing.test.ts",

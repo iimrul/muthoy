@@ -1,4 +1,3 @@
-import * as bcrypt from "npm:bcryptjs@3";
 import {
   type Caller,
   HttpError,
@@ -10,6 +9,12 @@ import { ensureAuthBinding, mintSessionForAppUser } from "./_shared/identity.ts"
 import { prepareInstallationEnrollment, tryBindSession } from "./deviceBinding.ts";
 import { isSameBdPhone, normalizeBdPhone } from "./_shared/phone.ts";
 import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
+import {
+  assertPinFreeInOwnerShops,
+  ownerActorsFor,
+  PIN_IN_USE,
+  setOwnerPinEverywhere,
+} from "./ownerPin.ts";
 
 // recoverPin.ts — the ONLY surviving use of OTP after first-time registration.
 //
@@ -27,10 +32,6 @@ import { supabaseAdmin } from "./_shared/supabaseAdmin.ts";
 // checks that the verified phone on the caller's token is the phone on the
 // owner row whose PIN is being replaced.
 
-// Matches native/crypto.ts. A recovered PIN must verify against the same cost
-// factor the device will later use offline.
-const BCRYPT_COST_FACTOR = 10;
-
 // Stable refusal codes. The device maps these — never the English message —
 // so each keeps its meaning for as long as an installed build may read it.
 // Without them every refusal reached the owner as "could not reach the
@@ -40,7 +41,6 @@ const BCRYPT_COST_FACTOR = 10;
 // Bangladeshi, no such owner, not an owner, not the number this session
 // proved — so the reply says nothing about which numbers run a pharmacy.
 const RECOVERY_REFUSED = "recovery_refused";
-const PIN_IN_USE = "pin_in_use";
 /** A fault on our side — never a verdict on the number or the PIN. */
 const RECOVERY_FAILED = "recovery_failed";
 /**
@@ -81,37 +81,27 @@ async function findOwnerByPhone(phone: string): Promise<OwnerRow | null> {
 }
 
 /**
- * Refuses a PIN that already belongs to somebody else in the shop.
+ * Refuses a PIN that already belongs to somebody else in ANY of the owner's
+ * shops.
  *
  * PIN Login has no "who are you" step: db/auth.ts's verifyPin compares the
- * typed PIN against EVERY live user's hash and takes the first match. Two users
- * sharing a PIN therefore means one of them silently signs in as the other —
- * and if the collision is with the owner, that is a privilege escalation. The
- * same rule is enforced on the device; this is the server half, so a recovery
- * cannot introduce a collision the device would then have to live with.
+ * typed PIN against every live user's hash in the shop. Two users sharing a
+ * PIN therefore means one of them silently signs in as the other — and if the
+ * collision is with the owner, that is a privilege escalation. The same rule
+ * is enforced on the device; this is the server half. Migration 43: the
+ * recovered PIN becomes the owner's PIN in every shop they run, so every one
+ * of those shops is checked (ownerPin.ts).
  */
-async function assertPinUnusedInShop(
-  shopId: string,
-  rawPin: string,
-  exceptUserId: string,
-): Promise<void> {
-  const { data, error } = await supabaseAdmin
-    .from("users")
-    .select("id, pin_hash")
-    .eq("shop_id", shopId)
-    .eq("is_active", true)
-    .eq("is_deleted", false)
-    .not("pin_set_at", "is", null);
-  if (error) {
+async function assertPinUnusedInOwnerShops(owner: OwnerRow, rawPin: string): Promise<void> {
+  try {
+    const actors = await ownerActorsFor(owner.id);
+    await assertPinFreeInOwnerShops(
+      actors.length > 0 ? actors : [{ shopId: owner.shopId, actorUserId: owner.id }],
+      rawPin,
+    );
+  } catch (error) {
+    if (error instanceof HttpError && error.code === PIN_IN_USE) throw error;
     throw new HttpError(500, "Could not recover this account", RECOVERY_FAILED);
-  }
-  for (const row of data ?? []) {
-    if (row.id === exceptUserId || !row.pin_hash) {
-      continue;
-    }
-    if (await bcrypt.compare(rawPin, row.pin_hash)) {
-      throw new HttpError(409, "That PIN is already in use at this shop. Choose another.", PIN_IN_USE);
-    }
   }
 }
 
@@ -187,7 +177,7 @@ export async function recoverPin(caller: Caller, body: Record<string, unknown>) 
   // different auth users — recover at all, instead of 403ing forever.
   await ensureAuthBinding(owner.id, caller.authUserId, { allowRebind: true });
 
-  await assertPinUnusedInShop(owner.shopId, newPin, owner.id);
+  await assertPinUnusedInOwnerShops(owner, newPin);
 
   // Cut every existing session BEFORE the new PIN exists. Recovery is what
   // someone does after losing a phone, so a session still living on that phone
@@ -207,13 +197,11 @@ export async function recoverPin(caller: Caller, body: Record<string, unknown>) 
 
   // CREDENTIAL COMMIT POINT. CLAUDE.md rule 8: the raw PIN is handed to
   // bcrypt and to nothing else — not logged, not returned, not stored.
-  const pinHash = await bcrypt.hash(newPin, BCRYPT_COST_FACTOR);
-  const now = new Date().toISOString();
-  const { error: updateError } = await supabaseAdmin
-    .from("users")
-    .update({ pin_hash: pinHash, pin_set_at: now, updated_at: now })
-    .eq("id", owner.id);
-  if (updateError) {
+  // Migration 43: written to EVERY owner actor of this owner in one statement,
+  // so a multi-shop owner's recovered PIN opens all of their shops.
+  try {
+    await setOwnerPinEverywhere(owner.id, newPin);
+  } catch {
     throw new HttpError(500, "Could not recover this account", RECOVERY_FAILED);
   }
   // The pin_hash change trips users_bump_permission_version, so any access

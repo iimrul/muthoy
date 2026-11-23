@@ -424,6 +424,9 @@ export const DEVICE_GUARDED_ACTIONS = [
   "device-access",
   "shop-switch",
   "shop-create",
+  // Migration 43: changes the owner's PIN in every shop — a credential write,
+  // so it needs this session's standing like everything else that mutates.
+  "owner-pin-change",
 ] as const;
 
 /**

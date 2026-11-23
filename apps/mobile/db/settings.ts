@@ -2,7 +2,7 @@
 // Settings (DEVELOPMENT_RULES.md). getShopProfile/updateShopProfile/
 // restoreFromBackupKey remain stubs — out of the Days 4-5/11 auth scope.
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { assertPinUnique, requireOwner } from './auth';
 import { assertSessionLive } from './errors';
 import { db } from './client';
@@ -247,6 +247,51 @@ export async function changeOwnPin(
     recordChange(tx, { shopId: user.shopId, table: 'audit_logs', rowId: auditId, op: 'insert', payload: auditValues });
     assertSessionLive(isStillActive);
   });
+}
+
+// Migration 43 — one owner PIN for every shop. The owner's PIN is changed on
+// the SERVER (sync/ownerPin.ts), because one person holds an actor row in each
+// shop they run and a phone sees only the shops it has pulled. These two are
+// the SQLite halves of that flow.
+
+/**
+ * The owner's current PIN, checked on this phone first so a typo never spends
+ * one of the server's attempts. Owner only, checked before any bcrypt.
+ */
+export async function verifyOwnerCurrentPin(userId: string, currentRawPin: string): Promise<boolean> {
+  const [user] = await db.select({ shopId: users.shopId, pinHash: users.pinHash }).from(users)
+    .where(and(eq(users.id, userId), eq(users.isDeleted, false)));
+  if (!user) throw new Error(`No user found with id ${userId}`);
+  await requireOwner(user.shopId, userId);
+  return verifyPinHash(currentRawPin, user.pinHash);
+}
+
+/**
+ * Mirrors a PIN the server has ALREADY written to every owner actor onto the
+ * rows this phone holds, so each of the owner's shops on this phone accepts
+ * it straight away, offline included.
+ *
+ * Not recorded for push: the server is the one that changed it. `pinSetAt` is
+ * the server's own timestamp, so the next pull of these rows agrees with it.
+ * The lookup tag is cleared rather than recomputed — PIN Login re-tags a row
+ * on its next successful match, and a stale tag must never route a PIN.
+ * Deliberately not session-guarded: the server change has happened, and
+ * leaving this phone on the old PIN would only lock the owner out.
+ */
+export async function applyOwnerPinLocally(
+  actorUserIds: readonly string[],
+  newRawPin: string,
+  pinSetAt: string,
+): Promise<number> {
+  if (actorUserIds.length === 0) return 0;
+  const pinHash = await hashPin(newRawPin);
+  return db.transaction((tx) => tx.update(users).set({
+    pinHash,
+    pinSetAt,
+    pinLookupTag: null,
+    pinLookupPinSetAt: null,
+    updatedAt: pinSetAt,
+  }).where(and(inArray(users.id, [...actorUserIds]), eq(users.isDeleted, false))).run().changes);
 }
 
 // TODO(P1): backup key restore-on-new-phone (Volume 4 SETTINGS: "backup key
