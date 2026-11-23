@@ -137,6 +137,29 @@ async function reserveAttempts(keys: readonly string[], limits: readonly number[
 }
 
 /**
+ * Each written actor's permission_version AFTER the write.
+ *
+ * A pin_hash change bumps permission_version (bump_permission_version), and
+ * the app's H-10 gate compares the token's claim with its local copy of that
+ * column. Without the new values the phone that made the change signed its
+ * own owner out at the next token refresh (device, 2026-11-24). Best effort:
+ * the PIN has already changed, so an unreadable row is left out, never fatal.
+ */
+async function permissionVersionsOf(actorUserIds: readonly string[]): Promise<Record<string, number>> {
+  const versions: Record<string, number> = {};
+  for (const actorUserId of actorUserIds) {
+    const { data, error } = await supabaseAdmin
+      .from("users")
+      .select("id, permission_version")
+      .eq("id", actorUserId)
+      .maybeSingle();
+    const version = (data as { permission_version?: unknown } | null)?.permission_version;
+    if (!error && typeof version === "number" && Number.isInteger(version)) versions[actorUserId] = version;
+  }
+  return versions;
+}
+
+/**
  * The owner changes their own PIN — current PIN proven, new PIN unique in
  * every one of their shops, then written to all of them.
  */
@@ -144,7 +167,7 @@ export async function ownerPinChange(
   caller: Caller,
   body: Record<string, unknown>,
   clientIp: string | null = null,
-): Promise<{ pinSetAt: string; actorUserIds: string[] }> {
+): Promise<{ pinSetAt: string; actorUserIds: string[]; permissionVersions: Record<string, number> }> {
   const { currentPin, newPin } = body;
   if (
     typeof currentPin !== "string" || !PIN_SHAPE.test(currentPin)
@@ -188,5 +211,6 @@ export async function ownerPinChange(
     throw new HttpError(403, "Owner access only");
   }
   await assertPinFreeInOwnerShops(actors, newPin);
-  return setOwnerPinEverywhere(principalUserId, newPin);
+  const written = await setOwnerPinEverywhere(principalUserId, newPin);
+  return { ...written, permissionVersions: await permissionVersionsOf(written.actorUserIds) };
 }

@@ -42,10 +42,24 @@ export interface OwnerPinChangeDependencies {
 interface OwnerPinChangeResult {
   pinSetAt: string;
   actorUserIds: string[];
+  /** Each actor's server permission_version after the write (may be partial). */
+  permissionVersions: Record<string, number>;
+}
+
+/** Keeps only integer versions for actors the server actually wrote. */
+function parseVersions(raw: unknown, actorUserIds: readonly string[]): Record<string, number> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const source = raw as Record<string, unknown>;
+  const versions: Record<string, number> = {};
+  for (const id of actorUserIds) {
+    const version = source[id];
+    if (typeof version === 'number' && Number.isInteger(version)) versions[id] = version;
+  }
+  return versions;
 }
 
 function parseResult(data: unknown): OwnerPinChangeResult {
-  const result = data as { pinSetAt?: unknown; actorUserIds?: unknown } | null;
+  const result = data as { pinSetAt?: unknown; actorUserIds?: unknown; permissionVersions?: unknown } | null;
   if (
     !result
     || typeof result.pinSetAt !== 'string'
@@ -54,7 +68,12 @@ function parseResult(data: unknown): OwnerPinChangeResult {
   ) {
     throw new OwnerPinChangeError('failed');
   }
-  return { pinSetAt: result.pinSetAt, actorUserIds: result.actorUserIds as string[] };
+  const actorUserIds = result.actorUserIds as string[];
+  return {
+    pinSetAt: result.pinSetAt,
+    actorUserIds,
+    permissionVersions: parseVersions(result.permissionVersions, actorUserIds),
+  };
 }
 
 /**
@@ -106,6 +125,7 @@ export async function changeOwnerPinEverywhere(
 
   // The server has changed it. A failure here cannot undo that, so it is not
   // reported as a failed change: the next pull brings the same PIN down.
-  await applyOwnerPinLocally(result.actorUserIds, newPin, result.pinSetAt).catch(() => 0);
+  await applyOwnerPinLocally(result.actorUserIds, newPin, result.pinSetAt, result.permissionVersions)
+    .catch(() => 0);
   return result;
 }

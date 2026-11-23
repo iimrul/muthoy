@@ -29,7 +29,11 @@ import { changeOwnerPinEverywhere, OwnerPinChangeError } from './ownerPin';
 
 const SESSION = { shopId: 'shop-a', userId: 'owner-a' };
 const ONLINE = { isOnline: async () => true };
-const RESULT = { pinSetAt: '2026-11-23T09:15:42.123456+00:00', actorUserIds: ['owner-a', 'owner-b'] };
+const RESULT = {
+  pinSetAt: '2026-11-23T09:15:42.123456+00:00',
+  actorUserIds: ['owner-a', 'owner-b'],
+  permissionVersions: { 'owner-a': 8, 'owner-b': 3 },
+};
 
 async function reasonOf(promise: Promise<unknown>): Promise<string> {
   const failure = await promise.then(() => null, (error: unknown) => error);
@@ -54,8 +58,28 @@ describe('changeOwnerPinEverywhere (migration 43)', () => {
       action: 'owner-pin-change', shopId: 'shop-a', currentPin: '4821', newPin: '7390',
     });
     expect(mocks.verifyCurrent).toHaveBeenCalledBefore(mocks.invoke);
-    expect(mocks.applyLocally).toHaveBeenCalledWith(['owner-a', 'owner-b'], '7390', RESULT.pinSetAt);
+    // The server's post-write permission versions travel with the PIN, so the
+    // H-10 gate's local copy matches the next token (device, 2026-11-24).
+    expect(mocks.applyLocally).toHaveBeenCalledWith(
+      ['owner-a', 'owner-b'], '7390', RESULT.pinSetAt, { 'owner-a': 8, 'owner-b': 3 },
+    );
     expect(mocks.invoke).toHaveBeenCalledBefore(mocks.applyLocally);
+  });
+
+  it('keeps only integer versions for actors the server wrote', async () => {
+    mocks.invoke.mockResolvedValue({
+      data: { ...RESULT, permissionVersions: { 'owner-a': 8, 'owner-b': '3', stranger: 9 } },
+      error: null,
+    });
+    const result = await changeOwnerPinEverywhere(SESSION, '4821', '7390', ONLINE);
+    expect(result.permissionVersions).toEqual({ 'owner-a': 8 });
+    expect(mocks.applyLocally).toHaveBeenCalledWith(['owner-a', 'owner-b'], '7390', RESULT.pinSetAt, { 'owner-a': 8 });
+  });
+
+  it('accepts an older server that sends no versions', async () => {
+    mocks.invoke.mockResolvedValue({ data: { pinSetAt: RESULT.pinSetAt, actorUserIds: RESULT.actorUserIds }, error: null });
+    const result = await changeOwnerPinEverywhere(SESSION, '4821', '7390', ONLINE);
+    expect(result.permissionVersions).toEqual({});
   });
 
   it('refuses a wrong current PIN on the phone, spending no server attempt', async () => {

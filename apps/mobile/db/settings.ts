@@ -2,7 +2,7 @@
 // Settings (DEVELOPMENT_RULES.md). getShopProfile/updateShopProfile/
 // restoreFromBackupKey remain stubs — out of the Days 4-5/11 auth scope.
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { assertPinUnique, requireOwner } from './auth';
 import { assertSessionLive } from './errors';
 import { db } from './client';
@@ -277,21 +277,35 @@ export async function verifyOwnerCurrentPin(userId: string, currentRawPin: strin
  * on its next successful match, and a stale tag must never route a PIN.
  * Deliberately not session-guarded: the server change has happened, and
  * leaving this phone on the old PIN would only lock the owner out.
+ *
+ * `permissionVersions` is the server's counter after the write. A PIN change
+ * bumps it, and H-10 compares the token's claim with this local copy: without
+ * it the phone that changed the PIN signed its own owner out at the next
+ * token refresh (device, 2026-11-24). Server values only — never guessed.
  */
 export async function applyOwnerPinLocally(
   actorUserIds: readonly string[],
   newRawPin: string,
   pinSetAt: string,
+  permissionVersions: Readonly<Record<string, number>> = {},
 ): Promise<number> {
   if (actorUserIds.length === 0) return 0;
   const pinHash = await hashPin(newRawPin);
-  return db.transaction((tx) => tx.update(users).set({
-    pinHash,
-    pinSetAt,
-    pinLookupTag: null,
-    pinLookupPinSetAt: null,
-    updatedAt: pinSetAt,
-  }).where(and(inArray(users.id, [...actorUserIds]), eq(users.isDeleted, false))).run().changes);
+  return db.transaction((tx) => {
+    let changed = 0;
+    for (const actorUserId of actorUserIds) {
+      const version = permissionVersions[actorUserId];
+      changed += tx.update(users).set({
+        pinHash,
+        pinSetAt,
+        pinLookupTag: null,
+        pinLookupPinSetAt: null,
+        updatedAt: pinSetAt,
+        ...(Number.isInteger(version) ? { permissionVersion: version } : {}),
+      }).where(and(eq(users.id, actorUserId), eq(users.isDeleted, false))).run().changes;
+    }
+    return changed;
+  });
 }
 
 // TODO(P1): backup key restore-on-new-phone (Volume 4 SETTINGS: "backup key

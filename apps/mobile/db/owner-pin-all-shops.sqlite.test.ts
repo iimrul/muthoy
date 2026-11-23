@@ -92,6 +92,16 @@ describe("the owner's new PIN reaches every shop on this phone (migration 43)", 
     expect(db.select().from(syncQueue).all()).toHaveLength(0);
   });
 
+  it("mirrors the server's permission versions, and leaves one it was not given alone", async () => {
+    // A PIN change bumps permission_version on the server; H-10 compares the
+    // next token's claim with THIS column (device, 2026-11-24).
+    db.update(users).set({ permissionVersion: 4 }).where(eq(users.id, OWNER_B)).run();
+    await applyOwnerPinLocally([OWNER_A, OWNER_B], NEW_PIN, SERVER_PIN_SET_AT, { [OWNER_A]: 9 });
+    expect(row(OWNER_A).permissionVersion).toBe(9);
+    expect(row(OWNER_B).permissionVersion).toBe(4);
+    expect(row(STAFF_A).permissionVersion).toBe(0);
+  });
+
   it("signs the owner in to EITHER shop with the new PIN, and neither with the old", async () => {
     await applyOwnerPinLocally([OWNER_A, OWNER_B], NEW_PIN, SERVER_PIN_SET_AT);
 

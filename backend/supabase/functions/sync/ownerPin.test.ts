@@ -58,8 +58,8 @@ beforeEach(() => {
   db.record = { appUserId: 'owner-a', shopId: 'shop-a', isOwner: true };
   const ownerHash = bcrypt.hashSync(OWNER_PIN, 4);
   db.users = [
-    { id: 'owner-a', shop_id: 'shop-a', is_active: true, is_deleted: false, pin_hash: ownerHash, pin_set_at: 't0' },
-    { id: 'owner-b', shop_id: 'shop-b', is_active: true, is_deleted: false, pin_hash: ownerHash, pin_set_at: 't0' },
+    { id: 'owner-a', shop_id: 'shop-a', is_active: true, is_deleted: false, pin_hash: ownerHash, pin_set_at: 't0', permission_version: 7 },
+    { id: 'owner-b', shop_id: 'shop-b', is_active: true, is_deleted: false, pin_hash: ownerHash, pin_set_at: 't0', permission_version: 2 },
     { id: 'staff-b', shop_id: 'shop-b', is_active: true, is_deleted: false, pin_hash: bcrypt.hashSync(STAFF_PIN, 4), pin_set_at: 't0' },
   ];
   db.memberships = [
@@ -78,7 +78,13 @@ beforeEach(() => {
 describe('owner-pin-change (migration 43)', () => {
   it('writes the new PIN to every owner actor through the RPC, as a bcrypt hash only', async () => {
     const result = await ownerPinChange(caller, { currentPin: OWNER_PIN, newPin: NEW_PIN }, '203.0.113.9');
-    expect(result).toEqual({ pinSetAt: '2026-11-23T12:00:00Z', actorUserIds: ['owner-a', 'owner-b'] });
+    // permissionVersions: each actor's counter read AFTER the write, so the
+    // phone's H-10 copy matches the next token instead of signing itself out.
+    expect(result).toEqual({
+      pinSetAt: '2026-11-23T12:00:00Z',
+      actorUserIds: ['owner-a', 'owner-b'],
+      permissionVersions: { 'owner-a': 7, 'owner-b': 2 },
+    });
     const [write] = rpcCalls('owner_set_pin_all_shops');
     expect(write?.p_principal_user_id).toBe('owner-a');
     const hash = String(write?.p_pin_hash);
@@ -99,6 +105,12 @@ describe('owner-pin-change (migration 43)', () => {
     await expect(ownerPinChange(caller, { currentPin: OWNER_PIN, newPin: STAFF_PIN }))
       .rejects.toMatchObject({ status: 409, code: 'pin_in_use' });
     expect(rpcCalls('owner_set_pin_all_shops')).toHaveLength(0);
+  });
+
+  it('still reports the change when a version cannot be read — the PIN is already written', async () => {
+    db.users = db.users.map((row) => (row.id === 'owner-b' ? { ...row, permission_version: null } : row));
+    const result = await ownerPinChange(caller, { currentPin: OWNER_PIN, newPin: NEW_PIN });
+    expect(result.permissionVersions).toEqual({ 'owner-a': 7 });
   });
 
   it('does not count the owner\'s own actors as a collision', async () => {
