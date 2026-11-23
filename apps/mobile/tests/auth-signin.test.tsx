@@ -103,6 +103,8 @@ beforeEach(() => {
   clearSignOutNotice();
   deps.params = {};
   deps.canDismiss.mockReturnValue(true);
+  // Offline unless a test says otherwise: a local "no" then stays a "no".
+  deps.networkReachability.mockResolvedValue('offline');
   frameQueue = [];
   vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
     frameQueue.push(callback);
@@ -258,6 +260,72 @@ describe('PIN Login', () => {
     expect(deps.localUserHasPhone).toHaveBeenCalledWith('shop-1', 'staff-2', expect.stringContaining('1712345678'));
     expect(deps.recordSuccessfulLogin).not.toHaveBeenCalled();
     expect(deps.replace).not.toHaveBeenCalled();
+  });
+
+  // 2026-11-24, founder-approved: a PIN changed on ANOTHER phone (or reset by
+  // the owner) is not on this phone yet. Online, the server is asked once.
+  describe('when this phone holds an old copy of the PIN', () => {
+    it('signs in through the server, which brings the new PIN down', async () => {
+      deps.networkReachability.mockResolvedValue('online');
+      deps.verifyPin.mockResolvedValueOnce(null);
+      deps.loginOnNewDevice.mockResolvedValueOnce(undefined);
+      renderPinLogin();
+      pressPin('7390');
+      await paintAndSubmit();
+
+      await waitFor(() => expect(deps.replace).toHaveBeenCalledWith('/'));
+      expect(deps.loginOnNewDevice).toHaveBeenCalledWith(expect.stringContaining('1712345678'), '7390', undefined);
+      expect(screen.queryByText(catalog.en.pinIncorrect)).toBeNull();
+    });
+
+    it('keeps the same "incorrect PIN" when the server says no as well', async () => {
+      deps.networkReachability.mockResolvedValue('online');
+      deps.verifyPin.mockResolvedValueOnce(null);
+      deps.loginOnNewDevice.mockRejectedValueOnce(new DeviceLoginError('Incorrect phone number or PIN', true, 'credentials'));
+      renderPinLogin();
+      pressPin('9999');
+      await paintAndSubmit();
+
+      expect(await screen.findByText(catalog.en.pinIncorrect)).toBeTruthy();
+      expect(deps.replace).not.toHaveBeenCalled();
+      expect(deps.loginOnNewDevice).toHaveBeenCalledTimes(1);
+    });
+
+    it('never asks the server while offline', async () => {
+      deps.verifyPin.mockResolvedValueOnce(null);
+      renderPinLogin();
+      pressPin('9999');
+      await paintAndSubmit();
+
+      expect(await screen.findByText(catalog.en.pinIncorrect)).toBeTruthy();
+      expect(deps.loginOnNewDevice).not.toHaveBeenCalled();
+    });
+
+    it('says a failed server check as itself, never as a wrong PIN', async () => {
+      deps.networkReachability.mockResolvedValue('online');
+      deps.verifyPin.mockResolvedValueOnce(null);
+      deps.loginOnNewDevice.mockRejectedValueOnce(new DeviceLoginError('network', false, 'network'));
+      renderPinLogin();
+      pressPin('7390');
+      await paintAndSubmit();
+
+      expect(await screen.findByText(catalog.en.authErrorNetwork)).toBeTruthy();
+      expect(screen.queryByText(catalog.en.pinIncorrect)).toBeNull();
+      expect(deps.replace).not.toHaveBeenCalled();
+    });
+
+    it('also covers a PIN that matched someone else on this phone', async () => {
+      deps.networkReachability.mockResolvedValue('online');
+      deps.verifyPin.mockResolvedValueOnce({ shopId: 'shop-1', userId: 'staff-2', role: 'staff', permissions: {} });
+      deps.localUserHasPhone.mockResolvedValueOnce(false);
+      deps.loginOnNewDevice.mockResolvedValueOnce(undefined);
+      renderPinLogin();
+      pressPin('4321');
+      await paintAndSubmit();
+
+      await waitFor(() => expect(deps.replace).toHaveBeenCalledWith('/'));
+      expect(deps.recordSuccessfulLogin).not.toHaveBeenCalled();
+    });
   });
 });
 

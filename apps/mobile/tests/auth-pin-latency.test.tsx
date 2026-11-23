@@ -80,7 +80,11 @@ vi.mock('../sync/deviceRegistry', () => {
 });
 
 vi.mock('../sync/deviceAuth', async () => {
-  class DeviceLoginError extends Error {}
+  class DeviceLoginError extends Error {
+    constructor(message = '', readonly isCredentialFailure = false, readonly code = 'network') {
+      super(message);
+    }
+  }
   return { DeviceLoginError, loginOnNewDevice: deps.loginOnNewDevice };
 });
 
@@ -225,6 +229,9 @@ describe('PIN authentication loading state', () => {
 
   it('recovers from a rejected offline PIN and re-enables retry', async () => {
     deps.verifyPin.mockResolvedValueOnce(null);
+    // Online, the server is asked once (2026-11-24) — and refuses too.
+    const { DeviceLoginError } = await import('../sync/deviceAuth');
+    deps.loginOnNewDevice.mockRejectedValueOnce(new DeviceLoginError('Incorrect phone number or PIN', true, 'credentials'));
     renderPinLogin();
 
     pressPin('9999');
@@ -284,6 +291,8 @@ describe('PIN authentication loading state', () => {
     });
     deps.localUserHasPhone.mockResolvedValueOnce(false);
     deps.verifyPinForPhoneOwner.mockResolvedValueOnce(null);
+    const { DeviceLoginError } = await import('../sync/deviceAuth');
+    deps.loginOnNewDevice.mockRejectedValueOnce(new DeviceLoginError('Incorrect phone number or PIN', true, 'credentials'));
     renderPinLogin();
 
     pressPin('1234');
