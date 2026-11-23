@@ -30,6 +30,12 @@ const deviceRegistry = vi.hoisted(() => ({
   recordBoundInstallation: vi.fn(async () => true),
 }));
 vi.mock('../sync/deviceRegistry', () => deviceRegistry);
+const authority = vi.hoisted(() => ({
+  readSessionAuthorityLease: vi.fn(() => ({ status: 'absent' })),
+  inspectSessionAuthority: vi.fn(async () => ({ status: 'confirmed', reason: 'claims_match' })),
+}));
+vi.mock('../sync/sessionAuthorityStore', () => ({ readSessionAuthorityLease: authority.readSessionAuthorityLease }));
+vi.mock('../sync/sessionAuthority', () => ({ inspectSessionAuthority: authority.inspectSessionAuthority }));
 
 const { useSessionStore } = await import('./sessionStore');
 const {
@@ -316,6 +322,47 @@ describe('the device binding travels with the shop switch', () => {
     // forced a full re-download on every switch (~15 requests).
     vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({ data: SWITCHED, error: null } as never);
     await switchActiveShop('shop-2', true);
+    expect(vi.mocked(pullChanges)).toHaveBeenCalledWith('shop-2', undefined, expect.any(Function));
+  });
+
+  it('clears a quarantined target lease only after a FULL hydration and an exact authority check', async () => {
+    // 2026-11-23: the owner's second-shop actor was quarantined and nothing
+    // could clear it (that actor has no number for the relink), so every
+    // switch there signed the owner straight back out.
+    authority.readSessionAuthorityLease.mockReturnValueOnce({
+      status: 'valid',
+      record: { v: 1, confirmedAtMs: 1, highWaterAtMs: 1, quarantineReason: 'actor_mismatch' },
+    } as never);
+    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({ data: SWITCHED, error: null } as never);
+
+    await switchActiveShop('shop-2', true);
+
+    expect(vi.mocked(pullChanges)).toHaveBeenCalledWith('shop-2', null, expect.any(Function));
+    expect(authority.inspectSessionAuthority).toHaveBeenCalledWith(
+      { userId: 'owner-2', shopId: 'shop-2', role: 'owner', principalUserId: 'owner-1', billingAccountId: 'account-1' },
+      expect.any(Number),
+      expect.objectContaining({ allowQuarantineRecovery: true }),
+    );
+    expect(vi.mocked(pullChanges)).toHaveBeenCalledBefore(authority.inspectSessionAuthority);
+    expect(useSessionStore.getState().session).toMatchObject({ shopId: 'shop-2', userId: 'owner-2' });
+  });
+
+  it('keeps the quarantine and rolls back when the authority check does not confirm', async () => {
+    authority.readSessionAuthorityLease.mockReturnValueOnce({
+      status: 'valid',
+      record: { v: 1, confirmedAtMs: 1, highWaterAtMs: 1, quarantineReason: 'actor_mismatch' },
+    } as never);
+    authority.inspectSessionAuthority.mockResolvedValueOnce({ status: 'revoked', reason: 'actor_mismatch' } as never);
+    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({ data: SWITCHED, error: null } as never);
+
+    await expect(switchActiveShop('shop-2', true)).rejects.toThrow(/Could not confirm access/);
+    expect(useSessionStore.getState().session).toMatchObject({ shopId: 'shop-1', userId: 'owner-1' });
+  });
+
+  it('leaves the fast path alone when the target lease is not quarantined', async () => {
+    vi.mocked(invokeSyncWithClaimRefresh).mockResolvedValue({ data: SWITCHED, error: null } as never);
+    await switchActiveShop('shop-2', true);
+    expect(authority.inspectSessionAuthority).not.toHaveBeenCalled();
     expect(vi.mocked(pullChanges)).toHaveBeenCalledWith('shop-2', undefined, expect.any(Function));
   });
 

@@ -14,6 +14,8 @@ import {
   recordBoundInstallation,
   type BoundInstallationResponse,
 } from '../sync/deviceRegistry';
+import { inspectSessionAuthority } from '../sync/sessionAuthority';
+import { readSessionAuthorityLease } from '../sync/sessionAuthorityStore';
 import { useCartStore } from './cartStore';
 import { useSessionStore, type Session } from './sessionStore';
 
@@ -182,6 +184,14 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
       { userId: response.actor_user_id, shopId },
     );
     if (!ownsTransition()) throw new Error('The active user changed.');
+    // H-10 (2026-11-23). A quarantined lease for the target actor used to be
+    // a dead end: only activateHydratedDevice (number + PIN + full pull) clears
+    // one, and an owner's second-shop actor has no number, so that shop signed
+    // the owner out on every switch, forever. The switch now clears it on the
+    // same terms: credential-proven session, server-confirmed membership and
+    // claims, a FULL hydration, then exact local actor validation below.
+    const lease = readSessionAuthorityLease(shopId, response.actor_user_id);
+    const quarantined = lease.status === 'valid' && lease.record.quarantineReason !== null;
     // `undefined` = this shop's own stored cursor. A shop never hydrated on
     // this device has none and gets the full hydration; a shop already
     // hydrated pulls only what changed since, exactly as the background
@@ -189,7 +199,7 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     // stored cursor can only exist after a COMPLETE hydration: pull.ts
     // applies it in one transaction and writes the cursor last. This took the
     // switch from ~15 pull requests to ~1-2 (founder-approved 2026-11-22).
-    await pullChanges(shopId, undefined, () => !ownsTransition());
+    await pullChanges(shopId, quarantined ? null : undefined, () => !ownsTransition());
     timing.mark('pull');
     if (!ownsTransition()) throw new Error('The active user changed.');
     // The shop is linked at exactly this point, not one step earlier: the
@@ -207,6 +217,25 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     if (!ownsTransition()) throw new Error('The active user changed.');
     const permissions = await getUserPermissionOverrides(shopId, response.actor_user_id);
     if (!ownsTransition()) throw new Error('The active user changed.');
+    if (quarantined) {
+      // The only recovery H-10 allows, reached here with everything it asks
+      // for. Anything short of an exact match keeps the quarantine and fails
+      // the switch, which rolls back to the source shop.
+      const authority = await inspectSessionAuthority(
+        {
+          userId: response.actor_user_id,
+          shopId,
+          role: 'owner',
+          principalUserId,
+          billingAccountId: response.billing_account_id,
+        },
+        Date.now(),
+        { allowQuarantineRecovery: true, isCurrent: ownsTransition },
+      );
+      if (authority.status !== 'confirmed') throw new Error('Could not confirm access to this shop.');
+      timing.mark('quarantine_recovery');
+      if (!ownsTransition()) throw new Error('The active user changed.');
+    }
     const next: Session = {
       shopId,
       userId: response.actor_user_id,
