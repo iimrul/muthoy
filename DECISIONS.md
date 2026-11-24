@@ -5568,3 +5568,127 @@ runbook listed as unproven. PROD must set both values before its first deploy.
 The held admin compatibility test now builds its full-chain case through
 migration 39 (createHarness({ through })), the chain that candidate pins; every
 assertion is unchanged.
+
+## 2026-11-20 — Live strip scan adds to the cart (PR #3)
+
+Founder decisions: a confident strip match adds one unit with a 3-second Undo;
+an ambiguous match asks for a one-tap choice; prescription medicines auto-add
+too; an add beep plays (expo-audio). This reverses W2-01's never-skippable scan
+confirmation at the founder's request, so ScanConfirmSheet must not come back.
+Matching reads only the shop's own inventory and sits under the existing OCR
+override.
+
+Checked on the Galaxy A04s: the scanner opens, the permission flow works, frames
+are deleted, and real ML Kit output on five strip photos matched. Not verified:
+a person holding real strips, the audible beep, and iOS (never built). Merged to
+main 2026-11-22 (3b1e3df). Details: docs/plans/ocr-and-multilingual-search.md §7.
+
+## 2026-11-21 — Speed round and the staff side (PR #4)
+
+The founder asked that every page, for Owner and Staff, answer at once. Tabs
+now stay mounted: pages open on top and going back returns to the kept tab.
+Sale insights use 4 queries instead of 61. The dashboard has no loading screen,
+number formatters are cached, and the business-day filters use the created_at
+index (53 ms to 0.5 ms per query on 60k synthetic sales). Every date field uses
+an in-app calendar.
+
+Live scan moved to frame-processor OCR on react-native-vision-camera 5.2.4 and
+ocr-plus 2.1.2 (founder-approved packages). It gives a new reading every
+170-190 ms instead of about 600 ms. VisionCamera 5 has no barcode output on
+Android, so the Sale scanner keeps frame OCR plus a Barcode button. Android 8.0
+is now the minimum (founder decision; the OCR package needs API 26). Release
+build 1596518d on the A04s: add-to-cart 54-76 ms, cart +/- 71-111 ms, kept
+tabs 117-163 ms, first Home open 1.4 s.
+
+Sign-in asks for the mobile number first, then the PIN (founder decision). This
+changes S-1's PIN-only identification, as flagged under rule 11. A locked
+account now signs in through the number-and-PIN relink instead of looping
+(94e6ff3). The Staff home shows only what the Owner granted. Its first redesign
+used a dark card and was rejected as off-brand, so it now matches the brand:
+green hero and white cards. Text and dark ink use #1A1A1A.
+
+Admin can grant or extend Pro/Ultra (migration 41, admin_grant_plan). The RPC
+is service-role only, writes an audit trail and never stamps verified_at. This
+supersedes the earlier rule that no admin action grants paid access, and the
+admin grant test now names exactly that RPC. Merged to main 2026-11-22
+(99ec980).
+
+## 2026-11-22 — DEV: migrations 41-42, shop-switch binding, function region
+
+Each step was founder-approved. DEV received migration 41 at 06:31Z and
+migration 42 at 08:33Z. Each ran as one Management API transaction with its
+history row, against a verified file hash. Migration 42 adds the billing cycle
+'grant': an admin grant has no price and no next billing date, and is left out
+of MRR. One UPDATE corrected the founder's earlier grant row, which had been
+stored as 'annual'.
+
+Shop-switch loop: a switch moved the account's active shop but left the
+session's device binding on the old shop. The server then refused every
+request, and the app re-switched about twice a second. c3d5433 moves the
+session's device binding into the target shop. sync v33 was deployed on DEV at
+10:00Z.
+
+Speed: DEV's database is in Tokyo, but Edge Functions ran in Mumbai, so every
+query crossed regions (median 1.8 s per request). e534e17 sends an x-region
+header for DEV calls, which brought the median to 0.6 s. PROD should be created
+in Mumbai (ap-south-1).
+
+Also: Windows Metro start-up and EMFILE fixes, a one-sentence sync card
+(sent, waiting or failing), and a blinking header sync dot.
+
+## 2026-11-23 — Faster switch, Sentry, multi-shop sign-in repairs (PR #5)
+
+Founder-approved: a shop switch pulls only what changed since that shop's own
+cursor, and a cursor is written only after a complete hydration. Sentry crash
+reporting is wired behind H-8's privacy contract. Events are rebuilt from an
+allowlist, and messages, breadcrumbs, user and request data are always dropped.
+Source maps are not uploaded (that needs a Sentry auth token). Native capture
+ships in EAS builds from 7e1685f; a device-side crash report is not yet
+verified.
+
+The multi-shop Owner lockout was root-caused on the device and has two parts.
+First, the Owner's second-shop actor has no phone number, so the number-first
+PIN pad refused a correct PIN; the pad now also checks the account the number
+belongs to (f5248a9). Second, a sign-in on another install moved the account's
+active shop. That quarantined this phone's actor, and nothing could clear it. A
+switch into a quarantined shop now forces a full pull and a recovery check
+(7d0e132).
+
+## 2026-11-24 — One Owner, many shops, one login (migration 43)
+
+The founder approved the plan on 2026-11-23. Part B: custom_access_token_hook
+takes the shop from the session's device binding, which must match an active
+membership of the same principal. Only unbound sessions fall back to the
+account's active shop. Two installs of one Owner in different shops no longer
+evict each other. Part A: an Owner PIN change or recovery is checked against
+every person in every one of the Owner's shops. It is then written to all of
+the Owner's shop actors at once by owner_set_pin_all_shops, which is
+service-role only and writes one audit row per actor. Changing the Owner PIN in
+the app is now online-only.
+
+DEV (founder-approved): migration 43 was applied on 2026-11-23 at 16:00Z,
+followed by sync v34. A read-only count found 57 live bound sessions; 10 of
+them would have been given the wrong shop before migration 43.
+
+Device testing found two defects. The founder approved both fixes:
+
+- 9f89bb7: a PIN change bumps permission_version. The phone that made the
+  change kept the old value and signed itself out at the next token refresh.
+  The server now returns the new versions and the phone mirrors them (sync v35
+  on DEV).
+- 7a94ae7: another phone holding an old copy of the PIN refused the new PIN
+  without asking the server. Now, when the local check fails and the phone is
+  online, the PIN pad asks the server once. A server "no" still shows the
+  wrong-PIN message, and an offline phone never asks.
+
+Device results, DEV, Galaxy A04s, 2026-11-24 (Preview build of 7a94ae7 plus the
+dev app):
+- Two installs in different shops did not evict each other, in both
+  directions.
+- A PIN change gave both shop actors the same pin_set_at and one audit row
+  each.
+- The phone that changed the PIN stayed signed in after a restart.
+- The other phone signed in with the new PIN through the server, and did so
+  again after the PIN was changed back.
+
+The owner-PIN and PIN-login suites pass 109/109. PROD is untouched.

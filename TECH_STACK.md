@@ -1,6 +1,29 @@
 # TECH_STACK.md — Muthoy POS
 
-## Current integration status — 2026-11-15
+## Current status — 2026-11-24
+
+Changes since 2026-11-16 (each logged in DECISIONS.md):
+
+- **Live strip scan:** frame-processor OCR on `react-native-vision-camera` 5.2.4,
+  `react-native-vision-camera-worklets` 5.2.4, `react-native-nitro-modules`
+  0.37.2, `react-native-nitro-image` 0.15.2 and
+  `react-native-vision-camera-ocr-plus` 2.1.2 (founder-approved). Expo Camera's
+  photo loop remains the fallback. VisionCamera 5 has no barcode output on
+  Android, so the Sale scanner pairs frame OCR with a Barcode button.
+  `expo-audio` ~57.0.5 plays the add beep.
+- **Android 8.0 (API 26) minimum**, set by `plugins/withAndroidMinSdk`; the OCR
+  package needs it.
+- **Sentry:** `@sentry/react-native` 7.11.0 is wired behind H-8's allowlist
+  (`crashReporting/`). Messages, breadcrumbs, user and request data are always
+  dropped. Source maps are not uploaded yet. PostHog (below) is not installed.
+- **Edge Function region:** DEV's database is in Tokyo, so the app sends an
+  `x-region` header for DEV function calls (`sync/functionRegion.ts`). PROD
+  should be created in Mumbai (ap-south-1) and added to that map.
+- **DEV backend:** migrations through 43 (41 admin plan grants, 42 the `grant`
+  billing cycle, 43 the session-bound token shop plus one owner PIN for all of
+  an owner's shops); `sync` is v35. PROD is untouched.
+
+## Integration status — 2026-11-15
 
 The approved external source work is integrated file by file into this repository:
 Android remediation, money/stock/transaction tests, role-scoped sync repair,

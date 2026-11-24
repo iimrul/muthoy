@@ -1,6 +1,16 @@
 # Muthoy POS
 
-## Current integration status — 2026-11-15
+## Current status — 2026-11-24
+
+Since 2026-11-16 the app gained live strip scan (PR #3), a speed and staff-side
+round with number-then-PIN sign-in and Admin plan grants (PR #4), and faster
+shop switching, Sentry crash reporting and one owner login across many shops
+(PR #5, migration 43). DEV runs migrations 1–43 and `sync` v35; PROD is
+untouched and remains NO GO. Device testing is on one Galaxy A04s against DEV;
+iOS has never been built. See [`DECISIONS.md`](DECISIONS.md) for each decision
+and its evidence.
+
+## Integration status — 2026-11-15
 
 The approved external source work is integrated file by file into this repository:
 Android remediation, money/stock/transaction tests, role-scoped sync repair,
