@@ -5692,3 +5692,16 @@ dev app):
   again after the PIN was changed back.
 
 The owner-PIN and PIN-login suites pass 109/109. PROD is untouched.
+
+## 2026-11-24 — iOS is authorized
+
+Founder decision: "iOS এখন অনুমতি দেওয়া" (iOS is now authorized). This settles
+a conflict in the docs. TECH_STACK.md already recorded the 11 November
+authorization to build iOS in this same React Native app, but README, the
+delivery ledger and the release-readiness checklist still said iOS was on hold.
+All four now agree.
+
+Authorization is not verification. iOS has never been built here: there is no
+Xcode and no Apple developer account, so native build, runtime and
+physical-device testing are all still outstanding. The dated 2026-11-12 review
+records that say "on hold" are left as written; they were true at the time.
