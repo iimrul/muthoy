@@ -142,8 +142,8 @@ describe('a volatile ADD COLUMN default is a backfill', () => {
 
 describe('the corrected PostgreSQL classification', () => {
   it('covers every migration on disk exactly once', () => {
-    expect(pg.length).toBe(42);
-    expect(new Set(pg.map((row) => row.name)).size).toBe(42);
+    expect(pg.length).toBe(43);
+    expect(new Set(pg.map((row) => row.name)).size).toBe(43);
   });
 
   it('is A 8 / B 24 / C 10 — not the 14 forward-only the first audit claimed', () => {
@@ -179,7 +179,7 @@ describe('the corrected PostgreSQL classification', () => {
     // definition out of 20260831000000, which is a deploy, not a data
     // operation -- so B, and the suite executes that reversal rather than
     // claiming it.
-    expect(classCounts(pg)).toEqual({ A: 8, B: 24, C: 10 });
+    expect(classCounts(pg)).toEqual({ A: 8, B: 25, C: 10 });
   });
 
   it('declares its two judgements instead of inferring them', () => {
@@ -214,7 +214,7 @@ describe('the corrected PostgreSQL classification', () => {
   );
 
   it('states the corrected headline count in the document itself', () => {
-    expect(ROLLBACK_DOC).toContain('**A: 8 · B: 24 · C: 10 — of 42.**');
+    expect(ROLLBACK_DOC).toContain('**A: 8 · B: 25 · C: 10 — of 43.**');
   });
 
   it('carries no OTHER headline anywhere in any of the three documents', () => {

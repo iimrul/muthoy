@@ -27,6 +27,8 @@ const deps = vi.hoisted(() => ({
   recordSuccessfulLogin: vi.fn(),
   setOwnerPin: vi.fn(),
   verifyPinForUser: vi.fn(),
+  localUserHasPhone: vi.fn(),
+  verifyPinForPhoneOwner: vi.fn(),
   refreshBillingStatus: vi.fn(),
   loginOnNewDevice: vi.fn(),
   login: vi.fn(),
@@ -42,7 +44,8 @@ vi.mock('expo-router', () => ({
 }));
 
 vi.mock('../db/auth', () => ({
-  localUserHasPhone: async () => true,
+  localUserHasPhone: deps.localUserHasPhone,
+  verifyPinForPhoneOwner: deps.verifyPinForPhoneOwner,
   verifyPin: deps.verifyPin,
   recordSuccessfulLogin: deps.recordSuccessfulLogin,
   setOwnerPin: deps.setOwnerPin,
@@ -77,7 +80,11 @@ vi.mock('../sync/deviceRegistry', () => {
 });
 
 vi.mock('../sync/deviceAuth', async () => {
-  class DeviceLoginError extends Error {}
+  class DeviceLoginError extends Error {
+    constructor(message = '', readonly isCredentialFailure = false, readonly code = 'network') {
+      super(message);
+    }
+  }
   return { DeviceLoginError, loginOnNewDevice: deps.loginOnNewDevice };
 });
 
@@ -155,6 +162,10 @@ beforeEach(() => {
     principalUserId: USER_ID,
     billingAccountId: 'account-1',
   });
+  deps.localUserHasPhone.mockReset();
+  deps.localUserHasPhone.mockResolvedValue(true);
+  deps.verifyPinForPhoneOwner.mockReset();
+  deps.verifyPinForPhoneOwner.mockResolvedValue(null);
   deps.refreshBillingStatus.mockReset();
   deps.refreshBillingStatus.mockResolvedValue(undefined);
   deps.loginOnNewDevice.mockReset();
@@ -218,6 +229,9 @@ describe('PIN authentication loading state', () => {
 
   it('recovers from a rejected offline PIN and re-enables retry', async () => {
     deps.verifyPin.mockResolvedValueOnce(null);
+    // Online, the server is asked once (2026-11-24) — and refuses too.
+    const { DeviceLoginError } = await import('../sync/deviceAuth');
+    deps.loginOnNewDevice.mockRejectedValueOnce(new DeviceLoginError('Incorrect phone number or PIN', true, 'credentials'));
     renderPinLogin();
 
     pressPin('9999');
@@ -245,6 +259,48 @@ describe('PIN authentication loading state', () => {
     await paintAndSubmit();
 
     await waitFor(() => expect(deps.replace).toHaveBeenCalledWith(destination));
+  });
+
+  it('signs a multi-shop owner in to the account their number belongs to when the last shop\'s account has none', async () => {
+    // 2026-11-23: the owner's second-shop actor carries the same PIN but no
+    // number, so the last-shop match failed the number check and a correct
+    // PIN read as "incorrect" — locking the owner out of their own phone.
+    const SECOND_SHOP = '8c2f1a30-0000-4000-8000-0000000000b2';
+    deps.verifyPin.mockResolvedValueOnce({
+      shopId: SECOND_SHOP, userId: 'second-shop-owner-actor', role: 'owner', permissions: {},
+    });
+    deps.localUserHasPhone.mockResolvedValueOnce(false);
+    deps.verifyPinForPhoneOwner.mockResolvedValueOnce({
+      shopId: SHOP_ID, userId: USER_ID, role: 'staff', permissions: {},
+    });
+    renderPinLogin();
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    await waitFor(() => expect(deps.verifyPinForPhoneOwner).toHaveBeenCalledWith(
+      '1234', expect.stringContaining('1712345678'), expect.anything(),
+    ));
+    await waitFor(() => expect(deps.replace).toHaveBeenCalledWith('/staff-home'));
+    expect(screen.queryByText('Incorrect PIN — try again')).toBeNull();
+  });
+
+  it('still refuses when the number belongs to nobody whose PIN this is', async () => {
+    deps.verifyPin.mockResolvedValueOnce({
+      shopId: SHOP_ID, userId: USER_ID, role: 'staff', permissions: {},
+    });
+    deps.localUserHasPhone.mockResolvedValueOnce(false);
+    deps.verifyPinForPhoneOwner.mockResolvedValueOnce(null);
+    const { DeviceLoginError } = await import('../sync/deviceAuth');
+    deps.loginOnNewDevice.mockRejectedValueOnce(new DeviceLoginError('Incorrect phone number or PIN', true, 'credentials'));
+    renderPinLogin();
+
+    pressPin('1234');
+    await paintAndSubmit();
+
+    expect(await screen.findByText('Incorrect PIN — try again')).toBeTruthy();
+    expect(deps.replace).not.toHaveBeenCalled();
+    expect(deps.recordSuccessfulLogin).not.toHaveBeenCalled();
   });
 
   it('re-links an online shared-device actor mismatch with the number and PIN already typed, before login', async () => {

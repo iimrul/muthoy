@@ -1,6 +1,14 @@
 # Release-readiness checklist
 
-## Current implementation receipt — 2026-11-09
+## Status note — 2026-11-24
+
+Work since 2026-11-16 (PRs #3–#5, DEV migrations 41–43, `sync` v35) is logged
+in `DECISIONS.md`. It was device-checked on one Galaxy A04s against DEV only.
+None of it changes a production gate below: PROD is untouched, iOS has never
+been built, and payment remains fails-closed. The one row it changed is the
+admin paid-access row in section 1.
+
+## Implementation receipt — 2026-11-09
 
 Android remediation is in progress from source `a23ca61262497474bf85ede78948ca831657c8db`.
 See [the dated implementation record](android-remediation-2026-11-09.md).
@@ -32,7 +40,7 @@ The two axes never collapse: **CODE-COMPLETE** means tested in CI;
 | Admin RBAC with an effective-permission intersection | `adminRoles.test.ts`, `adminAuthz.test.ts` |
 | Service-role key confined to server-only modules | build-enforced; four assertions in `serviceRoleExposure.test.ts` |
 | Admin write power bounded and enumerated | `adminGrants.test.ts`'s `(module, table, operation)` manifest, with five negative controls |
-| No admin action can grant or extend paid access | structural: no write entry touches `entitlement_snapshots`, `billing_subscriptions`, `billing_accounts` or `plan_offerings`, and the refresh RPC is forbidden by name |
+| Admin can grant or extend paid access only through one audited RPC | **Changed 2026-11-21 (founder-approved, migration 41):** `admin_grant_plan` is the single admin path to paid access. It is service-role only, writes `admin_plan_grants` plus an audit row, and never stamps `verified_at`. `adminGrants.test.ts` names exactly `admin_grant_plan` and `b4_reconcile_plan_limits`, and the refresh RPC is still forbidden by name |
 | Audit awaited on every sensitive path, denials included | `adminAuditStore.test.ts`, `adminAuthz.test.ts` |
 | k = 5 on every cross-pharmacy aggregate | `adminSuppression.test.ts`, at the boundary, with a mutation check |
 | Export completeness asserted against a counted total | `adminReports.test.ts`, with a multi-page fixture |

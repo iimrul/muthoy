@@ -17,6 +17,7 @@ import { recoverPin } from "./recoverPin.ts";
 import { refundClaim } from "./refundClaim.ts";
 import { billingStatus, finalizeBillingAttempt, initiateBilling } from "./billing.ts";
 import { createOwnedShop, mutateOwnedShop, shopSummaries, switchShop } from "./multiShop.ts";
+import { ownerPinChange } from "./ownerPin.ts";
 import { reactivateStaff } from './staffLifecycle.ts';
 import { httpErrorBody } from './errorResponse.ts';
 
@@ -109,6 +110,8 @@ export async function handleSyncRequest(request: Request): Promise<Response> {
     if (body.action === "shop-create") return json(await createOwnedShop(caller, body));
     if (body.action === "shop-mutate") return json(await mutateOwnedShop(caller, body));
     if (body.action === "shop-summaries") return json(await shopSummaries(caller, body));
+    // Migration 43: the owner's PIN, changed in every shop they run at once.
+    if (body.action === "owner-pin-change") return json(await ownerPinChange(caller, body, clientIp(request)));
     if (body.action === 'staff-reactivate') return json(await reactivateStaff(caller, body));
     if (body.action === "pull") {
       const result = authTiming

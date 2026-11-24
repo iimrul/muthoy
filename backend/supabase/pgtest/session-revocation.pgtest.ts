@@ -299,7 +299,9 @@ describe('recoverPin, executed end to end', () => {
     }]);
     // Old sessions die BEFORE the new PIN exists; the fresh session is minted after it.
     const loggedOut = events.indexOf('auth:logout:global');
-    const pinWritten = events.indexOf('rest:update:users');
+    // Migration 43: the PIN is written to every owner actor by one RPC.
+    const pinWritten = events.indexOf('rpc:owner_set_pin_all_shops');
+    expect(pinWritten).toBeGreaterThan(-1);
     expect(loggedOut).toBeGreaterThan(-1);
     expect(loggedOut).toBeLessThan(pinWritten);
     expect(pinWritten).toBeLessThan(events.indexOf('auth:generate_link'));
@@ -344,7 +346,7 @@ describe('recoverPin, executed end to end', () => {
     double.failNextLogout = { status: 500, code: 'unexpected_failure' };
     await expect(recoverPin(caller, recoverBody(seed.ownerPhone, NEW_PIN)))
       .rejects.toMatchObject({ status: 500, code: 'recovery_failed' });
-    expect(events).not.toContain('rest:update:users');
+    expect(events).not.toContain('rpc:owner_set_pin_all_shops');
     expect(events).not.toContain('auth:generate_link');
     expect(await ownerPinMatches(seed.ownerId, OWNER_PIN)).toBe(true);
     expect(await sessionIds(seed.ownerAuth)).toHaveLength(2);

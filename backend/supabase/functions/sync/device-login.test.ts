@@ -31,6 +31,7 @@ const MIGRATION_SQL = readFileSync(
 const DEVICE_LOGIN = readFileSync(resolve(FUNCTIONS, 'deviceLogin.ts'), 'utf8');
 const DEVICE_LOGIN_POLICY = readFileSync(resolve(FUNCTIONS, 'deviceLoginPolicy.ts'), 'utf8');
 const RECOVER_PIN = readFileSync(resolve(FUNCTIONS, 'recoverPin.ts'), 'utf8');
+const OWNER_PIN = readFileSync(resolve(FUNCTIONS, 'ownerPin.ts'), 'utf8');
 const IDENTITY = readFileSync(resolve(FUNCTIONS, '_shared/identity.ts'), 'utf8');
 // H-9: the dispatch moved verbatim from index.ts (now Deno wiring only) into
 // handler.ts; deviceRegistryPolicy.test.ts keeps index.ts route-free.
@@ -149,12 +150,17 @@ describe('the PIN never leaks', () => {
     expect(response).not.toMatch(/\bpin\b/i);
   });
 
-  test('recoverPin hands the raw PIN only to bcrypt.hash, at the same cost factor', () => {
+  test('recoverPin hands the raw PIN only to the all-shops writer, which bcrypts it at the same cost factor', () => {
     const body = code(RECOVER_PIN);
     expect(body).not.toMatch(/console\.(log|warn|error)/);
-    expect(body).toMatch(/bcrypt\.hash\(newPin, BCRYPT_COST_FACTOR\)/);
+    // Migration 43: the recovered PIN is written to every owner actor at once.
+    expect(body).toMatch(/setOwnerPinEverywhere\(owner\.id, newPin\)/);
+    const ownerPin = code(OWNER_PIN);
+    expect(ownerPin).toMatch(/bcrypt\.hash\(rawPin, BCRYPT_COST_FACTOR\)/);
     // Must match native/crypto.ts, or a recovered PIN will not verify offline.
-    expect(body).toMatch(/const BCRYPT_COST_FACTOR = 10/);
+    expect(ownerPin).toMatch(/const BCRYPT_COST_FACTOR = 10/);
+    // Its one log line names a SQLSTATE, never a PIN.
+    expect(ownerPin).not.toMatch(/console\.\w+\([^)]*(rawPin|newPin|currentPin|pinHash)/);
   });
 });
 
@@ -206,7 +212,9 @@ describe('owner PIN recovery is the only surviving OTP path', () => {
     expect(body).not.toMatch(/admin\.signOut\(/);
     // And BEFORE the new hash is written: a failure here must leave the old PIN
     // standing rather than a new PIN beside sessions that were meant to die.
-    expect(body.indexOf('revokeCallerSessionsGlobally(caller)')).toBeLessThan(body.indexOf('bcrypt.hash('));
+    expect(body.indexOf('revokeCallerSessionsGlobally(caller)'))
+      .toBeLessThan(body.indexOf('setOwnerPinEverywhere(owner.id'));
+    expect(body.indexOf('setOwnerPinEverywhere(owner.id')).toBeGreaterThan(-1);
   });
 
   test('every auth.admin.signOut call lives in _shared/auth.ts, each scoped to exactly its own token', () => {
@@ -224,7 +232,7 @@ describe('owner PIN recovery is the only surviving OTP path', () => {
 
   test('a post-write session failure is reported as pin_changed_login_required, never recovery_failed', () => {
     const body = code(RECOVER_PIN);
-    const commit = body.indexOf('.update({ pin_hash: pinHash');
+    const commit = body.indexOf('await setOwnerPinEverywhere(owner.id, newPin)');
     const tryBlock = body.indexOf('try {', commit);
     const cleanup = body.indexOf('revokeMintedSessionLocally(session.accessToken)');
     // From `cleanup` onward: PIN_CHANGED_LOGIN_REQUIRED is also a constant

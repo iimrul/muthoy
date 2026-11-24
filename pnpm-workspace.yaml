@@ -10,6 +10,11 @@ allowBuilds:
   # sharp: transitive dep of Next.js, used only by next/image optimization.
   # apps/admin renders no images, so its native build is deliberately skipped
   # rather than left as an undeclared ignored build.
+  # @sentry/cli: transitive dep of @sentry/react-native. Its install script
+  # downloads the sentry-cli binary, used only to upload source maps at build
+  # time with a Sentry auth token. Not configured yet, so the download is
+  # skipped; crash capture itself does not need it.
+  '@sentry/cli': false
   esbuild: true
   sharp: false
   unrs-resolver: true

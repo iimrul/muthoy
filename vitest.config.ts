@@ -23,6 +23,9 @@ export default defineConfig({
     alias: {
       "expo-constants": resolve(process.cwd(), "apps/mobile/db/test/expo-constants.ts"),
       "expo-application": resolve(process.cwd(), "apps/mobile/db/test/expo-application.ts"),
+      // Never the real SDK in a test: it would initialise against the real
+      // Sentry project. crashReporting/ reads this recorder instead.
+      "@sentry/react-native": resolve(process.cwd(), "apps/mobile/db/test/sentry-react-native.ts"),
       "./client": resolve(process.cwd(), "apps/mobile/db/test/client.ts"),
       "expo-sqlite": resolve(
         process.cwd(),
@@ -159,6 +162,7 @@ export default defineConfig({
       "apps/mobile/components/inventory/receiptless-batch.test.tsx",
       "apps/mobile/components/sync/sync-exposure.test.tsx",
       "apps/mobile/components/sync/sync-status-dot.test.tsx",
+      "apps/mobile/crashReporting/crash-reporting.test.ts",
       "apps/mobile/state/liveSyncState.test.ts",
       "apps/mobile/db/receiptless-restock.sqlite.test.ts",
       "apps/mobile/db/environment-binding.test.ts",
@@ -313,6 +317,7 @@ export default defineConfig({
       // Multi-Shop physical defects: cloud-link persistence across a shop
       // switch/cold restart, and shop-scoped PIN uniqueness.
       "apps/mobile/db/multi-shop-restart-pin.sqlite.test.ts",
+      "apps/mobile/db/owner-pin-all-shops.sqlite.test.ts",
       "apps/mobile/db/sync-helpers.sqlite.test.ts",
       // H-6 (W3-01/W3-02). Detection through the real apply path, then the
       // resolver: force-apply past the LWW gate, outbox supersession with a
@@ -490,6 +495,7 @@ export default defineConfig({
       // harness so the refusals are not free.
       "backend/supabase/pgtest/e11-entitlement-verification.pgtest.ts",
       "backend/supabase/pgtest/admin-plan-grants.pgtest.ts",
+      "backend/supabase/pgtest/owner-session-shop.pgtest.ts",
       // W4-05. Both barriers proven INDEPENDENTLY — the owner gate with the pin
       // bypassed, the pin with the gate bypassed — plus the seven working paths.
       "backend/supabase/pgtest/w405-shop-identity.pgtest.ts",
@@ -606,6 +612,7 @@ export default defineConfig({
       // reaches no payment table on a refused attempt.
       "backend/supabase/functions/sync/payment-provider.test.ts",
       "backend/supabase/functions/sync/multiShop.test.ts",
+      "backend/supabase/functions/sync/ownerPin.test.ts",
       // billing-status self-heal: MU032 is the only failure that may answer
       // 404; every other RPC/database error stays a 500.
       "backend/supabase/functions/sync/billing.test.ts",

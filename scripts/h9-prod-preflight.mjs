@@ -96,6 +96,8 @@ export const E4_MIGRATIONS = Object.freeze([
   // to any hosted project yet, declared so the chain refusal stays accurate.
   '20261121000000_admin_plan_grants.sql',
   '20261122000000_admin_grant_cycle.sql',
+  // Migration 43: per-session active shop + one owner PIN in every shop.
+  '20261123000000_owner_session_shop_and_pin.sql',
 ]);
 // The chain, pinned by NAME rather than by count.
 //

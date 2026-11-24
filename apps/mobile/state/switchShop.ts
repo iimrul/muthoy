@@ -14,8 +14,33 @@ import {
   recordBoundInstallation,
   type BoundInstallationResponse,
 } from '../sync/deviceRegistry';
+import { inspectSessionAuthority } from '../sync/sessionAuthority';
+import { readSessionAuthorityLease } from '../sync/sessionAuthorityStore';
 import { useCartStore } from './cartStore';
 import { useSessionStore, type Session } from './sessionStore';
+
+/**
+ * DEV-only stopwatch for the online switch: how long each step took, in ms.
+ * Logs durations only — never a shop id, user id or token. A no-op in a
+ * release build.
+ */
+function switchTiming() {
+  const startedAt = Date.now();
+  let last = startedAt;
+  const steps: Record<string, number> = {};
+  return {
+    mark(step: string) {
+      const now = Date.now();
+      steps[step] = now - last;
+      last = now;
+    },
+    done(outcome: 'ok' | 'failed') {
+      if (__DEV__) {
+        console.info('[shop-switch:timing]', JSON.stringify({ outcome, totalMs: Date.now() - startedAt, ...steps }));
+      }
+    },
+  };
+}
 
 async function refreshCloudSession(): Promise<void> {
   const refreshed = await withAuthMutation(() => supabase.auth.refreshSession());
@@ -132,12 +157,15 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     const state = useSessionStore.getState();
     return state.epoch === transitionEpoch && state.authorityTransitioning;
   };
+  // DEV-only stopwatch: step durations in ms, no shop or user ids.
+  const timing = switchTiming();
   try {
     // An unconfirmed shop means an earlier attempt may have stopped between
     // the server's switch and this device's token refresh. Refresh first so
     // the token names the shop the server actually has this session on.
     if (current.cloudShopConfirmed === false) await refreshCloudSession();
     const { data, error } = await invokeSyncWithClaimRefresh(await shopSwitchRequest(shopId));
+    timing.mark('server_switch');
     if (error) throw error;
     const response = data as {
       actor_user_id?: unknown; role?: unknown; billing_account_id?: unknown; device?: unknown;
@@ -149,17 +177,35 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     await persistCarriedInstallation(shopId, response.actor_user_id, response.device);
     if (!ownsTransition()) throw new Error('The active user changed.');
     await refreshCloudSession();
+    timing.mark('token_refresh');
     if (!ownsTransition()) throw new Error('The active user changed.');
     assertCloudActorBinding(
       await inspectCloudActorBinding({ userId: response.actor_user_id, shopId }),
       { userId: response.actor_user_id, shopId },
     );
     if (!ownsTransition()) throw new Error('The active user changed.');
-    await pullChanges(shopId, null, () => !ownsTransition());
+    // H-10 (2026-11-23). A quarantined lease for the target actor used to be
+    // a dead end: only activateHydratedDevice (number + PIN + full pull) clears
+    // one, and an owner's second-shop actor has no number, so that shop signed
+    // the owner out on every switch, forever. The switch now clears it on the
+    // same terms: credential-proven session, server-confirmed membership and
+    // claims, a FULL hydration, then exact local actor validation below.
+    const lease = readSessionAuthorityLease(shopId, response.actor_user_id);
+    const quarantined = lease.status === 'valid' && lease.record.quarantineReason !== null;
+    // `undefined` = this shop's own stored cursor. A shop never hydrated on
+    // this device has none and gets the full hydration; a shop already
+    // hydrated pulls only what changed since, exactly as the background
+    // engine does every cycle (including its access-change rehydration). A
+    // stored cursor can only exist after a COMPLETE hydration: pull.ts
+    // applies it in one transaction and writes the cursor last. This took the
+    // switch from ~15 pull requests to ~1-2 (founder-approved 2026-11-22).
+    await pullChanges(shopId, quarantined ? null : undefined, () => !ownsTransition());
+    timing.mark('pull');
     if (!ownsTransition()) throw new Error('The active user changed.');
     // The shop is linked at exactly this point, not one step earlier: the
     // server confirmed this owner may act in it, the claims were refreshed, and
-    // a FULL hydration then completed. Recording it here is the same fact
+    // the shop is hydrated (fully just now, or earlier with this pull bringing
+    // it up to date). Recording it here is the same fact
     // deviceAuth records after its own hydration — not a client-side guess.
     // Without it the shop keeps `cloud_linked_at = NULL`, which the root gate
     // reads on the next cold start as an unfinished registration and answers
@@ -167,9 +213,29 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
     await markShopCloudLinked(shopId);
     if (!ownsTransition()) throw new Error('The active user changed.');
     await refreshBillingStatus(shopId, undefined, { isCurrent: ownsTransition });
+    timing.mark('billing');
     if (!ownsTransition()) throw new Error('The active user changed.');
     const permissions = await getUserPermissionOverrides(shopId, response.actor_user_id);
     if (!ownsTransition()) throw new Error('The active user changed.');
+    if (quarantined) {
+      // The only recovery H-10 allows, reached here with everything it asks
+      // for. Anything short of an exact match keeps the quarantine and fails
+      // the switch, which rolls back to the source shop.
+      const authority = await inspectSessionAuthority(
+        {
+          userId: response.actor_user_id,
+          shopId,
+          role: 'owner',
+          principalUserId,
+          billingAccountId: response.billing_account_id,
+        },
+        Date.now(),
+        { allowQuarantineRecovery: true, isCurrent: ownsTransition },
+      );
+      if (authority.status !== 'confirmed') throw new Error('Could not confirm access to this shop.');
+      timing.mark('quarantine_recovery');
+      if (!ownsTransition()) throw new Error('The active user changed.');
+    }
     const next: Session = {
       shopId,
       userId: response.actor_user_id,
@@ -181,7 +247,9 @@ export async function switchActiveShop(shopId: string, online: boolean): Promise
       cloudActorConfirmed: true,
     };
     useSessionStore.getState().login(next);
+    timing.done('ok');
   } catch (error) {
+    timing.done('failed');
     if (!ownsTransition()) {
       // Use the captured owner token only to restore that owner's cloud shop;
       // never touch the new local session established by the handover.

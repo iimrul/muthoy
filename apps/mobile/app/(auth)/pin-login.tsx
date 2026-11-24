@@ -14,7 +14,7 @@ import { AUTH_CHIP_LABELS, SecureChip } from '../../components/auth/SecureChip';
 import { latinFont, useCopyFont } from '../../components/auth/typography';
 import { PinPad, usePinEntry, type PinCompletionMeta } from '../../components/ui/PinPad';
 import { StandardHeader } from '../../components/ui/StandardHeader';
-import { localUserHasPhone, recordSuccessfulLogin, verifyPin } from '../../db/auth';
+import { localUserHasPhone, recordSuccessfulLogin, verifyPin, verifyPinForPhoneOwner } from '../../db/auth';
 import { DeviceAccessRevokedError, PinAccountRefusedError, PinLockedOutError } from '../../db/errors';
 import { pinAttemptScope, pinAttemptStatus } from '../../db/pinAttemptLock';
 import { handoffAuthTiming, startAuthTiming } from '../../dev/authTiming';
@@ -162,6 +162,37 @@ export default function PinLoginScreen() {
 
   const remainingMs = lockedUntilMs === null ? 0 : Math.max(0, lockedUntilMs - nowMs);
   const isLocked = remainingMs > 0;
+  // 2026-11-24, founder-approved. This phone's copy of a PIN can be old: the
+  // owner changed theirs on another phone, or reset a staff member's, and this
+  // phone has not pulled since. When the local check says no and the phone is
+  // online, the server — which keeps its own wrong-PIN budget — is asked ONCE,
+  // through the same sign-in the relink below uses, so a yes also brings the
+  // new PIN down. A server "no" stays the same "incorrect PIN" as before; any
+  // other failure is said as itself. Returns true when nothing more is to be
+  // shown here (signed in, or a failure already on screen).
+  const serverHandledPin = useCallback(
+    async (pin: string, timing: ReturnType<typeof startAuthTiming>): Promise<boolean> => {
+      if ((await networkReachability()) === 'offline') return false;
+      timing?.mark('server_pin_check');
+      try {
+        await loginOnNewDevice(authPhoneForSubmit(phone), pin, timing);
+        router.replace('/');
+        return true;
+      } catch (cause) {
+        if (cause instanceof DeviceLoginError && cause.isCredentialFailure) return false;
+        setError(false);
+        setRevoked(null);
+        setRefused(null);
+        setRelinkFailure(
+          cause instanceof DeviceLoginError ? deviceLoginErrorKey(cause.code) : 'deviceLoginGenericFailure',
+        );
+        timing?.mark('server_pin_check_failed', 'error');
+        return true;
+      }
+    },
+    [phone],
+  );
+
   const handleComplete = useCallback(
     async (pin: string, { completedAt }: PinCompletionMeta) => {
       markRuntimeDiagnosticStep('pin_submit', {
@@ -216,6 +247,7 @@ export default function PinLoginScreen() {
         return;
       }
       if (!result) {
+        if (await serverHandledPin(pin, timing)) return;
         setError(true);
         setRevoked(null);
         setRefused(null);
@@ -237,12 +269,22 @@ export default function PinLoginScreen() {
       // charged the attempt budget exactly as before; a PIN that belongs to
       // someone else is answered with the same "incorrect" message.
       if (!(await localUserHasPhone(result.shopId, result.userId, authPhoneForSubmit(phone)))) {
-        setError(true);
-        setRevoked(null);
-        setRefused(null);
-        setShakeKey((value) => value + 1);
-        timing?.mark('login_rejected', 'error');
-        return;
+        // 2026-11-23: a multi-shop owner's second-shop account has no number
+        // of its own, so the match above can be that owner in the last-opened
+        // shop. Sign in to the account the number belongs to instead — same
+        // number, same PIN — and the owner switches shops from there.
+        const owner = await verifyPinForPhoneOwner(pin, authPhoneForSubmit(phone), timing);
+        if (!owner) {
+          if (await serverHandledPin(pin, timing)) return;
+          setError(true);
+          setRevoked(null);
+          setRefused(null);
+          setShakeKey((value) => value + 1);
+          timing?.mark('login_rejected', 'error');
+          return;
+        }
+        timing?.mark('phone_owner_fallback');
+        result = owner;
       }
 
       setError(false);
@@ -362,7 +404,7 @@ export default function PinLoginScreen() {
         sessionDiagnosticContext(boundResult, '/pin-login'),
       );
     },
-    [login, phone],
+    [login, phone, serverHandledPin],
   );
 
   const { pin, isSubmitting, handleDigitPress, handleBackspace } = usePinEntry(handleComplete);

@@ -40,6 +40,7 @@ const h = vi.hoisted(() => {
       'shop-create': action(),
       'shop-mutate': action(),
       'shop-summaries': action(),
+      'owner-pin-change': action(),
       'staff-reactivate': action(),
       pull: action(),
       'link-device': action(),
@@ -80,6 +81,7 @@ vi.mock('./multiShop.ts', () => ({
   shopSummaries: h.actions['shop-summaries'],
 }));
 vi.mock('./staffLifecycle.ts', () => ({ reactivateStaff: h.actions['staff-reactivate'] }));
+vi.mock('./ownerPin.ts', () => ({ ownerPinChange: h.actions['owner-pin-change'] }));
 // The real isDeviceGuardedAction decides which routes are gated; only the
 // gate's registry verdict is a double.
 vi.mock('./deviceGuard.ts', async (importOriginal) => ({

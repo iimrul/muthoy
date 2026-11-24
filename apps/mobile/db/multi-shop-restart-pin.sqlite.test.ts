@@ -10,6 +10,7 @@ const {
   getRegistrationStatus,
   markShopCloudLinked,
   verifyPin,
+  verifyPinForPhoneOwner,
 } = await import("./auth");
 const { useSessionStore } = await import("../state/sessionStore");
 const { DuplicatePinError } = await import("./errors");
@@ -217,5 +218,63 @@ describe("PIN uniqueness is scoped to the shop, not the device", () => {
 
     coldRestart(SHOP_A);
     expect(await verifyPin(OWNER_PIN)).toMatchObject({ shopId: SHOP_A, userId: OWNER_A });
+  });
+});
+
+describe("the PIN pad signs an owner in through the account their number belongs to", () => {
+  // DEV 2026-11-23, measured: the owner's second-shop actor has the same PIN
+  // and NO phone (the number identifies the primary account). After working
+  // in that shop, the phone-first pad matched the PIN there, found no number,
+  // and refused a correct PIN as "incorrect".
+  async function pinMatches(result: boolean) {
+    const crypto = await import("../native/crypto");
+    vi.spyOn(crypto, "verifyPinHash").mockResolvedValue(result);
+  }
+
+  function hydrateShopBWithoutPhone(): void {
+    hydrateShopB();
+    db.update(users).set({ phone: null }).where(eq(users.id, OWNER_B)).run();
+  }
+
+  it("verifies the PIN against the number's own account and opens its shop", async () => {
+    hydrateShopBWithoutPhone();
+    await pinMatches(true);
+    expect(await verifyPinForPhoneOwner(OWNER_PIN, "01700000731"))
+      .toMatchObject({ shopId: SHOP_A, userId: OWNER_A, role: "owner" });
+  });
+
+  it("accepts any spelling of the same Bangladeshi number", async () => {
+    hydrateShopBWithoutPhone();
+    await pinMatches(true);
+    expect(await verifyPinForPhoneOwner(OWNER_PIN, "+8801700000731"))
+      .toMatchObject({ shopId: SHOP_A, userId: OWNER_A });
+  });
+
+  it("refuses when the PIN is not that account's", async () => {
+    hydrateShopBWithoutPhone();
+    await pinMatches(false);
+    expect(await verifyPinForPhoneOwner("0000", "01700000731")).toBeNull();
+  });
+
+  it("refuses a number nobody here signs in with", async () => {
+    hydrateShopBWithoutPhone();
+    await pinMatches(true);
+    expect(await verifyPinForPhoneOwner(OWNER_PIN, "01799999999")).toBeNull();
+  });
+
+  it("cannot be handed two accounts for one number: the schema allows only one", () => {
+    // users.phone is UNIQUE locally — which is exactly why the second-shop
+    // actor carries no number. The function's own exactly-one check is a
+    // backstop for a schema that this proves already holds.
+    hydrateShopB();
+    expect(() => db.update(users).set({ phone: "01700000731" })
+      .where(eq(users.id, OWNER_B)).run()).toThrow(/UNIQUE/);
+  });
+
+  it("does not let a deleted account's number open anything", async () => {
+    hydrateShopBWithoutPhone();
+    db.update(users).set({ isDeleted: true }).where(eq(users.id, OWNER_A)).run();
+    await pinMatches(true);
+    expect(await verifyPinForPhoneOwner(OWNER_PIN, "01700000731")).toBeNull();
   });
 });

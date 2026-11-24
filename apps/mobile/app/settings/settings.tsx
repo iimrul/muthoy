@@ -17,7 +17,6 @@ import {
 import { StandardHeader } from "../../components/ui/StandardHeader";
 import { PlanBadge } from "../../components/ui/PlanBadge";
 import {
-  changeOwnPin,
   getB2Settings,
   getShopProfile,
   updateB2Settings,
@@ -47,6 +46,11 @@ import { LogoutConfirmSheet } from "../../components/auth/LogoutConfirmSheet";
 import type { CatalogKey } from "../../i18n/catalog";
 import { endShiftToPinPad } from "../../navigation/endShift";
 import { triggerSyncNow } from "../../sync";
+import {
+  changeOwnerPinEverywhere,
+  OwnerPinChangeError,
+  type OwnerPinChangeFailure,
+} from "../../sync/ownerPin";
 import { MULTI_SHOP_HREF } from "../../navigation/routes";
 import { countVisibleConflicts } from "../../db/conflicts";
 
@@ -743,6 +747,14 @@ function NotificationSettingsModal({
   );
 }
 
+const CHANGE_PIN_MESSAGES: Record<OwnerPinChangeFailure, CatalogKey> = {
+  wrong_current: "changePinWrongCurrent",
+  offline: "changePinNeedsInternet",
+  pin_in_use: "changePinInUse",
+  too_many_attempts: "changePinTooManyAttempts",
+  failed: "changePinFailed",
+};
+
 function ChangePinModal({
   visible,
   session,
@@ -767,19 +779,22 @@ function ChangePinModal({
         const guard = captureSessionFor(session);
         if (!guard) return;
         try {
-          await changeOwnPin(
-            session.userId,
-            currentPin,
-            pin,
-            guard.isStillActive,
-          );
-          void triggerSyncNow(session.shopId);
+          // Migration 43: changed on the server for every shop the owner
+          // runs, then mirrored onto this phone. Needs internet.
+          await changeOwnerPinEverywhere(session, currentPin, pin);
           guard.ifLive(onClose);
-        } catch {
+        } catch (failure) {
+          const reason =
+            failure instanceof OwnerPinChangeError ? failure.reason : "failed";
           guard.ifLive(() => {
-            setError("changePinWrongCurrent");
-            setStep("current");
-            setCurrentPin("");
+            setError(CHANGE_PIN_MESSAGES[reason]);
+            // A wrong current PIN (or a spent attempt budget) asks for it
+            // again; anything else keeps it, so the owner just picks the new
+            // PIN once more.
+            if (reason === "wrong_current" || reason === "too_many_attempts") {
+              setStep("current");
+              setCurrentPin("");
+            }
           });
         }
       },
@@ -809,6 +824,11 @@ function ChangePinModal({
             {t("changePin")}
           </Text>
           <Text className={`${face} text-sm text-midGray`}>{t(prompt)}</Text>
+          {step === "new" && confirmed.step === "confirm" && confirmed.isSubmitting ? (
+            <Text accessibilityLiveRegion="polite" className={`${face} text-sm text-midGray`}>
+              {t("changePinWorking")}
+            </Text>
+          ) : null}
           {error ? (
             <Text accessibilityLiveRegion="polite" className={`${face} text-sm text-error`}>
               {t(error)}

@@ -1,6 +1,15 @@
 # Muthoy POS — delivery ledger (SIX batches)
 
-## Current implementation receipt — 2026-11-09
+## Status note — 2026-11-24
+
+The work from 2026-11-20 to 2026-11-24 was founder-directed outside the batch
+plan: live strip scan, a speed and staff-side round, Admin plan grants, faster
+shop switching, Sentry, and one owner login across many shops (PRs #3–#5, DEV
+migrations 41–43). It is logged in `DECISIONS.md`. No batch status below
+changed: the device checks were on one Galaxy A04s against DEV, which is not
+the Definition of Done's production verification.
+
+## Implementation receipt — 2026-11-09
 
 Android remediation is in progress from source `a23ca61262497474bf85ede78948ca831657c8db`.
 See [the dated implementation record](android-remediation-2026-11-09.md).
