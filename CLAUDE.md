@@ -37,6 +37,15 @@
     navigation, visual hierarchy, components, and interaction patterns. NEVER
     copy its React Web architecture, CSS, business logic, state management,
     or data layer into React Native.
+16. DEV FIRST, PRODUCTION ONLY WITH THE FOUNDER'S PERMISSION (founder,
+    2026-11-24). Everything done for testing goes to DEV
+    (btfprhticjgeihcngpif) first: every test, experiment, migration, function
+    deploy, secret, setting and data change. Production
+    (qfhntfxtnjalsxqsvkun, Mumbai) is touched only after the founder approves
+    that exact step. No DEV test data (shops, users, phone numbers, PINs,
+    sales, stock, plan grants, logs) may ever reach Production, whether by
+    copy, dump/restore, sync, migration, script or app build. A phone or app
+    install used on DEV is never pointed at Production.
 ```
 
 
