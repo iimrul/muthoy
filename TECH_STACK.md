@@ -21,7 +21,12 @@ Changes since 2026-11-16 (each logged in DECISIONS.md):
   should be created in Mumbai (ap-south-1) and added to that map.
 - **DEV backend:** migrations through 43 (41 admin plan grants, 42 the `grant`
   billing cycle, 43 the session-bound token shop plus one owner PIN for all of
-  an owner's shops); `sync` is v35. PROD is untouched.
+  an owner's shops); `sync` is v35. PROD is not created yet. The founder decided
+  it will be a Free-plan project in Mumbai (ap-south-1).
+- **Payments:** direct bKash merchant is the only gateway (locked 2026-10-21,
+  restated 2026-11-24). SSLCommerz is retired; the "first planned provider" line
+  in the historical section below no longer applies. bKash (B6-02) is not built,
+  so the pilot has no payment path, and paid plans come only from Admin grants.
 
 ## Integration status — 2026-11-15
 
