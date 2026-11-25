@@ -5845,3 +5845,21 @@ Not done, and why:
 - Phone ON (step 10) waits for the REVE credentials and the self-managed daily
   backup (pilot item 2).
 - No DEV data touched PROD at any step.
+
+## 2026-11-25 — Founder decisions: widen the E4 seal by one file; same phone, separate app
+
+**E4 seal.** The founder answered "অনুমতি দিলাম" (approved). The supersession
+allowlist (SUPERSEDABLE_EVIDENCE_FILES) gains exactly one path:
+apps/mobile/tests/h9-prod-preflight.test.ts. Its sealed copy asserted that the
+production policy is unset, which became false once PROD was approved. The
+transition was recorded with the official writer (post-e4-source-hashes.json:
+e4 6533208977871917... -> now 3597c6e1cdf3ceae...), and the hardcoded allowlist
+test now lists eight files. Every other sealed artifact, above all
+e4_postmigration_checks.sql, still can never be superseded.
+
+**Test device.** The founder answered "একই ফোন, আলাদা অ্যাপ" (same phone,
+separate app). The production app (com.muthoy.pos) may be installed on the same
+phone as the dev and preview apps: it is a separate install, and Android gives
+each app its own data. A DEV install itself is still never pointed at PROD.
+CLAUDE.md rule 16 and AGENTS.md rule 13 now say "app install" instead of
+"phone".
