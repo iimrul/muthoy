@@ -5895,3 +5895,57 @@ dev and preview apps (founder decision):
 - The self-managed daily backup and a restore test (pilot item 2) need their
   own plan and approval.
 - Only then is the Phone provider turned on.
+
+## 2026-11-25 — PROD daily backup live; restore and new-phone tests pass (pilot item 2)
+
+The founder chose a free, private GitHub backup ("GitHub প্রাইভেট রিপো, ফ্রি")
+over Supabase Pro, and offered this computer's Android emulator as the second
+device.
+
+**Backup.**
+- Private repository iimrul/muthoy-prod-backups (never public).
+- `.github/workflows/backup.yml` runs daily at 03:00 Asia/Dhaka and on demand.
+  It runs Supabase's own `supabase db dump` (roles, schema, and data with COPY)
+  against PROD's session pooler. The URL is the founder-entered secret
+  SUPABASE_DB_URL; Claude never saw the password.
+- The data dump leaves out four platform-owned ledgers that the postgres role
+  cannot write and a fresh project recreates: auth.schema_migrations,
+  storage.migrations, storage.buckets_vectors and storage.vector_indexes.
+- On the runner, each dump is encrypted with a fresh AES-256 key, and that key
+  is wrapped with the founder's RSA-4096 public key (OAEP-SHA256). Only the
+  ciphertext, the wrapped key and a SHA-256 are uploaded, kept 30 days.
+- The private key exists only on the founder's computer
+  (C:\Users\Imrul\.muthoy-backup-key, current-user ACL). The founder must keep
+  an offline copy; without it no backup can be opened.
+- First runs succeeded (45549998818, 45553180105).
+
+**Restore tests.**
+- Decrypt (local): the artifact opened with the private key, its SHA-256
+  matched, and it held roles.sql, schema.sql (60 tables) and data.sql (95 COPY
+  blocks including auth.users). The decrypted copies were deleted afterwards.
+- Restore (`.github/workflows/restore-test.yml`, monthly on the 1st and on
+  demand): it starts a throwaway local Supabase on the runner and restores a
+  fresh PROD dump made with the same commands. roles.sql runs tolerantly,
+  because its built-in-role settings are refused (permission denied) exactly
+  as on a real fresh project; schema and data run strictly in one transaction.
+  Run 45552681794: all 87 public and auth tables match PROD's row counts.
+- Three issues were found and fixed on the way:
+  - built-in role settings in roles.sql;
+  - hosted-only `SET (pg_attver=N)` column options, which the latest CLI no
+    longer emits; the test still strips them;
+  - an older local Auth missing hosted tables, so the restore test now uses
+    the latest CLI.
+
+**New phone (DEV first).** The Preview build was installed on the emulator
+(Pixel_7, API 37, x86_64) as a brand-new device and signed in with the
+founder's DEV number and PIN. The full shop came down from the server:
+- the same three medicines with the same stock (42, 199, 3);
+- the same expiry alerts, plan (Ultra) and shop name;
+- "all changes reached the server".
+
+**Gaps, stated.**
+- The backup is daily, so up to a day of server data is at risk, and unsynced
+  phone data is not in it (the accepted pilot rule).
+- Storage FILES are not backed up; only their metadata is. Today PROD and DEV
+  hold 0 objects. If prescription photos come into use, they need their own
+  backup.
