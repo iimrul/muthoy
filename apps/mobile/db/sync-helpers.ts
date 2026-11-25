@@ -509,6 +509,13 @@ function buildDeletePayload(
   }
   return { ...markers, shopId: params.shopId };
 }
+/** The two server-owned shop fields a local row carries (camelCase, as read). */
+const SHOP_COMMERCIAL_FIELDS = ["plan", "trialEndsAt"] as const;
+/** The same two on the wire (snake_case, as queued). */
+const SHOP_COMMERCIAL_WIRE_FIELDS = ["plan", "trial_ends_at"] as const;
+/** The server's permanent refusal for a shop row that carried them (sync/push.ts). */
+export const SHOP_COMMERCIAL_REJECTION = "Commercial fields are server-owned";
+
 function toSyncPayload(
   tableName: SyncTableName,
   row: Record<string, unknown>,
@@ -522,6 +529,13 @@ function toSyncPayload(
   }
   if (tableName === "shops") {
     delete payload.cloudLinkedAt;
+    // Server-owned since B4 (20260831000000): the server sets the plan and the
+    // trial date itself, right after the shop's first push. A device that sent
+    // its local defaults (plan 'free', trial null) had every later re-send of
+    // the shop refused as "Commercial fields are server-owned" — the first PROD
+    // shop's stuck row, 2026-11-25. They are read back from the server, never
+    // sent; repairShopCommercialPayloads cleans rows queued before this.
+    for (const field of SHOP_COMMERCIAL_FIELDS) delete payload[field];
   }
   if (tableName === "users") {
     delete payload.permissionVersion;
@@ -1888,6 +1902,60 @@ export function listPendingSyncRows(
     .limit(limit)
     .all()
     .map((row) => ({ ...row, tableName: row.tableName as SyncTableName }));
+}
+
+/**
+ * Repairs shop rows queued before toSyncPayload stopped sending the plan and
+ * trial date (founder-approved fix, 2026-11-25). Runs before every push.
+ *
+ * - A pending shop row loses the two fields, so it can no longer be refused.
+ * - A shop row the server refused for exactly that reason loses them too and
+ *   goes back to pending with a fresh attempt count. Nothing newer on the
+ *   server is overwritten: the push is last-write-wins by updated_at, so the
+ *   old row is dropped as stale if the server's shop has moved on since.
+ * - Rows refused for any other reason, and every other table, are untouched.
+ *
+ * Returns how many rows it changed; a second run changes none.
+ */
+export function repairShopCommercialPayloads(shopId: string): number {
+  return db.transaction((tx) => {
+    const rows = tx
+      .select({
+        id: syncQueue.id,
+        payload: syncQueue.payload,
+        status: syncQueue.status,
+        lastError: syncQueue.lastError,
+      })
+      .from(syncQueue)
+      .where(and(eq(syncQueue.shopId, shopId), eq(syncQueue.tableName, "shops")))
+      .all();
+    let changed = 0;
+    for (const row of rows) {
+      const refusedForFields =
+        row.status === "failed" && row.lastError === SHOP_COMMERCIAL_REJECTION;
+      if (row.status !== "pending" && !refusedForFields) continue;
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(row.payload) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const carried = SHOP_COMMERCIAL_WIRE_FIELDS.filter((field) => field in payload);
+      if (carried.length === 0 && !refusedForFields) continue;
+      const cleaned = { ...payload };
+      for (const field of carried) delete cleaned[field];
+      tx.update(syncQueue)
+        .set(
+          refusedForFields
+            ? { payload: JSON.stringify(cleaned), status: "pending", attempts: 0, lastError: null }
+            : { payload: JSON.stringify(cleaned) },
+        )
+        .where(eq(syncQueue.id, row.id))
+        .run();
+      changed += 1;
+    }
+    return changed;
+  });
 }
 
 export function markSyncRowSent(id: string): void {

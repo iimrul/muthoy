@@ -5996,3 +5996,48 @@ Preview build on DEV, then the production build, must show the consent prompt,
 the paste button and the details sheet on a real phone. The production sheet
 is then expected to show why the PROD shop's one change failed. Any fix that
 follows touches sync and needs its own plan (Rule 10).
+
+**Device-verified the same day.**
+- DEV, Preview build d3b93ad on the emulator: a test SMS brought up Google's
+  "Allow Muthoy POS Preview to read the message…" prompt. Allow filled all six
+  boxes and verification started by itself.
+- "Paste code" took the code from the clipboard. The emulator was taken
+  offline for this check, so the screen tried to verify, which it only does
+  with a full six-digit code.
+- PROD, the production build installed in place on the founder's phone: the
+  card read "১টি দোকানের সেটিং সার্ভারে যায়নি". The sheet showed the reason,
+  and the support copy showed the row.
+
+## 2026-11-25 — Shop rows stop sending the server-owned plan and trial date
+
+**Found** with the new details sheet on the first PROD shop. The one stuck
+change is `shops.insert`, refused with "Commercial fields are server-owned",
+not the login audit row that had been guessed.
+- `recordChange` queues the whole local row, so the shop's local defaults went
+  with it: `plan` 'free' and `trial_ends_at` null.
+- After the shop's first push, the server sets the trial date itself
+  (`b4_ensure_owner_billing_account`). Any later send of that row then
+  disagrees with the server, and `commercialShopFieldsUnchanged` in the sync
+  function refuses it for good.
+- Every new shop could hit this. No data was lost: the shop is on the server,
+  which is where the app's trial banner comes from.
+
+**Fix, approved by the founder ("হ্যাঁ, এভাবে করো"). The app only; the server
+is unchanged.**
+- `toSyncPayload` no longer sends `plan` or `trial_ends_at` for shops. Both are
+  server-owned and are read back from the server.
+- `repairShopCommercialPayloads(shopId)` runs before every push:
+  - It strips the two fields from pending shop rows queued by older builds.
+  - A shop row refused for exactly that reason goes back to pending with
+    attempts at 0.
+  - Last-write-wins by `updated_at` means an old row cannot overwrite newer
+    server data.
+  - Other refusals, other tables and other shops are untouched.
+- Tests:
+  - the payload no longer carries the two fields (mutation-checked: with the
+    fix removed, the test fails);
+  - repair covers the refused row, the pending row, everything it must not
+    touch, and a second run changing nothing;
+  - the push runs the repair first.
+- Rollout: DEV first, then Preview and production builds (both approved), then
+  the founder's phone should show "all changes reached the server".

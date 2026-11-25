@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   markSyncRowSent: vi.fn(),
   markSyncRowTransientFailure: vi.fn(),
   markSyncRowPermanentFailure: vi.fn(),
+  repairShopCommercialPayloads: vi.fn(),
 }));
 
 vi.mock('./supabaseClient', () => ({
@@ -28,6 +29,7 @@ vi.mock('../db/sync-helpers', () => ({
   markSyncRowSent: mocks.markSyncRowSent,
   markSyncRowTransientFailure: mocks.markSyncRowTransientFailure,
   markSyncRowPermanentFailure: mocks.markSyncRowPermanentFailure,
+  repairShopCommercialPayloads: mocks.repairShopCommercialPayloads,
 }));
 vi.mock('../native/deviceId', () => ({ getDeviceId: () => 'device-a' }));
 
@@ -88,6 +90,17 @@ beforeEach(() => {
 });
 
 describe('push authorization and claim control flow', () => {
+  it('repairs old shop rows for this shop before reading anything to send', async () => {
+    const order: string[] = [];
+    mocks.repairShopCommercialPayloads.mockImplementation(() => { order.push('repair'); return 1; });
+    mocks.listPendingSyncRows.mockImplementation(() => { order.push('list'); return []; });
+
+    await expect(pushPendingRows(SHOP)).resolves.toBe(true);
+
+    expect(mocks.repairShopCommercialPayloads).toHaveBeenCalledWith(SHOP);
+    expect(order[0]).toBe('repair');
+  });
+
   it('sends a complete operation as one atomic grouped request', async () => {
     const rows = queueRows('group', 3).map((row, index) => ({
       ...row,
