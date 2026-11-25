@@ -1,0 +1,22 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.muthoy.smsotp'
+version = '0.1.0'
+
+android {
+  namespace 'com.muthoy.smsotp'
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // Google's SMS User Consent API: the system asks the owner once per message
+  // ("Allow Muthoy to read this message?") and only that one SMS reaches the
+  // app. No READ_SMS / RECEIVE_SMS permission is requested.
+  implementation 'com.google.android.gms:play-services-auth-api-phone:18.1.0'
+}

@@ -16,6 +16,8 @@ const {
   STUCK_SYNC_ATTEMPTS,
   getSyncExposure,
   listPendingSyncRows,
+  listUndeliveredSyncRows,
+  UNDELIVERED_LIST_LIMIT,
   markSyncRowPermanentFailure,
   markSyncRowSent,
   markSyncRowTransientFailure,
@@ -201,6 +203,35 @@ describe("sync helper behavior on real SQLite", () => {
     expect(countStuckSyncRows("10000000-0000-4000-8000-0000000000ff")).toBe(0);
     markSyncRowSent(row.id);
     expect(countStuckSyncRows(SHOP_ID)).toBe(baseline);
+  });
+
+  it("lists exactly the undelivered rows, oldest first, without their payload", () => {
+    // Founder request 2026-11-25: name WHAT did not reach the server. Failed and
+    // stuck rows are listed; pending-but-healthy and sent rows are not; another
+    // shop's rows never are; and no payload field is read.
+    const otherShop = "10000000-0000-4000-8000-0000000000fe";
+    const ids = ["10000000-0000-4000-8000-00000000000a", "10000000-0000-4000-8000-00000000000b", "10000000-0000-4000-8000-00000000000c"];
+    db.transaction((tx) => {
+      ids.forEach((id) => {
+        tx.insert(customers).values({ id, shopId: SHOP_ID, name: "Listed", createdAt: NOW, updatedAt: NOW }).run();
+        recordChange(tx, { shopId: SHOP_ID, table: "customers", rowId: id, op: "insert", payload: { phone: "01700000000" } });
+      });
+    });
+    const queued = listPendingSyncRows(SHOP_ID, 200).filter((candidate) => ids.includes(candidate.rowId));
+    const [failed, stuck, healthy] = queued;
+    markSyncRowPermanentFailure(failed!.id, "Caller does not have permission for this table");
+    for (let attempt = 0; attempt < STUCK_SYNC_ATTEMPTS; attempt += 1) markSyncRowTransientFailure(stuck!.id, "network");
+    markSyncRowTransientFailure(healthy!.id, "network");
+
+    const listed = listUndeliveredSyncRows(SHOP_ID);
+    const ours = listed.filter((row) => row.id === failed!.id || row.id === stuck!.id || row.id === healthy!.id);
+    expect(ours.map((row) => [row.id, row.status])).toEqual([[failed!.id, "failed"], [stuck!.id, "stuck"]]);
+    expect(ours[0]).toMatchObject({ tableName: "customers", op: "insert", lastError: "Caller does not have permission for this table" });
+    expect(ours[1]).toMatchObject({ attempts: STUCK_SYNC_ATTEMPTS, lastError: "network" });
+    expect(JSON.stringify(listed)).not.toContain("01700000000");
+    expect(listed.every((row) => !("payload" in row))).toBe(true);
+    expect(listUndeliveredSyncRows(otherShop)).toEqual([]);
+    expect(listed.length).toBeLessThanOrEqual(UNDELIVERED_LIST_LIMIT);
   });
 
   it("re-arms the Owner's sync warning once it is resolved, and touches nothing else", async () => {

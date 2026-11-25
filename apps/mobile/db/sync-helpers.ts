@@ -7,6 +7,7 @@ import {
   isConflictExemptTable,
 } from "../domain/serverOwnedFields";
 import { purgeConflictsForTables, recordConflict } from "./conflicts";
+import type { UndeliveredSyncRow } from "../domain/syncFailures";
 import { reportError } from "../monitoring";
 import { db, sqliteConnection } from "./client";
 import {
@@ -1970,4 +1971,40 @@ export function countFailedSyncRows(shopId: string): number {
       .where(and(eq(syncQueue.shopId, shopId), eq(syncQueue.status, "failed")))
       .get()?.value ?? 0
   );
+}
+
+/** At most this many undelivered rows are read for the owner's details sheet. */
+export const UNDELIVERED_LIST_LIMIT = 100;
+
+/**
+ * The rows that have not reached the server, oldest first: every refused
+ * (`failed`) row and every row still retrying after STUCK_SYNC_ATTEMPTS tries.
+ * Metadata only. The payload is never read, so nothing here can carry a
+ * customer, a phone number or an amount into the UI or a support report.
+ */
+export function listUndeliveredSyncRows(shopId: string): UndeliveredSyncRow[] {
+  return db
+    .select({
+      id: syncQueue.id,
+      tableName: syncQueue.tableName,
+      op: syncQueue.op,
+      operationKind: syncQueue.operationKind,
+      operationGroupId: syncQueue.operationGroupId,
+      createdAt: syncQueue.createdAt,
+      lastError: syncQueue.lastError,
+      status: syncQueue.status,
+      attempts: syncQueue.attempts,
+    })
+    .from(syncQueue)
+    .where(and(
+      eq(syncQueue.shopId, shopId),
+      or(
+        eq(syncQueue.status, "failed"),
+        and(eq(syncQueue.status, "pending"), gte(syncQueue.attempts, STUCK_SYNC_ATTEMPTS)),
+      ),
+    ))
+    .orderBy(asc(syncQueue.seq), asc(syncQueue.createdAt))
+    .limit(UNDELIVERED_LIST_LIMIT)
+    .all()
+    .map((row) => ({ ...row, status: row.status === "failed" ? "failed" : "stuck" }));
 }

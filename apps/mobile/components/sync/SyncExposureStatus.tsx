@@ -1,20 +1,35 @@
 import { useCallback, useState, type ComponentProps } from "react";
-import { Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { colors } from "@muthoy/constants";
-import { getSyncExposure } from "../../db/sync-helpers";
+import { getSyncExposure, listUndeliveredSyncRows } from "../../db/sync-helpers";
+import type { UndeliveredSyncRow } from "../../domain/syncFailures";
 import { fillTemplate } from "../../i18n/display";
 import { subscribeToSyncCompletion } from "../../sync";
 import type { Session } from "../../state/sessionStore";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useI18n } from "../../state/localeStore";
+import { SyncFailureSheet } from "./SyncFailureSheet";
 import { syncStateOf, type SyncCounts, type SyncState } from "./syncState";
+import { undeliveredSentence } from "./undeliveredText";
 
 export { syncStateOf };
 
 interface SyncExposure extends SyncCounts {
   shopId: string;
+  /** Read only when something failed or is stuck; empty otherwise. */
+  undelivered: UndeliveredSyncRow[];
+}
+
+function readUndelivered(shopId: string, counts: SyncCounts): UndeliveredSyncRow[] {
+  if (counts.failed + counts.stuck === 0) return [];
+  try {
+    return listUndeliveredSyncRows(shopId);
+  } catch {
+    // The counts still tell the owner something failed; only the names are lost.
+    return [];
+  }
 }
 
 interface StateLook {
@@ -42,9 +57,13 @@ function lookOf(state: SyncState): StateLook {
 // it. Two rules from the android remediation plan still hold: the shop's own
 // pending/failed counts stay visible when anything is wrong, and an empty
 // queue is never presented as a backup (the footnote says so every time).
+// 2026-11-25 (founder): a failing card names WHAT did not arrive, in one line
+// ("1 sale and 1 activity record didn't reach the server"), and "View details"
+// opens a sheet with each one's time and reason. The card does not grow.
 export function SyncExposureStatus({ session }: { session: Session }) {
   const { t, formatNumber } = useI18n();
   const [exposure, setExposure] = useState<SyncExposure | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   useFocusEffect(useCallback(() => {
     let active = true;
     const refresh = () => {
@@ -52,7 +71,8 @@ export function SyncExposureStatus({ session }: { session: Session }) {
       if (!active || !guard) return;
       try {
         const counts = getSyncExposure(session.shopId);
-        guard.ifLive(() => setExposure({ shopId: session.shopId, ...counts }));
+        const undelivered = readUndelivered(session.shopId, counts);
+        guard.ifLive(() => setExposure({ shopId: session.shopId, ...counts, undelivered }));
       } catch {
         guard.ifLive(() => setExposure(null));
       }
@@ -75,7 +95,8 @@ export function SyncExposureStatus({ session }: { session: Session }) {
     title = fillTemplate(t("syncWaitingTitle"), { count: formatNumber(current.pending) });
     advice = t("syncExposureWarning");
   } else if (current && state === "failing") {
-    title = fillTemplate(t("syncFailingTitle"), { count: formatNumber(current.failed + current.stuck) });
+    title = undeliveredSentence(current.undelivered, t, formatNumber)
+      ?? fillTemplate(t("syncFailingTitle"), { count: formatNumber(current.failed + current.stuck) });
     detail = [
       t("syncPendingLabel") + ": " + formatNumber(current.pending),
       t("syncFailedLabel") + ": " + formatNumber(current.failed),
@@ -83,6 +104,7 @@ export function SyncExposureStatus({ session }: { session: Session }) {
     ].join(" · ");
     advice = t("syncFailingBody");
   }
+  const canShowDetails = state === "failing" && (current?.undelivered.length ?? 0) > 0;
   const notBackup = session.role === "owner"
     ? t("syncExposureNotBackup") + " " + t("recoveryOwnerStatusHint")
     : t("syncExposureNotBackup");
@@ -94,7 +116,19 @@ export function SyncExposureStatus({ session }: { session: Session }) {
       </View>
       <View className="flex-1">
         <Text accessibilityRole="header" className={"font-sans-bold text-sm " + look.title}>{title}</Text>
-        {detail ? <Text className="mt-0.5 font-sans text-xs text-midGray">{detail}</Text> : null}
+        {canShowDetails ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("syncDetailsLink")}
+            onPress={() => setDetailsOpen(true)}
+            hitSlop={8}
+            className="mt-0.5 flex-row items-center gap-1 self-start active:opacity-70"
+          >
+            <Text className="font-sans text-xs text-midGray">{detail}</Text>
+            <Text className="font-sans-semibold text-xs text-brand-green">{" · " + t("syncDetailsLink")}</Text>
+            <Feather name="chevron-right" size={12} color={colors.brandGreen} />
+          </Pressable>
+        ) : detail ? <Text className="mt-0.5 font-sans text-xs text-midGray">{detail}</Text> : null}
       </View>
     </View>
     {advice ? (
@@ -105,5 +139,14 @@ export function SyncExposureStatus({ session }: { session: Session }) {
       </View>
     ) : null}
     <Text className="font-sans text-[11px] leading-4 text-midGray">{notBackup}</Text>
+    {canShowDetails && current ? (
+      <SyncFailureSheet
+        visible={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        shopId={current.shopId}
+        rows={current.undelivered}
+        counts={{ pending: current.pending, failed: current.failed, stuck: current.stuck }}
+      />
+    ) : null}
   </View>;
 }

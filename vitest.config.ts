@@ -43,6 +43,17 @@ export default defineConfig({
         process.cwd(),
         "apps/mobile/db/test/expo-device.ts",
       ),
+      // Founder request 2026-11-25 (OTP paste, failed-sync copy for support).
+      // Same EventEmitter-at-import problem as expo-device.
+      "expo-clipboard": resolve(
+        process.cwd(),
+        "apps/mobile/db/test/expo-clipboard.ts",
+      ),
+      // The SMS consent reader imports `expo`; Node gets the "absent" double.
+      "../../modules/muthoy-sms-otp": resolve(
+        process.cwd(),
+        "apps/mobile/db/test/muthoy-sms-otp.ts",
+      ),
       "muthoy-pin-crypto": resolve(
         process.cwd(),
         "apps/mobile/db/test/muthoy-pin-crypto.ts",

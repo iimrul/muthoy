@@ -5949,3 +5949,50 @@ founder's DEV number and PIN. The full shop came down from the server:
 - Storage FILES are not backed up; only their metadata is. Today PROD and DEV
   hold 0 objects. If prescription photos come into use, they need their own
   backup.
+
+## 2026-11-25 — Failed sync changes named; OTP fills itself or pastes in one tap
+
+The founder asked for two things after registering the first PROD shop, where
+one change would not reach the server and the screen could not say which.
+- Failed sync changes should be named, e.g. "একটি বিক্রয় সিঙ্ক হয় নি", in both
+  languages, without making the dashboard card larger.
+- A modern OTP screen: "ওটিপি আসার সাথে সাথে অটো পেস্ট হয়ে যাওয়া উচিত এবং
+  ম্যানুয়ালি ওটিপি পেস্ট করতে পারাও উচিত".
+
+Approved: a details summary, a details sheet and a support copy ("ঠিক আছে, করো");
+OTP option A, Android's own one-tap consent prompt ("A: এক চাপে বসা"); and both
+EAS builds, Preview on DEV first and then production ("হ্যাঁ, দুটোই").
+
+**Failed changes.**
+- The card's title now names what is stuck, for example "1 sale and 1 refund
+  didn't reach the server" / "১টি বিক্রয় ও ১টি ফেরত সার্ভারে যায়নি".
+- It names at most two kinds and then says "N more", so the card stays one line
+  taller at most.
+- "View details" opens a sheet listing each stuck change: its kind, when it
+  was made, and a plain reason (keeps failing, plan read-only, not allowed,
+  incomplete, refused by the server).
+- "Copy for support" puts a short report on the clipboard. It holds the kind,
+  table, operation, status and the server's error, with long digit runs masked
+  and each error cut at 160 characters. It never includes the row's payload.
+- The rows are read from local SQLite only (`listUndeliveredSyncRows`, capped
+  at 100). Nothing is sent anywhere.
+
+**OTP.**
+- Android: the new local module `muthoy-sms-otp` uses Google's SMS User
+  Consent API (play-services-auth-api-phone 18.1.0). When the code SMS
+  arrives, Android itself asks "Allow Muthoy to read this message?". On Allow,
+  the code fills the boxes and verifies as if typed.
+- No SMS permission is requested, only that one message is read, and nothing
+  is stored. The prompt is launched only if it resolves to Google Play services.
+- The wait re-arms for a resent code and stops if the API fails at once.
+- "Paste code" under the boxes takes the six digits from a copied SMS. If the
+  clipboard has no code, or has two different codes, it says so and changes
+  nothing.
+- iOS keeps its built-in code suggestion (`oneTimeCode`), with no code of ours.
+- New dependency: expo-clipboard ~57.0.2.
+
+**Not yet true.** The behaviour is checked by unit and component tests only. A
+Preview build on DEV, then the production build, must show the consent prompt,
+the paste button and the details sheet on a real phone. The production sheet
+is then expected to show why the PROD shop's one change failed. Any fix that
+follows touches sync and needs its own plan (Rule 10).

@@ -14,6 +14,24 @@ vi.mock('react-native', async () =>
   (await import('../../tests/support/reactNativeMock')).createReactNativeMock(),
 );
 
+const toasts = vi.hoisted(() => ({ show: vi.fn() }));
+vi.mock('./Toast', () => ({ showToast: toasts.show }));
+
+// The SMS consent reader, controllable per test. Absent by default, as on iOS.
+const sms = vi.hoisted(() => ({
+  available: false,
+  wait: vi.fn<() => Promise<string | null>>(),
+  cancel: vi.fn(),
+}));
+vi.mock('../../modules/muthoy-sms-otp', () => ({
+  get isSmsConsentAvailable() {
+    return sms.available;
+  },
+  waitForSmsWithConsent: () => sms.wait(),
+  cancelSmsConsent: () => sms.cancel(),
+}));
+
+const { setClipboardTestText } = await import('../../db/test/expo-clipboard');
 const { useLocaleStore } = await import('../../state/localeStore');
 const { PinPad, useConfirmedPinEntry } = await import('./PinPad');
 const { OtpInput } = await import('./OtpInput');
@@ -22,6 +40,11 @@ let frameQueue: FrameRequestCallback[];
 
 beforeEach(() => {
   useLocaleStore.setState({ locale: 'en' });
+  toasts.show.mockReset();
+  sms.available = false;
+  sms.wait.mockReset();
+  sms.cancel.mockReset();
+  setClipboardTestText('');
   frameQueue = [];
   vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
     frameQueue.push(callback);
@@ -184,8 +207,11 @@ describe('OtpInput', () => {
     expect(labelled).toHaveLength(1);
     expect(labelled[0]?.tagName).toBe('INPUT');
     expect(screen.getAllByRole('textbox')).toHaveLength(1);
-    // ...the tap-to-focus wrapper is no second control...
-    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    // ...the tap-to-focus wrapper is no second control (the one button is
+    // "Paste code", a different action)...
+    const buttons = screen.queryAllByRole('button');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]?.getAttribute('aria-label')).toBe('Paste code');
     // ...and the six visual boxes are out of the accessibility tree.
     expect(screen.getByText('4').closest('[aria-hidden="true"]')).not.toBeNull();
     expect(screen.queryByRole('textbox', { name: label })).toBe(labelled[0]);
@@ -197,7 +223,8 @@ describe('OtpInput', () => {
       createElement(OtpInput, { ref: ref as never, value: '', onChangeText: vi.fn() }),
     );
     (ref.current as HTMLInputElement).blur();
-    fireEvent.click(container.firstElementChild as Element);
+    // Outer column -> its first child, the tap-to-focus wrapper over the boxes.
+    fireEvent.click(container.firstElementChild?.firstElementChild as Element);
     expect(document.activeElement).toBe(ref.current);
   });
 
@@ -232,5 +259,107 @@ describe('OtpInput', () => {
     useLocaleStore.setState({ locale: 'bn' });
     render(createElement(OtpInput, { value: '', onChangeText: vi.fn() }));
     expect(hiddenField('৬ ডিজিটের যাচাই কোড দিন')).toBeTruthy();
+  });
+});
+
+describe('OtpInput paste button', () => {
+  async function tapPaste(label = 'Paste code'): Promise<void> {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: label }));
+    });
+  }
+
+  it('fills the code from a copied SMS in one tap', async () => {
+    setClipboardTestText('Your Muthoy code is 482913. Do not share it.');
+    const onChangeText = vi.fn();
+    render(createElement(OtpInput, { value: '', onChangeText }));
+    await tapPaste();
+    expect(onChangeText).toHaveBeenCalledWith('482913');
+    expect(toasts.show).not.toHaveBeenCalled();
+  });
+
+  it('says so, and changes nothing, when the clipboard holds no code', async () => {
+    setClipboardTestText('call me at 01712');
+    const onChangeText = vi.fn();
+    render(createElement(OtpInput, { value: '12', onChangeText }));
+    await tapPaste();
+    expect(onChangeText).not.toHaveBeenCalled();
+    expect(toasts.show).toHaveBeenCalledWith({
+      message: 'No 6-digit code to paste. Copy the code first.',
+    });
+  });
+
+  it('refuses a clipboard with two different codes rather than guess', async () => {
+    setClipboardTestText('old 111111 new 222222');
+    const onChangeText = vi.fn();
+    render(createElement(OtpInput, { value: '', onChangeText }));
+    await tapPaste();
+    expect(onChangeText).not.toHaveBeenCalled();
+    expect(toasts.show).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing while the code is being verified', async () => {
+    setClipboardTestText('482913');
+    const onChangeText = vi.fn();
+    render(createElement(OtpInput, { value: '', onChangeText, verifying: true }));
+    await tapPaste();
+    expect(onChangeText).not.toHaveBeenCalled();
+  });
+
+  it('is labelled in Bangla in Bangla', async () => {
+    useLocaleStore.setState({ locale: 'bn' });
+    setClipboardTestText('482913');
+    const onChangeText = vi.fn();
+    render(createElement(OtpInput, { value: '', onChangeText }));
+    await tapPaste('কোড পেস্ট করুন');
+    expect(onChangeText).toHaveBeenCalledWith('482913');
+  });
+});
+
+describe('OtpInput SMS auto-fill (Android consent)', () => {
+  const never = () => new Promise<string | null>(() => undefined);
+
+  async function flush(): Promise<void> {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('never asks where the reader is absent (iOS, older builds)', async () => {
+    render(createElement(OtpInput, { value: '', onChangeText: vi.fn() }));
+    await flush();
+    expect(sms.wait).not.toHaveBeenCalled();
+  });
+
+  it('fills the code when the owner allows the SMS, then waits for the next one', async () => {
+    sms.available = true;
+    sms.wait.mockResolvedValueOnce('<#> 739201 is your Muthoy code').mockImplementation(never);
+    const onChangeText = vi.fn();
+    render(createElement(OtpInput, { value: '', onChangeText }));
+    await flush();
+    expect(onChangeText).toHaveBeenCalledWith('739201');
+    // Re-armed for a resent code.
+    expect(sms.wait).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops asking when the reader fails at once instead of looping', async () => {
+    sms.available = true;
+    sms.wait.mockResolvedValue(null);
+    const onChangeText = vi.fn();
+    render(createElement(OtpInput, { value: '', onChangeText }));
+    await flush();
+    await flush();
+    expect(sms.wait).toHaveBeenCalledTimes(1);
+    expect(onChangeText).not.toHaveBeenCalled();
+  });
+
+  it('cancels the pending wait when the screen closes', async () => {
+    sms.available = true;
+    sms.wait.mockImplementation(never);
+    const { unmount } = render(createElement(OtpInput, { value: '', onChangeText: vi.fn() }));
+    await flush();
+    unmount();
+    expect(sms.cancel).toHaveBeenCalledTimes(1);
   });
 });
