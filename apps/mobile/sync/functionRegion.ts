@@ -15,6 +15,8 @@
 const DATABASE_REGION_BY_PROJECT_REF: Readonly<Record<string, string>> = Object.freeze({
   // DEV
   btfprhticjgeihcngpif: 'ap-northeast-1',
+  // PROD: Mumbai, the region nearest Bangladesh (founder-created 2026-11-24)
+  qfhntfxtnjalsxqsvkun: 'ap-south-1',
 });
 
 const FUNCTIONS_PATH_PREFIX = '/functions/v1/';

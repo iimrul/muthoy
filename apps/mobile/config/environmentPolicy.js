@@ -9,10 +9,14 @@ const POLICY_VERSION = 1;
 const BINDING_VERSION = 1;
 const DEV_PROJECT_REF = 'btfprhticjgeihcngpif';
 const DEV_PUBLIC_KEY_SHA256 = '8c231a25bde4192528bf81f94888ee5f5760ec347586d72d644534119a870ec7';
+// PROD: created by the founder 2026-11-24 (Mumbai). The fingerprint is the
+// SHA-256 of that project's default publishable key, read on 2026-11-24.
+const PROD_PROJECT_REF = 'qfhntfxtnjalsxqsvkun';
+const PROD_PUBLIC_KEY_SHA256 = '8d38b57444df0e2e08ee3c290727d65d8612401c9dc155689afb28eca8753536';
 const ENVIRONMENT_POLICIES = Object.freeze({
   development: Object.freeze({ displayName: 'Muthoy POS Dev', nativeApplicationId: 'com.muthoy.pos.dev', scheme: 'muthoy-dev', supabaseProjectRef: DEV_PROJECT_REF, publicKeySha256: Object.freeze([DEV_PUBLIC_KEY_SHA256]) }),
   preview: Object.freeze({ displayName: 'Muthoy POS Preview', nativeApplicationId: 'com.muthoy.pos.preview', scheme: 'muthoy-preview', supabaseProjectRef: DEV_PROJECT_REF, publicKeySha256: Object.freeze([DEV_PUBLIC_KEY_SHA256]) }),
-  production: Object.freeze({ displayName: 'Muthoy POS', nativeApplicationId: 'com.muthoy.pos', scheme: 'muthoy', supabaseProjectRef: null, publicKeySha256: Object.freeze([]) }),
+  production: Object.freeze({ displayName: 'Muthoy POS', nativeApplicationId: 'com.muthoy.pos', scheme: 'muthoy', supabaseProjectRef: PROD_PROJECT_REF, publicKeySha256: Object.freeze([PROD_PUBLIC_KEY_SHA256]) }),
 });
 
 class EnvironmentRefusalError extends Error {

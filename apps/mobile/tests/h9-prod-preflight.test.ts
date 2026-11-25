@@ -23,8 +23,9 @@ import {
 // Nothing here — and nothing the script does — contacts a real project.
 //
 // The PROD ref, key and fingerprint are FABRICATED and live only in this file
-// and its temp directories; the committed policy stays unset, and a test below
-// proves the real script refuses because of exactly that.
+// and its temp directories. The committed policy names the real PROD
+// (founder-created 2026-11-24), and a test below proves the real script
+// refuses any other target because of exactly that.
 
 // Each case copies a ~130-file backend tree into temp directories; on Windows
 // under the two-worker gate that is not a 5 s budget.
@@ -166,11 +167,11 @@ describe('offline preflight', () => {
     expect(result.pass).toBe(true);
   });
 
-  it('refuses with the REAL committed policy: production is unset until approved', async () => {
+  it('refuses with the REAL committed policy: it names the real PROD, not this fabricated one', async () => {
     const result = await runPreflight(options(workdir(), manifest()), { repoRoot: repo, env: {} });
     expect(result.pass).toBe(false);
-    expect(failed(result)).toContain('committed-policy:policy-unapproved');
-    expect(ENVIRONMENT_POLICIES.production.supabaseProjectRef).toBeNull();
+    expect(failed(result)).toContain('committed-policy:policy-target-mismatch');
+    expect(ENVIRONMENT_POLICIES.production.supabaseProjectRef).toBe('qfhntfxtnjalsxqsvkun');
   });
 
   it.each([
@@ -386,7 +387,7 @@ describe('the enforced policy is the approved revision\'s file, byte for byte', 
   it('refuses a policy committed after the approved revision', async () => {
     await withPolicyChange(
       () => {
-        writeFileSync(policyFile(), POLICY_BYTES.toString('utf8').replace("supabaseProjectRef: null", `supabaseProjectRef: '${PROD_REF}'`));
+        writeFileSync(policyFile(), `${POLICY_BYTES.toString('utf8')}// a later reviewed edit\n`);
         commitAll('later policy commit');
       },
       async () => {

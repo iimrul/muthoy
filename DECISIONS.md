@@ -5749,3 +5749,25 @@ grants. They contain no DEV row ids, phone numbers or shop data. Their one
 top-level data UPDATE (migration 42: admin_grant rows to the 'grant' cycle)
 matches nothing on an empty database. So applying the chain to PROD carries no
 DEV data. That application is a separate step needing its own approval.
+
+## 2026-11-25 — PROD steps 1-2: read-only inspection and app identity; G2 = DEV
+
+The founder approved steps 1 and 2 of the PROD plan, neither of which changes
+PROD. The founder also accepted DEV's full 1-43 chain as the G2 rehearsal. The
+separate rehearsal project's G2 review had been left incomplete (insufficient
+evidence, 2026-10-17). Since then, DEV has run every migration through 43, and
+the app was device-tested against it on 2026-11-24.
+
+Step 1 (read-only, GET plus read_only SELECTs): PROD is empty. It has no
+tables, users, migration history, functions or secrets, and runs Postgres
+17.12. Phone and anonymous sign-in are OFF and the OTP length is 6. The OTP
+expiry (60 s) and resend gap (5 s) differ from the runbook's 300/60 and are set
+in step 5. The test-OTP map reads as null, while DEV's (which has one) reads as
+text. The preflight refuses null, so step 5 sets the map explicitly to '' and
+re-reads it. A proposal to accept null instead was blocked as weakening a
+safety check, and it stays that way unless the founder decides otherwise.
+
+Step 2 (code): the production policy now names qfhntfxtnjalsxqsvkun and its
+publishable-key fingerprint, and Edge Function calls to PROD pin to ap-south-1.
+Development and preview still point at DEV and are unchanged. Tests:
+environment, preflight and region suites pass (286 + 86).
