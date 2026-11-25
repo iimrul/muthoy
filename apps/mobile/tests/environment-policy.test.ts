@@ -35,9 +35,16 @@ describe('explicit variants and identity-only discovery', () => {
     expect(config.extra.environmentPolicyVersion).toBe(POLICY_VERSION);
     expect(JSON.stringify(config)).not.toContain('stray-dev');
   });
-  test('production target/fingerprint remain unset and full validation refuses', () => {
-    expect(ENVIRONMENT_POLICIES.production.supabaseProjectRef).toBeNull();
-    expect(ENVIRONMENT_POLICIES.production.publicKeySha256).toEqual([]);
+  test('production names the founder-approved PROD project and never DEV', () => {
+    // Founder-created 2026-11-24 (Mumbai); fingerprint read from that project the same day.
+    expect(ENVIRONMENT_POLICIES.production.supabaseProjectRef).toBe('qfhntfxtnjalsxqsvkun');
+    // PROD's publishable key, then its legacy anon key (the kind DEV's app runs on).
+    expect(ENVIRONMENT_POLICIES.production.publicKeySha256).toEqual([
+      '8d38b57444df0e2e08ee3c290727d65d8612401c9dc155689afb28eca8753536',
+      'cccc0a946283c61e2f7e53a747bab45c13a7ac9ca4ab80ccc8ab678286cd53e1',
+    ]);
+    expect(ENVIRONMENT_POLICIES.production.supabaseProjectRef).not.toBe(DEV_PROJECT_REF);
+    expect(ENVIRONMENT_POLICIES.production.publicKeySha256).not.toContain(ENVIRONMENT_POLICIES.development.publicKeySha256[0]);
     expect(() => validatePublicEnvironment('production', `https://${DEV_PROJECT_REF}.supabase.co`, fakeKey)).toThrow(EnvironmentRefusalError);
   });
   test.each([['development', 'development'], ['internal', 'preview'], ['production', 'production']])('profile %s explicitly selects %s', (profile, variant) => {
@@ -90,11 +97,13 @@ describe('build wrapper refusals', () => {
     const { validateEnvironment } = await import('../../../scripts/validate-mobile-environment.mjs');
     expect(() => validateEnvironment({ APP_VARIANT: 'development', EXPO_PUBLIC_SUPABASE_URL: `https://${DEV_PROJECT_REF}.supabase.co`, EXPO_PUBLIC_SUPABASE_ANON_KEY: fakeKey }, 'development')).toThrow('Muthoy environment check refused startup.');
   });
-  test('missing worker profile and unset production refuse before CLI or build startup', async () => {
+  test('missing worker profile and an unknown variant refuse before CLI or build startup', async () => {
     const { main } = await import('../../../scripts/validate-mobile-environment.mjs');
     vi.stubEnv('APP_VARIANT', 'development'); vi.stubEnv('EAS_BUILD_PROFILE', '');
     expect(() => main(['--worker'])).toThrow('Muthoy environment check refused startup.');
-    vi.stubEnv('APP_VARIANT', 'production');
+    // Production now names PROD, so it would reach the EAS CLI; an unknown
+    // variant still refuses at the selector, before any CLI call.
+    vi.stubEnv('APP_VARIANT', 'staging');
     expect(() => main(['--eas', '--profile', 'production'])).toThrow('Muthoy environment check refused startup.');
   });
   test.each(['com.muthoy.pos', 'com.muthoy.pos.h3scratch', 'com.muthoy.pos.preview'])('stale generated native package %s refuses before build', async id => {

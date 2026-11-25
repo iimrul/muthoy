@@ -1,5 +1,23 @@
 # H-9 deployment runbook — DEV rehearsal (Part A) and production (Part B)
 
+**Status 2026-11-25 (PROD exists).** The founder created PROD on 2026-11-24:
+`qfhntfxtnjalsxqsvkun`, `muthoy-prod`, ap-south-1, Free plan. The founder holds
+the database password. The founder accepted DEV's full 1–43 chain as the G2
+rehearsal. A read-only inspection (step 1) found an empty project: no tables,
+users, migrations, functions or secrets; Postgres 17.12. Phone and anonymous
+sign-in are OFF. OTP length is 6, but expiry is 60 s and the resend gap is 5 s,
+so B4 step 8 must set 300/60. Both hooks are off. The publishable key's
+fingerprint (`8d38b574…3536`) is now in the committed policy, so
+`policy-unapproved` no longer fires. The policy also lists PROD's legacy anon
+key (`cccc0a94…53e1`), the kind DEV's app runs on.
+
+**Executed 2026-11-25:** B4 steps 4–11, i.e. schema 1–43 with a fresh F12
+preflight before 34, post-checks, Auth, secrets and function deploy. Results are
+in DECISIONS.md under 2026-11-25. The test-OTP map now reads `''`. Remaining:
+REVE credentials (founder), steps 12–14 (production build, clean device) and
+P-F. CLAUDE.md rule 16 applies: DEV first, and each PROD step only with
+approval.
+
 **Status 2026-10-14 (H-9 Batch A): prepared, NOT executed.** Every hosted,
 DEV, EAS, build or device step below is **BLOCKED — APPROVAL REQUIRED**. No
 project was created, linked, read, changed or deployed while writing this, no

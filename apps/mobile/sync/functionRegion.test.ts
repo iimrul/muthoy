@@ -7,6 +7,7 @@ const UNKNOWN = 'https://abcdefghijklmnopqrst.supabase.co';
 describe('Edge Functions run next to the database', () => {
   test('knows the DEV database region and nothing it was not told', () => {
     expect(databaseRegionFor(DEV)).toBe('ap-northeast-1');
+    expect(databaseRegionFor('https://qfhntfxtnjalsxqsvkun.supabase.co')).toBe('ap-south-1');
     expect(databaseRegionFor(UNKNOWN)).toBeNull();
     expect(databaseRegionFor('http://127.0.0.1:1')).toBeNull();
     expect(databaseRegionFor('not a url')).toBeNull();

@@ -124,13 +124,15 @@ describe('declared supersession cannot bless a sealed artifact', () => {
     expect(E4_EVIDENCE_FILES).toContain(SEALED);
   });
 
-  it('the allowlist is exactly the seven files a chain declaration must touch', () => {
+  it('the allowlist is exactly the seven chain-declaration files plus the founder-approved preflight test', () => {
     // Hardcoded on purpose, and transcribed independently of the constant.
     // Widening this list is a privacy-and-evidence decision, and the point of
     // asserting it here is that the decision shows up as a failing test rather
-    // than as a side effect of running `--write`.
+    // than as a side effect of running `--write`. The eighth entry is that
+    // decision, made by the founder on 2026-11-25 when PROD was approved.
     expect([...SUPERSEDABLE_EVIDENCE_FILES].sort()).toEqual([
       '.gitattributes',
+      'apps/mobile/tests/h9-prod-preflight.test.ts',
       'apps/mobile/tests/migration-rollback-classification.test.ts',
       'backend/supabase/migrations/README.md',
       'backend/supabase/migrations/ROLLBACK.md',

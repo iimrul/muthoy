@@ -44,8 +44,11 @@
     (qfhntfxtnjalsxqsvkun, Mumbai) is touched only after the founder approves
     that exact step. No DEV test data (shops, users, phone numbers, PINs,
     sales, stock, plan grants, logs) may ever reach Production, whether by
-    copy, dump/restore, sync, migration, script or app build. A phone or app
-    install used on DEV is never pointed at Production.
+    copy, dump/restore, sync, migration, script or app build. An app install
+    used on DEV (the dev or preview app) is never pointed at Production. The
+    production app (com.muthoy.pos) is a separate install, and it may share a
+    phone with them because Android isolates each app's data (founder,
+    2026-11-25).
 ```
 
 

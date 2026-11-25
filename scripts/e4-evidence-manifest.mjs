@@ -157,9 +157,14 @@ export const SUCCESSOR_MANIFEST_PATH = 'backend/supabase/migrations/post-e4-sour
  * `e4_postmigration_checks.sql` would otherwise be honoured by `supersededBy()`
  * no matter how careful the generator was.
  *
- * These seven are exactly what declaring a post-E4 migration cannot avoid
- * touching. Everything else in `E4_EVIDENCE_FILES` — the sealed acceptance SQL
- * above all — can never be superseded, and a drift in one fails always.
+ * The first seven are exactly what declaring a post-E4 migration cannot avoid
+ * touching. The eighth, h9-prod-preflight.test.ts, was added by FOUNDER
+ * DECISION on 2026-11-25 ("অনুমতি দিলাম"). Its sealed copy asserted that the
+ * production policy is unset, which stopped being true the moment the founder
+ * approved PROD (qfhntfxtnjalsxqsvkun). That makes it a one-time,
+ * founder-approved lifecycle step, not a convenience. Everything else in
+ * `E4_EVIDENCE_FILES`, above all the sealed acceptance SQL, can never be
+ * superseded, and a drift in one fails always.
  */
 export const SUPERSEDABLE_EVIDENCE_FILES = Object.freeze([
   'backend/supabase/pgtest/checkFile.ts',
@@ -169,6 +174,7 @@ export const SUPERSEDABLE_EVIDENCE_FILES = Object.freeze([
   'backend/supabase/migrations/README.md',
   'apps/mobile/tests/migration-rollback-classification.test.ts',
   '.gitattributes',
+  'apps/mobile/tests/h9-prod-preflight.test.ts',
 ]);
 
 /**

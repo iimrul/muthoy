@@ -25,7 +25,7 @@ Repository docs are source of truth. Do not depend on previous chat context.
 10. `apps/prototype-web` is UI/UX reference only; never copy its web architecture/data/state layer.
 11. Respect current P0/P1/P2 scope. Do not add scope silently.
 12. Beta includes the approved offline + online architecture; check Volume 0 before deferring sync/RLS/admin.
-13. DEV first, Production only with the founder's permission (founder, 2026-11-24). Everything done for testing goes to DEV (`btfprhticjgeihcngpif`) first. Production (`qfhntfxtnjalsxqsvkun`, Mumbai) is touched only after the founder approves that exact step. No DEV test data (shops, users, phones, PINs, sales, stock, grants, logs) may ever reach Production by any route: copy, dump/restore, sync, migration, script or build. A phone or install used on DEV is never pointed at Production.
+13. DEV first, Production only with the founder's permission (founder, 2026-11-24). Everything done for testing goes to DEV (`btfprhticjgeihcngpif`) first. Production (`qfhntfxtnjalsxqsvkun`, Mumbai) is touched only after the founder approves that exact step. No DEV test data (shops, users, phones, PINs, sales, stock, grants, logs) may ever reach Production by any route: copy, dump/restore, sync, migration, script or build. An app install used on DEV (the dev or preview app) is never pointed at Production. The production app (`com.muthoy.pos`) is a separate install and may share a phone with them, because Android isolates each app's data (founder, 2026-11-25).
 
 ## Safety Gate
 

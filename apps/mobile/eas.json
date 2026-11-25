@@ -27,6 +27,13 @@
       "environment": "production",
       "env": { "APP_VARIANT": "production" },
       "android": { "buildType": "app-bundle" }
+    },
+    "production-smoke": {
+      "extends": "production",
+      "distribution": "internal",
+      "developmentClient": false,
+      "autoIncrement": false,
+      "android": { "buildType": "apk" }
     }
   },
   "submit": {

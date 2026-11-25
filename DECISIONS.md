@@ -5749,3 +5749,117 @@ grants. They contain no DEV row ids, phone numbers or shop data. Their one
 top-level data UPDATE (migration 42: admin_grant rows to the 'grant' cycle)
 matches nothing on an empty database. So applying the chain to PROD carries no
 DEV data. That application is a separate step needing its own approval.
+
+## 2026-11-25 — PROD steps 1-2: read-only inspection and app identity; G2 = DEV
+
+The founder approved steps 1 and 2 of the PROD plan, neither of which changes
+PROD. The founder also accepted DEV's full 1-43 chain as the G2 rehearsal. The
+separate rehearsal project's G2 review had been left incomplete (insufficient
+evidence, 2026-10-17). Since then, DEV has run every migration through 43, and
+the app was device-tested against it on 2026-11-24.
+
+Step 1 (read-only, GET plus read_only SELECTs): PROD is empty. It has no
+tables, users, migration history, functions or secrets, and runs Postgres
+17.12. Phone and anonymous sign-in are OFF and the OTP length is 6. The OTP
+expiry (60 s) and resend gap (5 s) differ from the runbook's 300/60 and are set
+in step 5. The test-OTP map reads as null, while DEV's (which has one) reads as
+text. The preflight refuses null, so step 5 sets the map explicitly to '' and
+re-reads it. A proposal to accept null instead was blocked as weakening a
+safety check, and it stays that way unless the founder decides otherwise.
+
+Step 2 (code): the production policy now names qfhntfxtnjalsxqsvkun and its
+publishable-key fingerprint, and Edge Function calls to PROD pin to ap-south-1.
+Development and preview still point at DEV and are unchanged. Tests:
+environment, preflight and region suites pass (286 + 86).
+
+Correction, same day: DEV's policy fingerprint turned out to be DEV's legacy
+anon key, not its publishable key. The app has only ever run on an anon key. So
+the PROD policy lists both PROD public keys (publishable 8d38b574..., legacy
+anon cccc0a94...), and the production build carries the anon key, the kind DEV
+tested. The publishable path has to be proven on DEV first.
+
+## 2026-11-25 — PROD steps 3-7 executed: schema, checks, Auth, secrets, functions
+
+The founder approved all remaining PROD steps at once ("সব ধাপ শেষ করে ফেলো
+আমি অনুমতি দিচ্ছি"). The source is revision 3f0113b (main). Migration bytes were
+taken from git blobs (LF); per-migration hashes match DEV's catch-up records
+(8 of 8 recorded).
+
+Step 3, migrations:
+- Created a history table with DEV's exact shape, then enabled pg_cron (1.6.4,
+  pg_catalog, supabase_admin, GMT, host set; identical to DEV).
+- Applied migrations 1-33, each with its history row in one transaction.
+- Captured a fresh F12 hosted preflight (12/12 mandatory checks PASS). Its
+  observations were 2 roles, no memberships, and supabase_realtime publishing
+  only public.batches.
+- Applied 34, then 35-43. Five files that carry their own outer BEGIN/COMMIT
+  had that pair stripped, exactly as DEV's catch-up did.
+- Final history: 43, latest 20261123000000.
+
+Step 4, verification (read-only):
+- Post-checks: h9 constraints 6/6, cron 5/5, api_role_privileges 15/15, and
+  e4 objects, privileges, legacy and functions 65/65.
+- e4 history_e4 fails 2 of 5 on PROD and identically on DEV. It asserts a chain
+  that ends at 35, so it is stale, not a PROD fault.
+- The catalog matches DEV with no differences in relations, columns,
+  constraints, indexes, policies, triggers, the cron job, default ACLs or
+  history. Only platform items differ: DEV's rls_auto_enable() (F13,
+  deliberately not replicated), vault 0.3.1 vs 0.3.2, and DEV's daily realtime
+  message partitions.
+
+Step 5, Auth:
+- Phone OFF, anonymous OFF, email unchanged.
+- OTP 6 digits, 300 s, 60 s apart.
+- The test OTP map now reads '' (set explicitly), so the strict preflight
+  passes without being relaxed.
+- The access-token hook is enabled
+  (pg-functions://postgres/public/custom_access_token_hook), and so is the Send
+  SMS hook (PROD URL), with a newly generated secret.
+
+Step 6, secrets:
+- Set seven function secrets: SEND_SMS_HOOK_SECRET (the same value as the Auth
+  hook), SMS_DISPATCH_HASH_KEY (new random), MUTHOY_ENVIRONMENT=production,
+  MUTHOY_SUPABASE_PROJECT_REF, MUTHOY_SUPABASE_KEY_MODE=modern, REVE_API_URL
+  (DEV's endpoint, matched by digest) and REVE_TRANSPORT=post_json.
+- The founder must still enter REVE_API_KEY, REVE_SECRET_KEY and REVE_SENDER_ID.
+- No DEV-only or payment secret is present.
+
+Step 7, functions:
+- Deployed from a git-archive workdir (D:\Muthoy-deploy\prod\3f0113b):
+  auth-send-sms v1 (verify_jwt false) and sync v1 (verify_jwt true).
+  payment-webhook was not deployed.
+- Smoke results: sync with no headers returned 401; GET with the anon key
+  returned 405, which proves the function boots in modern key mode. An
+  unsigned Send SMS hook call returned 401 Invalid signature, and the SMS
+  ledger stayed at 0.
+
+Also: the EAS production environment now has the two public variables (PROD
+URL and PROD anon key, plaintext, project scope).
+
+Not done, and why:
+- The production build (step 8) needs this policy commit on main. That commit
+  changes apps/mobile/tests/h9-prod-preflight.test.ts, which the E4 evidence
+  seal says can never be superseded. Its test asserts that production is
+  unset, so widening the allowlist is the founder's decision.
+- A clean device (step 9) is also pending a founder decision.
+- Phone ON (step 10) waits for the REVE credentials and the self-managed daily
+  backup (pilot item 2).
+- No DEV data touched PROD at any step.
+
+## 2026-11-25 — Founder decisions: widen the E4 seal by one file; same phone, separate app
+
+**E4 seal.** The founder answered "অনুমতি দিলাম" (approved). The supersession
+allowlist (SUPERSEDABLE_EVIDENCE_FILES) gains exactly one path:
+apps/mobile/tests/h9-prod-preflight.test.ts. Its sealed copy asserted that the
+production policy is unset, which became false once PROD was approved. The
+transition was recorded with the official writer (post-e4-source-hashes.json:
+e4 6533208977871917... -> now 3597c6e1cdf3ceae...), and the hardcoded allowlist
+test now lists eight files. Every other sealed artifact, above all
+e4_postmigration_checks.sql, still can never be superseded.
+
+**Test device.** The founder answered "একই ফোন, আলাদা অ্যাপ" (same phone,
+separate app). The production app (com.muthoy.pos) may be installed on the same
+phone as the dev and preview apps: it is a separate install, and Android gives
+each app its own data. A DEV install itself is still never pointed at PROD.
+CLAUDE.md rule 16 and AGENTS.md rule 13 now say "app install" instead of
+"phone".

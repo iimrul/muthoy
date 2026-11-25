@@ -4,7 +4,7 @@
   "supersedesManifest": "backend/supabase/migrations/e4-source-hashes.json",
   "counts": {
     "migrations": 8,
-    "supersededEvidenceFiles": 7
+    "supersededEvidenceFiles": 8
   },
   "files": {
     "20261030000000_e4b_publication_snapshots.sql": "a072d9d66dd8f0e356f6151cbe6dcfe95cddc3f0481c51ed1b2c49ae82840028",
@@ -20,6 +20,10 @@
     "scripts/h9-prod-preflight.mjs": {
       "e4": "bac816d16d670af8ed464e75cafeb2a85455610f733afcd8aabcb5e5c44ad41d",
       "now": "555993a8297c99ec0da70e16bc628e70a6f09866aaa201974952482b3e00fc2c"
+    },
+    "apps/mobile/tests/h9-prod-preflight.test.ts": {
+      "e4": "6533208977871917d430c1446a1223890adcb70fe090cd4f7d9e7155cb2f5db7",
+      "now": "3597c6e1cdf3ceae9188000b80ae673ded25843b568bfffeeeaf2d22a84c66f0"
     },
     "backend/supabase/migrations/rollback-classification.json": {
       "e4": "08c50fd579a5d6e0a24ffdefade12d8ac126503c15765b081e286b7d5f010d75",
