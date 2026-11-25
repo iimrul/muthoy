@@ -5863,3 +5863,35 @@ phone as the dev and preview apps: it is a separate install, and Android gives
 each app its own data. A DEV install itself is still never pointed at PROD.
 CLAUDE.md rule 16 and AGENTS.md rule 13 now say "app install" instead of
 "phone".
+
+## 2026-11-25 — PROD steps 8-9: production APK built, inspected and device-checked
+
+**Build.** The production-smoke build is EAS 5f3cb2b9-cf67-4de9-8b29-462ad57d4bc0,
+made from main b931963 through the validator (--eas-build, clean revision). It
+used the existing EAS keystore for com.muthoy.pos ("Build Credentials
+MEHEvxt620") and the EAS production environment's two public variables.
+
+**Artifact (step 13 of B4).** The package is com.muthoy.pos, labelled "Muthoy
+POS", version 0.1.0 (1), minSdk 26. The JS bundle:
+- contains the PROD URL once and the DEV URL zero times;
+- embeds one JWT, an anon key whose ref is qfhntfxtnjalsxqsvkun;
+- contains zero secret-shaped keys, and no service_role, whsec_ or REVE
+  secret. The sb_secret_ and sb_publishable_ hits are validation prefixes and
+  patterns, not keys.
+
+**Device (step 14).** On the founder's phone, as a separate app beside the
+dev and preview apps (founder decision):
+- It started on a fresh welcome screen with no adopted data.
+- The cloud-ready indicator turned green. Its /auth/v1/health probe returns 401
+  without an apikey by design, and connectivity.ts treats any status below 500
+  as reachable.
+- A registration with a fictional number (Phone OFF) showed "the code could not
+  be sent". PROD's auth log recorded POST /otp -> 400 phone_provider_disabled.
+- PROD still has 0 auth users, 0 shops and 0 SMS ledger rows. Every request in
+  PROD's edge log came from the app to the PROD host.
+
+**Remaining before real shops (P-F):**
+- The founder enters REVE_API_KEY, REVE_SECRET_KEY and REVE_SENDER_ID.
+- The self-managed daily backup and a restore test (pilot item 2) need their
+  own plan and approval.
+- Only then is the Phone provider turned on.
