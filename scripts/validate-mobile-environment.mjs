@@ -112,7 +112,7 @@ export function inspectArchive(root, identity, sourceRoot = repoRoot) {
     for (let index = item.indexOf('/'); index > 0; index = item.indexOf('/', index + 1)) approvedDirectories.add(item.slice(0, index));
   }
   const required = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc', 'apps/mobile/package.json', 'apps/mobile/app.json', 'apps/mobile/app.config.js', 'apps/mobile/eas.json', 'apps/mobile/config/environmentPolicy.js', 'apps/mobile/config/publicEnvironment.ts', 'apps/mobile/native/environmentIdentity.ts', 'apps/mobile/db/environmentBinding.ts', 'scripts/validate-mobile-environment.mjs', 'apps/mobile/plugins/withAndroidBackupProtection.js'];
-  for (const name of ['muthoy-db-key', 'muthoy-pin-crypto', 'muthoy-ble-printer']) required.push(`apps/mobile/modules/${name}/expo-module.config.json`, `apps/mobile/modules/${name}/package.json`);
+  for (const name of ['muthoy-db-key', 'muthoy-pin-crypto', 'muthoy-ble-printer', 'muthoy-sms-otp']) required.push(`apps/mobile/modules/${name}/expo-module.config.json`, `apps/mobile/modules/${name}/package.json`);
   for (const name of required) if (!approved.has(name)) fail('archive-missing-input');
   // .easignore must never strip tracked native modules, config plugins, assets or workspace sources.
   for (const item of gitFiles(sourceRoot, ['--cached'])) {
