@@ -22,6 +22,8 @@ const {
   markSyncRowSent,
   markSyncRowTransientFailure,
   recordChange,
+  repairShopCommercialPayloads,
+  SHOP_COMMERCIAL_REJECTION,
   toSnakeCasePayload,
 } = await import("./sync-helpers");
 const {
@@ -120,6 +122,11 @@ describe("sync helper behavior on real SQLite", () => {
     const payload = JSON.parse(queueRows().at(-1)!.payload) as Record<string, unknown>;
     expect(payload).not.toHaveProperty("cloud_linked_at");
     expect(payload).not.toHaveProperty("cloudLinkedAt");
+    // Server-owned since B4: the local default plan 'free' and a null trial
+    // date must never ride along (the first PROD shop's refusal, 2026-11-25).
+    expect(payload).not.toHaveProperty("plan");
+    expect(payload).not.toHaveProperty("trial_ends_at");
+    expect(payload).toHaveProperty("name", "Linked Shop");
   });
   it("keeps every migrated FK target before its source in hydration order", () => {
     const rank = new Map(HYDRATION_TABLE_ORDER.map((table, index) => [table, index]));
@@ -376,5 +383,54 @@ describe("read-only queue exposure", () => {
     expect(getSyncExposure("unknown-shop")).toEqual({pending:0,failed:0,stuck:0});
     expect(queueRows()).toEqual(before);
     sqlite.exec("DELETE FROM sync_queue WHERE id LIKE 'exposure-%'");
+  });
+});
+
+describe("repairing shop rows queued with the server-owned plan and trial date", () => {
+  const SHOP = "repair-shop-a";
+  const OTHER = "repair-shop-b";
+  const OLD = JSON.stringify({ id: SHOP, name: "Hasan", plan: "free", trial_ends_at: null, updated_at: NOW });
+
+  function seed(id: string, shop: string, table: string, status: string, lastError: string | null, payload = OLD, attempts = 3): void {
+    sqlite.prepare("INSERT INTO sync_queue (id,shop_id,table_name,row_id,op,payload,status,attempts,last_error,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .run(id, shop, table, shop, "insert", payload, status, attempts, lastError, NOW);
+  }
+  function row(id: string): { payload: string; status: string; attempts: number; last_error: string | null } {
+    return sqlite.prepare("SELECT payload,status,attempts,last_error FROM sync_queue WHERE id = ?").get(id) as unknown as ReturnType<typeof row>;
+  }
+
+  it("puts a shop row refused for those fields back in line, without them", () => {
+    seed("repair-refused", SHOP, "shops", "failed", SHOP_COMMERCIAL_REJECTION);
+    expect(repairShopCommercialPayloads(SHOP)).toBe(1);
+    const repaired = row("repair-refused");
+    expect(repaired.status).toBe("pending");
+    expect(repaired.attempts).toBe(0);
+    expect(repaired.last_error).toBeNull();
+    expect(JSON.parse(repaired.payload)).toEqual({ id: SHOP, name: "Hasan", updated_at: NOW });
+  });
+
+  it("strips them from a pending shop row but leaves its status and attempts", () => {
+    seed("repair-pending", SHOP, "shops", "pending", null, OLD, 2);
+    repairShopCommercialPayloads(SHOP);
+    const cleaned = row("repair-pending");
+    expect(cleaned.status).toBe("pending");
+    expect(cleaned.attempts).toBe(2);
+    expect(JSON.parse(cleaned.payload)).not.toHaveProperty("plan");
+    expect(JSON.parse(cleaned.payload)).not.toHaveProperty("trial_ends_at");
+  });
+
+  it("touches nothing else: other refusals, sent rows, other tables, other shops", () => {
+    seed("repair-other-error", SHOP, "shops", "failed", "Permission role does not belong to authenticated shop");
+    seed("repair-sent", SHOP, "shops", "sent", null);
+    seed("repair-medicine", SHOP, "medicines", "failed", SHOP_COMMERCIAL_REJECTION);
+    seed("repair-other-shop", OTHER, "shops", "failed", SHOP_COMMERCIAL_REJECTION);
+    const before = ["repair-other-error", "repair-sent", "repair-medicine", "repair-other-shop"].map(row);
+    repairShopCommercialPayloads(SHOP);
+    expect(["repair-other-error", "repair-sent", "repair-medicine", "repair-other-shop"].map(row)).toEqual(before);
+  });
+
+  it("changes nothing on a second run", () => {
+    expect(repairShopCommercialPayloads(SHOP)).toBe(0);
+    sqlite.exec("DELETE FROM sync_queue WHERE id LIKE 'repair-%'");
   });
 });

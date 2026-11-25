@@ -3,6 +3,7 @@ import {
   markSyncRowPermanentFailure,
   markSyncRowSent,
   markSyncRowTransientFailure,
+  repairShopCommercialPayloads,
   type PendingSyncRow,
 } from "../db/sync-helpers";
 import { getDeviceId } from "../native/deviceId";
@@ -189,6 +190,9 @@ export async function pushPendingRows(
   if (!isSupabaseConfigured) {
     return false;
   }
+  // Shop rows queued by an older build still carry the server-owned plan and
+  // trial date; one the server already refused for that is put back in line.
+  repairShopCommercialPayloads(shopId);
 
   while (true) {
     if (isCancelled()) {
