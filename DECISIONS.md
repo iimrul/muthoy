@@ -6041,3 +6041,19 @@ is unchanged.**
   - the push runs the repair first.
 - Rollout: DEV first, then Preview and production builds (both approved), then
   the founder's phone should show "all changes reached the server".
+
+**Verified on the device the same day (#12, merged as ca6a95a).**
+- DEV: Preview build 383d3ea6, installed in place on the emulator. The app ran
+  and sync stayed green ("সব পরিবর্তন সার্ভারে পৌঁছেছে").
+  - Only registration ever sends a shop row, so a DEV re-test of the shop row
+    itself would have needed a new registration. The unit tests cover it
+    instead.
+- PROD: production build 7a15e8f1 (same keystore), installed in place on the
+  founder's phone. On first open, the stuck shop row was repaired and sent.
+  - The card went from "১টি দোকানের সেটিং সার্ভারে যায়নি" to "সব পরিবর্তন
+    সার্ভারে পৌঁছেছে".
+  - The 14-day trial is unchanged.
+- Disk: this computer's C: drive was full (0 MB), which also explains a local
+  full-suite run dying of Node out-of-memory. With the founder's approval, old
+  APK copies and test temp folders were deleted (about 1 GB freed). New APKs
+  now download to D:\Muthoy-deploy\apks.
