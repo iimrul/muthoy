@@ -5705,3 +5705,47 @@ Authorization is not verification. iOS has never been built here: there is no
 Xcode and no Apple developer account, so native build, runtime and
 physical-device testing are all still outstanding. The dated 2026-11-12 review
 records that say "on hold" are left as written; they were true at the time.
+
+## 2026-11-24 — Pilot decisions: PROD on Free, accepted offline-loss rule, bKash only
+
+The founder answered four pilot questions.
+
+**PROD plan.** PROD starts on the Supabase Free plan, in Mumbai (ap-south-1).
+The founder creates the project in the dashboard and keeps the database
+password; Claude never sees it. The organization is on Free with DEV active and
+the H-9 rehearsal project paused, so PROD takes the second active slot.
+Consequences of Free: there are no automatic backups, so pilot item 2 (our own
+daily backup plus a restore test on a new phone) stays P0. A Free project also
+pauses after a week without activity. Every PROD step still goes through the
+H-9 runbook gates (backend/supabase/deploy/README.md, Part B), each with its own
+approval.
+
+**Offline data loss (pilot item 6): risk accepted.** A sale that has not reached
+the server is lost if the app is uninstalled or its data is cleared. That cannot
+be fully prevented: clearing app data also deletes the Keystore key. The pilot
+rule is that nobody uninstalls the app or clears its data while the sync dot is
+yellow or red. Shop owners are told this in training.
+
+**Payments (pilot item 7).** The founder restated the locked 2026-10-21 decision:
+direct bKash merchant is the only subscription gateway, and SSLCommerz stays
+retired. A 2026-11-24 pilot list wrongly said "SSLCommerz live test pending"; it
+is corrected here. The bKash merchant details are not needed now; the founder
+will provide them later (B6-02). The pilot therefore runs with no payment path.
+A paid plan can only be given from the Admin panel (migration 41).
+
+## 2026-11-24 — PROD project created; DEV first, Production only with permission
+
+The founder created the PROD project in the dashboard: ref qfhntfxtnjalsxqsvkun,
+Mumbai, Free plan. The founder keeps the database password.
+
+Standing rule, founder's words: "আমি/তুমি টেস্ট পারপাসে যা কিছু করবা সব আগে DEV
+এ যাবে তারপর আমি অনুমতি দিলে Production এ যাবে" (everything either of us does
+for testing goes to DEV first, and to Production only after the founder's
+permission). No DEV test data may reach Production. The rule is now CLAUDE.md
+rule 16 and AGENTS.md core rule 13, so every agent reads it.
+
+Check, 2026-11-24: the 43 migration files hold only schema, functions and
+grants. They contain no DEV row ids, phone numbers or shop data. Their one
+top-level data UPDATE (migration 42: admin_grant rows to the 'grant' cycle)
+matches nothing on an empty database. So applying the chain to PROD carries no
+DEV data. That application is a separate step needing its own approval.
