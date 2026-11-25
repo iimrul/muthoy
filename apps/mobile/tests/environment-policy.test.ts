@@ -38,7 +38,11 @@ describe('explicit variants and identity-only discovery', () => {
   test('production names the founder-approved PROD project and never DEV', () => {
     // Founder-created 2026-11-24 (Mumbai); fingerprint read from that project the same day.
     expect(ENVIRONMENT_POLICIES.production.supabaseProjectRef).toBe('qfhntfxtnjalsxqsvkun');
-    expect(ENVIRONMENT_POLICIES.production.publicKeySha256).toEqual(['8d38b57444df0e2e08ee3c290727d65d8612401c9dc155689afb28eca8753536']);
+    // PROD's publishable key, then its legacy anon key (the kind DEV's app runs on).
+    expect(ENVIRONMENT_POLICIES.production.publicKeySha256).toEqual([
+      '8d38b57444df0e2e08ee3c290727d65d8612401c9dc155689afb28eca8753536',
+      'cccc0a946283c61e2f7e53a747bab45c13a7ac9ca4ab80ccc8ab678286cd53e1',
+    ]);
     expect(ENVIRONMENT_POLICIES.production.supabaseProjectRef).not.toBe(DEV_PROJECT_REF);
     expect(ENVIRONMENT_POLICIES.production.publicKeySha256).not.toContain(ENVIRONMENT_POLICIES.development.publicKeySha256[0]);
     expect(() => validatePublicEnvironment('production', `https://${DEV_PROJECT_REF}.supabase.co`, fakeKey)).toThrow(EnvironmentRefusalError);
