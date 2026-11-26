@@ -34,10 +34,14 @@ const REQUIRED_PERMISSION: Partial<Record<NotificationType, Permission>> = {
   refund: 'sale_return',
 };
 
+// Owner-only types. An oversell asks for a shelf recount and a stock
+// correction, which is the owner's call (founder, 2026-11-27).
+const OWNER_ONLY_TYPES: ReadonlySet<NotificationType> = new Set(['daily_summary', 'oversell']);
+
 async function mayReadType(shopId: string, actorUserId: string, type: NotificationType): Promise<boolean> {
   const context = await getActiveSessionContext(actorUserId, shopId);
   if (!context) return false;
-  if (type === 'daily_summary') return context.role === 'owner';
+  if (OWNER_ONLY_TYPES.has(type)) return context.role === 'owner';
   const permission = REQUIRED_PERMISSION[type];
   return !permission || resolvePermission(context.role, permission, context.permissions);
 }
@@ -59,7 +63,7 @@ export async function listNotifications(shopId: string, actorUserId: string): Pr
   );
   return rows
     .filter((row) => {
-      if (row.type === 'daily_summary') return context.role === 'owner';
+      if (OWNER_ONLY_TYPES.has(row.type)) return context.role === 'owner';
       const permission = REQUIRED_PERMISSION[row.type];
       return !permission || resolvePermission(context.role, permission, context.permissions);
     })
@@ -210,6 +214,22 @@ export async function resolveLowStockAlert(notificationId: string): Promise<void
   const now = new Date().toISOString();
   await db.update(notifications).set({ resolvedAt: now, updatedAt: now }).where(and(
     eq(notifications.id, notificationId), eq(notifications.type, 'low_stock'), isNull(notifications.resolvedAt),
+  ));
+}
+
+/** Open oversell alerts; `refId` is the oversold batch's id. */
+export async function listUnresolvedOversellAlerts(shopId: string): Promise<{ id: string; refId: string | null }[]> {
+  return db.select({ id: notifications.id, refId: notifications.refId }).from(notifications).where(and(
+    eq(notifications.shopId, shopId), eq(notifications.type, 'oversell'),
+    isNull(notifications.resolvedAt), eq(notifications.isDeleted, false),
+  ));
+}
+
+/** Re-arms a batch's oversell alert once its stock is back to zero or above. */
+export async function resolveOversellAlert(notificationId: string): Promise<void> {
+  const now = new Date().toISOString();
+  await db.update(notifications).set({ resolvedAt: now, updatedAt: now }).where(and(
+    eq(notifications.id, notificationId), eq(notifications.type, 'oversell'), isNull(notifications.resolvedAt),
   ));
 }
 

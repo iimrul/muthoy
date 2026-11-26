@@ -31,6 +31,14 @@ const mocks = vi.hoisted(() => ({
     name: string;
     totalStock: number;
     threshold: number;
+    oversoldStock?: number;
+  }[],
+  oversold: [] as {
+    batchId: string;
+    medicineId: string;
+    medicineName: string;
+    batchNo: string;
+    stock: number;
   }[],
   batches: new Map<
     string,
@@ -118,6 +126,7 @@ vi.mock("../db/inventory", () => ({
     async (_shopId: string, medicineId: string) =>
       mocks.batches.get(medicineId) ?? [],
   ),
+  listOversoldBatches: vi.fn(() => mocks.oversold),
 }));
 vi.mock("../db/notifications", async () => {
   const actual = await vi.importActual<typeof import("../db/notifications")>(
@@ -133,7 +142,9 @@ vi.mock("../db/notifications", async () => {
         body: string,
         refId?: string,
       ) => {
-        if (type === "overdue_credit") {
+        // Oversell runs on the real module too: its once-per-batch guard has
+        // to hold across days, which the in-memory dedup below cannot show.
+        if (type === "overdue_credit" || type === "oversell") {
           return actual.createNotification(
             shopId,
             type,
@@ -200,6 +211,8 @@ vi.mock("../db/notifications", async () => {
       const row = mocks.rows.find((candidate) => candidate.id === id);
       if (row) row.resolvedAt = new Date().toISOString();
     }),
+    listUnresolvedOversellAlerts: actual.listUnresolvedOversellAlerts,
+    resolveOversellAlert: actual.resolveOversellAlert,
     hasExpiryAlert: vi.fn(async (_shopId: string, batchId: string) =>
       mocks.rows.some((row) => row.type === "expiry" && row.refId === batchId),
     ),
@@ -227,6 +240,7 @@ import {
   registerNotificationBackgroundTaskAsync,
   requestNotificationPermissionsAsync,
   runNotificationChecks,
+  runOversellAlertCheck,
   syncClosingTimeScheduleAsync,
 } from "../native/notifications";
 
@@ -245,6 +259,7 @@ describe("runNotificationChecks", () => {
     mocks.activeRole = "owner";
     mocks.activePermissions = {};
     mocks.medicines = [];
+    mocks.oversold = [];
     mocks.batches.clear();
     mocks.rows.length = 0;
     mocks.closingHour = 20;
@@ -342,6 +357,85 @@ describe("runNotificationChecks", () => {
     expect(mocks.rows.filter((row) => row.type === "low_stock")).toHaveLength(
       2,
     );
+  });
+
+  describe("oversell (F13)", () => {
+    const OS2 = {
+      batchId: "batch-os2",
+      medicineId: "med-probe",
+      medicineName: "Probe",
+      batchNo: "OS2",
+      stock: -2,
+    };
+    const oversellRows = () =>
+      sqlite
+        .prepare(
+          `SELECT severity, title, body, ref_id AS refId, resolved_at AS resolvedAt
+             FROM notifications WHERE shop_id = ? AND type = 'oversell'
+            ORDER BY rowid`,
+        )
+        .all("shop-1") as unknown as {
+        severity: string;
+        title: string;
+        body: string;
+        refId: string | null;
+        resolvedAt: string | null;
+      }[];
+
+    beforeEach(() => {
+      mocks.medicines = [
+        { medicineId: "med-probe", name: "Probe", totalStock: -2, threshold: 5, oversoldStock: -2 },
+      ];
+      mocks.oversold = [{ ...OS2 }];
+    });
+
+    it("alerts the owner once per oversold batch, with no extra low-stock banner", async () => {
+      await runNotificationChecks("shop-1");
+      await runNotificationChecks("shop-1");
+      expect(oversellRows()).toHaveLength(1);
+      const [row] = oversellRows();
+      expect(row).toMatchObject({ severity: "critical", refId: "batch-os2" });
+      expect(localizeStoredText(row!.title, "bn")).toBe("বেশি বিক্রি: Probe");
+      expect(localizeStoredText(row!.body, "en")).toContain("Batch OS2: 2 more sold than in stock");
+      expect(mocks.rows.filter((r) => r.type === "low_stock")).toHaveLength(0);
+      expect(mocks.scheduled).toHaveBeenCalledOnce();
+    });
+
+    it("re-arms after the batch is recounted, then alerts on a second oversell", async () => {
+      await runNotificationChecks("shop-1");
+      mocks.oversold = [];
+      await runNotificationChecks("shop-1");
+      expect(oversellRows()[0]!.resolvedAt).not.toBeNull();
+      mocks.oversold = [{ ...OS2, stock: -1 }];
+      await runNotificationChecks("shop-1");
+      expect(oversellRows()).toHaveLength(2);
+      expect(mocks.scheduled).toHaveBeenCalledTimes(2);
+    });
+
+    it("creates nothing on a staff session", async () => {
+      mocks.session = { shopId: "shop-1", userId: "staff-1", role: "staff" };
+      mocks.activeRole = "staff";
+      await runNotificationChecks("shop-1");
+      expect(oversellRows()).toHaveLength(0);
+      expect(mocks.scheduled).not.toHaveBeenCalled();
+    });
+
+    it("runs on its own after a sync lands a late offline sale", async () => {
+      await runOversellAlertCheck("shop-1");
+      expect(oversellRows()).toHaveLength(1);
+      expect(mocks.scheduled).toHaveBeenCalledOnce();
+      // A second sync with nothing new does not alert again.
+      await runOversellAlertCheck("shop-1");
+      expect(mocks.scheduled).toHaveBeenCalledOnce();
+    });
+
+    it("does not alert again the next day while the batch is still short", async () => {
+      await runNotificationChecks("shop-1");
+      vi.setSystemTime(new Date("2026-08-13T14:30:00Z"));
+      await runNotificationChecks("shop-1");
+      expect(oversellRows()).toHaveLength(1);
+      expect(mocks.scheduled).toHaveBeenCalledOnce();
+    });
   });
 
   it("deduplicates expiry alerts and uses the real date for critical severity", async () => {

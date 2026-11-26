@@ -23,14 +23,20 @@ import { ensureDatabaseInitialized } from "../db/init";
 import { resolvePermission } from "../domain/permissions";
 import { getCashSummary } from "../db/cash";
 import { shopHasOverdueCredit } from "../db/customers";
-import { listBatchesForMedicine, listMedicines } from "../db/inventory";
+import {
+  listBatchesForMedicine,
+  listMedicines,
+  listOversoldBatches,
+} from "../db/inventory";
 import {
   createDailySummaryNotification,
   createNotification,
   findUnresolvedLowStockAlert,
   hasDailySummaryToday,
   hasExpiryAlert,
+  listUnresolvedOversellAlerts,
   resolveLowStockAlert,
+  resolveOversellAlert,
   type NotificationSeverity,
 } from "../db/notifications";
 import { getB2Settings } from "../db/settings";
@@ -100,6 +106,9 @@ async function runLowStockCheck(shopId: string): Promise<void> {
   if (!preferences.all || !preferences.stock) return;
   const medicines = await listMedicines(shopId);
   for (const medicine of medicines) {
+    // An oversold medicine already has its own, louder alert (runOversellCheck);
+    // a second "low stock: −2 left" banner for the same event is noise.
+    if (medicine.oversoldStock < 0) continue;
     const unresolved = await findUnresolvedLowStockAlert(
       shopId,
       medicine.medicineId,
@@ -139,6 +148,76 @@ async function runLowStockCheck(shopId: string): Promise<void> {
       await resolveLowStockAlert(unresolved.id);
     }
   }
+}
+
+/**
+ * F13 (founder, 2026-11-27): two phones selling offline can together sell
+ * more of a batch than it held. Both sales are kept and the batch goes below
+ * zero, so the shelf needs a recount. One critical alert per oversold batch,
+ * re-armed once the batch is corrected back to zero or above. Owner-only:
+ * staff cannot correct stock, and db/notifications.ts hides the type from
+ * them as well.
+ */
+async function runOversellCheck(shopId: string): Promise<void> {
+  const preferences = readNotificationPreferences(shopId);
+  if (!preferences.all || !preferences.stock) return;
+  const session = readPersistedSessionSync();
+  if (!session || session.shopId !== shopId) return;
+  const context = await getActiveSessionContext(session.userId, shopId);
+  if (context?.role !== "owner") return;
+  const oversold = listOversoldBatches(shopId);
+  const open = await listUnresolvedOversellAlerts(shopId);
+  const stillOversold = new Set(oversold.map((row) => row.batchId));
+  for (const alert of open) {
+    if (!alert.refId || !stillOversold.has(alert.refId)) {
+      await resolveOversellAlert(alert.id);
+    }
+  }
+  const alerted = new Set(open.map((alert) => alert.refId));
+  const bn = new Intl.NumberFormat("bn-BD");
+  for (const row of oversold) {
+    if (alerted.has(row.batchId)) continue;
+    const extra = -row.stock;
+    const title = encodeLocalizedText(
+      `Oversold: ${row.medicineName}`,
+      `বেশি বিক্রি: ${row.medicineName}`,
+    );
+    const body = encodeLocalizedText(
+      `Batch ${row.batchNo}: ${formatNumber(extra)} more sold than in stock (stock ${formatNumber(row.stock)}). Count the shelf and correct the stock.`,
+      `ব্যাচ ${row.batchNo}: স্টকের চেয়ে ${bn.format(extra)}টি বেশি বিক্রি হয়েছে (স্টক ${bn.format(row.stock)})। তাক গুনে স্টক ঠিক করুন।`,
+    );
+    const { created } = await createNotification(
+      shopId,
+      "oversell",
+      "critical",
+      title,
+      body,
+      row.batchId,
+    );
+    if (created) await presentLocalNotification(title, body, "critical");
+  }
+}
+
+// One oversell check at a time, each after the previous: a sync can land
+// while a check is mid-way, and the later check must still see it.
+let oversellQueue: Promise<void> = Promise.resolve();
+
+function queueOversellCheck(shopId: string): Promise<void> {
+  oversellQueue = oversellQueue.then(() =>
+    runOversellCheck(shopId).catch(() => {
+      console.warn("notification-check-failed:oversell");
+    }),
+  );
+  return oversellQueue;
+}
+
+/**
+ * Called after every completed sync, which is when another phone's late
+ * offline sale lands. Only the oversell check: the low-stock and expiry
+ * sweeps walk every medicine and stay on their foreground/background cadence.
+ */
+export function runOversellAlertCheck(shopId: string): Promise<void> {
+  return queueOversellCheck(shopId);
 }
 
 async function runExpiryCheck(shopId: string, now: Date): Promise<void> {
@@ -313,6 +392,7 @@ export function runNotificationChecks(shopId: string): Promise<void> {
       return;
     }
     const now = new Date();
+    await queueOversellCheck(shopId);
     try {
       await runLowStockCheck(shopId);
     } catch {

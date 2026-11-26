@@ -130,6 +130,7 @@ vi.mock('../native/notifications', () => ({
   registerNotificationBackgroundTaskAsync: native.registerNotificationBackgroundTaskAsync,
   requestNotificationPermissionsAsync: native.requestNotificationPermissionsAsync,
   runNotificationChecks: native.runNotificationChecks,
+  runOversellAlertCheck: vi.fn(async () => undefined),
   syncClosingTimeScheduleAsync: native.syncClosingTimeScheduleAsync,
 }));
 vi.mock('../sync/supabaseClient', () => ({
@@ -146,6 +147,7 @@ vi.mock('../sync/supabaseClient', () => ({
 vi.mock('../sync', () => ({
   startSyncEngine: native.startSyncEngine,
   stopSyncEngine: native.stopSyncEngine,
+  subscribeToSyncCompletion: vi.fn(() => () => undefined),
 }));
 vi.mock('../sync/billingHydration', () => ({
   startBillingHydration: native.startBillingHydration,

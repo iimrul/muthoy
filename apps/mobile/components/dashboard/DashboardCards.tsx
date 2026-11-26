@@ -157,6 +157,8 @@ export interface AlertRow {
   value: string;
   /** Render the value in DM Mono. Money only (CLAUDE.md rule 6). */
   isMoney?: boolean;
+  /** Red label and value — something the owner must act on (an oversell). */
+  isAlarm?: boolean;
 }
 
 interface AlertCardProps {
@@ -229,12 +231,12 @@ export function AlertCard({
                 <View key={row.key} className="flex-row justify-between gap-3">
                   <Text
                     numberOfLines={1}
-                    className="flex-1 font-sans text-xs text-midGray"
+                    className={`flex-1 text-xs ${row.isAlarm ? "font-sans-semibold text-error" : "font-sans text-midGray"}`}
                   >
                     {row.label}
                   </Text>
                   <Text
-                    className={`text-xs ${row.isMoney ? "font-mono" : "font-sans-semibold"} ${palette.value}`}
+                    className={`text-xs ${row.isMoney ? "font-mono" : "font-sans-semibold"} ${row.isAlarm ? "text-error" : palette.value}`}
                   >
                     {row.value}
                   </Text>

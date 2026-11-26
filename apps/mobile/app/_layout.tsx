@@ -22,6 +22,7 @@ import { useDatabaseMigrations } from '../db';
 import {
   registerNotificationBackgroundTaskAsync,
   runNotificationChecks,
+  runOversellAlertCheck,
   syncClosingTimeScheduleAsync,
 } from '../native/notifications';
 import { useSessionStore } from '../state/sessionStore';
@@ -29,7 +30,7 @@ import {
   handleAppStateChangeForAuthRefresh,
   isSupabaseConfigured,
 } from '../sync/supabaseClient';
-import { startSyncEngine, stopSyncEngine } from '../sync';
+import { startSyncEngine, stopSyncEngine, subscribeToSyncCompletion } from '../sync';
 import { startBillingHydration, stopBillingHydration } from '../sync/billingHydration';
 import { subscribeToReconnect } from '../sync/connectivity';
 import { revalidateOfflineSelectedShop } from '../state/switchShop';
@@ -280,6 +281,10 @@ export default function RootLayout() {
     if (!isDatabaseReady || !isSupabaseConfigured || !session || !authorityAllowed) return;
     startSyncEngine(session.shopId);
     startBillingHydration(session.shopId);
+    // F13: another phone's late offline sale lands with a sync, and may have
+    // taken a batch below zero. Check right then, not at the next foreground.
+    const shopId = session.shopId;
+    const stopOversellWatch = subscribeToSyncCompletion(shopId, () => runOversellAlertCheck(shopId));
     if (AppState.currentState === 'active') {
       const now = Date.now();
       if (now - lastForegroundCheckAt >= FOREGROUND_CHECK_DEBOUNCE_MS) {
@@ -288,6 +293,7 @@ export default function RootLayout() {
       }
     }
     return () => {
+      stopOversellWatch();
       stopSyncEngine();
       stopBillingHydration();
     };

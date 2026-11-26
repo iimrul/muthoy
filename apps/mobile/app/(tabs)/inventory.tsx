@@ -384,13 +384,19 @@ export function InventoryCard({
       : days < 0
         ? "—"
         : `${formatNumber(days)}${t("daysShortSuffix")}`;
+  // F13: a batch sold below zero offline. The shelf is short by that much,
+  // so "Current" shows the net figure (e.g. −2) and the badge says so.
+  const isOversold = medicine.oversoldStock < 0;
+  const currentStock = medicine.sellableStock + medicine.oversoldStock;
   const isOut = medicine.sellableStock === 0;
   const isExpiring =
     !isOut && days !== null && days >= 0 && days < NEAR_EXPIRY_DAYS;
   const isLow =
     !isOut && !isExpiring && medicine.sellableStock < medicine.threshold;
 
-  const status = isOut
+  const status = isOversold
+    ? { bg: "bg-[#ffdad6]", text: "text-[#93000a]", label: t("oversoldLabel") }
+    : isOut
     ? { bg: "bg-[#ffdad6]", text: "text-[#93000a]", label: t("outOfStockLabel") }
     : isExpiring
       ? { bg: "bg-[#ffdad6]", text: "text-[#93000a]", label: `${formatNumber(days ?? 0)}${t("daysShortSuffix")}` }
@@ -399,10 +405,10 @@ export function InventoryCard({
         : { bg: "bg-[#95f2f1]", text: "text-[#004f4f]", label: t("statusOkLabel") };
 
   const heatmapPct = Math.min(
-    (medicine.sellableStock / Math.max(medicine.threshold, 1)) * 100,
+    (Math.max(0, currentStock) / Math.max(medicine.threshold, 1)) * 100,
     100,
   );
-  const heatmapColor = isOut
+  const heatmapColor = isOut || isOversold
     ? "bg-[#ba1a1a]"
     : isLow || isExpiring
       ? "bg-[#84451e]"
@@ -415,7 +421,7 @@ export function InventoryCard({
           <Feather
             name="package"
             size={20}
-            color={isOut ? "#93000a" : isLow || isExpiring ? "#713610" : "#004f4f"}
+            color={isOut || isOversold ? "#93000a" : isLow || isExpiring ? "#713610" : "#004f4f"}
           />
         </View>
         <View className="flex-1 gap-0.5">
@@ -455,9 +461,9 @@ export function InventoryCard({
         <View className="flex-1 items-center rounded-lg bg-[#f3f3f6] p-2">
           <Text className="font-sans text-[10px] uppercase text-midGray">{t("currentLabel")}</Text>
           <Text
-            className={`font-sans-extrabold text-lg ${isOut ? "text-[#ba1a1a]" : isLow || isExpiring ? "text-[#84451e]" : "text-brand-green"}`}
+            className={`font-sans-extrabold text-lg ${isOut || isOversold ? "text-[#ba1a1a]" : isLow || isExpiring ? "text-[#84451e]" : "text-brand-green"}`}
           >
-            {formatNumber(medicine.sellableStock)}
+            {formatNumber(currentStock)}
           </Text>
         </View>
         <View className="flex-1 items-center rounded-lg bg-[#f3f3f6] p-2">
@@ -557,7 +563,9 @@ export function InventoryCard({
                 >
                   {batchExpiryLabel}
                 </Text>
-                <Text className="w-12 text-right font-sans-bold text-xs text-richBlack">
+                <Text
+                  className={`w-12 text-right font-sans-bold text-xs ${batch.quantityAvailable < 0 ? "text-error" : "text-richBlack"}`}
+                >
                   {formatNumber(batch.quantityAvailable)}
                 </Text>
                 <Text className="w-16 text-right font-mono text-xs text-richBlack">

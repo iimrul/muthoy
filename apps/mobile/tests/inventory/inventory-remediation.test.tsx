@@ -851,6 +851,7 @@ describe("Inventory action permissions and FEFO badge", () => {
           threshold: 10,
           totalStock: 9,
           sellableStock: 4,
+          oversoldStock: 0,
           batchCount: 2,
           batchSearchText: "EXPIRED SELLABLE",
           hasExpiringStock: false,
@@ -917,6 +918,45 @@ describe("Inventory action permissions and FEFO badge", () => {
 
     expect(screen.getByLabelText("Active SELLABLE")).toBeTruthy();
     expect(screen.queryByLabelText("Active EXPIRED")).toBeNull();
+  });
+
+  it("shows an oversold medicine as Oversold with its negative stock (F13)", () => {
+    render(
+      createElement(InventoryCard, {
+        medicine: {
+          medicineId: "medicine-probe",
+          name: "Probe",
+          generic: null,
+          manufacturer: null,
+          threshold: 5,
+          totalStock: -2,
+          sellableStock: 0,
+          oversoldStock: -2,
+          batchCount: 1,
+          batchSearchText: "OS2",
+          hasExpiringStock: false,
+          activePromotionBps: null,
+          activeBatch: undefined,
+        },
+        t: (key: string) =>
+          ({ oversoldLabel: "Oversold", outOfStockLabel: "Out of Stock", currentLabel: "Current" })[key] ?? key,
+        formatNumber: String,
+        formatDate: String,
+        formatPercent: String,
+        formatMoney: () => "৳3.00",
+        expanded: false,
+        batches: undefined,
+        onToggleBatches: vi.fn(),
+        onEdit: vi.fn(),
+        onDelete: vi.fn(),
+        canEdit: false,
+        onEditBatch: vi.fn(),
+      }),
+    );
+
+    expect(screen.getByText("Oversold")).toBeTruthy();
+    expect(screen.queryByText("Out of Stock")).toBeNull();
+    expect(screen.getByText("-2")).toBeTruthy();
   });
 });
 

@@ -197,6 +197,7 @@ const DASHBOARD_DATA = {
   supplierPayable: { payable: asPaisa(0), supplierCount: 0 },
   expiry: { rows: [], moreCount: 0, total: 0 },
   lowStock: { rows: [], moreCount: 0, total: 0 },
+  oversold: { rows: [], moreCount: 0, total: 0 },
   activeStaff: [],
   recentActivity: [],
 };
