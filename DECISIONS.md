@@ -6160,7 +6160,7 @@ phone (John) each sold 2 of a batch that had 2, both offline.
 ## 2026-11-27 — An oversell is shown to the owner
 
 **Founder's rule (plan "গ", approved 2026-11-27).** When offline sales take a
-batch below zero, the owner gets a notification, the Low Stock card on the
+batch below zero, the owner and staff get a notification, the Low Stock card on the
 dashboard shows it in red, and Inventory shows the negative stock (−2).
 
 **Why.** The server already kept both sales and marked the batch (DEV test
@@ -6190,8 +6190,10 @@ the low-stock card only counts medicines with some stock left, so it said
     sale arrives. It also runs with the usual foreground and background
     checks.
   - It is behind the existing stock-alert switch.
-  - Owner only: no row is created on a staff session, and the in-app list
-    hides the type from staff (like `daily_summary`).
+  - Who: the owner, and every staff member who may view stock
+    (`inventory_view`, on by default for staff), the same gate as low stock.
+    The founder first said owner only, then the same day asked for staff
+    too ("স্টাফরাও নোটিফিকেশন পাওয়া উচিত"): they sell from that shelf.
   - An oversold medicine does not also get a "low stock: −2 left" alert.
 - **Unchanged.**
   - The Sale list still hides a batch with no stock.
@@ -6200,11 +6202,12 @@ the low-stock card only counts medicines with some stock left, so it said
     new value needs no migration.
 - **Tests.**
   - On real SQLite: the batch below zero is listed and nothing else is; the
-    shortfall reaches Inventory; the batch drops out after a recount; owner
-    sees the alert and staff do not, while staff still see low stock.
-  - Notification checks: once, re-arm, not again the next day, staff session,
-    after-sync path.
+    shortfall reaches Inventory; the batch drops out after a recount; the
+    owner and staff see the alert, a staff member with stock view switched
+    off sees neither it nor low stock.
+  - Notification checks: once, re-arm, not again the next day, staff with
+    and without stock view, after-sync path.
   - Inventory card: badge and −2.
-  - Mutation run: 10 of 11 caught. The one survivor is the `created` guard
+  - Mutation run: 12 of 13 caught. The one survivor is the `created` guard
     on the banner, which only matters if two checks race; the check queue
     already prevents that.

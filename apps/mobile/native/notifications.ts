@@ -154,9 +154,9 @@ async function runLowStockCheck(shopId: string): Promise<void> {
  * F13 (founder, 2026-11-27): two phones selling offline can together sell
  * more of a batch than it held. Both sales are kept and the batch goes below
  * zero, so the shelf needs a recount. One critical alert per oversold batch,
- * re-armed once the batch is corrected back to zero or above. Owner-only:
- * staff cannot correct stock, and db/notifications.ts hides the type from
- * them as well.
+ * re-armed once the batch is corrected back to zero or above. The owner and
+ * every staff member who may view stock get it (founder, 2026-11-27); the
+ * same `inventory_view` gate hides it in db/notifications.ts.
  */
 async function runOversellCheck(shopId: string): Promise<void> {
   const preferences = readNotificationPreferences(shopId);
@@ -164,7 +164,9 @@ async function runOversellCheck(shopId: string): Promise<void> {
   const session = readPersistedSessionSync();
   if (!session || session.shopId !== shopId) return;
   const context = await getActiveSessionContext(session.userId, shopId);
-  if (context?.role !== "owner") return;
+  if (!context || !resolvePermission(context.role, "inventory_view", context.permissions)) {
+    return;
+  }
   const oversold = listOversoldBatches(shopId);
   const open = await listUnresolvedOversellAlerts(shopId);
   const stillOversold = new Set(oversold.map((row) => row.batchId));
@@ -183,8 +185,8 @@ async function runOversellCheck(shopId: string): Promise<void> {
       `বেশি বিক্রি: ${row.medicineName}`,
     );
     const body = encodeLocalizedText(
-      `Batch ${row.batchNo}: ${formatNumber(extra)} more sold than in stock (stock ${formatNumber(row.stock)}). Count the shelf and correct the stock.`,
-      `ব্যাচ ${row.batchNo}: স্টকের চেয়ে ${bn.format(extra)}টি বেশি বিক্রি হয়েছে (স্টক ${bn.format(row.stock)})। তাক গুনে স্টক ঠিক করুন।`,
+      `Batch ${row.batchNo}: ${formatNumber(extra)} more sold than in stock (stock ${formatNumber(row.stock)}). Count the shelf; the stock needs correcting.`,
+      `ব্যাচ ${row.batchNo}: স্টকের চেয়ে ${bn.format(extra)}টি বেশি বিক্রি হয়েছে (স্টক ${bn.format(row.stock)})। তাক গুনে স্টক ঠিক করতে হবে।`,
     );
     const { created } = await createNotification(
       shopId,

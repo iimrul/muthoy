@@ -29,14 +29,15 @@ interface RawNotification extends Omit<Notification, 'isRead'> {
 const REQUIRED_PERMISSION: Partial<Record<NotificationType, Permission>> = {
   daily_summary: 'cash_drawer',
   low_stock: 'inventory_view',
+  // Staff see an oversell too (founder, 2026-11-27): they are the ones
+  // selling from that shelf. Same gate as low stock.
+  oversell: 'inventory_view',
   expiry: 'expiry_manage',
   overdue_credit: 'credit_view',
   refund: 'sale_return',
 };
 
-// Owner-only types. An oversell asks for a shelf recount and a stock
-// correction, which is the owner's call (founder, 2026-11-27).
-const OWNER_ONLY_TYPES: ReadonlySet<NotificationType> = new Set(['daily_summary', 'oversell']);
+const OWNER_ONLY_TYPES: ReadonlySet<NotificationType> = new Set(['daily_summary']);
 
 async function mayReadType(shopId: string, actorUserId: string, type: NotificationType): Promise<boolean> {
   const context = await getActiveSessionContext(actorUserId, shopId);

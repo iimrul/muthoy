@@ -327,13 +327,17 @@ describe("oversold batches (F13)", () => {
     await expect(getOversoldSummary(SHOP)).resolves.toMatchObject({ total: 0, rows: [] });
   });
 
-  it("shows the oversell alert to the owner only, while staff still see stock alerts", async () => {
+  it("shows the oversell alert to the owner and to staff who may view stock, like low stock", async () => {
     await createNotification(SHOP, "oversell", "critical", "Oversold: Probe", "Batch OS2", "batch-os2");
     await createNotification(SHOP, "low_stock", "warning", "Low stock: Seclo", "12 left", "med-seclo");
-    const ownerTypes = (await listNotifications(SHOP, OWNER)).map((item) => item.type).sort();
-    expect(ownerTypes).toEqual(["low_stock", "oversell"]);
-    const staffTypes = (await listNotifications(SHOP, STAFF_A)).map((item) => item.type);
-    expect(staffTypes).toEqual(["low_stock"]);
+    sqlite.exec(`INSERT INTO user_permissions (id, shop_id, user_id, key, allowed)
+      VALUES ('perm-no-stock', '${SHOP}', '${STAFF_B}', 'inventory_view', 0);`);
+    const types = async (userId: string) =>
+      (await listNotifications(SHOP, userId)).map((item) => item.type).sort();
+    expect(await types(OWNER)).toEqual(["low_stock", "oversell"]);
+    expect(await types(STAFF_A)).toEqual(["low_stock", "oversell"]);
+    // The owner switched "view stock" off for this staff member: neither.
+    expect(await types(STAFF_B)).toEqual([]);
   });
 });
 

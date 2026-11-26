@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   } | null,
   authority: vi.fn(async () => ({ status: "confirmed", reason: "claims_match" })),
   activeRole: "owner" as "owner" | "staff" | null,
-  activePermissions: {} as Partial<Record<"credit_view", boolean>>,
+  activePermissions: {} as Partial<Record<"credit_view" | "inventory_view", boolean>>,
   medicines: [] as {
     medicineId: string;
     name: string;
@@ -412,9 +412,18 @@ describe("runNotificationChecks", () => {
       expect(mocks.scheduled).toHaveBeenCalledTimes(2);
     });
 
-    it("creates nothing on a staff session", async () => {
+    it("alerts a staff member who may view stock", async () => {
       mocks.session = { shopId: "shop-1", userId: "staff-1", role: "staff" };
       mocks.activeRole = "staff";
+      await runNotificationChecks("shop-1");
+      expect(oversellRows()).toHaveLength(1);
+      expect(mocks.scheduled).toHaveBeenCalledOnce();
+    });
+
+    it("creates nothing for a staff member without stock view", async () => {
+      mocks.session = { shopId: "shop-1", userId: "staff-1", role: "staff" };
+      mocks.activeRole = "staff";
+      mocks.activePermissions = { inventory_view: false };
       await runNotificationChecks("shop-1");
       expect(oversellRows()).toHaveLength(0);
       expect(mocks.scheduled).not.toHaveBeenCalled();
