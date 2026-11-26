@@ -34,7 +34,7 @@ const schema = await import('./schema');
 const { ALWAYS_LIVE } = await import('./errors');
 const { createSaleTransaction } = await import('./sales');
 const { createMedicineWithBatch } = await import('./inventory');
-const { recordExpense, setOpeningCash, getCashSummary, closeDay } = await import('./cash');
+const { recordExpense, setOpeningCash, getCashSummary, closeDay, currentBusinessDate } = await import('./cash');
 const {
   listPendingSyncRows,
   markSyncRowSent,
@@ -103,12 +103,13 @@ function expectIntegerPaisa(step: string): void {
   }
 }
 
-/** Local business date, matching db/cash.ts's currentBusinessDate. */
+/**
+ * The app's own business date: Asia/Dhaka midnight (db/cash.ts). This used
+ * to be re-derived from the MACHINE's time zone, so on a UTC runner the test
+ * looked at yesterday from 00:00 to 06:00 Dhaka and every report read 0.
+ */
 function businessDate(): string {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
-    .toISOString()
-    .slice(0, 10);
+  return currentBusinessDate();
 }
 
 /**
