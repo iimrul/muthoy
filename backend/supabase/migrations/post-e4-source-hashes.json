@@ -3,7 +3,7 @@
   "gate": "E4-B",
   "supersedesManifest": "backend/supabase/migrations/e4-source-hashes.json",
   "counts": {
-    "migrations": 8,
+    "migrations": 9,
     "supersededEvidenceFiles": 8
   },
   "files": {
@@ -14,12 +14,13 @@
     "20261116020000_staff_reconciliation_server_clock.sql": "f5f7ffe3ce42fd88d64e0de30d7614d519ee79c2b0ef41f396dbfc19aec915eb",
     "20261121000000_admin_plan_grants.sql": "e2719d5d49b6cd1549ae3e2479ba302d18418dc7739146baece81462364502e9",
     "20261122000000_admin_grant_cycle.sql": "6df4752b09ebd2b811bc984c190223018499c115e235919e3da9b9c2af11b467",
-    "20261123000000_owner_session_shop_and_pin.sql": "70a50578126828d230bbe24fe1c325e4916a3cb3e6b7f10b68be18e17a114e0e"
+    "20261123000000_owner_session_shop_and_pin.sql": "70a50578126828d230bbe24fe1c325e4916a3cb3e6b7f10b68be18e17a114e0e",
+    "20261126000000_sync_pull_server_clock.sql": "7a08d228d34790c1b7216628bfe098e073026a002c89e4c8c0e81a79dfbbc686"
   },
   "supersedes": {
     "scripts/h9-prod-preflight.mjs": {
       "e4": "bac816d16d670af8ed464e75cafeb2a85455610f733afcd8aabcb5e5c44ad41d",
-      "now": "555993a8297c99ec0da70e16bc628e70a6f09866aaa201974952482b3e00fc2c"
+      "now": "fe7512260f7d1eb1adb3b742a41ba3fd8a4be2efed8169e88eef918c72fa69b1"
     },
     "apps/mobile/tests/h9-prod-preflight.test.ts": {
       "e4": "6533208977871917d430c1446a1223890adcb70fe090cd4f7d9e7155cb2f5db7",
@@ -27,27 +28,27 @@
     },
     "backend/supabase/migrations/rollback-classification.json": {
       "e4": "08c50fd579a5d6e0a24ffdefade12d8ac126503c15765b081e286b7d5f010d75",
-      "now": "34ed10ac225e933320e8043da643682dfc4e7eaf7ff643f65fad9a508e133f3b"
+      "now": "2d426e7aec245ca512074daf8f8a366710b9c9c21f0633fa7edc7a30fbf490f5"
     },
     "backend/supabase/migrations/ROLLBACK.md": {
       "e4": "9b61681b89bee9394b9093b4932d39a70cac31f699931419f1619f084f9f5d0a",
-      "now": "086d8352b8411bc0311af91750787beb1ae602054971d5e5e90aed163b395e20"
+      "now": "9be608dfc01a5a50e0a2582eb201826542fe205a2bec13af7402502c8cb6e998"
     },
     "backend/supabase/migrations/README.md": {
       "e4": "9114aafed4be01c0abe3ff4f4e0388d868ebb7fcabd9221278ec528d0c80f51f",
-      "now": "0c21a5162e13f6949d594dcc0193501ae44745e3aa2be0f5f939c2bed04c106e"
+      "now": "c8c484407b07327ebc2baac85bec5264e71f2be59e80928d4bf7528803b973d7"
     },
     "apps/mobile/tests/migration-rollback-classification.test.ts": {
       "e4": "17db87a58ea6242d4f8fbbcb60651fbc3f8ba7244bdeed83b470debda7c5c9ce",
-      "now": "e73439e58acee353353a0190aa20f3c991850f0c90758f1589b7b88185e6dadf"
+      "now": "5dae972601cf99e762a1999f30a747d7c75164cfb1f51d73eb0a5392f0599867"
     },
     "backend/supabase/pgtest/checkFile.ts": {
       "e4": "4157698d9275e4e77003f879bffdb39a27b7dad81094b37de43ac8523f4deff4",
-      "now": "0c0cb31dbe2428d73d3f6dbd30df55e53dab26df31c75fe5ad5a173fb3692405"
+      "now": "f38ede11216cbb6acfcf9bdcb30d10177398cca9d9bd73b6ae36d2d1b59a83ac"
     },
     ".gitattributes": {
       "e4": "1fb9331e11aaebe9786d9364b874985a3a274f7b2afb67050e51adcf2dc331a4",
-      "now": "4e5aa9e2285f8be9203c94b42f41d0f44790ad56df4ed84879a67e166bb9106f"
+      "now": "0d191a2e2a01071a3feb35cec0ac98608c6117f90f1a4458a04c4e3e6543b304"
     }
   }
 }

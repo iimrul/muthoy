@@ -325,13 +325,22 @@ export async function createHarness(options: { through?: string } = {}): Promise
     await db.exec(wider.rows.map((row) => row.statement).join('\n'));
   }
   await db.exec(HOSTED_FUNCTION_EXECUTE_MODEL);
+  await db.exec(NO_PULL_SETTLE_WAIT);
   return wrap(db);
 }
+
+/**
+ * Migration 44 holds back rows younger than two seconds from every pull (see
+ * 20261126000000_sync_pull_server_clock.sql). Tests apply and pull in the same
+ * breath, so they run without the wait; the test of the wait sets it back.
+ */
+export const NO_PULL_SETTLE_WAIT = `select set_config('muthoy.pull_settle_ms', '0', false)`;
 
 /** Bootstrap only, for the tests that apply migrations themselves. */
 export async function createBareHarness(): Promise<Harness> {
   const db = await PGlite.create();
   await db.exec(PLATFORM_BOOTSTRAP);
+  await db.exec(NO_PULL_SETTLE_WAIT);
   return wrap(db);
 }
 
