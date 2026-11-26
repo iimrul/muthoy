@@ -191,6 +191,19 @@ describe('returning to the same screen after an authority re-check', () => {
     expect(deps.replace).toHaveBeenCalledWith('/inventory');
   });
 
+  it('also returns when the fresh navigator opens on the Sale tab, not home', () => {
+    deps.session = owner;
+    deps.pathname = '/reports/sales-history';
+    renderBoundary();
+    cleanup();
+    lastRoute.armRouteRestore(ownerKey());
+
+    deps.pathname = '/sale'; // what the device showed after a reconnect
+    renderBoundary();
+
+    expect(deps.replace).toHaveBeenCalledWith('/reports/sales-history');
+  });
+
   it('does nothing when the remount was not an authority re-check', () => {
     deps.session = owner;
     deps.pathname = '/inventory';
