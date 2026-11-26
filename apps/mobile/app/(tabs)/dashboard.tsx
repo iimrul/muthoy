@@ -44,6 +44,7 @@ import {
 import {
   formatUnreadBadge,
   greetingKeyForHour,
+  greetingName,
   relativeTime,
 } from "../../domain/dashboard";
 import { completePendingAuthTimingStage } from "../../dev/authTiming";
@@ -483,7 +484,7 @@ export default function MorningDashboardScreen() {
           <View className="mb-6 px-4">
             <View className="flex-row flex-wrap items-center gap-2">
               <Text className="font-sans-bold text-lg text-white">
-                {greeting}, {data.ownerName}
+                {greeting}, {greetingName(data.ownerName, data.shopName)}
               </Text>
               <PlanBadge plan={plan.plan} daysLeft={plan.daysLeft} compact expired={plan.reason === 'paid_expired' || plan.reason === 'verification_stale'} grace={plan.reason === 'paid_grace'} />
             </View>

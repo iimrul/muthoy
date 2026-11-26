@@ -848,6 +848,48 @@ describe('settings — owner-sensitive actions denied', () => {
     await expect(getShopProfile(fixture.shopId, fixture.ownerId)).resolves.toMatchObject({ id: fixture.ownerId });
   });
 
+  // Founder 2026-11-26: registration's name is the SHOP's; the owner sets their
+  // own name and may rename the shop from Settings, one field each.
+  it('lets the owner set their own name and rename the shop, queuing both for sync', async () => {
+    const fixture = seedShop();
+    const before = await getShopProfile(fixture.shopId, fixture.ownerId);
+
+    await updateShopProfile(fixture.shopId, fixture.ownerId, { name: 'ইমরুল', shopName: 'নতুন ফার্মেসি' }, ALWAYS_LIVE);
+
+    const after = await getShopProfile(fixture.shopId, fixture.ownerId);
+    expect(after).toMatchObject({ name: 'ইমরুল', shopName: 'নতুন ফার্মেসি' });
+    expect(before.shopName).not.toBe('নতুন ফার্মেসি');
+    expect(await getShopName(fixture.shopId)).toBe('নতুন ফার্মেসি');
+    const queued = sqlite
+      .prepare("SELECT table_name, row_id FROM sync_queue WHERE shop_id = ? AND table_name IN ('shops','users') ORDER BY table_name")
+      .all(fixture.shopId) as { table_name: string; row_id: string }[];
+    expect(queued).toEqual([
+      { table_name: 'shops', row_id: fixture.shopId },
+      { table_name: 'users', row_id: fixture.ownerId },
+    ]);
+  });
+
+  it('queues no shop change when the shop name is unchanged', async () => {
+    const fixture = seedShop();
+    const { shopName } = await getShopProfile(fixture.shopId, fixture.ownerId);
+
+    await updateShopProfile(fixture.shopId, fixture.ownerId, { name: 'Owner Renamed', shopName: ` ${shopName} ` }, ALWAYS_LIVE);
+
+    const shopsQueued = sqlite
+      .prepare("SELECT COUNT(*) AS value FROM sync_queue WHERE shop_id = ? AND table_name = 'shops'")
+      .get(fixture.shopId) as { value: number };
+    expect(shopsQueued.value).toBe(0);
+  });
+
+  it('denies staff a shop rename', async () => {
+    const fixture = seedShop();
+    const name = await getShopName(fixture.shopId);
+
+    await expect(updateShopProfile(fixture.shopId, fixture.staffId, { shopName: 'Hijacked' }, ALWAYS_LIVE)).rejects.toThrow(/Owner access only/);
+
+    expect(await getShopName(fixture.shopId)).toBe(name);
+  });
+
   it('denies the P1 manager role the same Settings actions', async () => {
     const fixture = seedShop();
     sqlite.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(await hashPin('1234'), fixture.managerId);

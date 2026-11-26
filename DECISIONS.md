@@ -6126,3 +6126,33 @@ phone (John) each sold 2 of a batch that had 2, both offline.
   an unknown inner pull is refused. With the pull pointed back at `updated_at`,
   6 of them fail (mutation-checked).
 - Rollout: DEV first (approved). PROD only with the founder's separate approval.
+
+## 2026-11-26 — Shop name and owner name are separate; the greeting follows them
+
+**Founder's rule (plan "ঘ", approved).**
+- The name given at registration is the SHOP's name.
+- In Settings the owner can set their own name and can rename the shop. One
+  field each, Bangla or English; no separate Bangla/English fields.
+- The dashboard greets "শুভ সন্ধ্যা, <shop name>" until the owner sets a name of
+  their own, then "শুভ সন্ধ্যা, <owner name>".
+
+**How.**
+- No new column. Registration already stores the shop name as the owner's own
+  name too, so "the owner has not set a name" means the two are equal
+  (`domain/dashboard.ts` `greetingName`; compared trimmed, case-insensitive and
+  Unicode-normalised, so a decomposed Bangla spelling still counts as the
+  same).
+- Settings: a "দোকানের নাম" row next to "ব্যক্তিগত তথ্য"; the profile sheet has
+  "দোকানের নাম" and "আপনার নাম" fields (2–80 characters each).
+- `updateShopProfile` renames the shop in the same transaction as the owner's
+  details: `shops.name` plus one `shops` update in the outbox. Nothing is queued
+  when the name is unchanged. Owner only (staff and managers refused, tested).
+- Server side nothing changes: the owner may already change the shop identity
+  fields (W4-05).
+- Known limits, unchanged: an English shop name set in the Multi-Shop screen
+  (Ultra) stays as it was and still shows in English mode; the shop switcher
+  shows the new name after the next billing snapshot; each shop of a
+  multi-shop owner keeps its own owner name.
+- Tests: `greetingName` (Bangla and English, spacing/case/normalisation,
+  fallbacks), owner rename queues `shops` + `users`, unchanged name queues no
+  shop row, staff refused, and the rollback test covers the rename.

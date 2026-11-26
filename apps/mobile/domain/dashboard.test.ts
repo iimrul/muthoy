@@ -6,6 +6,7 @@ import {
   averageSale,
   formatUnreadBadge,
   greetingKeyForHour,
+  greetingName,
   overdueBeforeDate,
   relativeTime,
   shiftBusinessDate,
@@ -215,5 +216,29 @@ describe("overdueBeforeDate", () => {
   it("rejects a negative or fractional credit period", () => {
     expect(() => overdueBeforeDate("2026-08-22", -1)).toThrow("non-negative");
     expect(() => overdueBeforeDate("2026-08-22", 2.5)).toThrow("non-negative");
+  });
+});
+
+describe("greetingName", () => {
+  it("names the shop while the owner's name is still the registration copy of it", () => {
+    expect(greetingName("Rahim Pharmacy", "Rahim Pharmacy")).toBe("Rahim Pharmacy");
+    expect(greetingName("রহিম ফার্মেসি", "রহিম ফার্মেসি")).toBe("রহিম ফার্মেসি");
+  });
+
+  it("names the owner once the owner has set a name of their own", () => {
+    expect(greetingName("Imrul", "Rahim Pharmacy")).toBe("Imrul");
+    expect(greetingName("ইমরুল", "রহিম ফার্মেসি")).toBe("ইমরুল");
+  });
+
+  it("treats spacing, letter case and Bangla spelling forms as the same name", () => {
+    expect(greetingName("  rahim pharmacy ", "Rahim Pharmacy")).toBe("Rahim Pharmacy");
+    // য় written as one code point vs য + nukta: same name, same greeting.
+    expect(greetingName("ফার্মেসিয়", "ফার্মেসিয়")).toBe("ফার্মেসিয়");
+  });
+
+  it("falls back to whichever name exists", () => {
+    expect(greetingName("", "Rahim Pharmacy")).toBe("Rahim Pharmacy");
+    expect(greetingName("Imrul", null)).toBe("Imrul");
+    expect(greetingName(undefined, undefined)).toBe("");
   });
 });
