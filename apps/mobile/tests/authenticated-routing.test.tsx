@@ -12,6 +12,7 @@ const deps = vi.hoisted(() => ({
   replace: vi.fn(),
   premiumGate: vi.fn(),
   effectiveTier: 'free' as 'free' | 'pro' | 'ultra',
+  epoch: 3,
 }));
 
 // NavigationBoundary keeps the Stack mounted and draws gates as an absolute
@@ -54,8 +55,8 @@ vi.mock('../state/localeStore', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }));
 vi.mock('../state/sessionStore', () => {
-  const useSessionStore = (selector: (state: { session: typeof deps.session }) => unknown) =>
-    selector({ session: deps.session });
+  const useSessionStore = (selector: (state: { session: typeof deps.session; epoch: number }) => unknown) =>
+    selector({ session: deps.session, epoch: deps.epoch });
   useSessionStore.persist = {
     hasHydrated: () => true,
     onHydrate: () => () => undefined,
@@ -65,6 +66,7 @@ vi.mock('../state/sessionStore', () => {
 });
 
 const { NavigationBoundary } = await import('../components/navigation/NavigationBoundary');
+const lastRoute = await import('../navigation/lastRoute');
 
 function renderBoundary() {
   return render(
@@ -80,6 +82,8 @@ beforeEach(() => {
   deps.replace.mockReset();
   deps.premiumGate.mockReset();
   deps.effectiveTier = 'ultra';
+  deps.epoch = 3;
+  lastRoute.resetRouteMemoryForTests();
 });
 
 afterEach(cleanup);
@@ -167,5 +171,62 @@ describe('authenticated home routing boundary', () => {
     expect(deps.replace).toHaveBeenCalledTimes(1);
     expect(deps.replace).toHaveBeenCalledWith('/dashboard');
     expect(deps.replace).not.toHaveBeenCalledWith('/');
+  });
+});
+
+describe('returning to the same screen after an authority re-check', () => {
+  const owner = { shopId: 'shop-1', userId: 'owner-1', role: 'owner' as const };
+  const ownerKey = () => lastRoute.routeSessionKey(deps.epoch, owner.userId, owner.shopId);
+
+  it('goes back to the screen the person was on, once the navigator is home again', () => {
+    deps.session = owner;
+    deps.pathname = '/inventory';
+    renderBoundary();
+    cleanup(); // the gate closes: the navigator unmounts
+    lastRoute.armRouteRestore(ownerKey());
+
+    deps.pathname = '/dashboard'; // a fresh navigator lands on home
+    renderBoundary();
+
+    expect(deps.replace).toHaveBeenCalledWith('/inventory');
+  });
+
+  it('does nothing when the remount was not an authority re-check', () => {
+    deps.session = owner;
+    deps.pathname = '/inventory';
+    renderBoundary();
+    cleanup();
+
+    deps.pathname = '/dashboard';
+    renderBoundary();
+
+    expect(deps.replace).not.toHaveBeenCalled();
+  });
+
+  it('never carries the screen into a new login (a new epoch)', () => {
+    deps.session = owner;
+    deps.pathname = '/inventory';
+    renderBoundary();
+    cleanup();
+    deps.epoch = 4;
+    lastRoute.armRouteRestore(ownerKey());
+
+    deps.pathname = '/dashboard';
+    renderBoundary();
+
+    expect(deps.replace).not.toHaveBeenCalled();
+  });
+
+  it('does not return to a screen the person may no longer open', () => {
+    const staff = { shopId: 'shop-1', userId: 'staff-1', role: 'staff' as const };
+    const key = lastRoute.routeSessionKey(deps.epoch, staff.userId, staff.shopId);
+    lastRoute.rememberRoute(key, '/multi-shop'); // owner-only
+    lastRoute.armRouteRestore(key);
+    deps.session = staff;
+    deps.pathname = '/staff-home';
+
+    renderBoundary();
+
+    expect(deps.replace).not.toHaveBeenCalled();
   });
 });

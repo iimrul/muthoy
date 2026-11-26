@@ -19,7 +19,7 @@ import {
   type SaleHistoryStatus,
 } from "../../db/saleHistory";
 import { hasNetworkConnection } from "../../sync/connectivity";
-import { claimRefundAuthority, triggerSyncNow } from "../../sync";
+import { claimRefundAuthority, RefundClaimTimeoutError, triggerSyncNow } from "../../sync";
 import { getDeviceId } from "../../native/deviceId";
 import { captureSessionFor } from "../../state/sessionGuard";
 import { useSessionStore } from "../../state/sessionStore";
@@ -218,7 +218,9 @@ export default function SalesHistoryScreen() {
     } catch (caught) {
       if (!guard.isStale())
         setRefundMessage(
-          userFacingError(caught, "refundFailed", t),
+          caught instanceof RefundClaimTimeoutError
+            ? t("refundClaimTimeout")
+            : userFacingError(caught, "refundFailed", t),
         );
     } finally {
       setRefunding(false);
