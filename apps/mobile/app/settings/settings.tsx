@@ -54,8 +54,10 @@ import {
 import { MULTI_SHOP_HREF } from "../../navigation/routes";
 import { countVisibleConflicts } from "../../db/conflicts";
 
+// One field per name, Bangla or English alike (founder, 2026-11-26).
 const profileSchema = z.object({
-  name: z.string().trim().min(2),
+  shopName: z.string().trim().min(2).max(80),
+  name: z.string().trim().min(2).max(80),
   address: z.string().trim().max(300),
   email: z.union([z.literal(""), z.email()]),
 });
@@ -200,6 +202,11 @@ export default function SettingsScreen() {
         <RecoveryBackupSetup key={"recovery:" + session.shopId + ":" + session.userId} session={session} />
         {error ? <Text className="text-error">{error}</Text> : null}
         <View className="rounded-xl bg-white px-4">
+          <Row
+            label={t("registerShopNameLabel")}
+            value={profile?.shopName}
+            onPress={() => setProfileOpen(true)}
+          />
           <Row
             label={t("personalData")}
             value={profile?.name}
@@ -564,13 +571,14 @@ function ProfileModal({
   onSaved: () => void;
 }) {
   const { t } = useI18n();
+  const [shopName, setShopName] = useState(profile.shopName);
   const [name, setName] = useState(profile.name);
   const [address, setAddress] = useState(profile.address ?? "");
   const [email, setEmail] = useState(profile.email ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const save = async () => {
-    const parsed = profileSchema.safeParse({ name, address, email });
+    const parsed = profileSchema.safeParse({ shopName, name, address, email });
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? "Invalid profile");
       return;
@@ -606,10 +614,18 @@ function ProfileModal({
         <View className="w-full gap-3 rounded-2xl bg-white p-5">
           <Text className="font-sans-bold text-lg">{t("personalData")}</Text>
           {error ? <Text className="text-error">{error}</Text> : null}
-          <Text>{t("name")}</Text>
+          <Text>{t("registerShopNameLabel")}</Text>
+          <TextInput
+            value={shopName}
+            onChangeText={setShopName}
+            accessibilityLabel={t("registerShopNameLabel")}
+            className="rounded-xl border border-midGray p-3"
+          />
+          <Text>{t("yourName")}</Text>
           <TextInput
             value={name}
             onChangeText={setName}
+            accessibilityLabel={t("yourName")}
             className="rounded-xl border border-midGray p-3"
           />
           <Text>{t("phone")}</Text>

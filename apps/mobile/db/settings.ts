@@ -136,7 +136,10 @@ export async function updateTaxSettings(
 
 export interface ShopProfile {
   id: string;
+  /** The Owner's own name (registration copies the shop name here). */
   name: string;
+  /** The shop's name, shown on receipts and in the shop switcher. */
+  shopName: string;
   phone: string;
   address: string | null;
   email: string | null;
@@ -150,17 +153,28 @@ export interface ShopProfile {
 export async function getShopProfile(shopId: string, actorUserId: string): Promise<ShopProfile> {
   await requireOwner(shopId, actorUserId);
   const [profile] = await db
-    .select({ id: users.id, name: users.name, phone: users.phone, address: users.address, email: users.email })
+    .select({
+      id: users.id, name: users.name, shopName: shops.name, phone: users.phone,
+      address: users.address, email: users.email,
+    })
     .from(users)
+    .innerJoin(shops, eq(shops.id, users.shopId))
     .where(and(eq(users.id, actorUserId), eq(users.shopId, shopId), eq(users.isDeleted, false)));
   if (!profile) throw new Error('Owner profile not found');
   return { ...profile, phone: profile.phone ?? '' };
 }
 
+/**
+ * The Owner's own details and, when `shopName` is given, the shop's name.
+ *
+ * Founder 2026-11-26: the name given at registration is the SHOP's; the owner
+ * sets their own name here and may rename the shop. One transaction, so a
+ * failed outbox write leaves neither half behind.
+ */
 export async function updateShopProfile(
   shopId: string,
   actorUserId: string,
-  profile: Partial<Pick<ShopProfile, 'name' | 'address' | 'email'>>,
+  profile: Partial<Pick<ShopProfile, 'name' | 'shopName' | 'address' | 'email'>>,
   isStillActive: () => boolean,
 ): Promise<void> {
   await requireOwner(shopId, actorUserId);
@@ -176,6 +190,20 @@ export async function updateShopProfile(
     )).run();
     if (result.changes !== 1) throw new Error('Owner profile not found');
     recordChange(tx, { shopId, table: 'users', rowId: actorUserId, op: 'update', payload: values });
+
+    const shopName = profile.shopName?.trim();
+    if (shopName) {
+      const current = tx.select({ name: shops.name }).from(shops)
+        .where(and(eq(shops.id, shopId), eq(shops.isDeleted, false))).get();
+      if (!current) throw new Error('Shop not found');
+      if (current.name !== shopName) {
+        const shopValues = stampUpdatedAt({ name: shopName, isDirty: true });
+        tx.update(shops).set(shopValues).where(eq(shops.id, shopId)).run();
+        // The shop switcher's list is the server's directory; it shows the new
+        // name from the next billing snapshot after this push lands.
+        recordChange(tx, { shopId, table: 'shops', rowId: shopId, op: 'update', payload: shopValues });
+      }
+    }
     assertSessionLive(isStillActive);
   });
 }

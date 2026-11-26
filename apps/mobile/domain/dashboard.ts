@@ -56,6 +56,27 @@ export function greetingKeyForHour(hour: number): GreetingKey {
   return "goodNight";
 }
 
+/**
+ * The name the Owner's greeting uses.
+ *
+ * Registration asks for one name, the SHOP's, and stores it as the owner's
+ * own name too. Until the owner sets a name of their own in Settings the two
+ * are the same, and the greeting names the shop; afterwards it names the
+ * owner (founder, 2026-11-26). Bangla or English, one field: compared after
+ * Unicode normalisation, so a decomposed Bangla spelling still counts as the
+ * same name.
+ */
+export function greetingName(
+  ownerName: string | null | undefined,
+  shopName: string | null | undefined,
+): string {
+  const owner = (ownerName ?? "").trim();
+  const shop = (shopName ?? "").trim();
+  const comparable = (name: string) => name.normalize("NFD").toLocaleLowerCase();
+  if (owner && comparable(owner) !== comparable(shop)) return owner;
+  return shop || owner;
+}
+
 export type RelativeTimeUnit = "justNow" | "minutes" | "hours" | "days";
 
 export interface RelativeTime {

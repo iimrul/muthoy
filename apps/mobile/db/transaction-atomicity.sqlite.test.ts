@@ -64,7 +64,7 @@ describe("synchronous SQLite transaction boundaries",()=>{
     const f=fixture();await failOutbox(()=>auth.recordSuccessfulLogin({shopId:f.shopId,userId:f.ownerId,role:"owner",permissions:{}}));
   });
   it("rolls back the Owner profile and dirty state when the outbox fails",async()=>{
-    const f=fixture();await failOutbox(()=>settings.updateShopProfile(f.shopId,f.ownerId,{name:"Changed synthetic profile"},live));
+    const f=fixture();await failOutbox(()=>settings.updateShopProfile(f.shopId,f.ownerId,{name:"Changed synthetic profile",shopName:"Changed synthetic shop"},live));
   });
   it("rolls back Owner PIN change plus its audit and outbox",async()=>{
     const f=fixture();await failOutbox(()=>settings.changeOwnPin(f.ownerId,"1414","3636",live));
