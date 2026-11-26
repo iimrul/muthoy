@@ -91,10 +91,11 @@ export function NavigationBoundary({ children }: { children: ReactNode }) {
     }
     const href = restore.current.href;
     if (!href) return;
-    const home = authenticatedHome(session);
-    if (pathname === "/") return; // the root gate is still redirecting home
+    if (pathname === "/") return; // the root gate is still redirecting
+    // The fresh navigator's first real screen: home, or the tab group's
+    // first tab (on device it opened straight onto Sale, never /dashboard).
     restore.current.href = null;
-    if (pathname === home && href !== home && canAccessPath(session, href)) {
+    if (href !== pathname && canAccessPath(session, href)) {
       router.replace(href as Parameters<typeof router.replace>[0]);
     }
   }, [pathname, routeKey, session]);
