@@ -6057,3 +6057,31 @@ is unchanged.**
   full-suite run dying of Node out-of-memory. With the founder's approval, old
   APK copies and test temp folders were deleted (about 1 GB freed). New APKs
   now download to D:\Muthoy-deploy\apks.
+
+## 2026-11-26 — Every cloud request gets a deadline
+
+**Found on a DEV device (offline oversell test).** The access check that runs
+on every reconnect ("আপনার প্রবেশাধিকার যাচাই হচ্ছে…") stayed up forever, twice
+in a row: once when the network went away and once when it came back.
+- Bringing the app back to the foreground did not help. Only a force-close did.
+- Cause: React Native's fetch has no timeout. A token refresh that was in flight
+  when the network changed never answered, and every later auth call queued
+  behind it. The refund that hung for about 3 minutes earlier the same day had
+  the same cause.
+
+**Fix (approved by the founder, plan "ক").**
+- `sync/requestDeadline.ts`: every request through the Supabase client now has
+  a deadline.
+  - Auth: 20 s. Storage (photos): 120 s. Sync, billing and REST: 60 s.
+  - At the deadline the request is aborted and fails with "Network request
+    timed out", the same error React Native's own timeout raises. The existing
+    classifiers already treat it as "never reached the server" and retry.
+  - The promise fails at the deadline even if the transport ignores the abort.
+  - A caller's own abort (the refund claim's 20 s limit) still works unchanged.
+- The access gate then goes to its existing "retrying" state every 5 s instead
+  of hanging. When the phone is really offline, the next check opens the
+  offline window as before.
+- Tests: deadline unit tests, plus a real-SDK test in which a token refresh that
+  never answers ends as a retryable error. With the deadline removed, that
+  test hangs and fails (mutation-checked).
+- Device check: needs a Preview build (not yet approved).

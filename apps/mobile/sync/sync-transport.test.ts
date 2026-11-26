@@ -148,8 +148,37 @@ describe('sync function transport with the real SDK', () => {
     const controller = new AbortController();
     const result = await module.supabase.functions.invoke('sync', { body: { action: 'device-login' }, signal: controller.signal });
     expect(result.error?.context.status).toBe(403);
-    expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+    // The transport now carries a deadline-linked signal (sync/requestDeadline.ts);
+    // the caller's abort must still reach it.
+    const forwarded = vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.signal;
+    expect(forwarded?.aborted).toBe(false);
+    controller.abort();
+    expect(forwarded?.aborted).toBe(true);
     expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.redirect).toBe('error');
+  }, 30_000);
+});
+
+describe('a request caught by a network change', () => {
+  // DEV device 2026-11-26: a token refresh in flight when the network changed
+  // never answered, and "Checking your access…" stayed up until a force-close.
+  test('a token refresh that never answers ends as a retryable error, not a hang', async () => {
+    storeSession();
+    const module = await client(PUBLISHABLE);
+    vi.mocked(globalThis.fetch).mockImplementation(() => new Promise<Response>(() => undefined));
+    // Date too: the SDK stops retrying a refresh by wall-clock time.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      let settled = false;
+      const pending = module.supabase.auth.refreshSession().finally(() => { settled = true; });
+      for (let step = 0; step < 10 && !settled; step += 1) {
+        await vi.advanceTimersByTimeAsync(20_000);
+      }
+      const { error } = await pending;
+      expect(error?.name).toBe('AuthRetryableFetchError');
+      expect(error?.message).toMatch(/timed out/i);
+    } finally {
+      vi.useRealTimers();
+    }
   }, 30_000);
 });
 
