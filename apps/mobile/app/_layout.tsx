@@ -45,6 +45,7 @@ import '../global.css';
 import { AppNavigationShell } from '../components/navigation/AppNavigationShell';
 import { AuthenticatedRuntimeErrorBoundary } from '../components/navigation/AuthenticatedRuntimeErrorBoundary';
 import { NavigationBoundary } from '../components/navigation/NavigationBoundary';
+import { armRouteRestore, routeSessionKey } from '../navigation/lastRoute';
 import { ToastHost } from '../components/ui/Toast';
 import { isTapLatencyProbeEnabled, TapLatencyProbe } from '../monitoring/tapLatencyProbe';
 import { DatabaseRecoveryScreen } from '../components/database/DatabaseRecoveryScreen';
@@ -148,6 +149,10 @@ export default function RootLayout() {
       clearExpiryTimer();
       clearRetryTimer();
       const checkedEpoch = useSessionStore.getState().epoch;
+      // Lets the navigator return to the current screen if THIS session is
+      // admitted again (navigation/lastRoute.ts). Changes nothing about
+      // whether it is admitted.
+      armRouteRestore(routeSessionKey(checkedEpoch, session.userId, session.shopId));
       // Close the complete authenticated runtime synchronously on every
       // foreground/reconnect, including same-epoch rechecks.
       setAuthorityGate({ epoch: checkedEpoch, status: 'checking' });

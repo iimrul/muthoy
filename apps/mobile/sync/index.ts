@@ -437,5 +437,5 @@ export function stopSyncEngine(): void {
 }
 
 export { handleAppStateChangeForAuthRefresh } from './supabaseClient';
-export { claimRefundAuthority } from './refundClaim';
+export { claimRefundAuthority, RefundClaimTimeoutError } from './refundClaim';
 export { getLastSuccessfulSyncAt } from './statusStore';

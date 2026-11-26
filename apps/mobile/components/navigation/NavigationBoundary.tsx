@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { router, usePathname } from "expo-router";
 import { AccessDenied } from "../ui/AccessDenied";
@@ -13,6 +13,11 @@ import {
   canAccessPath,
   isAuthPath,
 } from "../../navigation/routes";
+import {
+  rememberRoute,
+  routeSessionKey,
+  takeRouteToRestore,
+} from "../../navigation/lastRoute";
 import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
 import { usePlan } from "../../state/usePlan";
@@ -65,6 +70,41 @@ export function NavigationBoundary({ children }: { children: ReactNode }) {
     }
     if (homeCorrection) router.replace(homeCorrection);
   }, [homeCorrection, needsLogin]);
+
+  // Back to where the person was after an authority re-check (see
+  // navigation/lastRoute.ts). This effect is declared BEFORE the remembering
+  // one so it claims the pending route before the fresh mount's first path
+  // ("/" or the home redirect) could be remembered over it.
+  const epoch = useSessionStore((state) => state.epoch);
+  const routeKey =
+    isHydrated && session && typeof epoch === "number"
+      ? routeSessionKey(epoch, session.userId, session.shopId)
+      : null;
+  const restore = useRef<{ checked: boolean; href: string | null }>({
+    checked: false,
+    href: null,
+  });
+  useEffect(() => {
+    if (!routeKey || !session) return;
+    if (!restore.current.checked) {
+      restore.current = { checked: true, href: takeRouteToRestore(routeKey) };
+    }
+    const href = restore.current.href;
+    if (!href) return;
+    const home = authenticatedHome(session);
+    if (pathname === "/") return; // the root gate is still redirecting home
+    restore.current.href = null;
+    if (pathname === home && href !== home && canAccessPath(session, href)) {
+      router.replace(href as Parameters<typeof router.replace>[0]);
+    }
+  }, [pathname, routeKey, session]);
+
+  useEffect(() => {
+    if (!routeKey || !session || restore.current.href) return;
+    if (!isAuthPath(pathname) && canAccessPath(session, pathname)) {
+      rememberRoute(routeKey, pathname);
+    }
+  }, [pathname, routeKey, session]);
 
   useEffect(() => {
     if (isHydrated) {

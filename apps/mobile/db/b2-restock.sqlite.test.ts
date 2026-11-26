@@ -378,4 +378,20 @@ describe('Batch 3 existing medicine receipt and ledger reconciliation', () => {
     expect(choices.some((row) => row.id === other.original.medicineId)).toBe(false);
     expect(choices.find((row) => row.id === f.original.medicineId)).toMatchObject({ strength: '20mg', type: 'Tablet' });
   });
+
+  it('shows each live batch of the medicine in the picker, and nothing else', async () => {
+    // Device test 2026-11-26: every medicine read "No batches yet" because the
+    // subquery's outer column bound to the inner table.
+    const f = await fixture();
+    await addBatchWithPurchase(f.input);
+    await addBatchWithPurchase({ ...f.input, batch: { ...f.input.batch, batchNo: 'GONE' } });
+    db.update(s.batches).set({ isDeleted: true }).where(eq(s.batches.batchNo, 'GONE')).run();
+    const other = await fixture();
+    await addBatchWithPurchase({ ...other.input, batch: { ...other.input.batch, batchNo: 'OTHER-SHOP' } });
+
+    const [row] = await searchRestockMedicines(f.shopId, 'Progut');
+    const parts = (row?.batchContext ?? '').split('; ').sort();
+
+    expect(parts).toEqual(['Baban / 2027-12-12 / 200', 'FEFO-EARLY / 2027-01-15 / 50']);
+  });
 });

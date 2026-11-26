@@ -720,7 +720,11 @@ export async function searchRestockMedicines(shopId: string, query: string) {
     manufacturer: medicines.manufacturer, strength: medicines.strength,
     type: medicines.type, unitOfMeasure: medicines.unitOfMeasure,
     barcode: medicines.barcode,
-    batchContext: sql<string>`coalesce((select group_concat(b.batch_no || ' / ' || coalesce(b.expiry_date, '—') || ' / ' || b.stock, '; ') from batches b where b.shop_id = ${medicines.shopId} and b.medicine_id = ${medicines.id} and b.is_deleted = 0), '')`,
+    // The outer row is named in full on purpose. `${medicines.id}` renders as
+    // a bare "id" here, which inside `from batches b` binds to b.id, so the
+    // subquery compared b.medicine_id = b.id and never matched: every medicine
+    // read "No batches yet" on device (2026-11-26).
+    batchContext: sql<string>`coalesce((select group_concat(b.batch_no || ' / ' || coalesce(b.expiry_date, '—') || ' / ' || b.stock, '; ') from batches b where b.shop_id = "medicines"."shop_id" and b.medicine_id = "medicines"."id" and b.is_deleted = 0), '')`,
   }).from(medicines).where(and(
     eq(medicines.shopId, shopId), eq(medicines.isDeleted, false),
     or(
