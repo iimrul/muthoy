@@ -54,7 +54,10 @@ export function PermissionMatrix({
             className="gap-2 rounded-xl bg-brand-softGreen p-3"
           >
             <View className="flex-row items-center justify-between">
-              <Text className="font-sans-bold text-sm">
+              {/* flex-1: the row, not Android's text measurement, sets the
+                  width. Measured on its own, a Bangla label was clipped after
+                  its first word on device ("স্টক দেখুন" showed as "স্টক"). */}
+              <Text className="flex-1 pr-3 font-sans-bold text-sm">
                 {t(GROUP_LABELS[group.key])}
               </Text>
               {editable ? (
@@ -81,7 +84,7 @@ export function PermissionMatrix({
                 onPress={() => onChange({ ...value, [key]: !value[key] })}
                 className="flex-row items-center justify-between py-1"
               >
-                <Text className="font-sans text-sm text-richBlack">
+                <Text className="flex-1 pr-3 font-sans text-sm text-richBlack">
                   {t(LABELS[key])}
                 </Text>
                 <View
