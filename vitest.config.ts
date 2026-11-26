@@ -507,6 +507,9 @@ export default defineConfig({
       "backend/supabase/pgtest/e11-entitlement-verification.pgtest.ts",
       "backend/supabase/pgtest/admin-plan-grants.pgtest.ts",
       "backend/supabase/pgtest/owner-session-shop.pgtest.ts",
+      // Migration 44: the pull orders by the server's arrival clock, so a late
+      // offline row is never skipped (founder plan "খ", 2026-11-26).
+      "backend/supabase/pgtest/sync-pull-server-clock.pgtest.ts",
       // W4-05. Both barriers proven INDEPENDENTLY — the owner gate with the pin
       // bypassed, the pin with the gate bypassed — plus the seven working paths.
       "backend/supabase/pgtest/w405-shop-identity.pgtest.ts",

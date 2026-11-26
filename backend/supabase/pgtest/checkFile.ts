@@ -98,6 +98,9 @@ export const POST_E4_MIGRATIONS: readonly string[] = Object.freeze([
   // The token hook names the SESSION's bound shop; owner_set_pin_all_shops
   // writes one owner PIN to every owner actor.
   '20261123000000_owner_session_shop_and_pin.sql',
+  // Migration 44: the pull orders and pages by server_changed_at, stamped on
+  // arrival, so a late offline row is never skipped (founder plan 2026-11-26).
+  '20261126000000_sync_pull_server_clock.sql',
 ]);
 
 /**

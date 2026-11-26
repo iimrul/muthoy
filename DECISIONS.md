@@ -6085,3 +6085,44 @@ in a row: once when the network went away and once when it came back.
   never answers ends as a retryable error. With the deadline removed, that
   test hangs and fails (mutation-checked).
 - Device check: needs a Preview build (not yet approved).
+
+## 2026-11-26 — Migration 44: a pull follows the server's clock
+
+**Found on DEV (offline oversell test).** The owner's phone and a cashier's
+phone (John) each sold 2 of a batch that had 2, both offline.
+- The server kept both sales: stock −2, `oversold_at` set, two movements.
+- The owner's phone never received John's sale. It was missing from sales
+  history, and today's total showed ৳18 instead of ৳22, even after two syncs.
+- Cause: the pull pages by `updated_at`, which is the time the row was MADE on
+  the device. The owner's phone had already pulled past 15:37 when John's sale
+  (made at 15:37) reached the server at 15:48, so it sat behind the cursor
+  forever. Every offline row from another device was exposed the same way.
+
+**Fix (approved by the founder, plan "খ").**
+- `server_changed_at` on the 32 pulled tables, stamped by a trigger with the
+  server's clock on every insert and update. It is stripped from the rows the
+  pull sends; devices never see it.
+- `updated_at` is unchanged and still decides last-write-wins.
+- The pull orders and pages by `server_changed_at`. Its output column keeps the
+  name `updated_at`, and the Edge function already passes it through as an
+  opaque cursor, so neither the Edge function nor any installed app changes.
+- A row is pulled only once it is 2 s old by the server clock, so a row stamped
+  inside a not-yet-committed transaction cannot be skipped.
+- A cursor is trusted only if the row it names was stamped at or after it.
+  Server-made cursors always pass; an old device-clock cursor from a fast phone
+  starts over.
+- Existing rows get the migration's time (a constant column default: no row is
+  rewritten and no trigger fires), table by table in parent-first order. Every
+  device's next pull re-sends every row once, which also delivers the rows
+  already skipped. Re-applying a row a device has is a no-op (stock moves only
+  on a movement's first insert).
+- Chain declarations moved together: rollback class B, ROLLBACK.md, README,
+  checkFile, h9 preflight, eol=lf, post-E4 hashes. Test harness: no settle wait.
+- Tests: `sync-pull-server-clock.pgtest` (11): the late offline row is pulled;
+  the device time is kept and the stamp is never sent; an update is re-stamped;
+  the settle wait (override and 2 s default); a future cursor restarts; on an
+  existing database everything is re-sent once, parents first, and only once;
+  a fast-clock cursor restarts; `updated_at` is untouched; re-apply is a no-op;
+  an unknown inner pull is refused. With the pull pointed back at `updated_at`,
+  6 of them fail (mutation-checked).
+- Rollout: DEV first (approved). PROD only with the founder's separate approval.
