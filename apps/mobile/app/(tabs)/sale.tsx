@@ -25,6 +25,7 @@ import { useCartStore } from "../../state/cartStore";
 import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
 import { useUnreadCount } from "../../state/useUnreadCount";
+import { subscribeToSyncCompletion } from "../../sync";
 
 const FILTER_PILLS = [
   { value: "all", icon: "shopping-bag", labelKey: "allMedicineLabel" },
@@ -66,16 +67,34 @@ export default function SaleEntryScreen() {
   // which already loads.
   const [refreshNonce, setRefreshNonce] = useState(0);
   const hasFocusedOnce = useRef(false);
+  const isFocusedRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
+      isFocusedRef.current = true;
       if (!hasFocusedOnce.current) {
         hasFocusedOnce.current = true;
-        return undefined;
+        return () => {
+          isFocusedRef.current = false;
+        };
       }
       const timer = setTimeout(() => setRefreshNonce((value) => value + 1), 0);
-      return () => clearTimeout(timer);
+      return () => {
+        isFocusedRef.current = false;
+        clearTimeout(timer);
+      };
     }, []),
   );
+
+  // Another phone's sale or restock arrives by sync while this list is open:
+  // reload it, the same event the dashboard listens to. Only while the Sale
+  // tab is in front; a hidden tab refreshes on its next focus instead.
+  const shopId = session?.shopId;
+  useEffect(() => {
+    if (!shopId) return undefined;
+    return subscribeToSyncCompletion(shopId, () => {
+      if (isFocusedRef.current) setRefreshNonce((value) => value + 1);
+    });
+  }, [shopId]);
 
   useEffect(() => {
     if (!session || query.trim()) return;

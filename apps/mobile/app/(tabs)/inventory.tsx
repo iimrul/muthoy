@@ -190,7 +190,7 @@ export default function InventoryScreen() {
             onChangeText={setQuery}
             placeholder={t("searchByNameGenericBatchPlaceholder")}
             placeholderTextColor="#6B7280"
-            className="h-9 rounded-lg bg-[#E8E8EA] pl-10 pr-3 font-sans text-sm text-richBlack"
+            className="h-11 rounded-lg bg-[#E8E8EA] pl-10 pr-3 font-sans text-sm text-richBlack"
           />
         </View>
         {canAddMedicine || canManageExpiry || isOwner ? (
