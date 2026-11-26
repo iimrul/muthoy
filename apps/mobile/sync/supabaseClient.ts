@@ -7,6 +7,7 @@ import { readEnvironmentConfiguration } from '../native/environmentIdentity';
 import { ensureEnvironmentAllowed, ENVIRONMENT_STORE_IDS } from '../db/environmentBinding';
 import { withoutPublishableKeyBearer } from './sessionlessSyncTransport';
 import { withFunctionRegion } from './functionRegion';
+import { fetchWithDeadline, requestTimeoutMs } from './requestDeadline';
 
 export const supabaseUrl = publicEnvironment.url;
 export const missingSupabaseConfigKeys: readonly string[] = [
@@ -55,8 +56,9 @@ export const supabase = createClient(
     global: {
       async fetch(input, init) {
         await ensureCloudStartupAllowed();
+        const requestUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
         try {
-          const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+          const url = new URL(requestUrl);
           if (url.origin !== supabaseUrl || url.username || url.password) throw new Error();
         } catch { throw new EnvironmentRefusalError('configuration-invalid'); }
         // H-9 §4.2: a sessionless sync call never carries the publishable key
@@ -67,7 +69,14 @@ export const supabase = createClient(
           withoutPublishableKeyBearer(input, init, supabaseUrl, publicEnvironment.publicKey),
           supabaseUrl,
         );
-        const response = await globalThis.fetch(input, { ...transport, redirect: 'error' });
+        // A deadline on every request (sync/requestDeadline.ts): React Native's
+        // fetch has none, and a request caught by a network change waits forever.
+        const response = await fetchWithDeadline(
+          globalThis.fetch,
+          input,
+          { ...transport, redirect: 'error' },
+          requestTimeoutMs(requestUrl),
+        );
         // React Native's fetch (whatwg-fetch over XHR/OkHttp) ignores `redirect`
         // and follows redirects; only the final URL shows it happened. Never
         // hand the SDK a response that came from another origin.

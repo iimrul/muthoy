@@ -117,7 +117,12 @@ describe('cloud and credential startup protection with the real SDK', () => {
     const module = await client(); const controller = new AbortController();
     const result = await module.supabase.functions.invoke('sync', { body: { action: 'pull' }, signal: controller.signal });
     expect(result.error?.context.status).toBe(403);
-    expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+    // A deadline-linked signal now reaches the transport (sync/requestDeadline.ts);
+    // the caller's abort must still get through to it.
+    const forwarded = vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.signal;
+    expect(forwarded?.aborted).toBe(false);
+    controller.abort();
+    expect(forwarded?.aborted).toBe(true);
     module.handleAppStateChangeForAuthRefresh('background');
   });
   test('NetInfo may not issue its health probe before binding resolution', async () => {
