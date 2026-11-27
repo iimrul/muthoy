@@ -100,6 +100,8 @@ export const E4_MIGRATIONS = Object.freeze([
   '20261123000000_owner_session_shop_and_pin.sql',
   // Migration 44: the pull orders by the server's arrival clock (founder plan 2026-11-26).
   '20261126000000_sync_pull_server_clock.sql',
+  // Migration 45: Staff one-row opening stock without a supplier (founder B2, 2026-11-27).
+  '20261127000000_staff_opening_stock.sql',
 ]);
 // The chain, pinned by NAME rather than by count.
 //

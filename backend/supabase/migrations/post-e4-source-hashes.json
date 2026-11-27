@@ -3,7 +3,7 @@
   "gate": "E4-B",
   "supersedesManifest": "backend/supabase/migrations/e4-source-hashes.json",
   "counts": {
-    "migrations": 9,
+    "migrations": 10,
     "supersededEvidenceFiles": 8
   },
   "files": {
@@ -15,12 +15,13 @@
     "20261121000000_admin_plan_grants.sql": "e2719d5d49b6cd1549ae3e2479ba302d18418dc7739146baece81462364502e9",
     "20261122000000_admin_grant_cycle.sql": "6df4752b09ebd2b811bc984c190223018499c115e235919e3da9b9c2af11b467",
     "20261123000000_owner_session_shop_and_pin.sql": "70a50578126828d230bbe24fe1c325e4916a3cb3e6b7f10b68be18e17a114e0e",
-    "20261126000000_sync_pull_server_clock.sql": "7a08d228d34790c1b7216628bfe098e073026a002c89e4c8c0e81a79dfbbc686"
+    "20261126000000_sync_pull_server_clock.sql": "7a08d228d34790c1b7216628bfe098e073026a002c89e4c8c0e81a79dfbbc686",
+    "20261127000000_staff_opening_stock.sql": "35cc23d8073ce8903294851316f9aef6e01c12192d7b11c10a496748340e440a"
   },
   "supersedes": {
     "scripts/h9-prod-preflight.mjs": {
       "e4": "bac816d16d670af8ed464e75cafeb2a85455610f733afcd8aabcb5e5c44ad41d",
-      "now": "fe7512260f7d1eb1adb3b742a41ba3fd8a4be2efed8169e88eef918c72fa69b1"
+      "now": "156768cfee018086b324bbf8d56d08e93605687880991b0d46e124f8b9d868b6"
     },
     "apps/mobile/tests/h9-prod-preflight.test.ts": {
       "e4": "6533208977871917d430c1446a1223890adcb70fe090cd4f7d9e7155cb2f5db7",
@@ -28,27 +29,27 @@
     },
     "backend/supabase/migrations/rollback-classification.json": {
       "e4": "08c50fd579a5d6e0a24ffdefade12d8ac126503c15765b081e286b7d5f010d75",
-      "now": "2d426e7aec245ca512074daf8f8a366710b9c9c21f0633fa7edc7a30fbf490f5"
+      "now": "bf761c31bd8b7a7e2fc01866591f74896b98eb55bd4394d0292c2133d665b037"
     },
     "backend/supabase/migrations/ROLLBACK.md": {
       "e4": "9b61681b89bee9394b9093b4932d39a70cac31f699931419f1619f084f9f5d0a",
-      "now": "9be608dfc01a5a50e0a2582eb201826542fe205a2bec13af7402502c8cb6e998"
+      "now": "258889b13ce4251c4cc2a0473457ffc7e7c20e4aa8e3e64cf65a14251728c8df"
     },
     "backend/supabase/migrations/README.md": {
       "e4": "9114aafed4be01c0abe3ff4f4e0388d868ebb7fcabd9221278ec528d0c80f51f",
-      "now": "c8c484407b07327ebc2baac85bec5264e71f2be59e80928d4bf7528803b973d7"
+      "now": "6c9d029885abf817d1e838be712cbbc8ff9c6a8f22d7de0b59b43248c5c4dabe"
     },
     "apps/mobile/tests/migration-rollback-classification.test.ts": {
       "e4": "17db87a58ea6242d4f8fbbcb60651fbc3f8ba7244bdeed83b470debda7c5c9ce",
-      "now": "5dae972601cf99e762a1999f30a747d7c75164cfb1f51d73eb0a5392f0599867"
+      "now": "eb632dbe6043c287336d470d4a03aa0a8062c4cb5008a56410f161cf0314d8fd"
     },
     "backend/supabase/pgtest/checkFile.ts": {
       "e4": "4157698d9275e4e77003f879bffdb39a27b7dad81094b37de43ac8523f4deff4",
-      "now": "f38ede11216cbb6acfcf9bdcb30d10177398cca9d9bd73b6ae36d2d1b59a83ac"
+      "now": "05e6ae9f5e025c9c0d7b17862c32364dfa40274af21c79f738e4d3bd1c756bfb"
     },
     ".gitattributes": {
       "e4": "1fb9331e11aaebe9786d9364b874985a3a274f7b2afb67050e51adcf2dc331a4",
-      "now": "0d191a2e2a01071a3feb35cec0ac98608c6117f90f1a4458a04c4e3e6543b304"
+      "now": "a6bca2f62f9815302fc3311cfa251af1ac04628fff01ce828d25907e3daa7456"
     }
   }
 }

@@ -510,6 +510,8 @@ export default defineConfig({
       // Migration 44: the pull orders by the server's arrival clock, so a late
       // offline row is never skipped (founder plan "খ", 2026-11-26).
       "backend/supabase/pgtest/sync-pull-server-clock.pgtest.ts",
+      // Migration 45: Staff one-row opening stock (founder decision B2).
+      "backend/supabase/pgtest/staff-opening-stock.pgtest.ts",
       // W4-05. Both barriers proven INDEPENDENTLY — the owner gate with the pin
       // bypassed, the pin with the gate bypassed — plus the seven working paths.
       "backend/supabase/pgtest/w405-shop-identity.pgtest.ts",

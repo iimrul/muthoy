@@ -6211,3 +6211,47 @@ the low-stock card only counts medicines with some stock left, so it said
   - Mutation run: 12 of 13 caught. The one survivor is the `created` guard
     on the banner, which only matters if two checks race; the check queue
     already prevents that.
+
+## 2026-11-27 — Migration 45: Staff may add opening stock without a supplier (server, DEV first)
+
+Founder decision B2 (supplier optional for the Owner AND Staff), then "হ্যাঁ,
+DEV-তে শুরু করো" after the risk was stated: Staff can raise stock without a
+cost record.
+
+- **Who and what.**
+  - Only a staff member holding the explicit `inventory_add` grant (default
+    OFF), and only the exact one-row graph the Owner's `createOpeningStock`
+    sends as `inventory_import`:
+    - header (`row_count` 1, fingerprint `opening:<id>`, `created_by` = the
+      sender);
+    - optional new medicine;
+    - batch (stock 0, new batch number);
+    - one positive `csv_import` movement bound to the header;
+    - one `inventory_opening_stock_added` audit row.
+  - Never a CSV file, a second batch, a purchase, a payment or a drawer row.
+  - A non-Owner without the grant still gets MU015. The Owner, the CSV path
+    and every other kind take the old dispatcher unchanged.
+- **How** (`20261127000000_staff_opening_stock.sql`):
+  - the `inventory_add_purchase` pattern: the operation wrapper validates the
+    whole graph once, then applies each row through `sync_apply_row`, so the
+    commercial gate and actor binding stay in the path;
+  - the header is Owner-only inside `sync_apply_b2_row`, which is wrapped to
+    take a non-Owner header only while the operation has armed a
+    transaction-local `muthoy.staff_opening_stock` carrying that header's id.
+- **No schema change, no Edge Function change.** The Edge function already
+  passes `inventory_import` through and the database decides. Rollback class
+  B: rename the two `_pre_staff_opening` functions back.
+- **Tests** (`staff-opening-stock.pgtest.ts`, 19):
+  - granted staff, new and existing medicine;
+  - no grant (MU015, nothing written);
+  - the Owner's one-row path and the Owner's multi-row CSV unchanged;
+  - eight tampered graphs, a second batch, a purchase, another shop's
+    medicine, a repeated batch number, the commercial gate (MU035), a header
+    outside its operation (MU010), and nothing left armed afterwards.
+  - Mutation run: 9 of 9 caught. The first run left the Owner bypass
+    uncovered; the Owner multi-row CSV test was added for it.
+- **Rollout.**
+  - DEV only. PROD needs the founder's separate approval (rule 16).
+  - The app still asks Staff for a supplier. That change ships in its own PR
+    and must not reach a PROD build before migration 45 does, or a staff
+    member's add would sit in the failed-sync list.
