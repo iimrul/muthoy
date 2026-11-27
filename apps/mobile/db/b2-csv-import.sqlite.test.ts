@@ -154,6 +154,22 @@ describe('files as spreadsheets really save them', () => {
     expect(await issuesOf(tooMany)).toEqual([{ rowNumber: null, code: 'too_many_rows' }]);
   });
 
+  it('refuses a barcode Excel rounded, and repairs one it only stripped zeros from', async () => {
+    const head = `${HEADER},barcode`;
+    expect(await issuesOf(`${head}\nNapa,Paracetamol,Beximco,tablet,BC-1,,5,1.00,2.00,8.94123E+12`)).toEqual([
+      { rowNumber: 2, code: 'bad_barcode', column: 'barcode' },
+    ]);
+    const preview = await previewInventoryCsv('shop', 'owner', [
+      head,
+      'Tums,Calcium,Haleon,tablet,BC-2,,5,1.00,2.00,36000291452',
+      'Ace,Paracetamol,Square,tablet,="0012",,5,1.00,2.00,="8941234567896"',
+    ].join('\n'));
+    expect(preview.rows).toMatchObject([
+      { barcode: '036000291452' },
+      { batchNo: '0012', barcode: '8941234567896' },
+    ]);
+  });
+
   it('leaves the form empty when the type column is', async () => {
     const preview = await previewInventoryCsv('shop', 'owner', `${HEADER}\nZinc,Zinc,Square,,Z-1,,5,1.00,2.00`);
     expect(preview.rows[0]?.type).toBeNull();

@@ -44,6 +44,7 @@ const ISSUE_KEY: Readonly<Record<InventoryCsvIssueCode, CatalogKey>> = {
   bad_price: "csvIssueBadPrice",
   bad_expiry: "csvIssueBadExpiry",
   bad_threshold: "csvIssueBadThreshold",
+  bad_barcode: "csvIssueBadBarcode",
   duplicate_row: "csvIssueDuplicateRow",
   ambiguous_medicine: "csvIssueAmbiguous",
   batch_exists: "csvIssueBatchExists",

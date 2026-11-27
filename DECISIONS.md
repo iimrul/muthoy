@@ -6307,6 +6307,19 @@ Founder item 2 ("Inventory তে prototype web এ একটা সিস্ট
   12/31/2027, and the two cannot be told apart for days 1–12. A wrong guess
   would break FEFO (rule 3), so such dates are refused with the format to
   use, never guessed.
+- **Barcodes Excel mangles** (founder: "বারকোডটাও ঠিক করো";
+  `domain/importedBarcode.ts`). The scanner matches `medicines.barcode`
+  exactly, so a mangled code is a medicine that never scans.
+  - "8.94123E+12" (a long number in a General cell) has lost its digits. It
+    is refused with "set the column to Text and type it again"; never stored.
+  - A dropped leading zero is restored only when the GTIN check digit proves
+    the code: 11 digits become a 12-digit UPC-A, 7 become an 8-digit EAN-8,
+    as the camera reads them. Leading zeros never change the check digit.
+  - A valid 12-digit code (a UPC-A, or an EAN-13 missing its zero) and any
+    code failing the check digit are kept as typed, never guessed.
+  - Excel's `="0123"` text form is unwrapped in every column, so batch
+    numbers keep their zeros too.
+  - The template's barcode hint says to set the column to Text first.
 - **Screen:**
   - three steps: template, file, check and import;
   - a summary of new medicines, batches and total units;
@@ -6320,4 +6333,6 @@ Founder item 2 ("Inventory তে prototype web এ একটা সিস্ট
     row; short rows; unclosed quote; over 1,000 rows; empty form.
   - Screen (9) and `parseCsv` options (4). Admin `parseCsv` callers pass
     unchanged.
-  - Mutation run: 10 of 10 caught.
+  - Barcodes: 10 unit cases plus one real-SQLite case (rounded refused,
+    UPC-A zero restored, `="…"` kept).
+  - Mutation run: 10 of 10 caught, then 6 of 6 for the barcode rules.

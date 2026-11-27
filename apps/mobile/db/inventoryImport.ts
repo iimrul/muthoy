@@ -15,6 +15,7 @@ import { recordChange, type SyncOperationGroup } from "./sync-helpers";
 import { generateId } from "../native/id";
 import { searchKeyFor } from "./medicineSearchKeyBackfill";
 import { normalizeDosageForm } from "../domain/dosageForm";
+import { readImportedBarcode, unwrapExcelText } from "../domain/importedBarcode";
 import {
   InventoryCsvError,
   type InventoryCsvIssue,
@@ -119,7 +120,9 @@ function parseRow(
   const thresholdText = cell("low_stock_threshold") || cell("threshold");
   const threshold = thresholdText ? wholeNumber(thresholdText) : null;
   if (thresholdText && threshold === null) flag("bad_threshold", "threshold");
-  if (issues.length > 0 || stock === null || purchasePrice === null || salePrice === null) {
+  const barcode = readImportedBarcode(cell("barcode"));
+  if (barcode.isLost) flag("bad_barcode", "barcode");
+  if (issues.length > 0 || stock === null || purchasePrice === null || salePrice === null || barcode.isLost) {
     return { row: null, issues };
   }
   return {
@@ -136,7 +139,7 @@ function parseRow(
       type: normalizeDosageForm(cell("type")),
       expiryDate,
       lowStockThresholdOverride: threshold,
-      barcode: cell("barcode") || null,
+      barcode: barcode.value,
       unitOfMeasure: cell("unit") || cell("unit_of_measure") || "piece",
     },
     issues,
@@ -191,9 +194,10 @@ function parseInventoryCsv(text: string): { rows: ParsedImportRow[]; issues: Inv
       issues.push({ rowNumber, code: "uneven_columns" });
       continue;
     }
+    // Excel's ="0123" (how a sheet keeps leading zeros) reads as 0123 everywhere.
     const cell: CellReader = (column) => {
       const at = header.indexOf(column);
-      return at < 0 ? "" : (cells[at]?.trim() ?? "");
+      return at < 0 ? "" : unwrapExcelText(cells[at] ?? "");
     };
     const parsed = parseRow(rowNumber, cell);
     issues.push(...parsed.issues);

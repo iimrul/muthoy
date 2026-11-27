@@ -17,6 +17,7 @@ export type InventoryCsvIssueCode =
   | "bad_price"
   | "bad_expiry"
   | "bad_threshold"
+  | "bad_barcode"
   | "duplicate_row"
   | "ambiguous_medicine"
   | "batch_exists";
@@ -43,6 +44,7 @@ const ISSUE_TEXT: Readonly<Record<InventoryCsvIssueCode, string>> = {
   bad_price: "price must be a taka amount",
   bad_expiry: "expiry must be a real date written YYYY-MM-DD",
   bad_threshold: "threshold must be a non-negative integer",
+  bad_barcode: "the spreadsheet turned the barcode into a rounded number (e.g. 8.94E+12)",
   duplicate_row: "duplicate medicine/batch row",
   ambiguous_medicine: "medicine match is ambiguous",
   batch_exists: "batch already exists",
