@@ -17,7 +17,7 @@ import {
   HindSiliguri_700Bold,
 } from '@expo-google-fonts/hind-siliguri';
 import { DMMono_400Regular, DMMono_500Medium } from '@expo-google-fonts/dm-mono';
-import { AppState } from 'react-native';
+import { AppState, View } from 'react-native';
 import { useDatabaseMigrations } from '../db';
 import {
   registerNotificationBackgroundTaskAsync,
@@ -58,6 +58,8 @@ import type { AuthorityBlockReason } from '../components/auth/authorityGateCopy'
 import { EnvironmentRefusalError } from '../config/environmentPolicy';
 import { initCrashReporting } from '../crashReporting';
 
+const FILL = { flex: 1 } as const;
+const COVER = { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 } as const;
 const FOREGROUND_CHECK_DEBOUNCE_MS = 60_000;
 const AUTHORITY_RETRY_DELAY_MS = 5_000;
 let lastForegroundCheckAt = 0;
@@ -81,6 +83,10 @@ export default function RootLayout() {
   // settled; anything else means reconciliation has not finished for the
   // session currently in the store.
   const [authorityGate, setAuthorityGate] = useState<AuthorityGate | null>(null);
+  // The epoch whose navigator has been ADMITTED at least once. A later
+  // re-check of that same epoch (reconnect, foreground, lease deadline) covers
+  // the mounted navigator instead of unmounting it — see the render below.
+  const [admittedEpoch, setAdmittedEpoch] = useState<number | null>(null);
   // A cloud credential that would not clear is reported, never swallowed.
   const [credentialCleanupFailed, setCredentialCleanupFailed] = useState(false);
   const [cleanupRetry, setCleanupRetry] = useState<'idle' | 'running' | 'failed'>('idle');
@@ -192,6 +198,7 @@ export default function RootLayout() {
           ) {
             setCredentialCleanupFailed(false);
             setAuthorityGate({ epoch: checkedEpoch, status: 'allowed' });
+            setAdmittedEpoch(checkedEpoch);
             const deadline = readSessionAuthorityDeadlineMs(current.session);
             if (deadline !== null) {
               // Seven days fits safely inside the platform timeout limit. The
@@ -225,6 +232,9 @@ export default function RootLayout() {
             // the reason attached so the screen can say what fixes it. The
             // reconnect/foreground listeners below re-check by themselves.
             setAuthorityGate({ epoch: checkedEpoch, status: 'blocked', reason: outcome.reason });
+            // The blocked screen unmounts the navigator, so its next opening is
+            // a FIRST admission again: never mount it under the re-check cover.
+            setAdmittedEpoch(null);
           }
         })
         .catch((error: unknown) => {
@@ -246,6 +256,7 @@ export default function RootLayout() {
           const current = useSessionStore.getState();
           if (!disposed && !rerunRequested && current.session !== null && current.epoch === checkedEpoch) {
             setAuthorityGate({ epoch: checkedEpoch, status: 'blocked', reason: 'check_failed' });
+            setAdmittedEpoch(null);
           }
         })
         .finally(() => {
@@ -370,9 +381,28 @@ export default function RootLayout() {
   // It is a blocking view rather than a spinner over the app on purpose: an
   // overlay still has the authenticated tree mounted underneath it, running
   // effects and reads.
-  if (authorityTransitioning || (session && !authorityAllowed)) {
-    const gate = authorityGate?.epoch === sessionEpoch ? authorityGate : null;
+  const gate = authorityGate?.epoch === sessionEpoch ? authorityGate : null;
+  // A1 (founder decision, 2026-11-27). A re-check of a session this navigator
+  // has ALREADY admitted — the same epoch, after a reconnect, a return to the
+  // foreground or the lease deadline — COVERS the navigator instead of
+  // unmounting it. Unmounting dropped whatever the person was doing: a
+  // cashier mid-checkout landed back on the Sale list with the sale not made
+  // (device test, 2026-11-27), and a half-typed form was wiped. The cover is
+  // still a closed gate: it is opaque, it takes every touch, the subtree is
+  // hidden from TalkBack/VoiceOver, and sync and billing are stopped exactly
+  // as before (checkAuthority stops them; the runtime effect above only
+  // restarts them once the gate says 'allowed' again).
+  // Unchanged: the FIRST admission of an epoch, a shop transition and a
+  // 'blocked' verdict still render without the navigator, and a revocation
+  // clears the session — a new epoch — so nothing admitted survives it.
+  const isRecheckingAdmittedSession =
+    !authorityTransitioning
+    && session !== null
+    && !authorityAllowed
+    && admittedEpoch === sessionEpoch
+    && (gate?.status === 'checking' || gate?.status === 'retrying');
 
+  if ((authorityTransitioning || (session && !authorityAllowed)) && !isRecheckingAdmittedSession) {
     // Closed for a reason the person can act on. The navigator stays
     // unmounted: "Try again" re-runs the same check (the nonce restarts the
     // effect above) and "Switch user" clears the active actor, which leaves no
@@ -446,8 +476,25 @@ export default function RootLayout() {
 
   return (
     <AuthenticatedRuntimeErrorBoundary>
-      {/* Internal builds only (EXPO_PUBLIC_PERF_PROBE=1): logs tap latency. */}
-      {isTapLatencyProbeEnabled ? <TapLatencyProbe>{navigation}</TapLatencyProbe> : navigation}
+      {/* Always present, so covering the navigator never re-parents (and so
+          never remounts) it. */}
+      <View
+        style={FILL}
+        pointerEvents={isRecheckingAdmittedSession ? 'none' : 'auto'}
+        importantForAccessibility={isRecheckingAdmittedSession ? 'no-hide-descendants' : 'auto'}
+        accessibilityElementsHidden={isRecheckingAdmittedSession}
+      >
+        {/* Internal builds only (EXPO_PUBLIC_PERF_PROBE=1): logs tap latency. */}
+        {isTapLatencyProbeEnabled ? <TapLatencyProbe>{navigation}</TapLatencyProbe> : navigation}
+      </View>
+      {isRecheckingAdmittedSession ? (
+        <View style={COVER} accessibilityViewIsModal testID="authority-recheck-cover">
+          <BrandLoader
+            title={t('gateCheckingTitle')}
+            message={t(gate?.status === 'retrying' ? 'gateRetryingBody' : 'gateCheckingBody')}
+          />
+        </View>
+      ) : null}
       {/* Phase C Pass 1. Mounted ONCE, and outside the navigator on purpose: a
           confirmation raised just before a route change used to be unmounted by
           the screen that raised it, because the toast lived in that screen. */}

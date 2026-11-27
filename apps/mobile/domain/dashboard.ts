@@ -7,6 +7,7 @@
 // Every money value stays branded integer paisa.
 
 import { asPaisa, ZERO_PAISA, type Paisa } from "@muthoy/types";
+import { parseStoredTimestamp } from "./storedTimestamp";
 
 /** Founder decision 1 (owner-dashboard-parity-recovery.md): 3 rows per alert. */
 export const ALERT_PREVIEW_ROWS = 3;
@@ -90,7 +91,7 @@ export interface RelativeTime {
  * "just now" rather than a negative count.
  */
 export function relativeTime(timestamp: string, now: Date): RelativeTime {
-  const elapsed = now.getTime() - new Date(timestamp).getTime();
+  const elapsed = now.getTime() - parseStoredTimestamp(timestamp).getTime();
   if (!Number.isFinite(elapsed)) {
     throw new Error(
       `relativeTime received an unparseable timestamp: ${timestamp}`,

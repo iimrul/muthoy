@@ -66,7 +66,15 @@ const native = vi.hoisted(() => ({
 vi.mock('react-native', () => ({
   AppState: { addEventListener: native.addEventListener, currentState: 'active' },
   Text: ({ children }: { children?: ReactNode }) => createElement('span', null, children),
-  View: ({ children }: { children?: ReactNode }) => createElement('div', null, children),
+  // pointerEvents / a11y-hiding are forwarded so the A1 cover's "takes every
+  // touch, hidden from screen readers" promise is asserted, not assumed.
+  View: ({ children, pointerEvents, accessibilityElementsHidden, testID }: {
+    children?: ReactNode; pointerEvents?: string; accessibilityElementsHidden?: boolean; testID?: string;
+  }) => createElement('div', {
+    'data-pointer-events': pointerEvents,
+    'data-a11y-hidden': accessibilityElementsHidden ? 'true' : undefined,
+    'data-testid': testID,
+  }, children),
   // Auth parity: the gate's status screens render real buttons (Try again,
   // Switch user) inside the shared auth shell, so presses are wired through.
   Pressable: ({ children, onPress, accessibilityLabel, disabled }: {
@@ -81,7 +89,18 @@ vi.mock('react-native', () => ({
 
 // The marker is what 'the navigator is mounted' means below: every closed-gate
 // assertion checks it is ABSENT, not merely that some copy is present.
-vi.mock('expo-router', () => ({ Stack: () => createElement('div', null, 'navigator-mounted') }));
+// `stackMounts` counts real MOUNTS, so "covered" and "remounted" can be told
+// apart: text alone cannot (a remounted navigator prints the same marker).
+const stackMounts = vi.hoisted(() => ({ count: 0 }));
+vi.mock('expo-router', async () => {
+  const react = await import('react');
+  return {
+    Stack: () => {
+      react.useEffect(() => { stackMounts.count += 1; }, []);
+      return react.createElement('div', null, 'navigator-mounted');
+    },
+  };
+});
 vi.mock('../components/navigation/AppNavigationShell', () => ({ AppNavigationShell: ({ children }: { children?: ReactNode }) => createElement('div', null, children) }));
 vi.mock('../components/navigation/AuthenticatedRuntimeErrorBoundary', () => ({ AuthenticatedRuntimeErrorBoundary: ({ children }: { children?: ReactNode }) => createElement('div', null, children) }));
 vi.mock('../components/navigation/NavigationBoundary', () => ({ NavigationBoundary: ({ children }: { children?: ReactNode }) => createElement('div', null, children) }));
@@ -360,6 +379,9 @@ describe('the pre-navigation authority gate (H-10 #6)', () => {
     // The whole navigator, not an overlay on top of it: an overlay leaves the
     // authenticated tree mounted underneath, running effects and reads.
     expect(view.container.textContent).toContain('Checking your access');
+    // First admission: not even a covered navigator exists yet (A1 applies
+    // only to a session that was already admitted).
+    expect(view.container.textContent).not.toContain('navigator-mounted');
     expect(native.startSyncEngine).not.toHaveBeenCalled();
     expect(native.startBillingHydration).not.toHaveBeenCalled();
 
@@ -520,6 +542,129 @@ describe('the pre-navigation authority gate (H-10 #6)', () => {
     expect(view.container.textContent).not.toContain('Checking your access');
     expect(native.startSyncEngine).toHaveBeenCalledWith(SHOP_ID);
     expect(native.startBillingHydration).toHaveBeenCalledWith(SHOP_ID);
+  });
+
+  // A1 (founder, 2026-11-27): a re-check of an already-admitted session covers
+  // the navigator instead of unmounting it, so a checkout or a half-typed form
+  // survives a reconnect. Still closed: services stop and the cover is opaque.
+  it('covers the admitted navigator during a reconnect re-check instead of remounting it', async () => {
+    const view = render(createElement(RootLayout));
+    await act(async () => {
+      useSessionStore.getState().login(OWNER);
+      await promiseTick();
+    });
+    expect(view.container.textContent).toContain('navigator-mounted');
+    const mountsAfterAdmission = stackMounts.count;
+    native.startSyncEngine.mockClear();
+
+    const { release } = deferredAuthority();
+    await act(async () => { listeners.reconnect?.(); });
+    // Closed: the cover is up and the runtime services are stopped …
+    expect(view.container.textContent).toContain('Checking your access');
+    expect(native.stopSyncEngine).toHaveBeenCalled();
+    expect(native.stopBillingHydration).toHaveBeenCalled();
+    expect(native.startSyncEngine).not.toHaveBeenCalled();
+    // … but the navigator underneath was never unmounted …
+    expect(view.container.textContent).toContain('navigator-mounted');
+    expect(stackMounts.count).toBe(mountsAfterAdmission);
+    // … and it is unreachable: no touches, hidden from screen readers.
+    const shield = view.container.querySelector('[data-pointer-events="none"]');
+    expect(shield?.textContent).toContain('navigator-mounted');
+    expect(shield?.getAttribute('data-a11y-hidden')).toBe('true');
+    expect(view.container.querySelector('[data-testid="authority-recheck-cover"]')).not.toBeNull();
+
+    await act(async () => {
+      release({ status: 'confirmed', reason: 'claims_match' });
+      await promiseTick();
+    });
+    expect(view.container.textContent).not.toContain('Checking your access');
+    expect(stackMounts.count).toBe(mountsAfterAdmission);
+    expect(native.startSyncEngine).toHaveBeenCalledWith(SHOP_ID);
+  });
+
+  it('covers the navigator on a return to the foreground, and survives a double re-check', async () => {
+    const view = render(createElement(RootLayout));
+    await act(async () => {
+      useSessionStore.getState().login(STAFF);
+      await promiseTick();
+    });
+    const mountsAfterAdmission = stackMounts.count;
+    const callsBefore = native.enforceSessionAuthority.mock.calls.length;
+
+    // Two triggers in a row — the device-test failure (two refreshes ~1 s
+    // apart). The first check is held open so the closed state really renders.
+    const { release } = deferredAuthority();
+    await act(async () => {
+      listeners.appState?.('active');
+    });
+    await act(async () => {
+      listeners.reconnect?.();
+    });
+    expect(view.container.textContent).toContain('Checking your access');
+    expect(stackMounts.count).toBe(mountsAfterAdmission);
+
+    await act(async () => {
+      release({ status: 'confirmed', reason: 'claims_match' });
+      await promiseTick();
+      await promiseTick();
+    });
+    expect(native.enforceSessionAuthority.mock.calls.length - callsBefore).toBe(2);
+    expect(view.container.textContent).not.toContain('Checking your access');
+    expect(stackMounts.count).toBe(mountsAfterAdmission);
+  });
+
+  it('still unmounts on a blocked re-check, and the retry is a first admission again', async () => {
+    const view = render(createElement(RootLayout));
+    await act(async () => {
+      useSessionStore.getState().login(OWNER);
+      await promiseTick();
+    });
+    native.enforceSessionAuthority.mockResolvedValueOnce({
+      status: 'unverified', reason: 'offline_window_expired',
+    });
+    await act(async () => {
+      listeners.reconnect?.();
+      await promiseTick();
+    });
+    expect(view.container.textContent).toContain(catalog.en.gateExpiredTitle);
+    expect(view.container.textContent).not.toContain('navigator-mounted');
+
+    // Try again: nothing authenticated mounts — not even covered — until it passes.
+    const { release } = deferredAuthority();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: catalog.en.retry }));
+    });
+    expect(view.container.textContent).toContain('Checking your access');
+    expect(view.container.textContent).not.toContain('navigator-mounted');
+
+    await act(async () => {
+      release({ status: 'confirmed', reason: 'claims_match' });
+      await promiseTick();
+    });
+    expect(view.container.textContent).toContain('navigator-mounted');
+  });
+
+  it('a re-check that throws unmounts the navigator rather than leaving it covered', async () => {
+    const view = render(createElement(RootLayout));
+    await act(async () => {
+      useSessionStore.getState().login(OWNER);
+      await promiseTick();
+    });
+    native.enforceSessionAuthority.mockRejectedValueOnce(new Error('unreadable'));
+    await act(async () => {
+      listeners.reconnect?.();
+      await promiseTick();
+    });
+    expect(view.container.textContent).toContain(catalog.en.gateUnknownTitle);
+    expect(view.container.textContent).not.toContain('navigator-mounted');
+
+    // Its retry is a first admission too: nothing mounts, covered or not.
+    deferredAuthority();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: catalog.en.retry }));
+    });
+    expect(view.container.textContent).toContain('Checking your access');
+    expect(view.container.textContent).not.toContain('navigator-mounted');
   });
 
   it('queues a reconnect that arrives during an authority check', async () => {

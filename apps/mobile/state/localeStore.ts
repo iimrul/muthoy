@@ -16,6 +16,7 @@ import {
   timeFormatter,
 } from "../i18n/formatters";
 import { toTaka, type Paisa } from "@muthoy/types";
+import { parseStoredTimestamp } from "../domain/storedTimestamp";
 
 export type Locale = "bn" | "en";
 
@@ -56,16 +57,18 @@ export function useI18n() {
     (value: number): string => numberFormatter(locale).format(value),
     [locale],
   );
+  // parseStoredTimestamp: a zone-less SQLite stamp is UTC, never local time
+  // (domain/storedTimestamp.ts — notifications read six hours early).
   const formatDate = useCallback(
-    (value: string | Date): string => dayMonthFormatter(locale).format(new Date(value)),
+    (value: string | Date): string => dayMonthFormatter(locale).format(parseStoredTimestamp(value)),
     [locale],
   );
   const formatDateTime = useCallback(
-    (value: string | Date): string => dateTimeFormatter(locale).format(new Date(value)),
+    (value: string | Date): string => dateTimeFormatter(locale).format(parseStoredTimestamp(value)),
     [locale],
   );
   const formatTime = useCallback(
-    (value: string | Date): string => timeFormatter(locale).format(new Date(value)),
+    (value: string | Date): string => timeFormatter(locale).format(parseStoredTimestamp(value)),
     [locale],
   );
   const formatPercent = useCallback(
