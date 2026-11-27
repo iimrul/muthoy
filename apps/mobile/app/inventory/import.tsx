@@ -1,187 +1,344 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
+import Feather from "@expo/vector-icons/Feather";
 import { router } from "expo-router";
-import { parseCsv } from "@muthoy/utils";
-import { inventoryCsvRowSchema } from "@muthoy/validation";
+import type { Paisa } from "@muthoy/types";
+import { DosageFormTag } from "../../components/medicine/DosageFormBadge";
 import { AccessDenied } from "../../components/ui/AccessDenied";
+import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { StandardHeader } from "../../components/ui/StandardHeader";
 import {
   importInventoryCsv,
   previewInventoryCsv,
+  type InventoryImportPreviewRow,
 } from "../../db/inventoryImport";
+import { CsvIssueList, CsvWarningList } from "../../components/inventory/CsvImportIssues";
+import {
+  InventoryCsvError,
+  type InventoryCsvIssue,
+  type InventoryCsvWarning,
+} from "../../domain/inventoryCsvIssue";
+import { INVENTORY_CSV_COLUMNS } from "../../domain/inventoryCsvTemplate";
+import type { CatalogKey } from "../../i18n/catalog";
+import { CsvPickError, pickInventoryCsv, shareInventoryCsvTemplate } from "../../native/inventoryCsvFile";
+import { useI18n } from "../../state/localeStore";
 import { captureSessionFor } from "../../state/sessionGuard";
-import { usePermission } from "../../state/usePermission";
+import { useOwnerAccess } from "../../state/usePermission";
 import { triggerSyncNow } from "../../sync";
 
-const REQUIRED = [
-  "name",
-  "generic",
-  "manufacturer",
-  "batch_no",
-  "stock",
-  "purchase_price",
-  "sale_price",
-];
+// Founder, 2026-11-27: bulk-add inventory from a spreadsheet, with a template
+// that says what each column needs (prototype "Import CSV" + "Template").
+// Download template → choose the filled .csv → see every problem at once, or
+// a summary of what will be added → import all rows in one atomic group.
+
+const PREVIEW_LIMIT = 20;
+
+interface CheckedFile {
+  csv: string;
+  fingerprint: string;
+  rows: InventoryImportPreviewRow[];
+  warnings: InventoryCsvWarning[];
+}
+
+interface Failure {
+  issues: readonly InventoryCsvIssue[];
+  rowCount: number;
+}
+
+type Busy = "checking" | "importing" | null;
+type T = (key: CatalogKey) => string;
 
 export default function InventoryImportScreen() {
-  const { session, isAllowed } = usePermission("inventory_edit");
-  const [csv, setCsv] = useState("");
-  const [fingerprint, setFingerprint] = useState<string | null>(null);
-  const [dbRows, setDbRows] = useState<
-    { rowNumber: number; name: string; batchNo: string; action: string }[]
-  >([]);
-  const [dbError, setDbError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const preview = useMemo(() => {
-    if (!csv.trim())
-      return { rows: [] as Record<string, string>[], errors: [] as string[] };
-    try {
-      const [headers = [], ...values] = parseCsv(csv);
-      const missing = REQUIRED.filter((name) => !headers.includes(name));
-      if (missing.length)
-        return { rows: [], errors: [`Missing columns: ${missing.join(", ")}`] };
-      const rows = values.map((row) =>
-        Object.fromEntries(
-          headers.map((header, index) => [header, row[index] ?? ""]),
-        ),
-      );
-      const errors = rows.flatMap((row, index) => {
-        const result = inventoryCsvRowSchema.safeParse(row);
-        return result.success
-          ? []
-          : [
-              `Row ${index + 2}: ${result.error.issues[0]?.message ?? "Invalid row"}`,
-            ];
-      });
-      return { rows, errors };
-    } catch (caught) {
-      return {
-        rows: [],
-        errors: [caught instanceof Error ? caught.message : "Invalid CSV"],
-      };
-    }
-  }, [csv]);
+  const { t, formatNumber, formatMoney } = useI18n();
+  const { session, isAllowed } = useOwnerAccess();
+  const [checked, setChecked] = useState<CheckedFile | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<Busy>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [pasted, setPasted] = useState("");
+  const [isPasteOpen, setPasteOpen] = useState(false);
+  const [importedCount, setImportedCount] = useState<number | null>(null);
   if (!session || !isAllowed) return <AccessDenied />;
-  const confirmPreview = async () => {
-    setBusy(true);
-    setDbError(null);
+
+  const reset = () => {
+    setChecked(null);
+    setFailure(null);
+    setError(null);
+    setImportedCount(null);
+  };
+
+  const check = async (csv: string) => {
+    reset();
+    setBusy("checking");
     try {
-      const result = await previewInventoryCsv(
-        session.shopId,
-        session.userId,
-        csv,
-      );
-      setFingerprint(result.fingerprint);
-      setDbRows(result.rows);
+      const preview = await previewInventoryCsv(session.shopId, session.userId, csv);
+      setChecked({ csv, fingerprint: preview.fingerprint, rows: preview.rows, warnings: preview.warnings });
     } catch (caught) {
-      setFingerprint(null);
-      setDbRows([]);
-      setDbError(caught instanceof Error ? caught.message : "Preview failed.");
+      if (caught instanceof InventoryCsvError) setFailure({ issues: caught.issues, rowCount: caught.rowCount });
+      else setError(t("csvPickFailed"));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
+
+  const chooseFile = async () => {
+    try {
+      const picked = await pickInventoryCsv();
+      if (!picked) return;
+      setFileName(picked.name);
+      await check(picked.text);
+    } catch (caught) {
+      reset();
+      if (caught instanceof CsvPickError) {
+        setError(t(caught.problem === "too_large" ? "csvFileTooLarge" : "csvNotCsv"));
+      } else setError(t("csvPickFailed"));
+    }
+  };
+
+  const shareTemplate = async () => {
+    try {
+      await shareInventoryCsvTemplate(t("csvTemplateShareTitle"));
+    } catch {
+      setError(t("csvTemplateShareFailed"));
+    }
+  };
+
   const runImport = async () => {
-    if (!fingerprint) return;
+    if (!checked) return;
     const guard = captureSessionFor(session);
     if (!guard) return;
-    setBusy(true);
+    setBusy("importing");
     try {
       const result = await importInventoryCsv(
         session.shopId,
         session.userId,
-        csv,
-        fingerprint,
+        checked.csv,
+        checked.fingerprint,
         guard.isStillActive,
       );
       void triggerSyncNow(session.shopId);
       guard.ifLive(() => {
-        setCsv("");
-        setFingerprint(null);
-        setDbRows([]);
-        setDbError(`Imported ${result.rowCount} rows.`);
+        reset();
+        setImportedCount(result.rowCount);
       });
     } catch (caught) {
-      if (!guard.isStale())
-        setDbError(caught instanceof Error ? caught.message : "Import failed.");
+      if (guard.isStale()) return;
+      // The inventory may have changed since the check (a batch added meanwhile).
+      if (caught instanceof InventoryCsvError) {
+        setChecked(null);
+        setFailure({ issues: caught.issues, rowCount: caught.rowCount });
+      } else {
+        const isReplay = caught instanceof Error && caught.message.includes("already imported");
+        setError(t(isReplay ? "csvAlreadyImported" : "csvImportFailed"));
+      }
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
+
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <StandardHeader
-        title="Import inventory"
-        onBackPress={() => router.back()}
-      />
-      <ScrollView
-        contentContainerClassName="gap-4 p-4"
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text className="text-sm text-midGray">
-          Owner only. Paste CSV, preview every error, then import all rows
-          atomically.
-        </Text>
-        <TextInput
-          value={csv}
-          onChangeText={(value) => {
-            setCsv(value);
-            setFingerprint(null);
-            setDbRows([]);
-          }}
-          multiline
-          textAlignVertical="top"
-          placeholder="name,generic,manufacturer,batch_no,stock,purchase_price,sale_price"
-          className="min-h-48 rounded-lg border border-midGray bg-white p-4"
-        />
-        <View className="rounded-lg bg-white p-4">
-          <Text className="font-sans-semibold">
-            Preview: {dbRows.length || preview.rows.length} rows
-          </Text>
-          {(dbRows.length
-            ? dbRows.map((row) => ({
-                name: row.name,
-                batch_no: row.batchNo,
-                stock: row.action,
-              }))
-            : preview.rows
-          )
-            .slice(0, 5)
-            .map((row, index) => (
-              <Text key={index} className="mt-2 text-sm">
-                {index + 1}. {row.name} · {row.batch_no} · {row.stock}
-              </Text>
-            ))}
+      <StandardHeader title={t("importCsvLabel")} onBackPress={() => router.back()} />
+      <ScrollView contentContainerClassName="gap-4 p-4 pb-10" keyboardShouldPersistTaps="handled">
+        <Text className="font-sans text-sm text-midGray">{t("csvImportIntro")}</Text>
+        {importedCount !== null ? (
+          <DoneCard t={t} count={formatNumber(importedCount)} />
+        ) : null}
+        <TemplateCard t={t} onShare={() => void shareTemplate()} />
+        <View className="gap-3 rounded-2xl bg-white p-4">
+          <Text className="font-sans-bold text-base text-richBlack">{t("csvStepFileTitle")}</Text>
+          <Pressable
+            onPress={() => void chooseFile()}
+            disabled={busy !== null}
+            accessibilityRole="button"
+            accessibilityLabel={t("csvChooseFile")}
+            className="h-12 flex-row items-center justify-center gap-2 rounded-xl bg-brand-green active:opacity-80 disabled:opacity-50"
+          >
+            <Feather name="file-text" size={18} color="#FFFFFF" />
+            <Text className="font-sans-semibold text-base text-white">{t("csvChooseFile")}</Text>
+          </Pressable>
+          {fileName ? <Text className="font-sans text-xs text-midGray">{fileName}</Text> : null}
+          <Pressable
+            onPress={() => setPasteOpen(!isPasteOpen)}
+            accessibilityRole="button"
+            accessibilityLabel={t("csvPasteInstead")}
+            className="items-center py-1 active:opacity-70"
+          >
+            <Text className="font-sans-medium text-sm text-brand-green">{t("csvPasteInstead")}</Text>
+          </Pressable>
+          {isPasteOpen ? (
+            <View className="gap-2">
+              <TextInput
+                value={pasted}
+                onChangeText={setPasted}
+                multiline
+                textAlignVertical="top"
+                accessibilityLabel={t("csvPastePlaceholder")}
+                placeholder={t("csvPastePlaceholder")}
+                className="min-h-32 rounded-xl border border-fieldBorder bg-white p-3 font-mono text-xs"
+              />
+              <Pressable
+                onPress={() => {
+                  setFileName(null);
+                  void check(pasted);
+                }}
+                disabled={busy !== null || !pasted.trim()}
+                accessibilityRole="button"
+                accessibilityLabel={t("csvCheckPasted")}
+                className="h-11 items-center justify-center rounded-xl border border-brand-green active:opacity-80 disabled:opacity-40"
+              >
+                <Text className="font-sans-semibold text-sm text-brand-green">{t("csvCheckPasted")}</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
-        {preview.errors.map((message, index) => (
-          <Text key={index} className="text-error">
-            {message}
+        {busy === "checking" ? (
+          <Text className="font-sans text-sm text-midGray">{t("csvChecking")}</Text>
+        ) : null}
+        {error ? (
+          <Text accessibilityRole="alert" className="font-sans-medium text-sm text-error">
+            {error}
           </Text>
-        ))}
-        {dbError ? <Text className="text-error">{dbError}</Text> : null}
-        {!fingerprint ? (
-          <Pressable
-            onPress={() => void confirmPreview()}
-            disabled={busy || preview.errors.length > 0 || !csv.trim()}
-            className="items-center rounded-lg bg-brand-green py-4 disabled:opacity-40"
-          >
-            <Text className="text-white">
-              {busy ? "Checking…" : "Validate preview"}
-            </Text>
-          </Pressable>
-        ) : (
-          <Pressable
-            onPress={() => void runImport()}
-            disabled={busy}
-            className="items-center rounded-lg bg-brand-green py-4 disabled:opacity-40"
-          >
-            <Text className="text-white">
-              {busy ? "Importing…" : `Import all ${dbRows.length} rows`}
-            </Text>
-          </Pressable>
-        )}
+        ) : null}
+        {failure ? (
+          <CsvIssueList t={t} issues={failure.issues} rowCount={failure.rowCount} formatNumber={formatNumber} />
+        ) : null}
+        {checked ? <CsvWarningList t={t} warnings={checked.warnings} formatNumber={formatNumber} /> : null}
+        {checked ? (
+          <PreviewCard
+            t={t}
+            rows={checked.rows}
+            isImporting={busy === "importing"}
+            formatNumber={formatNumber}
+            formatMoney={formatMoney}
+            onImport={() => void runImport()}
+          />
+        ) : null}
       </ScrollView>
+    </View>
+  );
+}
+
+function TemplateCard({ t, onShare }: { t: T; onShare: () => void }) {
+  return (
+    <View className="gap-3 rounded-2xl bg-white p-4">
+      <Text className="font-sans-bold text-base text-richBlack">{t("csvStepTemplateTitle")}</Text>
+      <Text className="font-sans text-sm text-midGray">{t("csvStepTemplateBody")}</Text>
+      <Pressable
+        onPress={onShare}
+        accessibilityRole="button"
+        accessibilityLabel={t("csvDownloadTemplate")}
+        className="h-11 flex-row items-center justify-center gap-2 rounded-xl border border-brand-green bg-brand-softGreen active:opacity-80"
+      >
+        <Feather name="download" size={16} color="#059669" />
+        <Text className="font-sans-semibold text-sm text-brand-green">{t("csvDownloadTemplate")}</Text>
+      </Pressable>
+      <Text className="font-sans-semibold text-sm text-richBlack">{t("csvColumnsTitle")}</Text>
+      {INVENTORY_CSV_COLUMNS.map((column) => (
+        <View key={column.key} className="flex-row items-start gap-2">
+          <Text className="w-28 font-mono text-xs text-richBlack">{column.key}</Text>
+          <View className="flex-1">
+            <Text className="font-sans text-xs text-midGray">{t(column.hint)}</Text>
+          </View>
+          <Text
+            className={`font-sans-semibold text-[10px] ${column.isRequired ? "text-error" : "text-midGray"}`}
+          >
+            {t(column.isRequired ? "csvRequiredTag" : "csvOptionalTag")}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function PreviewCard({
+  t,
+  rows,
+  isImporting,
+  formatNumber,
+  formatMoney,
+  onImport,
+}: {
+  t: T;
+  rows: readonly InventoryImportPreviewRow[];
+  isImporting: boolean;
+  formatNumber: (value: number) => string;
+  formatMoney: (value: Paisa) => string;
+  onImport: () => void;
+}) {
+  const newMedicines = rows.filter((row) => row.action === "create_medicine").length;
+  const units = rows.reduce((sum, row) => sum + row.stock, 0);
+  const hidden = rows.length - PREVIEW_LIMIT;
+  return (
+    <View testID="csv-preview" className="gap-3 rounded-2xl bg-white p-4">
+      <Text className="font-sans-bold text-base text-richBlack">{t("csvStepPreviewTitle")}</Text>
+      <View className="flex-row gap-2">
+        <Stat label={t("csvNewMedicines")} value={formatNumber(newMedicines)} />
+        <Stat label={t("csvBatchesLabel")} value={formatNumber(rows.length)} />
+        <Stat label={t("csvTotalUnits")} value={formatNumber(units)} />
+      </View>
+      {rows.slice(0, PREVIEW_LIMIT).map((row) => (
+        <View key={row.rowNumber} className="flex-row items-center gap-3 border-t border-midGray/15 pt-2">
+          <View className="flex-1 gap-0.5">
+            <Text className="font-sans-semibold text-sm text-richBlack">{row.name}</Text>
+            <DosageFormTag type={row.type} strength={null} />
+            <Text className="font-sans text-xs text-midGray">
+              #{row.batchNo} · {formatNumber(row.stock)}
+              {row.expiryDate ? ` · ${row.expiryDate}` : ""}
+            </Text>
+          </View>
+          <View className="items-end gap-1">
+            <Text className="font-mono text-sm text-brand-green">{formatMoney(row.salePrice)}</Text>
+            <Text className="font-sans-semibold text-[10px] text-midGray">
+              {t(row.action === "create_medicine" ? "csvActionNew" : "csvActionAddBatch")}
+            </Text>
+          </View>
+        </View>
+      ))}
+      {hidden > 0 ? (
+        <Text className="font-sans text-xs text-midGray">
+          + {formatNumber(hidden)} {t("csvMoreRows")}
+        </Text>
+      ) : null}
+      <Pressable
+        onPress={onImport}
+        disabled={isImporting}
+        accessibilityRole="button"
+        accessibilityLabel={t("csvImportButton")}
+        className="h-12 items-center justify-center rounded-xl bg-brand-green active:opacity-80 disabled:opacity-50"
+      >
+        <Text className="font-sans-semibold text-base text-white">
+          {isImporting ? t("csvImporting") : `${t("csvImportButton")} (${formatNumber(rows.length)})`}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <View className="flex-1 items-center rounded-xl bg-brand-softGreen py-2">
+      <Text className="font-sans-bold text-lg text-richBlack">{value}</Text>
+      <Text className="font-sans text-[11px] text-midGray">{label}</Text>
+    </View>
+  );
+}
+
+function DoneCard({ t, count }: { t: T; count: string }) {
+  return (
+    <View
+      testID="csv-import-done"
+      accessibilityRole="alert"
+      className="gap-2 rounded-2xl border border-brand-green/30 bg-white p-4"
+    >
+      <View className="flex-row items-center gap-2">
+        <Feather name="check-circle" size={18} color="#059669" />
+        <Text className="font-sans-bold text-base text-brand-green">{t("csvImportDoneTitle")}</Text>
+      </View>
+      <Text className="font-sans text-sm text-richBlack">
+        {count} {t("csvImportDoneBody")}
+      </Text>
     </View>
   );
 }

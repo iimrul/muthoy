@@ -6261,3 +6261,117 @@ OCR এটা কিভাবে আইডেন্টিফাই করতে 
   - Vocabulary on real SQLite reads `type`.
   - Tag, icon and picker components.
   - Mutation run: 8 of 8 caught.
+
+## 2026-11-27 — CSV import: a template, a file picker, and every problem at once
+
+Founder item 2 ("Inventory তে prototype web এ একটা সিস্টেম ছিলো বাল্কে
+ইনভেন্টরিতে এড করার জন্য "Import CSV" এবং একটা টেমপ্লেট দেওয়া থাকতো কি কি
+দরকার তা যাতে ঠিকঠাক আসে").
+
+- **What did not change.**
+  - The import is still owner-only, all-or-nothing, and confirmed by
+    fingerprint.
+  - It travels as the same one `inventory_import` sync group the server
+    already validates.
+  - The only new value written is `medicines.type`, now stored as the
+    canonical form key ("Tab." becomes "tablet").
+  - No migration, no sync change, no server change.
+- **Template** (`domain/inventoryCsvTemplate.ts`):
+  - the twelve columns the importer reads, with two example rows (a tablet
+    and a capsule);
+  - a BOM, so Excel keeps Bangla names;
+  - shared through the system share sheet (`expo-sharing`).
+  - The example rows use batch `EXAMPLE-…`, which the importer refuses, so a
+    template imported as downloaded does not create 100 phantom Napa.
+  - A test imports the filled template through the real importer, so the
+    template and the importer cannot drift apart.
+- **File picker:**
+  - `File.pickFileAsync` (expo-file-system, no new dependency);
+  - an Excel workbook is refused with "Save As → CSV UTF-8";
+  - files over 2 MB are refused;
+  - pasting stays as a fallback.
+- **Every problem at once.**
+  - The importer no longer stops at the first bad row. It lists each row and
+    column (`InventoryCsvError.issues`, codes in `domain/inventoryCsvIssue.ts`),
+    shown in Bangla as "সারি ৩: তারিখ YYYY-MM-DD আকারে লিখুন (expiry_date)".
+  - Row numbers are the spreadsheet's own:
+    - blank lines are kept for numbering (`parseCsv` gained opt-in
+      `keepBlankRows`; every other caller is unchanged);
+    - a row that an unquoted comma split is named (`allowRaggedRows`);
+    - before this, any such file failed whole with no row number.
+  - Excel's spelled-out headers ("Batch No", "Expiry Date (YYYY-MM-DD)"), a
+    trailing empty column and blank rows all read correctly.
+  - Over 1,000 rows, an unclosed quote and over 2 MB each get their own
+    message.
+- **Expiry stays strict YYYY-MM-DD.** Excel rewrites dates as 31/12/2027 or
+  12/31/2027, and the two cannot be told apart for days 1–12. A wrong guess
+  would break FEFO (rule 3), so such dates are refused with the format to
+  use, never guessed.
+- **Barcodes Excel mangles** (founder: "বারকোডটাও ঠিক করো";
+  `domain/importedBarcode.ts`). The scanner matches `medicines.barcode`
+  exactly, so a mangled code is a medicine that never scans.
+  - "8.94123E+12" (a long number in a General cell) has lost its digits. It
+    is refused with "set the column to Text and type it again"; never stored.
+  - A dropped leading zero is restored only when the GTIN check digit proves
+    the code: 11 digits become a 12-digit UPC-A, 7 become an 8-digit EAN-8,
+    as the camera reads them. Leading zeros never change the check digit.
+  - A valid 12-digit code (a UPC-A, or an EAN-13 missing its zero) and any
+    code failing the check digit are kept as typed, never guessed.
+  - Excel's `="0123"` text form is unwrapped in every column, so batch
+    numbers keep their zeros too.
+  - The template's barcode hint says to set the column to Text first.
+- **Screen:**
+  - three steps: template, file, check and import;
+  - a summary of new medicines, batches and total units;
+  - the first 20 rows, with form tag, batch, quantity, price and new/new-batch;
+  - all text in the catalogue (Bangla and English).
+- **Tests.**
+  - Real SQLite (12): template refused as downloaded, then imported once
+    filled; multi-row issues with nothing written; duplicate rows; every
+    missing column; no rows; existing batch together with row problems; the
+    Excel shape (BOM, CRLF, headers, blank rows, trailing column); a split
+    row; short rows; unclosed quote; over 1,000 rows; empty form.
+  - Screen (9) and `parseCsv` options (4). Admin `parseCsv` callers pass
+    unchanged.
+  - Barcodes: 10 unit cases plus one real-SQLite case (rounded refused,
+    UPC-A zero restored, `="…"` kept).
+  - Mutation run: 10 of 10 caught, then 6 of 6 for the barcode rules.
+
+### 2026-11-28 — CSV: the right medicine, one company however spelled, and a findable error list
+
+Founder: "দুটোই করো এবং কয়টা ঔষধের কি কি ইনপুট পড়ে নি সব ভুলের তালিকা দেখা
+যাওয়া উচিত, আর না হলে ইউজারের অনেক কষ্ট হয়ে যাবে খুঁজতে কোথায় আসলেই ভুল
+ছিল".
+
+- **Tablet vs capsule** (`domain/inventoryCsvMatch.ts`). Before this, a row
+  joined an existing medicine on name + generic + company alone, so a
+  Telmepress 20 capsule row became a batch of the Telmepress 20 tablet. Now:
+  - a row that names a form joins a medicine of that form, else one with no
+    form recorded, and never one of another form;
+  - a row with no form, where the shop has both forms of that name, is
+    refused with "type কলামে ধরন লিখুন";
+  - a tablet and a capsule of one name in the same file are two medicines.
+- **Company spelling** (`domain/manufacturerName.ts`).
+  - "Square", "Square Pharmaceuticals" and "SQUARE PHARMACEUTICALS LTD." are
+    one company: words that only say "drug company" are dropped.
+  - A near miss ("Sqaure", a typo within one or two letters) is never merged
+    and never refused. It is shown as a warning, so the owner decides before
+    importing. Merging two real companies would put one company's stock
+    under another's medicine.
+- **The error list** (`components/inventory/CsvImportIssues.tsx`):
+  - a summary: "৪৫টা ওষুধের সারির মধ্যে ১২টায় ভুল — এখনো কিছুই যোগ হয়নি";
+  - one card per sheet row, headed by the row number and the medicine's name;
+  - one line per problem: the column in Bangla, the exact value the cell
+    held, and what it needs ("মেয়াদ: “31/12/2027” — তারিখ YYYY-MM-DD আকারে
+    লিখুন");
+  - whole-file problems first;
+  - no cut-off: every bad row is shown, where it used to stop at 50 and say
+    "+N more".
+- **Tests.**
+  - Real SQLite (20): tablet row onto a capsule, capsule onto a capsule, the
+    same company spelled three ways, the near-miss warning, both forms
+    without a type, two forms in one file, the medicine name and value on
+    each problem, and the row count.
+  - Screen (11): the grouped Bangla cards, 80 bad rows all shown, and the
+    warning beside a still-enabled Import.
+  - Mutation run: 8 of 8 caught.
