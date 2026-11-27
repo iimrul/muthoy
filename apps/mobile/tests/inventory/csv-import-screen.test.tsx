@@ -93,7 +93,7 @@ beforeEach(() => {
   deps.isOwner = true;
   deps.pick.mockReset().mockResolvedValue({ name: "stock.csv", text: CSV });
   deps.share.mockReset().mockResolvedValue(undefined);
-  deps.preview.mockReset().mockResolvedValue({ fingerprint: "fp-1", rows: ROWS });
+  deps.preview.mockReset().mockResolvedValue({ fingerprint: "fp-1", rows: ROWS, warnings: [] });
   deps.importCsv.mockReset().mockResolvedValue({ importId: "imp-1", rowCount: 2 });
   deps.sync.mockClear();
 });
@@ -141,24 +141,56 @@ describe("CSV import screen", () => {
     expect(screen.queryByTestId("csv-preview")).toBeNull();
   });
 
-  it("lists every problem, by sheet row, in Bangla", async () => {
+  it("lists every problem in Bangla, one card per medicine, quoting what each cell held", async () => {
     useLocaleStore.setState({ locale: "bn" });
     deps.preview.mockRejectedValueOnce(
       new InventoryCsvError([
-        { rowNumber: 3, code: "bad_expiry", column: "expiry_date" },
-        { rowNumber: 7, code: "uneven_columns" },
         { rowNumber: null, code: "missing_column", column: "sale_price" },
-      ]),
+        { rowNumber: 3, code: "bad_expiry", column: "expiry_date", value: "31/12/2027", medicineName: "Napa 500mg" },
+        { rowNumber: 3, code: "bad_stock", column: "stock", value: "ten", medicineName: "Napa 500mg" },
+        { rowNumber: 7, code: "uneven_columns" },
+      ], 12),
     );
     render(createElement(InventoryImportScreen));
     await act(async () => {
       fireEvent.click(screen.getByLabelText("CSV ফাইল বেছে নিন"));
     });
-    const issues = await screen.findByTestId("csv-issues");
-    expect(issues.textContent).toContain("সারি ৩: তারিখ YYYY-MM-DD আকারে লিখুন (expiry_date)");
-    expect(issues.textContent).toContain("সারি ৭: ঘর বেশি");
-    expect(issues.textContent).toContain("কলাম নেই (sale_price)");
+    expect((await screen.findByTestId("csv-issues")).textContent).toContain(
+      "১২টা ওষুধের সারির মধ্যে ২টায় ভুল — এখনো কিছুই যোগ হয়নি",
+    );
+    const napa = screen.getByTestId("csv-issue-row-3").textContent;
+    expect(napa).toContain("সারি ৩ · Napa 500mg");
+    expect(napa).toContain("মেয়াদ: “31/12/2027” — তারিখ YYYY-MM-DD আকারে লিখুন");
+    expect(napa).toContain("পরিমাণ: “ten” — পূর্ণ সংখ্যা হতে হবে");
+    expect(screen.getByTestId("csv-issue-row-7").textContent).toContain("সারি ৭ · (নাম নেই)");
+    expect(screen.getByTestId("csv-issue-row-file").textContent).toContain("কলাম নেই: বিক্রয় মূল্য (sale_price)");
     expect(screen.queryByTestId("csv-preview")).toBeNull();
+  });
+
+  it("shows every bad row — there is no cut-off", async () => {
+    const issues = Array.from({ length: 80 }, (_, i) => ({
+      rowNumber: i + 2, code: "bad_price" as const, column: "sale_price", value: "x", medicineName: `Med ${i}`,
+    }));
+    deps.preview.mockRejectedValueOnce(new InventoryCsvError(issues, 80));
+    render(createElement(InventoryImportScreen));
+    await chooseFile();
+    await screen.findByTestId("csv-issues");
+    expect(screen.getAllByTestId(/^csv-issue-row-\d+$/)).toHaveLength(80);
+    expect(screen.getByTestId("csv-issue-row-81").textContent).toContain("Med 79");
+  });
+
+  it("warns about a near-miss company spelling but still lets the file be imported", async () => {
+    deps.preview.mockResolvedValueOnce({
+      fingerprint: "fp-1",
+      rows: ROWS,
+      warnings: [{ rowNumber: 4, code: "similar_company", medicineName: "Telmepress 20", value: "Sqaure", existing: "Square" }],
+    });
+    render(createElement(InventoryImportScreen));
+    await chooseFile();
+    const warnings = (await screen.findByTestId("csv-warnings")).textContent;
+    expect(warnings).toContain("Row 4 · Telmepress 20");
+    expect(warnings).toContain("Company “Sqaure” — inventory already has “Square”");
+    expect(screen.getByLabelText("Import").textContent).toBe("Import (2)");
   });
 
   it("explains an Excel workbook pick", async () => {

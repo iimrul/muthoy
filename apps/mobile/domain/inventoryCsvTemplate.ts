@@ -14,22 +14,24 @@ import type { CatalogKey } from "../i18n/catalog";
 export interface InventoryCsvColumn {
   key: string;
   isRequired: boolean;
+  /** The column's name in the owner's language, for the error list. */
+  label: CatalogKey;
   hint: CatalogKey;
 }
 
 export const INVENTORY_CSV_COLUMNS: readonly InventoryCsvColumn[] = [
-  { key: "name", isRequired: true, hint: "csvColumnName" },
-  { key: "generic", isRequired: true, hint: "csvColumnGeneric" },
-  { key: "manufacturer", isRequired: true, hint: "csvColumnManufacturer" },
-  { key: "type", isRequired: false, hint: "csvColumnType" },
-  { key: "batch_no", isRequired: true, hint: "csvColumnBatch" },
-  { key: "expiry_date", isRequired: false, hint: "csvColumnExpiry" },
-  { key: "stock", isRequired: true, hint: "csvColumnStock" },
-  { key: "purchase_price", isRequired: true, hint: "csvColumnPurchasePrice" },
-  { key: "sale_price", isRequired: true, hint: "csvColumnSalePrice" },
-  { key: "unit", isRequired: false, hint: "csvColumnUnit" },
-  { key: "threshold", isRequired: false, hint: "csvColumnThreshold" },
-  { key: "barcode", isRequired: false, hint: "csvColumnBarcode" },
+  { key: "name", isRequired: true, label: "csvFieldName", hint: "csvColumnName" },
+  { key: "generic", isRequired: true, label: "csvFieldGeneric", hint: "csvColumnGeneric" },
+  { key: "manufacturer", isRequired: true, label: "csvFieldManufacturer", hint: "csvColumnManufacturer" },
+  { key: "type", isRequired: false, label: "csvFieldType", hint: "csvColumnType" },
+  { key: "batch_no", isRequired: true, label: "csvFieldBatch", hint: "csvColumnBatch" },
+  { key: "expiry_date", isRequired: false, label: "csvFieldExpiry", hint: "csvColumnExpiry" },
+  { key: "stock", isRequired: true, label: "csvFieldStock", hint: "csvColumnStock" },
+  { key: "purchase_price", isRequired: true, label: "csvFieldPurchasePrice", hint: "csvColumnPurchasePrice" },
+  { key: "sale_price", isRequired: true, label: "csvFieldSalePrice", hint: "csvColumnSalePrice" },
+  { key: "unit", isRequired: false, label: "csvFieldUnit", hint: "csvColumnUnit" },
+  { key: "threshold", isRequired: false, label: "csvFieldThreshold", hint: "csvColumnThreshold" },
+  { key: "barcode", isRequired: false, label: "csvFieldBarcode", hint: "csvColumnBarcode" },
 ];
 
 const EXAMPLE_ROWS: readonly (readonly string[])[] = [

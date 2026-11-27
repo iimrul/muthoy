@@ -34,14 +34,19 @@ beforeAll(() => {
 
 const HEADER = 'name,generic,manufacturer,type,batch_no,expiry_date,stock,purchase_price,sale_price';
 
-async function issuesOf(csv: string): Promise<unknown[]> {
+async function failureOf(csv: string): Promise<InstanceType<typeof InventoryCsvError>> {
   try {
     await previewInventoryCsv('shop', 'owner', csv);
   } catch (caught) {
     expect(caught).toBeInstanceOf(InventoryCsvError);
-    return [...(caught as InstanceType<typeof InventoryCsvError>).issues];
+    return caught as InstanceType<typeof InventoryCsvError>;
   }
   throw new Error('preview accepted a file it should refuse');
+}
+
+/** Where and what — the quoted value and medicine name are checked separately. */
+async function issuesOf(csv: string): Promise<unknown[]> {
+  return (await failureOf(csv)).issues.map(({ value: _value, medicineName: _name, ...where }) => where);
 }
 
 const counts = () => ({
@@ -52,8 +57,8 @@ const counts = () => ({
 describe('the downloadable template', () => {
   it('refuses the template as downloaded: its example rows are not stock', async () => {
     expect(await issuesOf(buildInventoryCsvTemplate())).toEqual([
-      { rowNumber: 2, code: 'example_row' },
-      { rowNumber: 3, code: 'example_row' },
+      { rowNumber: 2, code: 'example_row', column: 'batch_no' },
+      { rowNumber: 3, code: 'example_row', column: 'batch_no' },
     ]);
   });
 
@@ -70,6 +75,77 @@ describe('the downloadable template', () => {
       { name: 'Napa 500mg', type: 'tablet' },
       { name: 'Telmepress 20', type: 'capsule' },
     ]));
+  });
+});
+
+// After the template test the shop holds Napa 500mg (tablet, Beximco
+// Pharmaceuticals) and Telmepress 20 (CAPSULE, Square Pharmaceuticals).
+describe('which medicine a row joins (founder, 2026-11-28)', () => {
+  const row = (company: string, form: string, batch: string) =>
+    `${HEADER}\nTelmepress 20,Telmisartan,${company},${form},${batch},2027-06-30,10,6.00,8.00`;
+
+  it('never adds a tablet row to the capsule of the same name — it is a new medicine', async () => {
+    const preview = await previewInventoryCsv('shop', 'owner', row('Square Pharmaceuticals', 'tablet', 'T-1'));
+    expect(preview.rows[0]).toMatchObject({ action: 'create_medicine', medicineId: null, type: 'tablet' });
+  });
+
+  it('adds a capsule row to the capsule', async () => {
+    const preview = await previewInventoryCsv('shop', 'owner', row('Square Pharmaceuticals', 'capsule', 'C-2'));
+    expect(preview.rows[0]).toMatchObject({ action: 'add_batch', type: 'capsule' });
+    expect(preview.rows[0]?.medicineId).toBeTruthy();
+  });
+
+  it('treats "Square" and "SQUARE PHARMACEUTICALS LTD." as the same company', async () => {
+    for (const company of ['Square', 'SQUARE PHARMACEUTICALS LTD.']) {
+      const preview = await previewInventoryCsv('shop', 'owner', row(company, 'capsule', `S-${company.length}`));
+      expect(preview.rows[0]).toMatchObject({ action: 'add_batch' });
+      expect(preview.warnings).toEqual([]);
+    }
+  });
+
+  it('warns — never merges, never refuses — when the company is spelled almost the same', async () => {
+    const preview = await previewInventoryCsv('shop', 'owner', row('Sqaure Pharmaceuticals', 'capsule', 'W-1'));
+    expect(preview.rows[0]).toMatchObject({ action: 'create_medicine' });
+    expect(preview.warnings).toEqual([{
+      rowNumber: 2, code: 'similar_company', medicineName: 'Telmepress 20',
+      value: 'Sqaure Pharmaceuticals', existing: 'Square Pharmaceuticals',
+    }]);
+  });
+
+  it('asks for the form when the shop has the same name as both a tablet and a capsule', async () => {
+    const both = `${HEADER}\nNapa 500mg,Paracetamol,Beximco Pharmaceuticals,capsule,NC-1,,5,1.00,2.00`;
+    const created = await previewInventoryCsv('shop', 'owner', both);
+    expect(created.rows[0]).toMatchObject({ action: 'create_medicine' });
+    await importInventoryCsv('shop', 'owner', both, created.fingerprint, ALWAYS_LIVE);
+    const failure = await failureOf(`${HEADER}\nNapa 500mg,Paracetamol,Beximco Pharmaceuticals,,NX-1,,5,1.00,2.00`);
+    expect(failure.issues).toEqual([{
+      rowNumber: 2, code: 'ambiguous_medicine', column: 'type', value: 'tablet, capsule', medicineName: 'Napa 500mg',
+    }]);
+  });
+
+  it('keeps a tablet and a capsule of one name in one file as two medicines', async () => {
+    const preview = await previewInventoryCsv('shop', 'owner', [
+      HEADER,
+      'Monas 10,Montelukast,ACME,tablet,MT-1,,5,1.00,2.00',
+      'Monas 10,Montelukast,ACME,capsule,MC-1,,5,1.00,2.00',
+    ].join('\n'));
+    expect(preview.rows.map((r) => r.action)).toEqual(['create_medicine', 'create_medicine']);
+  });
+
+  it('names the medicine and quotes the cell for every problem, and counts the rows', async () => {
+    const failure = await failureOf([
+      HEADER,
+      'Ace,Paracetamol,Square,tablet,A-9,31/12/2027,ten,1.00,1.50',
+      'Fexo,Fexofenadine,Square,tablet,F-9,2027-12-31,5,4.00,5.00',
+      ',Cetirizine,ACME,tablet,C-9,,5,abc,2.00',
+    ].join('\n'));
+    expect(failure.rowCount).toBe(3);
+    expect(failure.issues).toEqual([
+      { rowNumber: 2, code: 'bad_stock', column: 'stock', value: 'ten', medicineName: 'Ace' },
+      { rowNumber: 2, code: 'bad_expiry', column: 'expiry_date', value: '31/12/2027', medicineName: 'Ace' },
+      { rowNumber: 4, code: 'missing_text', column: 'name' },
+      { rowNumber: 4, code: 'bad_price', column: 'purchase_price', value: 'abc' },
+    ]);
   });
 });
 
@@ -95,7 +171,7 @@ describe('every problem at once, and nothing written', () => {
 
   it('reports a repeated medicine+batch row', async () => {
     const csv = [HEADER, 'Ace,Paracetamol,Square,tablet,D-1,,5,1.00,1.50', 'ace,paracetamol,square,tablet,d-1,,3,1.00,1.50'].join('\n');
-    expect(await issuesOf(csv)).toEqual([{ rowNumber: 3, code: 'duplicate_row' }]);
+    expect(await issuesOf(csv)).toEqual([{ rowNumber: 3, code: 'duplicate_row', column: 'batch_no' }]);
   });
 
   it('names every missing required column, not just the first', async () => {

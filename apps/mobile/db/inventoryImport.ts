@@ -18,9 +18,18 @@ import { normalizeDosageForm } from "../domain/dosageForm";
 import { readImportedBarcode, unwrapExcelText } from "../domain/importedBarcode";
 import {
   InventoryCsvError,
+  quotedCell,
   type InventoryCsvIssue,
   type InventoryCsvIssueCode,
+  type InventoryCsvWarning,
 } from "../domain/inventoryCsvIssue";
+import {
+  csvMedicineKey,
+  matchCsvRows,
+  type ExistingBatchForMatch,
+  type ExistingMedicineForMatch,
+  type MatchedRow,
+} from "../domain/inventoryCsvMatch";
 
 const REQUIRED_HEADERS = [
   "name",
@@ -44,7 +53,7 @@ function normalizedHeader(value: string): string {
 }
 
 export { InventoryCsvError } from "../domain/inventoryCsvIssue";
-export type { InventoryCsvIssue, InventoryCsvIssueCode } from "../domain/inventoryCsvIssue";
+export type { InventoryCsvIssue, InventoryCsvIssueCode, InventoryCsvWarning } from "../domain/inventoryCsvIssue";
 
 function fingerprintCsv(text: string): string {
   let hash = 0xcbf29ce484222325n;
@@ -105,23 +114,27 @@ function parseRow(
   cell: CellReader,
 ): { row: ParsedImportRow | null; issues: InventoryCsvIssue[] } {
   const issues: InventoryCsvIssue[] = [];
-  const flag = (code: InventoryCsvIssueCode, column?: string) =>
-    issues.push(column ? { rowNumber, code, column } : { rowNumber, code });
+  // Every problem names its column AND quotes what the cell held, so the
+  // owner can find it in the sheet without hunting.
+  const flag = (code: InventoryCsvIssueCode, column?: string, text?: string) => {
+    const value = text === undefined ? undefined : quotedCell(text);
+    issues.push({ rowNumber, code, ...(column ? { column } : {}), ...(value ? { value } : {}) });
+  };
   for (const column of TEXT_COLUMNS) if (!cell(column)) flag("missing_text", column);
-  if (EXAMPLE_BATCH.test(cell("batch_no"))) flag("example_row");
+  if (EXAMPLE_BATCH.test(cell("batch_no"))) flag("example_row", "batch_no", cell("batch_no"));
   const stock = wholeNumber(cell("stock"));
-  if (stock === null) flag("bad_stock", "stock");
+  if (stock === null) flag("bad_stock", "stock", cell("stock"));
   const purchasePrice = takaOrNull(cell("purchase_price"));
-  if (purchasePrice === null) flag("bad_price", "purchase_price");
+  if (purchasePrice === null) flag("bad_price", "purchase_price", cell("purchase_price"));
   const salePrice = takaOrNull(cell("sale_price"));
-  if (salePrice === null) flag("bad_price", "sale_price");
+  if (salePrice === null) flag("bad_price", "sale_price", cell("sale_price"));
   const expiryDate = cell("expiry_date") || cell("expiry") || null;
-  if (expiryDate && !isIsoDate(expiryDate)) flag("bad_expiry", "expiry_date");
+  if (expiryDate && !isIsoDate(expiryDate)) flag("bad_expiry", "expiry_date", expiryDate);
   const thresholdText = cell("low_stock_threshold") || cell("threshold");
   const threshold = thresholdText ? wholeNumber(thresholdText) : null;
-  if (thresholdText && threshold === null) flag("bad_threshold", "threshold");
+  if (thresholdText && threshold === null) flag("bad_threshold", "threshold", thresholdText);
   const barcode = readImportedBarcode(cell("barcode"));
-  if (barcode.isLost) flag("bad_barcode", "barcode");
+  if (barcode.isLost) flag("bad_barcode", "barcode", cell("barcode"));
   if (issues.length > 0 || stock === null || purchasePrice === null || salePrice === null || barcode.isLost) {
     return { row: null, issues };
   }
@@ -166,7 +179,7 @@ function readCsvRows(text: string): string[][] {
   }
 }
 
-function parseInventoryCsv(text: string): { rows: ParsedImportRow[]; issues: InventoryCsvIssue[] } {
+function parseInventoryCsv(text: string): { rows: ParsedImportRow[]; issues: InventoryCsvIssue[]; rowCount: number } {
   const lines = readCsvRows(text);
   // The header is the first non-blank line; every row keeps its sheet number.
   const headerAt = lines.findIndex((cells) => cells.length > 0);
@@ -188,103 +201,61 @@ function parseInventoryCsv(text: string): { rows: ParsedImportRow[]; issues: Inv
   const issues: InventoryCsvIssue[] = [];
   const seen = new Set<string>();
   for (const { cells, rowNumber } of data) {
-    // A filled cell past the last header means a name's comma split the row;
-    // every cell after it would land in the wrong column.
-    if (cells.slice(header.length).some((value) => value.trim() !== "")) {
-      issues.push({ rowNumber, code: "uneven_columns" });
-      continue;
-    }
     // Excel's ="0123" (how a sheet keeps leading zeros) reads as 0123 everywhere.
     const cell: CellReader = (column) => {
       const at = header.indexOf(column);
       return at < 0 ? "" : unwrapExcelText(cells[at] ?? "");
     };
+    const medicineName = quotedCell(cell("name"));
+    const named = (issue: InventoryCsvIssue): InventoryCsvIssue =>
+      medicineName ? { ...issue, medicineName } : issue;
+    // A filled cell past the last header means a name's comma split the row;
+    // every cell after it would land in the wrong column.
+    if (cells.slice(header.length).some((value) => value.trim() !== "")) {
+      issues.push(named({ rowNumber, code: "uneven_columns" }));
+      continue;
+    }
     const parsed = parseRow(rowNumber, cell);
-    issues.push(...parsed.issues);
+    issues.push(...parsed.issues.map(named));
     if (!parsed.row) continue;
-    const { name, generic, manufacturer, batchNo } = parsed.row;
-    const identity = [name, generic, manufacturer, batchNo].map(normalized).join("|");
+    const identity = `${csvMedicineKey(parsed.row)}|${normalized(parsed.row.batchNo)}`;
     if (seen.has(identity)) {
-      issues.push({ rowNumber, code: "duplicate_row" });
+      issues.push(named({ rowNumber, code: "duplicate_row", column: "batch_no", value: parsed.row.batchNo }));
       continue;
     }
     seen.add(identity);
     rows.push(parsed.row);
   }
-  return { rows, issues };
+  return { rows, issues, rowCount: data.length };
 }
 
-export interface InventoryImportPreviewRow extends ParsedImportRow {
-  action: "create_medicine" | "add_batch";
-  medicineId: string | null;
-  medicineKey: string;
-}
+export type InventoryImportPreviewRow = MatchedRow<ParsedImportRow>;
 
-type ExistingMedicine = Pick<
-  typeof medicines.$inferSelect,
-  "id" | "name" | "generic" | "manufacturer"
->;
-type ExistingBatch = Pick<
-  typeof batches.$inferSelect,
-  "medicineId" | "batchNo"
->;
-
-function resolveRows(
-  parsed: ParsedImportRow[],
-  existingMedicines: ExistingMedicine[],
-  existingBatches: ExistingBatch[],
-): { rows: InventoryImportPreviewRow[]; issues: InventoryCsvIssue[] } {
-  const proposed = new Set<string>();
-  const issues: InventoryCsvIssue[] = [];
-  const rows = parsed.flatMap((row) => {
-    const matches = existingMedicines.filter(
-      (medicine) =>
-        normalized(medicine.name) === normalized(row.name) &&
-        normalized(medicine.generic ?? "") === normalized(row.generic) &&
-        normalized(medicine.manufacturer ?? "") ===
-          normalized(row.manufacturer),
-    );
-    if (matches.length > 1) {
-      issues.push({ rowNumber: row.rowNumber, code: "ambiguous_medicine" });
-      return [];
-    }
-    const match = matches[0];
-    if (
-      match &&
-      existingBatches.some(
-        (batch) =>
-          batch.medicineId === match.id &&
-          normalized(batch.batchNo) === normalized(row.batchNo),
-      )
-    ) {
-      issues.push({ rowNumber: row.rowNumber, code: "batch_exists", column: "batch_no" });
-      return [];
-    }
-    const medicineKey = `${normalized(row.name)}|${normalized(row.generic)}|${normalized(row.manufacturer)}`;
-    const action =
-      match || proposed.has(medicineKey)
-        ? ("add_batch" as const)
-        : ("create_medicine" as const);
-    proposed.add(medicineKey);
-    return [{ ...row, action, medicineId: match?.id ?? null, medicineKey }];
-  });
-  return { rows, issues };
-}
-
-/** Parse and resolve; any problem anywhere refuses the whole file, listing all of them. */
+/**
+ * Parse and match (domain/inventoryCsvMatch.ts); any problem anywhere refuses
+ * the whole file, listing all of them, in sheet order. Warnings never refuse.
+ */
 function validatedRows(
   text: string,
-  existingMedicines: ExistingMedicine[],
-  existingBatches: ExistingBatch[],
-): InventoryImportPreviewRow[] {
+  existingMedicines: readonly ExistingMedicineForMatch[],
+  existingBatches: readonly ExistingBatchForMatch[],
+): { rows: InventoryImportPreviewRow[]; warnings: InventoryCsvWarning[] } {
   const parsed = parseInventoryCsv(text);
-  const resolved = resolveRows(parsed.rows, existingMedicines, existingBatches);
-  const issues = [...parsed.issues, ...resolved.issues].sort(
+  const matched = matchCsvRows(parsed.rows, existingMedicines, existingBatches);
+  const issues = [...parsed.issues, ...matched.issues].sort(
     (a, b) => (a.rowNumber ?? 0) - (b.rowNumber ?? 0),
   );
-  if (issues.length > 0) throw new InventoryCsvError(issues);
-  return resolved.rows;
+  if (issues.length > 0) throw new InventoryCsvError(issues, parsed.rowCount);
+  return { rows: matched.rows, warnings: matched.warnings };
 }
+
+const EXISTING_MEDICINE_COLUMNS = {
+  id: medicines.id,
+  name: medicines.name,
+  generic: medicines.generic,
+  manufacturer: medicines.manufacturer,
+  type: medicines.type,
+};
 
 export async function previewInventoryCsv(
   shopId: string,
@@ -293,15 +264,11 @@ export async function previewInventoryCsv(
 ): Promise<{
   fingerprint: string;
   rows: InventoryImportPreviewRow[];
+  warnings: InventoryCsvWarning[];
 }> {
   await requireOwner(shopId, actorUserId);
   const existingMedicines = db
-    .select({
-      id: medicines.id,
-      name: medicines.name,
-      generic: medicines.generic,
-      manufacturer: medicines.manufacturer,
-    })
+    .select(EXISTING_MEDICINE_COLUMNS)
     .from(medicines)
     .where(and(eq(medicines.shopId, shopId), eq(medicines.isDeleted, false)))
     .all();
@@ -310,10 +277,8 @@ export async function previewInventoryCsv(
     .from(batches)
     .where(eq(batches.shopId, shopId))
     .all();
-  return {
-    fingerprint: fingerprintCsv(text),
-    rows: validatedRows(text, existingMedicines, existingBatches),
-  };
+  const { rows, warnings } = validatedRows(text, existingMedicines, existingBatches);
+  return { fingerprint: fingerprintCsv(text), rows, warnings };
 }
 
 export async function importInventoryCsv(
@@ -344,12 +309,7 @@ export async function importInventoryCsv(
       .get();
     if (existingImport) throw new Error("This CSV was already imported");
     const existingMedicines = tx
-      .select({
-        id: medicines.id,
-        name: medicines.name,
-        generic: medicines.generic,
-        manufacturer: medicines.manufacturer,
-      })
+      .select(EXISTING_MEDICINE_COLUMNS)
       .from(medicines)
       .where(and(eq(medicines.shopId, shopId), eq(medicines.isDeleted, false)))
       .all();
@@ -358,7 +318,7 @@ export async function importInventoryCsv(
       .from(batches)
       .where(eq(batches.shopId, shopId))
       .all();
-    const resolved = validatedRows(text, existingMedicines, existingBatches);
+    const resolved = validatedRows(text, existingMedicines, existingBatches).rows;
     rowCount = resolved.length;
     const expectedCount =
       2 +

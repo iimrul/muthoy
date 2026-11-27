@@ -28,6 +28,32 @@ export interface InventoryCsvIssue {
   code: InventoryCsvIssueCode;
   /** The column at fault, when there is one. */
   column?: string;
+  /** What that cell actually held ("31/12/2027"), so it can be found in the sheet. */
+  value?: string;
+  /** The row's medicine name, so the list reads by medicine rather than by number. */
+  medicineName?: string;
+}
+
+/**
+ * Not a reason to refuse the file — something the owner should look at before
+ * importing. similar_company: a new medicine whose company is spelled almost
+ * like one already used for the same medicine ("Sqaure" beside "Square").
+ */
+export interface InventoryCsvWarning {
+  rowNumber: number;
+  code: "similar_company";
+  medicineName: string;
+  /** The company as this row spells it. */
+  value: string;
+  /** The spelling already in inventory (or earlier in the file). */
+  existing: string;
+}
+
+/** A cell's text as the error list quotes it: trimmed, at most 60 characters. */
+export function quotedCell(text: string): string | undefined {
+  const value = text.trim();
+  if (!value) return undefined;
+  return value.length > 60 ? `${value.slice(0, 59)}…` : value;
 }
 
 const ISSUE_TEXT: Readonly<Record<InventoryCsvIssueCode, string>> = {
@@ -61,10 +87,13 @@ function describeIssue(issue: InventoryCsvIssue): string {
  */
 export class InventoryCsvError extends Error {
   readonly issues: readonly InventoryCsvIssue[];
+  /** How many medicine rows the file had (0 when it could not be read at all). */
+  readonly rowCount: number;
 
-  constructor(issues: readonly InventoryCsvIssue[]) {
+  constructor(issues: readonly InventoryCsvIssue[], rowCount = 0) {
     super(issues.map(describeIssue).join("; "));
     this.name = "InventoryCsvError";
     this.issues = issues;
+    this.rowCount = rowCount;
   }
 }

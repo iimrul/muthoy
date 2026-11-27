@@ -12,10 +12,11 @@ import {
   previewInventoryCsv,
   type InventoryImportPreviewRow,
 } from "../../db/inventoryImport";
+import { CsvIssueList, CsvWarningList } from "../../components/inventory/CsvImportIssues";
 import {
   InventoryCsvError,
   type InventoryCsvIssue,
-  type InventoryCsvIssueCode,
+  type InventoryCsvWarning,
 } from "../../domain/inventoryCsvIssue";
 import { INVENTORY_CSV_COLUMNS } from "../../domain/inventoryCsvTemplate";
 import type { CatalogKey } from "../../i18n/catalog";
@@ -30,33 +31,18 @@ import { triggerSyncNow } from "../../sync";
 // Download template → choose the filled .csv → see every problem at once, or
 // a summary of what will be added → import all rows in one atomic group.
 
-const ISSUE_KEY: Readonly<Record<InventoryCsvIssueCode, CatalogKey>> = {
-  too_large: "csvFileTooLarge",
-  too_many_rows: "csvIssueTooManyRows",
-  unclosed_quote: "csvIssueUnclosedQuote",
-  uneven_columns: "csvIssueUnevenColumns",
-  no_rows: "csvIssueNoRows",
-  duplicate_headers: "csvIssueDuplicateHeaders",
-  missing_column: "csvIssueMissingColumn",
-  missing_text: "csvIssueMissingText",
-  example_row: "csvIssueExampleRow",
-  bad_stock: "csvIssueBadStock",
-  bad_price: "csvIssueBadPrice",
-  bad_expiry: "csvIssueBadExpiry",
-  bad_threshold: "csvIssueBadThreshold",
-  bad_barcode: "csvIssueBadBarcode",
-  duplicate_row: "csvIssueDuplicateRow",
-  ambiguous_medicine: "csvIssueAmbiguous",
-  batch_exists: "csvIssueBatchExists",
-};
-
 const PREVIEW_LIMIT = 20;
-const ISSUE_LIMIT = 50;
 
 interface CheckedFile {
   csv: string;
   fingerprint: string;
   rows: InventoryImportPreviewRow[];
+  warnings: InventoryCsvWarning[];
+}
+
+interface Failure {
+  issues: readonly InventoryCsvIssue[];
+  rowCount: number;
 }
 
 type Busy = "checking" | "importing" | null;
@@ -66,7 +52,7 @@ export default function InventoryImportScreen() {
   const { t, formatNumber, formatMoney } = useI18n();
   const { session, isAllowed } = useOwnerAccess();
   const [checked, setChecked] = useState<CheckedFile | null>(null);
-  const [issues, setIssues] = useState<readonly InventoryCsvIssue[]>([]);
+  const [failure, setFailure] = useState<Failure | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -77,7 +63,7 @@ export default function InventoryImportScreen() {
 
   const reset = () => {
     setChecked(null);
-    setIssues([]);
+    setFailure(null);
     setError(null);
     setImportedCount(null);
   };
@@ -87,9 +73,9 @@ export default function InventoryImportScreen() {
     setBusy("checking");
     try {
       const preview = await previewInventoryCsv(session.shopId, session.userId, csv);
-      setChecked({ csv, fingerprint: preview.fingerprint, rows: preview.rows });
+      setChecked({ csv, fingerprint: preview.fingerprint, rows: preview.rows, warnings: preview.warnings });
     } catch (caught) {
-      if (caught instanceof InventoryCsvError) setIssues(caught.issues);
+      if (caught instanceof InventoryCsvError) setFailure({ issues: caught.issues, rowCount: caught.rowCount });
       else setError(t("csvPickFailed"));
     } finally {
       setBusy(null);
@@ -141,7 +127,7 @@ export default function InventoryImportScreen() {
       // The inventory may have changed since the check (a batch added meanwhile).
       if (caught instanceof InventoryCsvError) {
         setChecked(null);
-        setIssues(caught.issues);
+        setFailure({ issues: caught.issues, rowCount: caught.rowCount });
       } else {
         const isReplay = caught instanceof Error && caught.message.includes("already imported");
         setError(t(isReplay ? "csvAlreadyImported" : "csvImportFailed"));
@@ -215,7 +201,10 @@ export default function InventoryImportScreen() {
             {error}
           </Text>
         ) : null}
-        {issues.length > 0 ? <IssueList t={t} issues={issues} formatNumber={formatNumber} /> : null}
+        {failure ? (
+          <CsvIssueList t={t} issues={failure.issues} rowCount={failure.rowCount} formatNumber={formatNumber} />
+        ) : null}
+        {checked ? <CsvWarningList t={t} warnings={checked.warnings} formatNumber={formatNumber} /> : null}
         {checked ? (
           <PreviewCard
             t={t}
@@ -259,41 +248,6 @@ function TemplateCard({ t, onShare }: { t: T; onShare: () => void }) {
           </Text>
         </View>
       ))}
-    </View>
-  );
-}
-
-function issueText(issue: InventoryCsvIssue, t: T, formatNumber: (value: number) => string): string {
-  const what = issue.column ? `${t(ISSUE_KEY[issue.code])} (${issue.column})` : t(ISSUE_KEY[issue.code]);
-  return issue.rowNumber === null ? what : `${t("csvRowLabel")} ${formatNumber(issue.rowNumber)}: ${what}`;
-}
-
-function IssueList({
-  t,
-  issues,
-  formatNumber,
-}: {
-  t: T;
-  issues: readonly InventoryCsvIssue[];
-  formatNumber: (value: number) => string;
-}) {
-  const hidden = issues.length - ISSUE_LIMIT;
-  return (
-    <View testID="csv-issues" className="gap-2 rounded-2xl border border-error/30 bg-errorBg p-4">
-      <View className="flex-row items-center gap-2">
-        <Feather name="alert-circle" size={16} color="#DC2626" />
-        <Text className="flex-1 font-sans-semibold text-sm text-error">{t("csvIssuesTitle")}</Text>
-      </View>
-      {issues.slice(0, ISSUE_LIMIT).map((issue, index) => (
-        <Text key={`${issue.rowNumber ?? 0}-${issue.code}-${issue.column ?? ""}-${index}`} className="font-sans text-xs text-error">
-          {issueText(issue, t, formatNumber)}
-        </Text>
-      ))}
-      {hidden > 0 ? (
-        <Text className="font-sans text-xs text-error">
-          + {formatNumber(hidden)} {t("csvMoreRows")}
-        </Text>
-      ) : null}
     </View>
   );
 }
