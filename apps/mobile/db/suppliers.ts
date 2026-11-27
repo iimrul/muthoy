@@ -211,6 +211,14 @@ function findDuplicateSupplierSync(shopId: string, name: string, phone: string |
   return Boolean(row);
 }
 
+/** The prototype's "এই সরবরাহকারী ইতিমধ্যে আছে": same name and phone as an active supplier. */
+export class DuplicateSupplierError extends Error {
+  constructor() {
+    super('A supplier with this name and phone already exists');
+    this.name = 'DuplicateSupplierError';
+  }
+}
+
 export async function createSupplier(
   shopId: string,
   actorUserId: string,
@@ -219,7 +227,7 @@ export async function createSupplier(
 ): Promise<Supplier> {
   await requireOwner(shopId, actorUserId);
   if (findDuplicateSupplierSync(shopId, supplier.name, supplier.phone ?? null)) {
-    throw new Error('A supplier with this name and phone already exists');
+    throw new DuplicateSupplierError();
   }
   const id = generateId();
   const now = new Date().toISOString();

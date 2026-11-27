@@ -183,7 +183,11 @@ vi.mock("../../db/inventory", () => ({
 vi.mock("../../db/suppliers", () => ({
   createSupplier: deps.createSupplier,
   listSupplierPickerOptions: deps.listSupplierPickerOptions,
+  DuplicateSupplierError: class DuplicateSupplierError extends Error {},
 }));
+// Item 12: the Owner's supplier-less add is opening stock.
+const openingDeps = vi.hoisted(() => ({ createOpeningStock: vi.fn() }));
+vi.mock("../../db/inventoryImport", () => ({ createOpeningStock: openingDeps.createOpeningStock }));
 vi.mock("../../sync", () => ({ triggerSyncNow: deps.triggerSyncNow }));
 
 // W2-02. The catalogue is real SQLite + FTS5 (db/medicineCatalog.ts); this
@@ -320,6 +324,62 @@ async function reviewMatchingMedicine() {
   await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
   await screen.findByLabelText("Create a distinct medicine");
 }
+
+describe("The supplier is optional when the Owner adds a medicine (item 12, 2026-11-27)", () => {
+  async function fillNewMedicineWithoutSupplier() {
+    const fields: [string, string][] = [
+      ["Medicine name *", "Telmepress 20"], ["Generic name *", "Telmisartan"], ["Manufacturer", "Square"],
+      ["Batch number *", "OPN-1"], ["Expiry date *", "2099-01-15"],
+      ["Purchase price (৳) *", "10"], ["Sale price (৳) *", "12"], ["Quantity *", "50"],
+    ];
+    for (const [label, value] of fields) fireEvent.change(screen.getByLabelText(label!), { target: { value } });
+    await waitFor(() => expect(deps.listSupplierPickerOptions).toHaveBeenCalled());
+  }
+
+  beforeEach(() => {
+    deps.searchRestockMedicines.mockResolvedValue([]);
+    openingDeps.createOpeningStock.mockReset();
+    openingDeps.createOpeningStock.mockResolvedValue({ importId: "imp-1", medicineId: "med-1", batchId: "batch-1" });
+  });
+
+  it("saves the Owner's medicine as opening stock: no supplier, no payment method, no purchase", async () => {
+    renderManualForRestock("owner");
+    await fillNewMedicineWithoutSupplier();
+    expect(screen.getByText("Supplier (optional)")).toBeTruthy();
+    expect(screen.getByText(/added as opening stock/)).toBeTruthy();
+    // No supplier → no "cash on delivery / credit" choice to make.
+    expect(screen.queryByText("Payment method")).toBeNull();
+
+    await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+    expect(openingDeps.createOpeningStock).toHaveBeenCalledWith(expect.objectContaining({
+      shopId: SESSION.shopId,
+      medicine: expect.objectContaining({ name: "Telmepress 20", generic: "Telmisartan" }),
+      batch: { batchNo: "OPN-1", expiryDate: "2099-01-15", quantity: 50, purchasePrice: 1000, salePrice: 1200 },
+    }));
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+    expect(deps.addBatchWithPurchase).not.toHaveBeenCalled();
+  });
+
+  it("still asks a staff member to choose a supplier, and writes nothing", async () => {
+    renderManualForRestock("staff");
+    await fillNewMedicineWithoutSupplier();
+    await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+    expect(await screen.findByText(/adding stock without one is for the owner/i)).toBeTruthy();
+    expect(openingDeps.createOpeningStock).not.toHaveBeenCalled();
+    expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
+  });
+
+  it("choosing a supplier brings back the purchase path and its payment method", async () => {
+    renderManualForRestock("owner");
+    await fillNewMedicineWithoutSupplier();
+    fireEvent.click(screen.getByLabelText("Select supplier"));
+    fireEvent.click(await screen.findByLabelText("Square"));
+    expect(screen.getByText("Payment method")).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
+    expect(deps.createMedicineWithPurchase).toHaveBeenCalledWith(expect.objectContaining({ supplierId: "supplier-1" }));
+    expect(openingDeps.createOpeningStock).not.toHaveBeenCalled();
+  });
+});
 
 describe("Explicit medicine identity during restocking", () => {
   beforeEach(() => {
@@ -791,12 +851,13 @@ describe("Add Medicine parity recovery", () => {
     fireEvent.change(screen.getByLabelText("Phone Number"), {
       target: { value: "1712345678" },
     });
-    const saveButtons = screen.getAllByLabelText("Save");
-    fireEvent.click(
-      saveButtons.find((button) =>
-        button.getAttribute("data-class")?.includes("rounded-xl"),
-      )!,
-    );
+    // The shared prototype sheet (components/suppliers/NewSupplierSheet.tsx).
+    // First attempt: the same name+phone already exists — said in the sheet.
+    const { DuplicateSupplierError } = await import("../../db/suppliers");
+    deps.createSupplier.mockRejectedValueOnce(new DuplicateSupplierError());
+    fireEvent.click(screen.getByLabelText("Save supplier"));
+    expect(await screen.findByText("This supplier already exists.")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Save supplier"));
 
     await waitFor(() =>
       expect(deps.createSupplier).toHaveBeenCalledWith(

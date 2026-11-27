@@ -8,19 +8,23 @@ import {
   View,
 } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
+import { colors } from "@muthoy/constants";
 import type { SupplierPickerOption } from "../../db/suppliers";
 import { useI18n } from "../../state/localeStore";
+import { NewSupplierSheet, type NewSupplierInput } from "../suppliers/NewSupplierSheet";
 
 interface SupplierPickerFieldProps {
   suppliers: SupplierPickerOption[];
   selectedId: string;
   onSelect: (supplierId: string) => void;
-  onCreateSupplier?: (input: {
-    name: string;
-    phone: string;
-    manufacturer?: string;
-    notes?: string;
-  }) => Promise<void>;
+  onCreateSupplier?: (input: NewSupplierInput) => Promise<void>;
+  loadManufacturerSuggestions?: (query?: string) => Promise<string[]>;
+  /**
+   * Item 12 (founder, 2026-11-27): the supplier may be left out, and the
+   * stock is then opening stock. The list leads with that choice, and
+   * selecting it reports "" (no supplier).
+   */
+  isOptional?: boolean;
 }
 
 export function SupplierPickerField({
@@ -28,17 +32,13 @@ export function SupplierPickerField({
   selectedId,
   onSelect,
   onCreateSupplier,
+  loadManufacturerSuggestions,
+  isOptional = false,
 }: SupplierPickerFieldProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newPhone, setNewPhone] = useState("");
-  const [newManufacturer, setNewManufacturer] = useState("");
-  const [newNotes, setNewNotes] = useState("");
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const selected = suppliers.find((supplier) => supplier.id === selectedId);
   const candidates = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -53,45 +53,16 @@ export function SupplierPickerField({
     setQuery("");
     setOpen(false);
   };
-  const closeCreate = () => {
-    setCreateOpen(false);
-    setCreateError(null);
-  };
-  const handleCreate = async () => {
-    if (!onCreateSupplier) return;
-    if (newName.trim().length < 2) {
-      setCreateError(t("supplierNameTooShortLabel"));
-      return;
-    }
-    if (newPhone.length !== 10) {
-      setCreateError(t("supplierPhoneRequiredLabel"));
-      return;
-    }
-    setCreating(true);
-    setCreateError(null);
-    try {
-      await onCreateSupplier({
-        name: newName.trim(),
-        phone: `+880${newPhone}`,
-        manufacturer: newManufacturer.trim() || undefined,
-        notes: newNotes.trim() || undefined,
-      });
-      setNewName("");
-      setNewPhone("");
-      setNewManufacturer("");
-      setNewNotes("");
-      setCreateOpen(false);
-    } catch {
-      setCreateError(t("supplierSaveFailedLabel"));
-    } finally {
-      setCreating(false);
-    }
+  const choose = (supplierId: string) => {
+    onSelect(supplierId);
+    setQuery("");
+    setOpen(false);
   };
 
   return (
     <View className="gap-2">
       <Text className="font-sans-semibold text-sm text-richBlack">
-        {t("supplierLabel")} *
+        {isOptional ? t("supplierOptionalLabel") : `${t("supplierLabel")} *`}
       </Text>
       <Pressable
         onPress={() => setOpen(true)}
@@ -103,8 +74,9 @@ export function SupplierPickerField({
           className={`flex-1 font-sans text-base ${selected ? "text-richBlack" : "text-midGray"}`}
           numberOfLines={1}
         >
-          {selected?.name ?? t("selectSupplierLabel")}
+          {selected?.name ?? (isOptional ? t("noSupplierOpeningStockLabel") : t("selectSupplierLabel"))}
         </Text>
+        <Feather name="chevron-down" size={18} color={colors.midGray} />
       </Pressable>
 
       <Modal
@@ -129,20 +101,20 @@ export function SupplierPickerField({
                 onPress={close}
                 accessibilityRole="button"
                 accessibilityLabel={t("closeLabel")}
-                className="h-8 w-8 items-center justify-center"
+                className="h-10 w-10 items-center justify-center"
               >
-                <Feather name="x" size={18} color="#6B7280" />
+                <Feather name="x" size={18} color={colors.midGray} />
               </Pressable>
             </View>
             <View className="relative mb-3 mt-3">
               <View className="absolute inset-y-0 left-3 z-10 justify-center">
-                <Feather name="search" size={16} color="#6B7280" />
+                <Feather name="search" size={16} color={colors.midGray} />
               </View>
               <TextInput
                 value={query}
                 onChangeText={setQuery}
                 placeholder={t("searchSupplierNameHint")}
-                placeholderTextColor="#6B7280"
+                placeholderTextColor={colors.midGray}
                 accessibilityLabel={t("searchSupplierNameHint")}
                 autoFocus
                 className="h-11 rounded-xl border border-[#D1D5DB] bg-white pl-9 pr-3 font-sans text-sm text-richBlack"
@@ -153,14 +125,25 @@ export function SupplierPickerField({
               showsVerticalScrollIndicator={false}
               contentContainerClassName="gap-1"
             >
+              {isOptional && !query.trim() ? (
+                <Pressable
+                  onPress={() => choose("")}
+                  accessibilityRole="button"
+                  accessibilityLabel={t("noSupplierOpeningStockLabel")}
+                  className={`flex-row items-center justify-between rounded-lg px-3 py-2.5 ${
+                    selectedId === "" ? "bg-brand-softGreen" : "bg-white"
+                  }`}
+                >
+                  <Text className="flex-1 font-sans-medium text-sm text-richBlack">
+                    {t("noSupplierOpeningStockLabel")}
+                  </Text>
+                  {selectedId === "" ? <Feather name="check" size={16} color={colors.brandGreen} /> : null}
+                </Pressable>
+              ) : null}
               {candidates.map((supplier) => (
                 <Pressable
                   key={supplier.id}
-                  onPress={() => {
-                    onSelect(supplier.id);
-                    setQuery("");
-                    setOpen(false);
-                  }}
+                  onPress={() => choose(supplier.id)}
                   accessibilityRole="button"
                   accessibilityLabel={supplier.name}
                   className={`flex-row items-center justify-between rounded-lg px-3 py-2.5 ${
@@ -173,7 +156,7 @@ export function SupplierPickerField({
                     {supplier.name}
                   </Text>
                   {supplier.id === selectedId ? (
-                    <Feather name="check" size={16} color="#059669" />
+                    <Feather name="check" size={16} color={colors.brandGreen} />
                   ) : null}
                 </Pressable>
               ))}
@@ -193,7 +176,7 @@ export function SupplierPickerField({
                 accessibilityLabel={t("newSupplierLabel")}
                 className="mt-3 h-11 flex-row items-center justify-center gap-2 rounded-xl bg-brand-green"
               >
-                <Feather name="plus" size={16} color="#FFFFFF" />
+                <Feather name="plus" size={16} color={colors.white} />
                 <Text className="font-sans-bold text-sm text-white">
                   {t("newSupplierLabel")}
                 </Text>
@@ -203,94 +186,17 @@ export function SupplierPickerField({
         </View>
       </Modal>
 
-      <Modal
-        visible={createOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={closeCreate}
-      >
-        <View className="flex-1 justify-end bg-black/40">
-          <Pressable
-            onPress={closeCreate}
-            accessibilityRole="button"
-            accessibilityLabel={t("closeLabel")}
-            className="absolute inset-0"
-          />
-          <View className="gap-3 rounded-t-3xl bg-white p-5 shadow-2xl">
-            <View className="mb-1 flex-row items-center justify-between">
-              <Text className="font-sans-bold text-lg text-richBlack">
-                {t("newSupplierLabel")}
-              </Text>
-              <Pressable
-                onPress={closeCreate}
-                accessibilityRole="button"
-                accessibilityLabel={t("closeLabel")}
-                className="h-8 w-8 items-center justify-center"
-              >
-                <Feather name="x" size={20} color="#6B7280" />
-              </Pressable>
-            </View>
-            <TextInput
-              value={newName}
-              onChangeText={setNewName}
-              placeholder={t("supplierNameLabel")}
-              placeholderTextColor="#6B7280"
-              accessibilityLabel={t("supplierNameLabel")}
-              autoFocus
-              className="h-11 rounded-xl border border-[#E5E7EB] bg-white px-4 font-sans text-base text-richBlack"
-            />
-            <View className="relative">
-              <View className="absolute inset-y-0 left-4 z-10 justify-center">
-                <Text className="font-sans-semibold text-[15px] text-richBlack">
-                  +880
-                </Text>
-              </View>
-              <TextInput
-                value={newPhone}
-                onChangeText={(value) =>
-                  setNewPhone(value.replace(/\D/g, "").slice(0, 10))
-                }
-                placeholder="1XXX XXX XXX"
-                placeholderTextColor="#6B7280"
-                accessibilityLabel={t("phone")}
-                keyboardType="phone-pad"
-                maxLength={10}
-                className="h-11 rounded-xl border border-[#E5E7EB] bg-white pl-16 pr-4 font-sans text-[15px] text-richBlack"
-              />
-            </View>
-            <TextInput
-              value={newManufacturer}
-              onChangeText={setNewManufacturer}
-              placeholder={t("manufacturerCompanyLabel")}
-              placeholderTextColor="#6B7280"
-              accessibilityLabel={t("manufacturerCompanyLabel")}
-              className="h-11 rounded-xl border border-[#E5E7EB] bg-white px-4 font-sans text-base text-richBlack"
-            />
-            <TextInput
-              value={newNotes}
-              onChangeText={setNewNotes}
-              placeholder={t("notesOptionalLabel")}
-              placeholderTextColor="#6B7280"
-              accessibilityLabel={t("notesOptionalLabel")}
-              className="h-11 rounded-xl border border-[#E5E7EB] bg-white px-4 font-sans text-base text-richBlack"
-            />
-            {createError ? (
-              <Text className="font-sans text-xs text-error">{createError}</Text>
-            ) : null}
-            <Pressable
-              onPress={() => void handleCreate()}
-              disabled={creating}
-              accessibilityRole="button"
-              accessibilityLabel={t("saveMedicineLabel")}
-              className="h-12 items-center justify-center rounded-xl bg-brand-green disabled:opacity-50"
-            >
-              <Text className="font-sans-bold text-white">
-                {creating ? t("savingMedicineLabel") : t("saveMedicineLabel")}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      {onCreateSupplier ? (
+        <NewSupplierSheet
+          visible={createOpen}
+          onClose={() => setCreateOpen(false)}
+          loadManufacturerSuggestions={loadManufacturerSuggestions}
+          onSave={async (input) => {
+            await onCreateSupplier(input);
+            setCreateOpen(false);
+          }}
+        />
+      ) : null}
     </View>
   );
 }

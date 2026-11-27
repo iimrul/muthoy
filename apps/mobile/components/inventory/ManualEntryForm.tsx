@@ -27,6 +27,8 @@ import {
   createSupplier,
   listSupplierPickerOptions,
 } from "../../db/suppliers";
+import { createOpeningStock } from "../../db/inventoryImport";
+import { colors } from "@muthoy/constants";
 import { parseScannedMedicineStrip } from "../../domain/ocrText";
 import type { MedicinePrefill } from "../../domain/catalogPrefill";
 import { captureSessionFor } from "../../state/sessionGuard";
@@ -233,8 +235,10 @@ export function ManualEntryForm({
         setErrorMessage(t("fillRequiredFieldsLabel"));
         return;
       }
-      if (!supplierId) {
-        setErrorMessage(t("selectSupplierLabel"));
+      // Item 12: the Owner may leave the supplier out (opening stock). A staff
+      // member still needs one until the server accepts their supplier-less add.
+      if (!supplierId && session.role !== "owner") {
+        setErrorMessage(t("staffNeedsSupplierLabel"));
         return;
       }
       if (
@@ -270,7 +274,27 @@ export function ManualEntryForm({
           purchasePrice: fromTaka(input.firstBatch.purchasePrice),
           salePrice: fromTaka(input.firstBatch.salePrice),
         };
-        if (existing) {
+        if (!supplierId) {
+          // Opening stock: no purchase, no supplier due, no cash out.
+          await createOpeningStock({
+            shopId: session.shopId,
+            actorUserId: session.userId,
+            isStillActive: guard.isStillActive,
+            existingMedicineId: existing?.id,
+            confirmDistinctMedicine,
+            medicine: existing ? undefined : {
+              name: input.name,
+              generic: input.generic,
+              manufacturer: input.manufacturer,
+              strength: input.strength?.trim() || undefined,
+              type: input.type?.trim() || undefined,
+              unitOfMeasure: input.unitOfMeasure,
+              requiresPrescription: input.requiresPrescription,
+              threshold: input.threshold,
+            },
+            batch,
+          });
+        } else if (existing) {
           await addBatchWithPurchase({
             shopId: session.shopId, actorUserId: session.userId,
             isStillActive: guard.isStillActive, medicineId: existing.id,
@@ -553,9 +577,18 @@ export function ManualEntryForm({
         onCreateSupplier={
           session.role === "owner" ? handleCreateSupplier : undefined
         }
+        loadManufacturerSuggestions={(query) => listManufacturerSuggestions(session.shopId, query)}
+        isOptional={session.role === "owner"}
       />
 
-      <View className="gap-2">
+      {!supplierId && session.role === "owner" ? (
+        <View className="flex-row gap-2 rounded-xl bg-brand-softGreen p-3">
+          <Feather name="info" size={16} color={colors.brandGreen} />
+          <Text className="flex-1 font-sans text-xs text-richBlack">{t("openingStockHint")}</Text>
+        </View>
+      ) : null}
+
+      {supplierId ? <View className="gap-2">
         <Text className="font-sans-bold text-xs text-richBlack">
           {t("addMedicinePaymentMethodLabel")}
         </Text>
@@ -582,7 +615,7 @@ export function ManualEntryForm({
             </Pressable>
           ))}
         </View>
-      </View>
+      </View> : null}
 
       {!existing ? <View className="flex-row items-center justify-between rounded-xl border border-[#E5E7EB] bg-white px-4 py-3">
         <View className="flex-1 pr-3">
