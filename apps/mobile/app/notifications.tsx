@@ -24,6 +24,7 @@ import { captureSessionFor } from "../state/sessionGuard";
 import { useI18n } from "../state/localeStore";
 import { useSessionStore } from "../state/sessionStore";
 import { localizeStoredText } from "../i18n/localizedText";
+import { parseStoredTimestamp } from "../domain/storedTimestamp";
 
 const ACTIONS: Partial<Record<NotificationType, Href>> = {
   daily_summary: "/cash-summary",
@@ -47,7 +48,8 @@ const ICONS: Partial<Record<NotificationType, string>> = {
 
 function groupKey(dateString: string): string {
   const now = new Date();
-  const date = new Date(dateString);
+  // Notification rows carry SQLite's zone-less UTC default stamp.
+  const date = parseStoredTimestamp(dateString);
   const today = new Date(
     now.getFullYear(),
     now.getMonth(),

@@ -6211,3 +6211,46 @@ the low-stock card only counts medicines with some stock left, so it said
   - Mutation run: 12 of 13 caught. The one survivor is the `created` guard
     on the banner, which only matters if two checks race; the check queue
     already prevents that.
+
+## 2026-11-27 — A re-check covers the screen instead of closing it (A1)
+
+**Founder's decision (A1, 2026-11-27).** When the app re-checks a session it has
+already let in (network back, app back in front, lease deadline), it covers the
+screen with "আপনার প্রবেশাধিকার যাচাই হচ্ছে…" instead of closing every screen.
+
+**Why.** Device test 2026-11-27, two staff on DEV: a cashier's checkout closed
+by itself three times and dropped back to the Sale list with the sale not made.
+Every re-check unmounted the navigator (H-10 #6), and the route-restore added in
+PR #16 lost the race when two checks ran about a second apart. Unmounting also
+wiped any half-typed form.
+
+**This changes H-10 #6, deliberately (CLAUDE.md rule 11 flagged; founder chose A1).**
+- **Still closed during the re-check.** The cover is opaque and takes every
+  touch. The screens under it are hidden from TalkBack/VoiceOver. Sync and
+  billing stop exactly as before and restart only on 'allowed'.
+- **Unchanged.**
+  - The first admission of every session (login, user switch, shop switch,
+    cold start) still mounts nothing until the check passes.
+  - A 'blocked' verdict or a check that throws still unmounts everything.
+  - The retry after a block is a first admission again
+    (`admittedEpoch` reset), so nothing is mounted under the cover.
+  - A revocation clears the session, which is a new epoch.
+- **Tests.** `tests/app-layout.test.tsx`:
+  - The navigator's mount count stays the same through a reconnect re-check
+    and through a double re-check.
+  - The shield is `pointerEvents="none"` and hidden from accessibility.
+  - A blocked or thrown re-check unmounts.
+  - The retry mounts nothing until it passes.
+  - Mutation run: 7 of 7 caught.
+
+## 2026-11-27 — A stored time without a zone is UTC
+
+Notification times showed six hours early: a 9:55 notification read "3:55 AM".
+SQLite's `current_timestamp` default (every `created_at` a write leaves out) is
+UTC written as "YYYY-MM-DD HH:MM:SS" with no zone, and Hermes reads a zone-less
+time as local time. `domain/storedTimestamp.ts` (`parseStoredTimestamp`) reads
+it, and Postgres text ("…+00"), as the real instant. It is used by
+`formatDate`/`formatDateTime`/`formatTime` (every screen), the notification day
+groups and the dashboard's "x min ago". Display only: nothing stored changes.
+Expense day-grouping (money) is left as it is; it reads timestamps the app
+itself writes in ISO.
