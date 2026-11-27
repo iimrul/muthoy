@@ -24,6 +24,7 @@ interface VocabularyRow {
   generic: string | null;
   manufacturer: string | null;
   strength: string | null;
+  dosageForm: string | null;
   requiresPrescription: number;
   isSellable: number;
 }
@@ -35,6 +36,7 @@ export async function listScanVocabulary(
   await requirePermission(shopId, actorUserId, "sale_entry");
   const rows = sqliteConnection.getAllSync<VocabularyRow>(
     `SELECT m.id AS medicineId, m.name, m.generic, m.manufacturer, m.strength,
+            m.type AS dosageForm,
             m.requires_prescription AS requiresPrescription,
             EXISTS (
               SELECT 1 FROM batches AS b
@@ -55,6 +57,7 @@ export async function listScanVocabulary(
     generic: row.generic,
     manufacturer: row.manufacturer,
     strength: row.strength,
+    dosageForm: row.dosageForm,
     requiresPrescription: Boolean(row.requiresPrescription),
     isSellable: Boolean(row.isSellable),
   }));

@@ -315,3 +315,89 @@ describe("what is NOT a medicine", () => {
     expect(scan([outOfStock], FLACOL_STRIP)).toMatchObject({ kind: "match", medicine: { isSellable: false } });
   });
 });
+
+// Founder, 2026-11-27: "telmepress 20 এটার tablet and capsule both আছে" — the
+// same brand and strength stocked as two products. The strip's printed form
+// picks one; without it, or against it, the matcher offers and never guesses.
+describe("dosage form separates a tablet from a capsule of the same name", () => {
+  const TELMI = { generic: "Telmisartan", strength: "20mg", manufacturer: "Square Pharmaceuticals Ltd." };
+  const TELMI_TAB = medicine("telmi-tab", "Telmepress 20", { ...TELMI, dosageForm: "tablet" });
+  const TELMI_CAP = medicine("telmi-cap", "Telmepress 20", { ...TELMI, dosageForm: "capsule" });
+  const telmiStrip = (...formLines: string[]): OcrTextLine[] =>
+    lines("Telmepress 20", "Telmisartan USP 20 mg", ...formLines, "SQUARE", "MA No. 123-456-789");
+
+  it("adds the capsule from a capsule strip", () => {
+    const result = scan([TELMI_TAB, TELMI_CAP, NAPA], telmiStrip("Capsule"));
+    expect(result.kind).toBe("match");
+    expect(idsOf(result)).toEqual(["telmi-cap"]);
+  });
+
+  it("adds the tablet from a tablet strip", () => {
+    const result = scan([TELMI_TAB, TELMI_CAP, NAPA], telmiStrip("Each film coated tablet contains"));
+    expect(result.kind).toBe("match");
+    expect(idsOf(result)).toEqual(["telmi-tab"]);
+  });
+
+  it("reads the printed abbreviations Caps and Tab.", () => {
+    expect(idsOf(scan([TELMI_TAB, TELMI_CAP], telmiStrip("10 x 10 Caps")))).toEqual(["telmi-cap"]);
+    expect(idsOf(scan([TELMI_TAB, TELMI_CAP], telmiStrip("Tab.")))).toEqual(["telmi-tab"]);
+  });
+
+  it("offers both when the strip shows no form", () => {
+    const result = scan([TELMI_TAB, TELMI_CAP], telmiStrip());
+    expect(result.kind).toBe("choose");
+    expect(idsOf(result).sort()).toEqual(["telmi-cap", "telmi-tab"]);
+  });
+
+  it("offers both when the strip names both forms", () => {
+    const result = scan([TELMI_TAB, TELMI_CAP], telmiStrip("Capsule", "Tablet"));
+    expect(result.kind).toBe("choose");
+    expect(idsOf(result).sort()).toEqual(["telmi-cap", "telmi-tab"]);
+  });
+
+  it("offers, never adds, the tablet when only the tablet is stocked and the strip says Capsule", () => {
+    const result = scan([TELMI_TAB, NAPA], telmiStrip("Capsule"));
+    expect(result).toEqual({ kind: "choose", options: [TELMI_TAB] });
+  });
+
+  it("adds a medicine with no recorded form, whatever form the strip prints", () => {
+    const unknownForm = medicine("telmi", "Telmepress 20", TELMI);
+    expect(scan([unknownForm, NAPA], telmiStrip("Capsule"))).toMatchObject({
+      kind: "match",
+      medicine: { medicineId: "telmi" },
+    });
+  });
+
+  it("treats a stored 'other' form as unknown, not as a conflict", () => {
+    const other = medicine("telmi-other", "Telmepress 20", { ...TELMI, dosageForm: "other" });
+    expect(scan([other], telmiStrip("Capsule")).kind).toBe("match");
+  });
+
+  it("does not pick between two unknown-form rows from the printed form", () => {
+    const first = medicine("telmi-a", "Telmepress 20", TELMI);
+    const second = medicine("telmi-b", "Telmepress 20", TELMI);
+    expect(scan([first, second], telmiStrip("Capsule")).kind).toBe("choose");
+  });
+
+  it("reads the form from an old row's name when none was stored", () => {
+    const oldTab = medicine("old-tab", "Telmepress 20 Tab", TELMI);
+    const oldCap = medicine("old-cap", "Telmepress 20 Cap", TELMI);
+    const result = scan([oldTab, oldCap], telmiStrip("Capsule"));
+    expect(result.kind).toBe("match");
+    expect(idsOf(result)).toEqual(["old-cap"]);
+  });
+
+  it("ignores a form word on a registration line", () => {
+    const result = scan([TELMI_TAB, TELMI_CAP], telmiStrip("Batch No. TAB2041"));
+    expect(result.kind).toBe("choose");
+  });
+
+  it("still lets strength decide before form", () => {
+    const cap40 = medicine("telmi-cap-40", "Telmepress 40", { ...TELMI, strength: "40mg", dosageForm: "capsule" });
+    const result = scan([TELMI_TAB, cap40], telmiStrip("Capsule"));
+    // Telmepress 40 is a different brand word set ("40" is not a word), so both
+    // match by name; 20 mg is printed, so the tablet wins on strength — and is
+    // then only OFFERED because the strip says Capsule.
+    expect(result).toEqual({ kind: "choose", options: [TELMI_TAB] });
+  });
+});

@@ -142,6 +142,8 @@ function LiveStripScannerModal({
           medicineName: medicine.name,
           generic: medicine.generic,
           manufacturer: medicine.manufacturer,
+          dosageForm: medicine.dosageForm ?? null,
+          strength: medicine.strength,
           requiresPrescription: medicine.requiresPrescription,
           batchId: batch.id,
           expiryDate: batch.expiryDate,

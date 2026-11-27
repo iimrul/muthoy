@@ -10,6 +10,9 @@ export interface CartLine {
   medicineName: string;
   generic?: string | null;
   manufacturer?: string | null;
+  /** Shown in the cart beside the name: tablet vs capsule (display only). */
+  dosageForm?: string | null;
+  strength?: string | null;
   batchId: string;
   batchNo?: string;
   expiryDate?: string | null;

@@ -64,6 +64,9 @@ export interface MedicineSearchResult {
   name: string;
   generic: string | null;
   manufacturer: string | null;
+  /** Dosage form as stored (domain/dosageForm.ts reads it): tablet vs capsule. */
+  type: string | null;
+  strength: string | null;
   requiresPrescription: boolean;
   activeBatch: Batch;
   /** domain/fefo.ts's Batch omits batchNo (FEFO logic never needs it) — carried here for the Sale Entry card's batch+expiry line only. */
@@ -78,6 +81,8 @@ interface FtsMedicineRow {
   name: string;
   generic: string | null;
   manufacturer: string | null;
+  type: string | null;
+  strength: string | null;
   requiresPrescription: boolean;
 }
 
@@ -95,7 +100,7 @@ export async function searchMedicinesForSale(
   }
 
   const medicineRows = sqliteConnection.getAllSync<FtsMedicineRow>(
-    `SELECT m.id AS medicineId, m.name, m.generic, m.manufacturer,
+    `SELECT m.id AS medicineId, m.name, m.generic, m.manufacturer, m.type, m.strength,
             m.requires_prescription AS requiresPrescription
        FROM medicines_fts
        JOIN medicines AS m ON m.rowid = medicines_fts.rowid
@@ -326,7 +331,7 @@ export async function listSaleInsights(
   // every Sale tab open and filter tap — and matched rows back by name, which
   // could drop a medicine whose name search returned more than 50 hits.
   const rows = sqliteConnection.getAllSync<FtsMedicineRow>(
-    `SELECT m.id AS medicineId, m.name, m.generic, m.manufacturer,
+    `SELECT m.id AS medicineId, m.name, m.generic, m.manufacturer, m.type, m.strength,
             m.requires_prescription AS requiresPrescription
        FROM medicines m
        LEFT JOIN sale_items si ON si.medicine_id=m.id AND si.shop_id=m.shop_id AND si.is_deleted=0

@@ -343,6 +343,33 @@ describe("what does not go into the cart", () => {
     expect(useCartStore.getState().items).toHaveLength(0);
   });
 
+  it("tells a tablet from a capsule of the same name (founder, 2026-11-27)", async () => {
+    const telmi = { generic: "Telmisartan", strength: "20mg" };
+    deps.listScanVocabulary.mockReset().mockResolvedValue([
+      medicine("telmi-tab", "Telmepress 20", { ...telmi, dosageForm: "tablet" }),
+      medicine("telmi-cap", "Telmepress 20", { ...telmi, dosageForm: "capsule" }),
+    ]);
+    renderScanner();
+    // No form printed: asked, each option labelled by its form.
+    hold(strip("Telmepress 20", "Telmisartan 20 mg"));
+    await screen.findByText("Which medicine is this?", {}, { timeout: 3_000 });
+    expect(screen.getByLabelText("Telmepress 20 · Capsule")).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("Telmepress 20 · Tablet"));
+    });
+    await waitFor(() => expect(quantityOf("telmi-tab")).toBe(1));
+    expect(quantityOf("telmi-cap")).toBe(0);
+    // The cart line carries the form and strength the cart shows.
+    expect(useCartStore.getState().items[0]).toMatchObject({ dosageForm: "tablet", strength: "20mg" });
+
+    // A capsule strip goes straight in as the capsule.
+    hold(NOTHING);
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    hold(strip("Telmepress 20", "Telmisartan 20 mg", "Capsule"));
+    await waitFor(() => expect(quantityOf("telmi-cap")).toBe(1), { timeout: 3_000 });
+    expect(quantityOf("telmi-tab")).toBe(1);
+  });
+
   it("does not start the camera loop when the inventory could not be loaded", async () => {
     deps.listScanVocabulary.mockReset().mockRejectedValue(new Error("db closed"));
     renderScanner();

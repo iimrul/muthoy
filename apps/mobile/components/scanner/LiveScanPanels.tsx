@@ -1,8 +1,11 @@
 import { Pressable, ScrollView, Text, View } from "react-native";
 import Feather from "@expo/vector-icons/Feather";
 import type { Paisa } from "@muthoy/types";
+import { DOSAGE_FORM_LABEL, normalizeDosageForm } from "../../domain/dosageForm";
 import type { ScanVocabularyEntry } from "../../domain/stripMatcher";
+import type { CatalogKey } from "../../i18n/catalog";
 import { useI18n } from "../../state/localeStore";
+import { DosageFormTag } from "../medicine/DosageFormBadge";
 
 // components/scanner/LiveScanPanels.tsx — the presentational pieces of the live
 // strip scanner: the notice at the top, the "which one?" choice, and the cart
@@ -61,7 +64,13 @@ export function LiveScanNoticeBanner({
 }
 
 function describeOption(option: ScanVocabularyEntry): string {
-  return [option.strength, option.generic, option.manufacturer].filter(Boolean).join(" · ");
+  return [option.generic, option.manufacturer].filter(Boolean).join(" · ");
+}
+
+/** "Telmepress 20 · Capsule": two same-name options must not read alike. */
+function optionLabel(option: ScanVocabularyEntry, t: (key: CatalogKey) => string): string {
+  const form = normalizeDosageForm(option.dosageForm);
+  return form && form !== "other" ? `${option.name} · ${t(DOSAGE_FORM_LABEL[form])}` : option.name;
 }
 
 export function LiveScanChoices({
@@ -83,11 +92,12 @@ export function LiveScanChoices({
           disabled={!option.isSellable}
           onPress={() => onChoose(option)}
           accessibilityRole="button"
-          accessibilityLabel={option.name}
+          accessibilityLabel={optionLabel(option, t)}
           accessibilityState={{ disabled: !option.isSellable }}
-          className="rounded-xl border border-fieldBorder p-3 active:opacity-70 disabled:opacity-40"
+          className="gap-1 rounded-xl border border-fieldBorder p-3 active:opacity-70 disabled:opacity-40"
         >
           <Text className="font-sans-semibold text-base text-richBlack">{option.name}</Text>
+          <DosageFormTag type={option.dosageForm} strength={option.strength} />
           <Text className="font-sans text-xs text-midGray">
             {option.isSellable ? describeOption(option) : t("liveScanOutOfStock")}
           </Text>

@@ -221,6 +221,7 @@ export default defineConfig({
       "apps/mobile/components/expenses/*.test.ts",
       "apps/mobile/components/expenses/*.test.tsx",
       "apps/mobile/components/suppliers/*.test.tsx",
+      "apps/mobile/components/medicine/*.test.tsx",
       // dev/ holds production-disabled instrumentation only (auth timing,
       // runtime diagnostics — both inert unless __DEV__); H-5 deleted the DEV
       // registration harness that also lived there. See dev/README.md.
