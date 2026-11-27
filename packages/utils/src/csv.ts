@@ -1,7 +1,25 @@
 export const MAX_INVENTORY_CSV_BYTES = 2 * 1024 * 1024;
 export const MAX_INVENTORY_CSV_ROWS = 1000;
 
-export function parseCsv(text: string, maxRows = MAX_INVENTORY_CSV_ROWS): string[][] {
+export interface ParseCsvOptions {
+  /**
+   * Keep blank lines as empty rows (`[]`) so a caller can number rows the way
+   * the spreadsheet shows them. Blank rows never count toward the row limit or
+   * the column-width check.
+   */
+  keepBlankRows?: boolean;
+  /**
+   * Return rows of differing widths instead of refusing the file, so a caller
+   * can name the row an unquoted comma split.
+   */
+  allowRaggedRows?: boolean;
+}
+
+export function parseCsv(
+  text: string,
+  maxRows = MAX_INVENTORY_CSV_ROWS,
+  options: ParseCsvOptions = {},
+): string[][] {
   if (new TextEncoder().encode(text).length > MAX_INVENTORY_CSV_BYTES) throw new Error('CSV exceeds 2 MiB');
   // A LEADING BOM IS NOT PART OF THE FIRST FIELD.
   //
@@ -17,6 +35,10 @@ export function parseCsv(text: string, maxRows = MAX_INVENTORY_CSV_ROWS): string
   let row: string[] = [];
   let field = '';
   let quoted = false;
+  const endRow = (): void => {
+    if (row.some((value) => value.length > 0)) rows.push(row);
+    else if (options.keepBlankRows) rows.push([]);
+  };
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
     if (quoted) {
@@ -28,15 +50,18 @@ export function parseCsv(text: string, maxRows = MAX_INVENTORY_CSV_ROWS): string
     else if (char === '\n' || char === '\r') {
       if (char === '\r' && text[index + 1] === '\n') index += 1;
       row.push(field); field = '';
-      if (row.some((value) => value.length > 0)) rows.push(row);
+      endRow();
       row = [];
     } else field += char;
   }
   if (quoted) throw new Error('Unclosed quoted CSV field');
   row.push(field);
-  if (row.some((value) => value.length > 0)) rows.push(row);
-  if (Math.max(0, rows.length - 1) > maxRows) throw new Error(`CSV exceeds ${maxRows} data rows`);
-  const width = rows[0]?.length ?? 0;
-  if (rows.some((value) => value.length !== width)) throw new Error('CSV rows have inconsistent columns');
+  endRow();
+  const filled = rows.filter((value) => value.length > 0);
+  if (Math.max(0, filled.length - 1) > maxRows) throw new Error(`CSV exceeds ${maxRows} data rows`);
+  const width = filled[0]?.length ?? 0;
+  if (!options.allowRaggedRows && filled.some((value) => value.length !== width)) {
+    throw new Error('CSV rows have inconsistent columns');
+  }
   return rows;
 }

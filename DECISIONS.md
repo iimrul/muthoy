@@ -6261,3 +6261,63 @@ OCR এটা কিভাবে আইডেন্টিফাই করতে 
   - Vocabulary on real SQLite reads `type`.
   - Tag, icon and picker components.
   - Mutation run: 8 of 8 caught.
+
+## 2026-11-27 — CSV import: a template, a file picker, and every problem at once
+
+Founder item 2 ("Inventory তে prototype web এ একটা সিস্টেম ছিলো বাল্কে
+ইনভেন্টরিতে এড করার জন্য "Import CSV" এবং একটা টেমপ্লেট দেওয়া থাকতো কি কি
+দরকার তা যাতে ঠিকঠাক আসে").
+
+- **What did not change.**
+  - The import is still owner-only, all-or-nothing, and confirmed by
+    fingerprint.
+  - It travels as the same one `inventory_import` sync group the server
+    already validates.
+  - The only new value written is `medicines.type`, now stored as the
+    canonical form key ("Tab." becomes "tablet").
+  - No migration, no sync change, no server change.
+- **Template** (`domain/inventoryCsvTemplate.ts`):
+  - the twelve columns the importer reads, with two example rows (a tablet
+    and a capsule);
+  - a BOM, so Excel keeps Bangla names;
+  - shared through the system share sheet (`expo-sharing`).
+  - The example rows use batch `EXAMPLE-…`, which the importer refuses, so a
+    template imported as downloaded does not create 100 phantom Napa.
+  - A test imports the filled template through the real importer, so the
+    template and the importer cannot drift apart.
+- **File picker:**
+  - `File.pickFileAsync` (expo-file-system, no new dependency);
+  - an Excel workbook is refused with "Save As → CSV UTF-8";
+  - files over 2 MB are refused;
+  - pasting stays as a fallback.
+- **Every problem at once.**
+  - The importer no longer stops at the first bad row. It lists each row and
+    column (`InventoryCsvError.issues`, codes in `domain/inventoryCsvIssue.ts`),
+    shown in Bangla as "সারি ৩: তারিখ YYYY-MM-DD আকারে লিখুন (expiry_date)".
+  - Row numbers are the spreadsheet's own:
+    - blank lines are kept for numbering (`parseCsv` gained opt-in
+      `keepBlankRows`; every other caller is unchanged);
+    - a row that an unquoted comma split is named (`allowRaggedRows`);
+    - before this, any such file failed whole with no row number.
+  - Excel's spelled-out headers ("Batch No", "Expiry Date (YYYY-MM-DD)"), a
+    trailing empty column and blank rows all read correctly.
+  - Over 1,000 rows, an unclosed quote and over 2 MB each get their own
+    message.
+- **Expiry stays strict YYYY-MM-DD.** Excel rewrites dates as 31/12/2027 or
+  12/31/2027, and the two cannot be told apart for days 1–12. A wrong guess
+  would break FEFO (rule 3), so such dates are refused with the format to
+  use, never guessed.
+- **Screen:**
+  - three steps: template, file, check and import;
+  - a summary of new medicines, batches and total units;
+  - the first 20 rows, with form tag, batch, quantity, price and new/new-batch;
+  - all text in the catalogue (Bangla and English).
+- **Tests.**
+  - Real SQLite (12): template refused as downloaded, then imported once
+    filled; multi-row issues with nothing written; duplicate rows; every
+    missing column; no rows; existing batch together with row problems; the
+    Excel shape (BOM, CRLF, headers, blank rows, trailing column); a split
+    row; short rows; unclosed quote; over 1,000 rows; empty form.
+  - Screen (9) and `parseCsv` options (4). Admin `parseCsv` callers pass
+    unchanged.
+  - Mutation run: 10 of 10 caught.
