@@ -45,3 +45,12 @@ export function playScanBeep(): void {
     }
   });
 }
+
+/**
+ * A confirmed sale. The prototype's checkout plays the very same 800 Hz /
+ * 150 ms tone (Checkout.tsx playConfirmationBeep), so it shares the asset and
+ * the player — and the same rules: silent mode respected, never throws.
+ */
+export function playSaleBeep(): void {
+  playScanBeep();
+}

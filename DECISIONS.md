@@ -6211,3 +6211,40 @@ the low-stock card only counts medicines with some stock left, so it said
   - Mutation run: 12 of 13 caught. The one survivor is the `created` guard
     on the banner, which only matters if two checks race; the check queue
     already prevents that.
+
+## 2026-11-27 — Faster selling: no false re-confirm, success screen returns by itself
+
+Founder's items 3, 4 and 5 ("১,২,৩,৪ সব ঠিক করো", plus the prototype's post-sale flow).
+
+- **Item 4: a FEFO spill is not a price change.**
+  - The cart quotes each medicine on its FEFO batch. When that batch held fewer
+    units than were sold, the sale drew the rest from the next batch and still
+    forced "মূল্য বা স্টক বদলেছে, আবার নিশ্চিত করুন", even at the same price
+    and the same total (device test: 12 SYNTH = 1 + 11).
+  - `createSaleTransaction` now compares the quote the way the customer sees
+    it: the quantity of each medicine at each unit price
+    (`customerQuoteDiffers`), plus the total as before.
+  - A different price, an ended promotion or a different quantity still asks
+    again.
+  - Callers that send no `medicineId` keep the exact per-batch comparison.
+  - The sale itself is unchanged: same FEFO allocation, same rows.
+  - Tests: real SQLite. Same-price spill passes. A dearer second batch, a
+    legacy caller, and a quantity mismatch all still reject. Mutation run:
+    4 of 4 caught.
+- **Item 3: clipped digits.**
+  - Android's vertical TextInput padding clipped digits in fixed-height boxes
+    (cart quantity "1" read "⊥").
+  - `AppTextInput` removes that padding for a single-line field that fixes its
+    height and sets no vertical padding of its own (13 fields).
+- **Item 5: after a sale.**
+  - The prototype's 800 Hz / 150 ms beep plays: the same asset as the scanner,
+    silent mode respected, never throws.
+  - A green card shows the total and, for cash, "ফেরত দিন ৳…" in large type.
+  - It returns to Sale by itself after 3 s. The prototype used 0.5 s, but the
+    change amount must be readable.
+  - A tap stops the countdown. "নতুন বিক্রয়" and the back button go straight
+    to Sale, never back to the emptied cart.
+  - Leaving the screen never pulls the person back.
+  - Tests: countdown, pause, back, unmount, change line; the beep plays once
+    per saved sale and never on a failed or stale commit. Mutation run:
+    5 of 5 caught.

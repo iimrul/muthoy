@@ -206,6 +206,8 @@ export default defineConfig({
       "apps/mobile/navigation/**/*.test.ts",
       "apps/mobile/components/scanner/*.test.tsx",
       "apps/mobile/components/ui/PinPad.test.tsx",
+      // Fixed-height single-line fields: no clipped digits (2026-11-27).
+      "apps/mobile/components/ui/AppTextInput.test.ts",
       // Auth parity: the shared auth primitives (shell, notices, buttons, the
       // +880 phone field, status/loader screens, the logout sheet) and the
       // PinPad/OtpInput visual variants.
@@ -378,6 +380,8 @@ export default defineConfig({
       "apps/mobile/state/useMultiShopAccess.test.tsx",
       "apps/mobile/state/businessDayStore.test.ts",
       "apps/mobile/tests/sale/checkout.test.tsx",
+      // Item 5: the confirmation returns to Sale by itself.
+      "apps/mobile/tests/sale/confirmation.test.tsx",
       "apps/mobile/tests/sale/cart-screen.test.tsx",
       // W2-01 / gate E9: the resumed-held-draft boundary, driven through the
       // real scanner and the real capture-cleanup helper.

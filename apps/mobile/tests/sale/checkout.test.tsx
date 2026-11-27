@@ -110,6 +110,10 @@ vi.mock('../../db/saleDrafts', () => ({
   createCancelledSaleDraft: deps.createCancelledSaleDraft,
 }));
 vi.mock('../../native/notifications', () => ({ runNotificationChecks: deps.runNotificationChecks }));
+// The confirmation beep (item 5, 2026-11-27): once per SAVED sale, never on a
+// commit that did not happen.
+const sound = vi.hoisted(() => ({ playSaleBeep: vi.fn() }));
+vi.mock('../../native/scanSound', () => ({ playSaleBeep: sound.playSaleBeep, playScanBeep: vi.fn() }));
 // state/switchUser.ts imports stopSyncEngine from this same module, so the
 // real switch below runs against the mock rather than the native engine.
 vi.mock('../../sync', () => ({
@@ -204,6 +208,7 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
 
     await confirmCashSale();
     expect(staffIdOfLastSale()).toBe(OWNER.userId);
+    expect(sound.playSaleBeep).toHaveBeenCalledTimes(1);
 
     // The real handover: cart cleared, session ended, sync stopped.
     act(() => switchUser());
@@ -261,6 +266,7 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
     expect(deps.createSaleTransaction).toHaveBeenCalledTimes(1);
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(deps.triggerSyncNow).not.toHaveBeenCalled();
+    expect(sound.playSaleBeep).not.toHaveBeenCalled();
   });
 
   // The case a userId comparison structurally cannot catch: the id is the
@@ -298,6 +304,7 @@ describe('checkout attributes a sale to whoever is logged in at commit time', ()
     expect(deps.createSaleTransaction).toHaveBeenCalledTimes(1);
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(deps.triggerSyncNow).not.toHaveBeenCalled();
+    expect(sound.playSaleBeep).not.toHaveBeenCalled();
   });
 
   // db/sales.ts awaits requirePermission before opening its transaction. The
@@ -386,6 +393,7 @@ describe('checkout remediation', () => {
     expect(deps.createSaleTransaction).toHaveBeenCalledTimes(1);
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(deps.triggerSyncNow).not.toHaveBeenCalled();
+    expect(sound.playSaleBeep).not.toHaveBeenCalled();
   });
 
   it('requires stale-quote reconfirmation again after any cart edit', async () => {

@@ -39,6 +39,7 @@ import {
 import type { SalePaymentRequest } from "../../domain/salePayment";
 import { getDeviceId } from "../../native/deviceId";
 import { runNotificationChecks } from "../../native/notifications";
+import { playSaleBeep } from "../../native/scanSound";
 import {
   useCartStore,
   type CartLine,
@@ -308,10 +309,14 @@ export default function CheckoutScreen() {
           quoteConfirmed && refreshedTotal !== null && refreshedAllocation
             ? { total: refreshedTotal, allocation: refreshedAllocation }
             : undefined,
+        // medicineId: the quote is compared as the customer sees it, so FEFO
+        // drawing the same units from a second batch at the same price no
+        // longer forces a re-confirm (db/sales.ts customerQuoteDiffers).
         quotedAllocation: items.map((item) => ({
           batchId: item.batchId,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
+          medicineId: item.medicineId,
         })),
         prescription: {
           prescriptionNo: prescriptionNo.trim() || undefined,
@@ -329,6 +334,9 @@ export default function CheckoutScreen() {
         })),
       });
       clearCart();
+      // The prototype's confirmation beep: the sale is saved, the cashier can
+      // look up from the screen (fire-and-forget, silent on silent mode).
+      playSaleBeep();
       void triggerSyncNow(session.shopId);
       void runNotificationChecks(session.shopId).catch(() => undefined);
       if (!guard.isStale())
