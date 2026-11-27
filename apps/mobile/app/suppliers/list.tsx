@@ -1,19 +1,14 @@
 import { useCallback, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { AppTextInput as TextInput } from '../../components/ui/AppTextInput';
 import { router, useFocusEffect } from 'expo-router';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  supplierFieldsSchema,
-  type SupplierFieldsInput,
-  type SupplierFieldsOutput,
-} from '@muthoy/validation';
+import { supplierFieldsSchema } from '@muthoy/validation';
 import { ZERO_PAISA } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
-import { FormField } from '../../components/forms/FormField';
 import { AccessDenied } from '../../components/ui/AccessDenied';
 import { StandardHeader } from '../../components/ui/StandardHeader';
+import { NewSupplierSheet, type NewSupplierInput } from '../../components/suppliers/NewSupplierSheet';
+import { listManufacturerSuggestions } from '../../db/inventory';
 import { createSupplier, listSuppliers, type SupplierListItem } from '../../db/suppliers';
 import { userFacingError } from '../../i18n/display';
 import { captureSessionFor } from '../../state/sessionGuard';
@@ -35,12 +30,7 @@ export default function SupplierListScreen() {
   const [query, setQuery] = useState('');
   const [supplierRows, setSupplierRows] = useState<SupplierListItem[]>([]);
   const [isAdding, setIsAdding] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { control, handleSubmit, reset } = useForm<SupplierFieldsInput, unknown, SupplierFieldsOutput>({
-    resolver: zodResolver(supplierFieldsSchema),
-    defaultValues: { name: '', phone: '', address: '', email: '', contactPerson: '', manufacturer: '', notes: '' },
-  });
 
   const reload = useCallback(async (searchText: string) => {
     if (!session || !isAllowed) {
@@ -60,13 +50,9 @@ export default function SupplierListScreen() {
     void reload(query);
   }, [query, reload]));
 
-  const closeAddSheet = useCallback(() => {
-    setIsAdding(false);
-    setError(null);
-    reset();
-  }, [reset]);
-
-  const handleCreate = useCallback(async (values: SupplierFieldsOutput) => {
+  // Errors (a duplicate, a failed save) are shown inside the sheet itself, so
+  // this only has to save and go to the new supplier.
+  const handleCreate = useCallback(async (input: NewSupplierInput) => {
     if (!session || !isAllowed) {
       return;
     }
@@ -74,25 +60,15 @@ export default function SupplierListScreen() {
     if (!guard) {
       return;
     }
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      const supplier = await createSupplier(session.shopId, session.userId, values, guard.isStillActive);
-      void triggerSyncNow(session.shopId);
-      guard.ifLive(() => {
-        reset();
-        setIsAdding(false);
-      });
-      if (guard.isStillActive()) {
-        // SU-10: navigate straight to the new supplier's detail.
-        router.push({ pathname: '/suppliers/detail', params: { supplierId: supplier.id } });
-      }
-    } catch (caught) {
-      guard.ifLive(() => setError(userFacingError(caught, 'supplierSaveFailedLabel', t)));
-    } finally {
-      setIsSubmitting(false);
+    const fields = supplierFieldsSchema.parse({ ...input, address: '', email: '', contactPerson: '' });
+    const supplier = await createSupplier(session.shopId, session.userId, fields, guard.isStillActive);
+    void triggerSyncNow(session.shopId);
+    guard.ifLive(() => setIsAdding(false));
+    if (guard.isStillActive()) {
+      // SU-10: navigate straight to the new supplier's detail.
+      router.push({ pathname: '/suppliers/detail', params: { supplierId: supplier.id } });
     }
-  }, [isAllowed, reset, session, t]);
+  }, [isAllowed, session]);
 
   if (!session || !isAllowed) {
     return <AccessDenied />;
@@ -171,35 +147,15 @@ export default function SupplierListScreen() {
         <Text className="font-sans-bold text-2xl text-white">+</Text>
       </Pressable>
 
-      <Modal visible={isAdding} transparent animationType="slide" onRequestClose={closeAddSheet}>
-        <Pressable onPress={closeAddSheet} className="flex-1 justify-end bg-black/50">
-          <Pressable className="max-h-[85%] gap-4 rounded-t-3xl bg-white p-5">
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerClassName="gap-4">
-              <View className="flex-row items-center justify-between">
-                <Text className="font-sans-bold text-lg text-richBlack">{t('addSupplierLabel')}</Text>
-                <Pressable onPress={closeAddSheet} accessibilityRole="button" accessibilityLabel="Close" hitSlop={8}>
-                  <Text className="font-sans-semibold text-xl text-midGray">✕</Text>
-                </Pressable>
-              </View>
-              <FormField control={control} name="name" label={t('supplierNameLabel')} />
-              <FormField control={control} name="phone" label={t('phone')} keyboardType="phone-pad" />
-              <FormField control={control} name="address" label={t('address')} />
-              <FormField control={control} name="email" label={t('email')} keyboardType="email-address" autoCapitalize="none" />
-              <FormField control={control} name="contactPerson" label={t('contactPersonLabel')} />
-              <FormField control={control} name="manufacturer" label={t('manufacturerCompanyLabel')} />
-              <FormField control={control} name="notes" label={t('notesLabel')} />
-              {error ? <Text className="font-sans text-sm text-error">{error}</Text> : null}
-              <Pressable
-                onPress={handleSubmit(handleCreate)}
-                disabled={isSubmitting}
-                className="items-center rounded-2xl bg-brand-green py-4 disabled:opacity-50"
-              >
-                <Text className="font-sans-bold text-white">{isSubmitting ? t('savingChangesLabel') : t('saveSupplierLabel')}</Text>
-              </Pressable>
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* The prototype's Add Supplier sheet (founder, 2026-11-27): name, +880
+          phone, company and a note. Address, email and contact person stay
+          editable on the supplier's own page. */}
+      <NewSupplierSheet
+        visible={isAdding}
+        onClose={() => setIsAdding(false)}
+        onSave={handleCreate}
+        loadManufacturerSuggestions={session ? (query) => listManufacturerSuggestions(session.shopId, query) : undefined}
+      />
     </View>
   );
 }

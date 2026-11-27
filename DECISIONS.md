@@ -6211,3 +6211,45 @@ the low-stock card only counts medicines with some stock left, so it said
   - Mutation run: 12 of 13 caught. The one survivor is the `created` guard
     on the banner, which only matters if two checks race; the check queue
     already prevents that.
+
+## 2026-11-27 — Suppliers like the prototype; a medicine can be added without a supplier (opening stock)
+
+Founder item 8 ("prototype web follow করো … একদম ঐভাবে করো"; "মেডিসিন এড করার
+সময় সাপ্লায়ার এড করাটা অপশনাল করে দাও") and decision B2.
+
+- **One Add Supplier sheet** (`components/suppliers/NewSupplierSheet.tsx`), the
+  prototype's own fields:
+  - name, a +880 phone, company with suggestions, and an optional note;
+  - name and phone are required;
+  - the same name+phone twice is refused with "এই সরবরাহকারী ইতিমধ্যে আছে"
+    (`DuplicateSupplierError`).
+  - Used by the Suppliers page "+" (which replaces its 7-field form; address,
+    email and contact person stay editable on the supplier page) and by the
+    supplier picker inside Add Medicine. The "+" itself was hidden under the
+    bottom bar; PR #23's shell clearance fixes that.
+- **Supplier optional (Owner).**
+  - Without a supplier the stock is opening stock (আগের মজুদ): no purchase
+    invoice, no supplier due, and nothing out of the cash drawer. The form
+    says so and hides the payment-method choice.
+  - It travels as a one-row `inventory_import` (`createOpeningStock`):
+    header, optional new medicine, batch, one `csv_import` movement bound to
+    the header, and one audit row. That is exactly the graph the server
+    already validates for the Owner's CSV import, so there is no server
+    change.
+  - A new medicine still needs the same-name review. A repeated batch is
+    refused.
+- **Staff (B2), not yet.**
+  - The server accepts `inventory_import` from the Owner only
+    (`sync_apply_operation`, `sync_row_permitted`).
+  - A staff member's supplier-less add needs a server migration (DEV first,
+    PROD only with approval), which lands separately. Until then the form asks
+    staff to choose a supplier and says why.
+- **Tests.**
+  - Real SQLite: new medicine and existing-medicine opening stock;
+    5-row/4-row group; no purchases/payments/drawer rows; repeated batch;
+    same name; non-owner; zero quantity; a capsule beside a tablet after
+    confirmation.
+  - Form: Owner saves without a supplier and sees no payment method; staff is
+    asked for a supplier; choosing one restores the purchase path; the
+    duplicate supplier message.
+  - Mutation run: 6 of 6 caught.

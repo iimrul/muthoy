@@ -378,3 +378,192 @@ export async function importInventoryCsv(
   });
   return { importId, rowCount: parsed.length };
 }
+
+/**
+ * Item 12 (founder, 2026-11-27): a supplier is OPTIONAL when adding a medicine.
+ * Stock added without one is "opening stock" (আগের মজুদ) — stock the shop
+ * already had: no purchase invoice, no supplier due, and NOTHING taken from
+ * the cash drawer. It travels as a one-row `inventory_import` operation, the
+ * exact graph the server already validates for the Owner's CSV import
+ * (header + optional new medicine + batch + one bound `csv_import` movement +
+ * one audit row), so this needs no server change. Owner-only, like that
+ * import; a staff member's supplier-less add needs the server extension
+ * (decision B2), which lands separately.
+ */
+export interface OpeningStockInput {
+  shopId: string;
+  actorUserId: string;
+  isStillActive: () => boolean;
+  /** Restock an existing medicine; its identity fields are then ignored. */
+  existingMedicineId?: string;
+  /** Explicit acknowledgement after reviewing same-name shop medicines. */
+  confirmDistinctMedicine?: boolean;
+  medicine?: {
+    name: string;
+    generic?: string;
+    manufacturer?: string;
+    strength?: string;
+    type?: string;
+    unitOfMeasure: string;
+    requiresPrescription: boolean;
+    threshold?: number;
+  };
+  batch: {
+    batchNo: string;
+    expiryDate: string | null;
+    quantity: number;
+    purchasePrice: Paisa;
+    salePrice: Paisa;
+  };
+}
+
+export async function createOpeningStock(
+  input: OpeningStockInput,
+): Promise<{ importId: string; medicineId: string; batchId: string }> {
+  await requireOwner(input.shopId, input.actorUserId);
+  const { batch } = input;
+  if (!Number.isSafeInteger(batch.quantity) || batch.quantity < 1)
+    throw new Error("Opening stock quantity must be a positive whole number");
+  if (!batch.batchNo.trim()) throw new Error("Batch number is required");
+  if (batch.expiryDate) assertIsoDate(batch.expiryDate);
+  if (!input.existingMedicineId && !input.medicine?.name.trim())
+    throw new Error("Medicine name is required");
+
+  const importId = generateId();
+  const batchId = generateId();
+  let medicineId = input.existingMedicineId ?? generateId();
+  db.transaction((tx) => {
+    assertSessionLive(input.isStillActive);
+    if (input.existingMedicineId) {
+      const existing = tx
+        .select({ id: medicines.id })
+        .from(medicines)
+        .where(and(
+          eq(medicines.id, input.existingMedicineId),
+          eq(medicines.shopId, input.shopId),
+          eq(medicines.isDeleted, false),
+        ))
+        .get();
+      if (!existing) throw new Error("Medicine does not belong to this shop");
+      medicineId = existing.id;
+      const duplicate = tx
+        .select({ id: batches.id })
+        .from(batches)
+        .where(and(
+          eq(batches.shopId, input.shopId),
+          eq(batches.medicineId, medicineId),
+          eq(batches.batchNo, batch.batchNo.trim()),
+        ))
+        .get();
+      if (duplicate) throw new Error("This batch already exists for the medicine");
+    } else if (!input.confirmDistinctMedicine) {
+      // A name is a warning, never proof of identity (same rule as a purchase).
+      const sameName = tx
+        .select({ id: medicines.id, name: medicines.name })
+        .from(medicines)
+        .where(and(eq(medicines.shopId, input.shopId), eq(medicines.isDeleted, false)))
+        .all()
+        .some((row) => normalized(row.name) === normalized(input.medicine!.name));
+      if (sameName) throw new Error("Review existing medicines before creating a distinct product");
+    }
+
+    const expectedCount = 1 + (input.existingMedicineId ? 0 : 1) + 1 + 1 + 1;
+    let sequence = 0;
+    const operation = (): SyncOperationGroup => ({
+      id: importId,
+      kind: "inventory_import",
+      sequence: sequence++,
+      expectedCount,
+    });
+    const now = new Date().toISOString();
+    const importValues = {
+      id: importId,
+      shopId: input.shopId,
+      // unique(shop_id, file_fingerprint): one opening-stock entry, one key.
+      fileFingerprint: `opening:${importId}`,
+      rowCount: 1,
+      status: "committed" as const,
+      createdBy: input.actorUserId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    tx.insert(inventoryImports).values(importValues).run();
+    recordChange(tx, {
+      shopId: input.shopId, table: "inventory_imports", rowId: importId,
+      op: "insert", payload: importValues, operation: operation(),
+    });
+
+    if (!input.existingMedicineId && input.medicine) {
+      const medicine = input.medicine;
+      const medicineValues = {
+        id: medicineId,
+        shopId: input.shopId,
+        name: medicine.name.trim(),
+        generic: medicine.generic?.trim() || null,
+        searchKey: searchKeyFor({ name: medicine.name.trim(), generic: medicine.generic?.trim() || null }),
+        manufacturer: medicine.manufacturer?.trim() || null,
+        type: medicine.type?.trim() || null,
+        strength: medicine.strength?.trim() || null,
+        unitOfMeasure: medicine.unitOfMeasure,
+        requiresPrescription: medicine.requiresPrescription,
+        threshold: medicine.threshold ?? 10,
+        lowStockThresholdOverride: medicine.threshold ?? null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      tx.insert(medicines).values(medicineValues).run();
+      recordChange(tx, {
+        shopId: input.shopId, table: "medicines", rowId: medicineId,
+        op: "insert", payload: medicineValues, operation: operation(),
+      });
+    }
+
+    const batchValues = {
+      id: batchId,
+      shopId: input.shopId,
+      medicineId,
+      batchNo: batch.batchNo.trim(),
+      expiryDate: batch.expiryDate,
+      stock: 0,
+      purchasePrice: batch.purchasePrice,
+      salePrice: batch.salePrice,
+      createdAt: now,
+      updatedAt: now,
+    };
+    tx.insert(batches).values(batchValues).run();
+    recordChange(tx, {
+      shopId: input.shopId, table: "batches", rowId: batchId,
+      op: "insert", payload: batchValues, operation: operation(),
+    });
+    addStock(tx, {
+      shopId: input.shopId,
+      batchId,
+      quantity: batch.quantity,
+      reason: "csv_import",
+      refId: importId,
+      createdBy: input.actorUserId,
+      operation: operation(),
+    });
+
+    const auditId = generateId();
+    const auditValues = {
+      id: auditId,
+      shopId: input.shopId,
+      actorId: input.actorUserId,
+      action: "inventory_opening_stock_added",
+      target: importId,
+      meta: JSON.stringify({ medicineId, batchId, quantity: batch.quantity }),
+      createdAt: now,
+      updatedAt: now,
+    };
+    tx.insert(auditLogs).values(auditValues).run();
+    recordChange(tx, {
+      shopId: input.shopId, table: "audit_logs", rowId: auditId,
+      op: "insert", payload: auditValues, operation: operation(),
+    });
+    assertSessionLive(input.isStillActive);
+    if (sequence !== expectedCount)
+      throw new Error("Opening stock operation count mismatch");
+  });
+  return { importId, medicineId, batchId };
+}
