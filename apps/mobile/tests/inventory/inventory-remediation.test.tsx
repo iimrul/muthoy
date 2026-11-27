@@ -21,6 +21,7 @@ interface StubProps {
   visible?: boolean;
   disabled?: boolean;
   accessibilityLabel?: string;
+  accessibilityState?: { selected?: boolean };
   placeholder?: string;
   placeholderTextColor?: string;
   className?: string;
@@ -47,12 +48,13 @@ vi.mock("react-native", () => ({
       },
       children,
     ),
-  Pressable: ({ children, onPress, accessibilityLabel, disabled, className }: StubProps) =>
+  Pressable: ({ children, onPress, accessibilityLabel, accessibilityState, disabled, className }: StubProps) =>
     createElement(
       "button",
       {
         onClick: onPress,
         "aria-label": accessibilityLabel,
+        "aria-pressed": accessibilityState?.selected,
         disabled,
         "data-class": className,
       },
@@ -627,9 +629,9 @@ describe("Add Medicine parity recovery", () => {
     expect((screen.getByLabelText("Strength") as HTMLInputElement).value).toBe(
       "500mg + 65mg",
     );
-    expect(
-      (screen.getByLabelText("Dosage form") as HTMLInputElement).value,
-    ).toBe("Tablet");
+    // The catalogue's free-text "Tablet" lands on the picker's canonical chip.
+    expect(screen.getByLabelText("Tablet").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByLabelText("Capsule").getAttribute("aria-pressed")).toBe("false");
     expect((screen.getByLabelText("Unit") as HTMLInputElement).value).toBe(
       "strip",
     );
@@ -663,7 +665,7 @@ describe("Add Medicine parity recovery", () => {
           generic: "Paracetamol + Caffeine",
           manufacturer: "Beximco Pharmaceuticals",
           strength: "500mg + 65mg",
-          type: "Tablet",
+          type: "tablet",
           unitOfMeasure: "strip",
           supplierId: "supplier-1",
           requiresPrescription: true,
@@ -728,9 +730,7 @@ describe("Add Medicine parity recovery", () => {
     expect((screen.getByLabelText("Strength") as HTMLInputElement).value).toBe(
       "500mg + 65mg",
     );
-    expect(
-      (screen.getByLabelText("Dosage form") as HTMLInputElement).value,
-    ).toBe("Tablet");
+    expect(screen.getByLabelText("Tablet").getAttribute("aria-pressed")).toBe("true");
     expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
   });
 
@@ -848,6 +848,8 @@ describe("Inventory action permissions and FEFO badge", () => {
           name: "Napa",
           generic: "Paracetamol",
           manufacturer: "Beximco",
+          type: "Tablet",
+          strength: "500mg",
           threshold: 10,
           totalStock: 9,
           sellableStock: 4,
@@ -928,6 +930,8 @@ describe("Inventory action permissions and FEFO badge", () => {
           name: "Probe",
           generic: null,
           manufacturer: null,
+          type: null,
+          strength: null,
           threshold: 5,
           totalStock: -2,
           sellableStock: 0,

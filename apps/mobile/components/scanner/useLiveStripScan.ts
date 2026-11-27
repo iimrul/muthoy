@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { AppState } from "react-native";
 import { matchStrip, type OcrTextLine, type StripIndex } from "../../domain/stripMatcher";
 import {
@@ -103,7 +103,9 @@ export function useLiveStripScan({
     onActionRef.current = onAction;
   }, [onAction]);
 
-  useEffect(() => {
+  // Layout, not passive: the ref must be armed in the same commit that shows
+  // the "hold a strip" prompt, or a reading pushed right then is dropped.
+  useLayoutEffect(() => {
     pushIndexRef.current = isScanning ? index : null;
   }, [index, isScanning]);
 

@@ -37,6 +37,8 @@ import type { Session } from "../../state/sessionStore";
 import { triggerSyncNow } from "../../sync";
 import { ExistingMedicinePicker } from "./ExistingMedicinePicker";
 import { SupplierPickerField } from "./SupplierPickerField";
+import { DosageFormPicker } from "../medicine/DosageFormPicker";
+import { normalizeDosageForm } from "../../domain/dosageForm";
 
 interface ManualEntryFormProps {
   session: Session;
@@ -174,7 +176,8 @@ export function ManualEntryForm({
       shouldDirty: true,
     });
     setValue("strength", initialMedicine.strength ?? "", { shouldDirty: true });
-    setValue("type", initialMedicine.type ?? "", { shouldDirty: true });
+    // The catalogue prints "Tablet", "Cap.", …; the picker stores the key.
+    setValue("type", normalizeDosageForm(initialMedicine.type) ?? "", { shouldDirty: true });
     if (initialMedicine.unitOfMeasure) {
       setValue("unitOfMeasure", initialMedicine.unitOfMeasure, {
         shouldDirty: true,
@@ -450,26 +453,21 @@ export function ManualEntryForm({
         />
       </View>
 
-      <View className="flex-row gap-3">
-        <View className="flex-1">
-          <FormField
-            control={control}
-            name="strength"
-            label={t("strengthLabel")}
-            placeholder={t("strengthPlaceholder")}
-            prototypeStyle
-          />
-        </View>
-        <View className="flex-1">
-          <FormField
-            control={control}
-            name="type"
-            label={t("dosageFormLabel")}
-            placeholder={t("dosageFormPlaceholder")}
-            prototypeStyle
-          />
-        </View>
-      </View>
+      <FormField
+        control={control}
+        name="strength"
+        label={t("strengthLabel")}
+        placeholder={t("strengthPlaceholder")}
+        prototypeStyle
+      />
+      {/* Picked, never typed: tablet vs capsule must be one of a known list. */}
+      <Controller
+        control={control}
+        name="type"
+        render={({ field: { value, onChange } }) => (
+          <DosageFormPicker value={value} onChange={onChange} />
+        )}
+      />
       <FormField
         control={control}
         name="unitOfMeasure"

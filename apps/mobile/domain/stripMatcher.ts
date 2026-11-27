@@ -16,11 +16,14 @@
 //      removes it ("Progut MUPS 40" when the strip says 20 mg).
 //   3. The most specific name wins: a Napa Extra strip also contains "Napa", but
 //      Napa Extra matched more words, so plain Napa is dropped.
-//   4. Strength, then the manufacturer, separate what is left.
+//   4. Strength, then the dosage form printed on the strip ("Capsule" picks
+//      Telmepress 20 capsule over Telmepress 20 tablet), then the manufacturer,
+//      separate what is left.
 //   5. Anything still ambiguous is offered as a choice, never guessed. So is a
 //      winner with a more specific sibling the strip shows evidence of
 //      (plain Napa while "Caffeine 65 mg" is visible — the "Extra" box was
-//      probably missed).
+//      probably missed), and a winner whose form the strip contradicts (only
+//      the tablet is stocked, the strip says "Capsule").
 //
 // Pure: no React, native or DB imports (mirrors domain/fefo.ts). Bengali
 // inventory names take part through the same fold W2-03 search uses
@@ -28,6 +31,7 @@
 // on-device model reads Latin script only, so the strip side is always Latin.
 
 import { medicineSearchKey, normalizeBengali } from "@muthoy/utils";
+import { dosageFormsInText, normalizeDosageForm, type DosageForm } from "./dosageForm";
 import { levenshteinDistance } from "./medicineMatch";
 
 export interface ScanVocabularyEntry {
@@ -36,6 +40,8 @@ export interface ScanVocabularyEntry {
   generic: string | null;
   manufacturer: string | null;
   strength: string | null;
+  /** `medicines.type` as stored (free text on old rows); absent = unknown. */
+  dosageForm?: string | null;
   requiresPrescription: boolean;
   /** At least one batch with stock that has not expired. */
   isSellable: boolean;
@@ -60,6 +66,8 @@ interface IndexedMedicine {
   strengths: readonly number[];
   genericTokens: readonly string[];
   makerTokens: readonly string[];
+  /** Null when unknown — including "other", which no strip word can confirm. */
+  form: DosageForm | null;
   /** False when every brand word is a variant word ("Forte", "Plus"...). */
   isDistinctive: boolean;
 }
@@ -163,6 +171,14 @@ function maxEditsFor(length: number): number {
 
 // ── index ───────────────────────────────────────────────────────────────────
 
+/** The stored form, or — on rows saved before the picker — one named in the name ("Napa Tab"). */
+function medicineForm(entry: ScanVocabularyEntry): DosageForm | null {
+  const stored = normalizeDosageForm(entry.dosageForm);
+  if (stored && stored !== "other") return stored;
+  const named = dosageFormsInText(entry.name);
+  return named.length === 1 ? (named[0] ?? null) : null;
+}
+
 function indexMedicine(entry: ScanVocabularyEntry): IndexedMedicine {
   const brandTokens = distinct(
     foldedWords(entry.name).filter(
@@ -184,6 +200,7 @@ function indexMedicine(entry: ScanVocabularyEntry): IndexedMedicine {
         (word) => word.length >= 3 && !MAKER_NOISE_WORDS.has(word),
       ),
     ),
+    form: medicineForm(entry),
     isDistinctive: brandTokens.some(
       (word) => word.length >= 3 && !VARIANT_WORDS.has(word),
     ),
@@ -219,6 +236,8 @@ interface OcrEvidence {
   wordsByLength: ReadonlyMap<number, readonly string[]>;
   lines: readonly EvidenceLine[];
   explicitStrengths: ReadonlySet<number>;
+  /** Dosage forms printed on the strip ("Capsule", "Tab."). */
+  forms: ReadonlySet<DosageForm>;
   maxHeight: number;
   isMedicineLike: boolean;
 }
@@ -241,6 +260,7 @@ function addSighting(
 function readEvidence(rawLines: readonly OcrTextLine[]): OcrEvidence {
   const words = new Map<string, WordSighting>();
   const explicitStrengths = new Set<number>();
+  const forms = new Set<DosageForm>();
   let isMedicineLike = false;
   const lines = rawLines.map((raw, lineIndex): EvidenceLine => {
     const text = normalizeBengali(fixOcrDigits(raw.text));
@@ -256,6 +276,7 @@ function readEvidence(rawLines: readonly OcrTextLine[]): OcrEvidence {
         const value = Number(match[1]);
         if (value > 0 && value <= MAX_STRENGTH_VALUE) explicitStrengths.add(value);
       }
+      dosageFormsInText(text).forEach((form) => forms.add(form));
     }
     if (MEDICINE_WORDS.test(text)) isMedicineLike = true;
     return { words: lineWords, numbers: numbersIn(text), isRegistration, height: raw.height };
@@ -269,6 +290,7 @@ function readEvidence(rawLines: readonly OcrTextLine[]): OcrEvidence {
     wordsByLength,
     lines,
     explicitStrengths,
+    forms,
     maxHeight: Math.max(0, ...rawLines.map((line) => line.height)),
     isMedicineLike: isMedicineLike || explicitStrengths.size > 0,
   };
@@ -319,8 +341,15 @@ interface Candidate {
   occurrences: number;
   exactCount: number;
   strength: StrengthStatus;
+  form: StrengthStatus;
   hasMakerHit: boolean;
   score: number;
+}
+
+/** Unknown unless both the medicine's form and a form on the strip are known. */
+function formStatus(medicine: IndexedMedicine, evidence: OcrEvidence): StrengthStatus {
+  if (!medicine.form || evidence.forms.size === 0) return "unknown";
+  return evidence.forms.has(medicine.form) ? "match" : "conflict";
 }
 
 function strengthStatus(
@@ -360,6 +389,7 @@ function scoreCandidate(
   const occurrences = Math.min(...hits.map((hit) => hit.lineIndexes.size));
   const exactCount = hits.filter((hit) => hit.isExact).length;
   const strength = strengthStatus(medicine, evidence, brandLines);
+  const form = formStatus(medicine, evidence);
   const hasMakerHit = medicine.makerTokens.some((token) => find(token) !== null);
   const genericHits = medicine.genericTokens.filter((token) => find(token) !== null).length;
   const isLargeText = [...brandLines].some(
@@ -369,11 +399,12 @@ function scoreCandidate(
     medicine.brandTokens.length * 10 +
     exactCount * 3 +
     (strength === "match" ? 8 : 0) +
+    (form === "match" ? 6 : 0) +
     (hasMakerHit ? 4 : 0) +
     genericHits * 2 +
     Math.min(occurrences, 4) +
     (isLargeText && evidence.maxHeight > 0 ? 2 : 0);
-  return { medicine, brandLines, occurrences, exactCount, strength, hasMakerHit, score };
+  return { medicine, brandLines, occurrences, exactCount, strength, form, hasMakerHit, score };
 }
 
 // ── deciding ────────────────────────────────────────────────────────────────
@@ -417,11 +448,13 @@ function siblingsWithEvidence(
 
 /**
  * The strip shows something the winner does not explain — a printed strength it
- * does not have ("65 mg" for plain Napa) or a formulation word beside its name
- * ("Napa® Extra"). The shop may simply not stock the product actually shown, so
- * the winner is offered, never added on its own.
+ * does not have ("65 mg" for plain Napa), a formulation word beside its name
+ * ("Napa® Extra") or another dosage form ("Capsule" for a tablet). The shop may
+ * simply not stock the product actually shown, so the winner is offered, never
+ * added on its own.
  */
 function hasUnexplainedEvidence(winner: Candidate, evidence: OcrEvidence): boolean {
+  if (winner.form === "conflict") return true;
   const { strengths, brandTokens } = winner.medicine;
   const isStrengthUnexplained =
     strengths.length > 0 && [...evidence.explicitStrengths].some((n) => !strengths.includes(n));
@@ -460,7 +493,12 @@ function decideMany(
   find: TokenFinder,
 ): StripMatchResult {
   const strengthMatched = candidates.filter((c) => c.strength === "match");
-  const pool = strengthMatched.length > 0 ? strengthMatched : candidates;
+  const byStrength = strengthMatched.length > 0 ? strengthMatched : candidates;
+  // Same name and strength, two forms (Telmepress 20 tablet + capsule): the
+  // form printed on the strip decides. Without a form match nothing is
+  // dropped — an unknown form is never guessed to be the printed one.
+  const formMatched = byStrength.filter((c) => c.form === "match");
+  const pool = formMatched.length > 0 ? formMatched : byStrength;
   if (pool.length === 1 && pool[0]) return decideSingle(pool[0], index, evidence, find);
   const makerHits = pool.filter((c) => c.hasMakerHit);
   const othersNameAMaker = pool.every((c) => c.hasMakerHit || c.medicine.makerTokens.length > 0);

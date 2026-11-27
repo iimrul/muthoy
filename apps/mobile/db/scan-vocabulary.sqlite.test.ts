@@ -28,7 +28,13 @@ function addShop(id: string, ownerId: string): void {
 function addMedicine(
   id: string,
   name: string,
-  fields: { shopId?: string; strength?: string; requiresPrescription?: boolean; isDeleted?: boolean } = {},
+  fields: {
+    shopId?: string;
+    strength?: string;
+    type?: string;
+    requiresPrescription?: boolean;
+    isDeleted?: boolean;
+  } = {},
 ): void {
   const timestamp = new Date().toISOString();
   db.insert(schema.medicines)
@@ -39,6 +45,7 @@ function addMedicine(
       generic: `${name} generic`,
       manufacturer: "Maker Ltd.",
       strength: fields.strength ?? null,
+      type: fields.type ?? null,
       requiresPrescription: fields.requiresPrescription ?? false,
       isDeleted: fields.isDeleted ?? false,
       createdAt: timestamp,
@@ -142,7 +149,7 @@ beforeAll(() => {
   addMedicine("flacol", "Flacol", { strength: "40mg" });
   addBatch("flacol-expired", "flacol", 10, "2000-01-01");
 
-  addMedicine("progut", "Progut MUPS 20", { requiresPrescription: true });
+  addMedicine("progut", "Progut MUPS 20", { requiresPrescription: true, type: "tablet" });
   addBatch("progut-empty", "progut", 0, "2099-12-31");
 
   addMedicine("orsaline", "SMC ORSaline");
@@ -184,9 +191,13 @@ describe("listScanVocabulary", () => {
       generic: "Progut MUPS 20 generic",
       manufacturer: "Maker Ltd.",
       strength: null,
+      dosageForm: "tablet",
       requiresPrescription: true,
       isSellable: false,
     });
+    // A medicine saved with no form reads as null, never "other".
+    const napa = (await listScanVocabulary(SHOP, OWNER)).find((entry) => entry.medicineId === "napa-extra");
+    expect(napa?.dosageForm).toBeNull();
   });
 
   it("refuses an actor with no session role in the shop", async () => {

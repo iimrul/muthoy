@@ -6211,3 +6211,53 @@ the low-stock card only counts medicines with some stock left, so it said
   - Mutation run: 12 of 13 caught. The one survivor is the `created` guard
     on the banner, which only matters if two checks race; the check queue
     already prevents that.
+
+## 2026-11-27 — Dosage form on every screen; the scanner tells a tablet from a capsule
+
+Founder items 3 and 4 ("telmepress 20 এটার tablet and capsule both আছে …
+OCR এটা কিভাবে আইডেন্টিফাই করতে পারবে এবং ইনভেন্টরিতেও?"; "কোনটা
+ট্যাবলেট, ক্যাপসুল, সিরাপ … বুঝার কোন উপায় নাই").
+
+- **One vocabulary** (`domain/dosageForm.ts`):
+  - eleven forms: tablet, capsule, syrup, suspension, injection, insulin,
+    powder, drops, cream, inhaler, other;
+  - a reader maps what was typed or printed ("Tab.", "CAPS", "ট্যাবলেট",
+    "Insulin Injection") onto them;
+  - one icon and one colour per form.
+  - `medicines.type` already existed in SQLite and Postgres but was free
+    text and shown nowhere. There is no migration and no sync change: the
+    column now holds the canonical key ("capsule"), and old free-text rows
+    are read through the same reader.
+- **Picked, never typed.**
+  - Add Medicine's free-text "Dosage form" becomes a row of chips
+    (`DosageFormPicker`). It stays optional: tapping the chosen chip again
+    clears it.
+  - A catalogue prefill's "Tablet" lands on the tablet chip.
+- **Seen everywhere a medicine is picked:**
+  - the Sale list and the cart show a coloured form tag plus the strength;
+  - Inventory cards draw the form's icon instead of the one generic package
+    icon;
+  - Expiry uses the same icons;
+  - the scanner's "which one?" choice shows the tag, and its accessibility
+    label carries the form, so two "Telmepress 20" options never read alike.
+- **Scanner** (`domain/stripMatcher.ts`):
+  - The strip's printed form is evidence. "Capsule" / "Caps" / "Tab." on any
+    non-registration line counts; a batch or MA line never does.
+  - Rule order: name, then strength, then form, then maker. A form match
+    picks between same-name, same-strength products. Without a form match
+    nothing is dropped: an unknown form is never guessed to be the printed
+    one.
+  - A single winner whose form the strip contradicts is offered, never added
+    (only the tablet is stocked, the strip says Capsule).
+  - A row saved before the picker takes its form from its name ("Napa Tab")
+    when it names exactly one. A stored "other" counts as unknown.
+  - A scanned add carries the form and strength into the cart line.
+- **Tests.**
+  - Matcher: capsule strip, tablet strip, abbreviations, no form printed,
+    both printed, contradicting form, unknown form, "other", two
+    unknown-form rows, old names, a registration line, strength before form.
+  - Scanner UI: the choice labelled by form, the cart line carrying it, and
+    a capsule strip going straight in.
+  - Vocabulary on real SQLite reads `type`.
+  - Tag, icon and picker components.
+  - Mutation run: 8 of 8 caught.

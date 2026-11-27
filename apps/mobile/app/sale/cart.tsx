@@ -12,6 +12,7 @@ import type { CatalogKey } from "../../i18n/catalog";
 import { useCartStore, type CartLine } from "../../state/cartStore";
 import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
+import { DosageFormTag } from "../../components/medicine/DosageFormBadge";
 
 const NEAR_EXPIRY_DAYS = 60;
 
@@ -161,6 +162,7 @@ const CartRow = memo(function CartRow({
           <Text className="font-sans-medium text-base text-richBlack">
             {item.medicineName}
           </Text>
+          <DosageFormTag type={item.dosageForm} strength={item.strength} />
           <Text className="font-mono text-xs text-midGray">
             {formatMoney(item.unitPrice)} {t("eachLabel")}
           </Text>

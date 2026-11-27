@@ -34,6 +34,7 @@ import { captureSessionFor } from "../../state/sessionGuard";
 import { useSessionStore } from "../../state/sessionStore";
 import { useOwnerAccess, usePermission } from "../../state/usePermission";
 import { triggerSyncNow } from "../../sync";
+import { DOSAGE_FORM_ICON, normalizeDosageForm } from "../../domain/dosageForm";
 
 // Expiry Management, laid out after the prototype's ExpiryManagement screen
 // (reference only, CLAUDE.md rule 15): two summary cards, an Urgent and a
@@ -69,13 +70,13 @@ const WARNING: Tone = { accent: colors.warning, tint: colors.warningBg, ink: col
 const BAND_TONE: Record<ExpiringBand, Tone> = { expired: URGENT, near: URGENT, far: WARNING };
 
 type MciName = keyof typeof MaterialCommunityIcons.glyphMap;
-/** The card's icon follows the dosage form, as the prototype's does. */
+/**
+ * The card's icon follows the dosage form, as the prototype's does — the same
+ * vocabulary every other screen uses (domain/dosageForm.ts), so a tablet and
+ * a capsule no longer share one "pill".
+ */
 function formIcon(form: string | null): MciName {
-  const value = (form ?? "").toLowerCase();
-  if (value.includes("syrup") || value.includes("suspension") || value.includes("drop")) return "bottle-tonic-outline";
-  if (value.includes("inject") || value.includes("vial")) return "needle";
-  if (value.includes("tablet") || value.includes("capsule")) return "pill";
-  return "medical-bag";
+  return DOSAGE_FORM_ICON[normalizeDosageForm(form) ?? "other"];
 }
 
 // Module scope, so no style object is rebuilt per render or per row.

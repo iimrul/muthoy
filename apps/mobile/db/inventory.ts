@@ -70,6 +70,9 @@ export interface MedicineListRow {
   name: string;
   generic: string | null;
   manufacturer: string | null;
+  /** Dosage form as stored (domain/dosageForm.ts reads it). */
+  type: string | null;
+  strength: string | null;
   threshold: number;
   totalStock: number;
   sellableStock: number;
@@ -99,6 +102,8 @@ export async function listMedicines(
       name: medicines.name,
       generic: medicines.generic,
       manufacturer: medicines.manufacturer,
+      type: medicines.type,
+      strength: medicines.strength,
       threshold: medicines.threshold,
       override: medicines.lowStockThresholdOverride,
     })
@@ -176,6 +181,8 @@ export async function listMedicines(
       name: medicine.name,
       generic: medicine.generic,
       manufacturer: medicine.manufacturer,
+      type: medicine.type,
+      strength: medicine.strength,
       threshold: effectiveLowStockThreshold(
         medicine.override,
         settings?.lowStockDefault,

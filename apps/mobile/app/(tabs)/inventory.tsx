@@ -22,6 +22,7 @@ import { captureSessionFor } from "../../state/sessionGuard";
 import { useSessionStore } from "../../state/sessionStore";
 import { useOwnerAccess, usePermission } from "../../state/usePermission";
 import { triggerSyncNow } from "../../sync";
+import { DosageFormIcon, DosageFormTag } from "../../components/medicine/DosageFormBadge";
 
 const FILTERS = [
   { value: "all", labelKey: "allLabel" },
@@ -417,17 +418,15 @@ export function InventoryCard({
   return (
     <View className="gap-3 rounded-2xl border border-[#e2e2e5]/10 bg-white p-4 shadow-sm">
       <View className="flex-row items-start justify-between gap-2">
-        <View className={`h-12 w-12 items-center justify-center rounded-xl ${status.bg}`}>
-          <Feather
-            name="package"
-            size={20}
-            color={isOut || isOversold ? "#93000a" : isLow || isExpiring ? "#713610" : "#004f4f"}
-          />
-        </View>
+        {/* The card's picture IS the dosage form (founder, 2026-11-27: use
+            the Inventory image as the indicator). Stock status stays on the
+            badge at the right and on the bar below. */}
+        <DosageFormIcon type={medicine.type} size={48} />
         <View className="flex-1 gap-0.5">
           <Text className="font-sans-bold text-base text-richBlack">
             {medicine.name}
           </Text>
+          <DosageFormTag type={medicine.type} strength={medicine.strength} />
           {medicine.generic ? (
             <Text className="font-sans-medium text-xs text-midGray">
               {t("genericNameLabel")}: {medicine.generic}

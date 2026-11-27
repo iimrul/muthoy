@@ -26,6 +26,7 @@ import { useI18n } from "../../state/localeStore";
 import { useSessionStore } from "../../state/sessionStore";
 import { useUnreadCount } from "../../state/useUnreadCount";
 import { subscribeToSyncCompletion } from "../../sync";
+import { DosageFormTag } from "../../components/medicine/DosageFormBadge";
 
 const FILTER_PILLS = [
   { value: "all", icon: "shopping-bag", labelKey: "allMedicineLabel" },
@@ -238,6 +239,8 @@ export default function SaleEntryScreen() {
       medicineName: item.name,
       generic: item.generic,
       manufacturer: item.manufacturer,
+      dosageForm: item.type,
+      strength: item.strength,
       requiresPrescription: item.requiresPrescription,
       batchId: item.activeBatch.id,
       batchNo: item.activeBatchNo ?? undefined,
@@ -380,6 +383,8 @@ export default function SaleEntryScreen() {
                 <Text className="font-sans-bold text-base text-richBlack">
                   {item.name}
                 </Text>
+                {/* Tablet vs capsule of the same name, told apart at a glance. */}
+                <DosageFormTag type={item.type} strength={item.strength} />
                 {item.generic || item.manufacturer ? (
                   <Text className="font-sans-medium text-xs text-midGray">
                     {[item.generic, item.manufacturer]
