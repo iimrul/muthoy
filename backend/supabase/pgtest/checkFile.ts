@@ -101,6 +101,9 @@ export const POST_E4_MIGRATIONS: readonly string[] = Object.freeze([
   // Migration 44: the pull orders and pages by server_changed_at, stamped on
   // arrival, so a late offline row is never skipped (founder plan 2026-11-26).
   '20261126000000_sync_pull_server_clock.sql',
+  // Migration 45: Staff with inventory_add may add one-row opening stock
+  // without a supplier (founder decision B2, 2026-11-27).
+  '20261127000000_staff_opening_stock.sql',
 ]);
 
 /**
