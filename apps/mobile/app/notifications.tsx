@@ -28,6 +28,7 @@ import { localizeStoredText } from "../i18n/localizedText";
 const ACTIONS: Partial<Record<NotificationType, Href>> = {
   daily_summary: "/cash-summary",
   low_stock: "/inventory",
+  oversell: "/inventory",
   expiry: "/inventory/expiry",
   overdue_credit: "/credit/credit-sales",
   refund: "/reports/sales-history",
@@ -36,6 +37,7 @@ const ACTIONS: Partial<Record<NotificationType, Href>> = {
 const ICONS: Partial<Record<NotificationType, string>> = {
   daily_summary: "৳",
   low_stock: "▤",
+  oversell: "⚠",
   expiry: "⌛",
   overdue_credit: "◷",
   sync: "↻",

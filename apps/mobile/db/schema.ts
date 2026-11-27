@@ -1296,6 +1296,9 @@ export const notifications = sqliteTable(
         "overdue_credit",
         "backup_reminder",
         "refund",
+        // F13: a batch sold below zero. Local-only like every notification
+        // row, and `type` is plain TEXT with no CHECK, so no migration.
+        "oversell",
       ],
     }).notNull(),
     severity: text("severity", { enum: ["info", "warning", "critical"] })

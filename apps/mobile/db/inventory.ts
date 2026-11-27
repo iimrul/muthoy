@@ -14,7 +14,7 @@ import {
   daysUntilExpiry,
   dhakaBusinessDate,
 } from "@muthoy/utils";
-import { db } from "./client";
+import { db, sqliteConnection } from "./client";
 import { requirePremiumFeature } from "./commercial";
 import {
   auditLogs,
@@ -73,6 +73,12 @@ export interface MedicineListRow {
   threshold: number;
   totalStock: number;
   sellableStock: number;
+  /**
+   * Sum of the batches that went below zero (0 when none did): offline
+   * sales on two phones that together sold more than a batch held. Both
+   * sales are kept; this is what the shelf count is short by (F13).
+   */
+  oversoldStock: number;
   batchCount: number;
   batchSearchText: string;
   hasExpiringStock: boolean;
@@ -182,6 +188,10 @@ export async function listMedicines(
         (sum, b) => sum + b.quantityAvailable,
         0,
       ),
+      oversoldStock: medicineBatches.reduce(
+        (sum, b) => sum + Math.min(0, b.quantityAvailable),
+        0,
+      ),
       batchCount: medicineBatches.length,
       batchSearchText: batchRows
         .filter((row) => row.medicineId === medicine.id)
@@ -199,6 +209,34 @@ export async function listMedicines(
       activeBatch,
     };
   });
+}
+
+export interface OversoldBatchRow {
+  batchId: string;
+  medicineId: string;
+  medicineName: string;
+  batchNo: string;
+  /** Always negative: units sold beyond what the batch held. */
+  stock: number;
+}
+
+/**
+ * Every batch whose ledger went below zero, most oversold first (F13). The
+ * test is `stock < 0`, not `oversold_at`: the server sets oversold_at once
+ * and never clears it, so a batch the owner has already recounted would keep
+ * alarming. A shop holds a handful of these at most, so no paging.
+ */
+export function listOversoldBatches(shopId: string): OversoldBatchRow[] {
+  return sqliteConnection.getAllSync<OversoldBatchRow>(
+    `SELECT b.id AS batchId, m.id AS medicineId, m.name AS medicineName,
+            b.batch_no AS batchNo, b.stock AS stock
+       FROM batches AS b
+       JOIN medicines AS m ON m.id = b.medicine_id AND m.shop_id = b.shop_id
+      WHERE b.shop_id = $shopId AND b.is_deleted = 0 AND m.is_deleted = 0
+        AND b.stock < 0
+      ORDER BY b.stock ASC, m.name ASC, b.batch_no ASC`,
+    { $shopId: shopId },
+  );
 }
 
 export interface CreateMedicineInput {

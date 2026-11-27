@@ -11,10 +11,13 @@ import {
   getDaySummary,
   getExpirySummary,
   getLowStockSummary,
+  getOversoldSummary,
   getOwnerDashboard,
   getRecentSaleLines,
   getSupplierPayableSummary,
 } from "./ownerDashboard";
+import { listMedicines } from "./inventory";
+import { createNotification, listNotifications } from "./notifications";
 import { getStaffPerformance } from "./staffDashboard";
 import { updateB2Settings } from "./settings";
 import { listPendingSyncRows } from "./sync-helpers";
@@ -265,7 +268,76 @@ describe("owner dashboard authorization", () => {
     });
     expect(data.expiry).toEqual({ rows: [], moreCount: 0, total: 0 });
     expect(data.lowStock).toEqual({ rows: [], moreCount: 0, total: 0 });
+    expect(data.oversold).toEqual({ rows: [], moreCount: 0, total: 0 });
     expect(data.cash.expected).toBe(0);
+  });
+});
+
+describe("oversold batches (F13)", () => {
+  // Two phones each sold 2 offline from a batch that held 2: both sales are
+  // kept and the ledger takes the batch to −2.
+  beforeEach(() => {
+    seedInventory();
+    const farExpiry = shiftBusinessDate(TODAY, 90);
+    sqlite.exec(`
+      INSERT INTO medicines (id, shop_id, name, unit_of_measure, threshold, created_at, updated_at)
+      VALUES ('med-probe', '${SHOP}', 'Probe', 'piece', 5, ${stamp(DAY_BEFORE)});
+      INSERT INTO batches (id, shop_id, medicine_id, batch_no, expiry_date, stock,
+                           purchase_price, sale_price, created_at, updated_at) VALUES
+        ('batch-os2', '${SHOP}', 'med-probe', 'OS2', '${farExpiry}', 0, 100, 300, ${stamp(DAY_BEFORE)}),
+        ('batch-ok', '${SHOP}', 'med-probe', 'OK1', '${farExpiry}', 0, 100, 300, ${stamp(DAY_BEFORE)});
+    `);
+    sqlite.exec(stockBatch("batch-os2", 2));
+    sqlite.exec(stockBatch("batch-ok", 10));
+    for (const [id, qty] of [["mv-sale-owner", -2], ["mv-sale-staff", -2]] as const) {
+      sqlite.exec(`INSERT INTO inventory_movements
+          (id, shop_id, batch_id, change_qty, reason, created_by, created_at, updated_at)
+        VALUES ('${id}', '${SHOP}', 'batch-os2', ${qty}, 'sale', '${OWNER}', ${stamp(YESTERDAY)});`);
+    }
+    sqlite.exec("DELETE FROM notifications");
+  });
+
+  it("lists the batch below zero and nothing that is not", async () => {
+    const summary = await getOversoldSummary(SHOP);
+    expect(summary.total).toBe(1);
+    expect(summary.moreCount).toBe(0);
+    expect(summary.rows).toEqual([
+      { batchId: "batch-os2", medicineId: "med-probe", medicineName: "Probe", batchNo: "OS2", stock: -2 },
+    ]);
+    await expect(getOversoldSummary(OTHER_SHOP)).resolves.toMatchObject({ total: 0 });
+  });
+
+  it("reaches the owner's dashboard payload", async () => {
+    const data = await getOwnerDashboard(SHOP, OWNER);
+    expect(data.oversold.rows.map((row) => row.batchNo)).toEqual(["OS2"]);
+  });
+
+  it("gives inventory the shortfall alongside the sellable stock", async () => {
+    const probe = (await listMedicines(SHOP)).find((row) => row.medicineId === "med-probe");
+    // OK1 still holds 10 sellable; OS2 is 2 short, so the shelf nets 8.
+    expect(probe).toMatchObject({ sellableStock: 10, oversoldStock: -2, totalStock: 8 });
+    const napa = (await listMedicines(SHOP)).find((row) => row.medicineId === "med-napa");
+    expect(napa?.oversoldStock).toBe(0);
+  });
+
+  it("drops the batch once a recount brings it back to zero", async () => {
+    sqlite.exec(`INSERT INTO inventory_movements
+        (id, shop_id, batch_id, change_qty, reason, created_by, created_at, updated_at)
+      VALUES ('mv-recount', '${SHOP}', 'batch-os2', 2, 'reconciliation', '${OWNER}', ${stamp(TODAY)});`);
+    await expect(getOversoldSummary(SHOP)).resolves.toMatchObject({ total: 0, rows: [] });
+  });
+
+  it("shows the oversell alert to the owner and to staff who may view stock, like low stock", async () => {
+    await createNotification(SHOP, "oversell", "critical", "Oversold: Probe", "Batch OS2", "batch-os2");
+    await createNotification(SHOP, "low_stock", "warning", "Low stock: Seclo", "12 left", "med-seclo");
+    sqlite.exec(`INSERT INTO user_permissions (id, shop_id, user_id, key, allowed)
+      VALUES ('perm-no-stock', '${SHOP}', '${STAFF_B}', 'inventory_view', 0);`);
+    const types = async (userId: string) =>
+      (await listNotifications(SHOP, userId)).map((item) => item.type).sort();
+    expect(await types(OWNER)).toEqual(["low_stock", "oversell"]);
+    expect(await types(STAFF_A)).toEqual(["low_stock", "oversell"]);
+    // The owner switched "view stock" off for this staff member: neither.
+    expect(await types(STAFF_B)).toEqual([]);
   });
 });
 

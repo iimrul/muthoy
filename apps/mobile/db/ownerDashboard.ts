@@ -36,6 +36,7 @@ import {
   hasCashDrawerForDate,
 } from "./cash";
 import { sqliteConnection } from "./client";
+import { listOversoldBatches, type OversoldBatchRow } from "./inventory";
 import { getB2Settings, getShopName } from "./settings";
 import { getStaffPerformance, type StaffPerformanceRow } from "./staffDashboard";
 import { getSupplierPositionSync } from "./suppliers";
@@ -303,6 +304,19 @@ export interface LowStockRow {
 export type AlertSummary<T> = AlertPreview<T> & { total: number };
 
 /**
+ * Batches sold below zero (F13), for the top of the Low Stock card. Not
+ * capped by the query: listOversoldBatches is a handful of rows at most, so
+ * the total is simply its length.
+ */
+export async function getOversoldSummary(
+  shopId: string,
+  limit: number = ALERT_PREVIEW_ROWS,
+): Promise<AlertSummary<OversoldBatchRow>> {
+  const rows = listOversoldBatches(shopId);
+  return { ...alertPreview(rows, rows.length, limit), total: rows.length };
+}
+
+/**
  * Batches with stock still on the shelf whose real expiry date falls inside
  * the shop's Far band — already-expired ones included, most urgent first.
  * Matches the prototype's `expiry <= warningDays && stock > 0`.
@@ -417,6 +431,8 @@ export interface OwnerDashboardData {
   supplierPayable: SupplierPayableSummary;
   expiry: AlertSummary<ExpiryAlertRow>;
   lowStock: AlertSummary<LowStockRow>;
+  /** Batches sold below zero; shown above the low-stock rows, in red. */
+  oversold: AlertSummary<OversoldBatchRow>;
   /** Only staff who actually sold today — this is an ACTIVE staff strip. */
   activeStaff: StaffPerformanceRow[];
   recentActivity: RecentSaleLine[];
@@ -453,6 +469,7 @@ export async function getOwnerDashboard(
     supplierPayable,
     expiry,
     lowStock,
+    oversold,
     activeStaff,
     recentActivity,
   ] = await Promise.all([
@@ -465,6 +482,7 @@ export async function getOwnerDashboard(
     getSupplierPayableSummary(shopId, actorUserId),
     getExpirySummary(shopId, businessDate, settings.expiryFarDays),
     getLowStockSummary(shopId, businessDate, settings.lowStockDefault),
+    getOversoldSummary(shopId),
     getStaffPerformance(shopId, actorUserId, "today", undefined, {
       soldOnly: true,
     }),
@@ -483,6 +501,7 @@ export async function getOwnerDashboard(
     supplierPayable,
     expiry,
     lowStock,
+    oversold,
     activeStaff,
     recentActivity,
   };

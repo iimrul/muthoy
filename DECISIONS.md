@@ -6156,3 +6156,58 @@ phone (John) each sold 2 of a batch that had 2, both offline.
 - Tests: `greetingName` (Bangla and English, spacing/case/normalisation,
   fallbacks), owner rename queues `shops` + `users`, unchanged name queues no
   shop row, staff refused, and the rollback test covers the rename.
+
+## 2026-11-27 — An oversell is shown to the owner
+
+**Founder's rule (plan "গ", approved 2026-11-27).** When offline sales take a
+batch below zero, the owner and staff get a notification, the Low Stock card on the
+dashboard shows it in red, and Inventory shows the negative stock (−2).
+
+**Why.** The server already kept both sales and marked the batch (DEV test
+2026-11-26: batch OS2 at −2, `oversold_at` set), but the owner saw nothing:
+the low-stock card only counts medicines with some stock left, so it said
+"স্টক ভালো আছে"; Inventory showed the sellable stock (0); no notification.
+
+**How. App only: no migration, no sync or server change.**
+- **The test is `batches.stock < 0`, not `oversold_at`.** The server sets
+  `oversold_at` once and never clears it, so it would keep flagging a batch
+  the owner has already recounted (`db/inventory.ts` `listOversoldBatches`).
+- **Dashboard.** Oversold batches lead the Low Stock card in red
+  ("বেশি বিক্রি: <medicine> #<batch>", value −2), ahead of the low rows. The
+  "+N more" and the list count cover both (`getOversoldSummary`,
+  `AlertRow.isAlarm`).
+- **Inventory.**
+  - `MedicineListRow.oversoldStock` is the sum of the negative batches.
+  - The card's badge says "বেশি বিক্রি", and "Current" shows sellable +
+    oversold. Example: 10 left in another batch and OS2 at −2 shows 8;
+    OS2 alone shows −2.
+  - In the batch table, a negative quantity is red.
+- **Notification.**
+  - A new local type, `oversell`: critical, one per batch.
+  - It re-arms after the batch is corrected to zero or above. It is not sent
+    again on later days while the batch is still short.
+  - It runs after every completed sync, which is when another phone's late
+    sale arrives. It also runs with the usual foreground and background
+    checks.
+  - It is behind the existing stock-alert switch.
+  - Who: the owner, and every staff member who may view stock
+    (`inventory_view`, on by default for staff), the same gate as low stock.
+    The founder first said owner only, then the same day asked for staff
+    too ("স্টাফরাও নোটিফিকেশন পাওয়া উচিত"): they sell from that shelf.
+  - An oversold medicine does not also get a "low stock: −2 left" alert.
+- **Unchanged.**
+  - The Sale list still hides a batch with no stock.
+  - The owner corrects stock as before: Edit Batch → reconciliation.
+  - `notifications.type` is plain TEXT with no CHECK and never syncs, so the
+    new value needs no migration.
+- **Tests.**
+  - On real SQLite: the batch below zero is listed and nothing else is; the
+    shortfall reaches Inventory; the batch drops out after a recount; the
+    owner and staff see the alert, a staff member with stock view switched
+    off sees neither it nor low stock.
+  - Notification checks: once, re-arm, not again the next day, staff with
+    and without stock view, after-sync path.
+  - Inventory card: badge and −2.
+  - Mutation run: 12 of 13 caught. The one survivor is the `created` guard
+    on the banner, which only matters if two checks race; the check queue
+    already prevents that.

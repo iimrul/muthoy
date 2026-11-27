@@ -42,6 +42,7 @@ import {
   type OwnerDashboardData,
 } from "../../db/ownerDashboard";
 import {
+  ALERT_PREVIEW_ROWS,
   formatUnreadBadge,
   greetingKeyForHour,
   greetingName,
@@ -352,15 +353,27 @@ export default function MorningDashboardScreen() {
     [data?.expiry.rows, formatNumber, t],
   );
 
-  const lowStockRows: AlertRow[] = useMemo(
-    () =>
-      (data?.lowStock.rows ?? []).map((row) => ({
+  // F13: batches sold below zero lead the Low Stock card in red, ahead of
+  // the ordinary low rows; the card's "+N more" and count cover both.
+  const stockAlert = useMemo(() => {
+    const oversold = data?.oversold ?? { rows: [], total: 0 };
+    const low = data?.lowStock ?? { rows: [], total: 0 };
+    const rows: AlertRow[] = [
+      ...oversold.rows.map((row) => ({
+        key: `oversold-${row.batchId}`,
+        label: `${t("oversoldLabel")}: ${row.medicineName} #${row.batchNo}`,
+        value: formatNumber(row.stock),
+        isAlarm: true,
+      })),
+      ...low.rows.map((row) => ({
         key: row.medicineId,
         label: row.name,
         value: `${formatNumber(row.stock)} / ${formatNumber(row.threshold)}`,
       })),
-    [data?.lowStock.rows, formatNumber],
-  );
+    ].slice(0, ALERT_PREVIEW_ROWS);
+    const total = oversold.total + low.total;
+    return { rows, total, moreCount: total - rows.length };
+  }, [data?.lowStock, data?.oversold, formatNumber, t]);
 
   const relativeLabel = useCallback(
     (createdAt: string) => {
@@ -644,14 +657,14 @@ export default function MorningDashboardScreen() {
           <AlertCard
             tone="warning"
             title={t("lowStockAlert")}
-            rows={lowStockRows}
-            moreCount={data.lowStock.moreCount}
+            rows={stockAlert.rows}
+            moreCount={stockAlert.moreCount}
             formatCount={formatNumber}
             moreLabel={t("andMore")}
             emptyLabel={t("stockIsGood")}
             actionLabel={
-              data.lowStock.total > 0
-                ? `${t("viewList")} (${formatNumber(data.lowStock.total)})`
+              stockAlert.total > 0
+                ? `${t("viewList")} (${formatNumber(stockAlert.total)})`
                 : t("viewList")
             }
             onPress={() => router.push("/inventory")}
