@@ -118,6 +118,48 @@ describe('opening stock: a medicine added without a supplier (item 12)', () => {
     expect(db.select().from(schema.syncQueue).all()).toHaveLength(before);
   });
 
+  it('lets a staff member WITH inventory_add add opening stock, attributed to them (decision B2, migration 45)', async () => {
+    const now = new Date().toISOString();
+    db.insert(schema.userPermissions).values({
+      id: 'staff-inventory-add', shopId: 'shop', userId: 'staff', key: 'inventory_add', allowed: true, createdAt: now, updatedAt: now,
+    }).run();
+    const added = await createOpeningStock({
+      shopId: 'shop', actorUserId: 'staff', isStillActive: ALWAYS_LIVE,
+      medicine: { name: 'Staff Opening Med', unitOfMeasure: 'piece', requiresPrescription: false }, batch: { ...BATCH, batchNo: 'STF-1' },
+    });
+    // The exact graph migration 45 accepts from staff: header, medicine, batch,
+    // csv_import movement and audit row, every one attributed to the staff member.
+    expect(db.select().from(schema.inventoryImports).where(eq(schema.inventoryImports.id, added.importId)).get())
+      .toMatchObject({ rowCount: 1, createdBy: 'staff', fileFingerprint: `opening:${added.importId}` });
+    expect(db.select().from(schema.inventoryMovements).where(eq(schema.inventoryMovements.batchId, added.batchId)).all())
+      .toEqual([expect.objectContaining({ reason: 'csv_import', refId: added.importId, createdBy: 'staff' })]);
+    expect(db.select().from(schema.auditLogs).where(eq(schema.auditLogs.target, added.importId)).all())
+      .toEqual([expect.objectContaining({ actorId: 'staff', action: 'inventory_opening_stock_added' })]);
+    expect(db.select().from(schema.syncQueue).where(eq(schema.syncQueue.operationGroupId, added.importId)).all()).toHaveLength(5);
+
+    // An explicit deny takes it away again, and writes nothing.
+    db.update(schema.userPermissions).set({ allowed: false }).where(eq(schema.userPermissions.id, 'staff-inventory-add')).run();
+    const before = db.select().from(schema.syncQueue).all().length;
+    await expect(createOpeningStock({
+      shopId: 'shop', actorUserId: 'staff', isStillActive: ALWAYS_LIVE,
+      medicine: { name: 'Denied Med', unitOfMeasure: 'piece', requiresPrescription: false }, batch: { ...BATCH, batchNo: 'STF-2' },
+    })).rejects.toThrow();
+    expect(db.select().from(schema.syncQueue).all()).toHaveLength(before);
+
+    // Revoked AFTER the guard but before the write (the race the in-transaction
+    // recheck exists for): the grant flips inside the transaction itself.
+    db.update(schema.userPermissions).set({ allowed: true }).where(eq(schema.userPermissions.id, 'staff-inventory-add')).run();
+    const revokeMidWrite = () => {
+      sqlite.prepare("UPDATE user_permissions SET allowed = 0 WHERE id = 'staff-inventory-add'").run();
+      return true;
+    };
+    await expect(createOpeningStock({
+      shopId: 'shop', actorUserId: 'staff', isStillActive: revokeMidWrite,
+      medicine: { name: 'Raced Med', unitOfMeasure: 'piece', requiresPrescription: false }, batch: { ...BATCH, batchNo: 'STF-3' },
+    })).rejects.toThrow();
+    expect(db.select().from(schema.syncQueue).all()).toHaveLength(before);
+  });
+
   it('a capsule with the same name is allowed once the owner confirms it is a different product', async () => {
     const capsule = await createOpeningStock({
       shopId: 'shop', actorUserId: 'owner', isStillActive: ALWAYS_LIVE, confirmDistinctMedicine: true,

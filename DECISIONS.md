@@ -6253,3 +6253,33 @@ Founder item 8 ("prototype web follow করো … একদম ঐভাবে
     asked for a supplier; choosing one restores the purchase path; the
     duplicate supplier message.
   - Mutation run: 6 of 6 caught.
+
+## 2026-11-27 — Staff may save Add Medicine without a supplier (client half of B2)
+
+Decision B2, with the server half in migration 45 (PR #27, applied on DEV
+only).
+
+- **Who.**
+  - `createOpeningStock` is gated on `inventory_add` (Owner always has it)
+    instead of Owner-only.
+  - The write transaction re-reads the role and overrides
+    (`db/inventoryAddGate.ts`), so a grant revoked between the guard and the
+    write cannot reach the outbox.
+  - The form already sits behind the same gate. Its supplier is now
+    optional for everyone who can open it, with the same opening-stock note.
+  - Creating a supplier from the form stays Owner-only.
+- **What it sends.** The unchanged one-row `inventory_import` graph. A staff
+  member's rows carry their own id as `created_by` / `actor_id`, which is
+  exactly what migration 45 checks.
+- **Shipping rule (rule 16).** This must not be in a build that talks to
+  PROD until PROD has migration 45. Otherwise a staff member's add is
+  accepted on the phone and refused by the server (MU015), and sits in the
+  failed-sync list. Merge order: #24, then #27 with PROD approval and apply,
+  then this.
+- **Tests.**
+  - Real SQLite: a granted staff member's graph is attributed to them; an
+    explicit deny refuses and writes nothing; a grant revoked inside the
+    transaction refuses and writes nothing.
+  - Form: staff saves without a supplier.
+  - Mutation run: 3 of 3 caught. The in-transaction recheck was unproven
+    until the race case was added.

@@ -1,9 +1,11 @@
 import { and, eq } from "drizzle-orm";
 import { parseCsv, parseTakaTextToPaisa, assertIsoDate } from "@muthoy/utils";
 import type { Paisa } from "@muthoy/types";
-import { requireOwner } from "./auth";
+import { requireOwner, requirePermission } from "./auth";
 import { db } from "./client";
+import { permissionForDataGate } from "./dataAccessGates";
 import { assertSessionLive } from "./errors";
+import { assertInventoryAddInTransaction } from "./inventoryAddGate";
 import { auditLogs, batches, inventoryImports, medicines } from "./schema";
 import { addStock } from "./stockLedger";
 import { recordChange, type SyncOperationGroup } from "./sync-helpers";
@@ -386,9 +388,10 @@ export async function importInventoryCsv(
  * the cash drawer. It travels as a one-row `inventory_import` operation, the
  * exact graph the server already validates for the Owner's CSV import
  * (header + optional new medicine + batch + one bound `csv_import` movement +
- * one audit row), so this needs no server change. Owner-only, like that
- * import; a staff member's supplier-less add needs the server extension
- * (decision B2), which lands separately.
+ * one audit row). The Owner, or a staff member holding the explicit
+ * inventory_add grant (decision B2): the server accepts exactly this one-row
+ * graph from such a staff member from migration 45
+ * (20261127000000_staff_opening_stock.sql) — never a CSV file.
  */
 export interface OpeningStockInput {
   shopId: string;
@@ -420,7 +423,7 @@ export interface OpeningStockInput {
 export async function createOpeningStock(
   input: OpeningStockInput,
 ): Promise<{ importId: string; medicineId: string; batchId: string }> {
-  await requireOwner(input.shopId, input.actorUserId);
+  await requirePermission(input.shopId, input.actorUserId, permissionForDataGate("inventoryAdd"));
   const { batch } = input;
   if (!Number.isSafeInteger(batch.quantity) || batch.quantity < 1)
     throw new Error("Opening stock quantity must be a positive whole number");
@@ -434,6 +437,8 @@ export async function createOpeningStock(
   let medicineId = input.existingMedicineId ?? generateId();
   db.transaction((tx) => {
     assertSessionLive(input.isStillActive);
+    // A grant revoked since the guard above must not slip into the outbox.
+    assertInventoryAddInTransaction(tx, input.shopId, input.actorUserId);
     if (input.existingMedicineId) {
       const existing = tx
         .select({ id: medicines.id })
