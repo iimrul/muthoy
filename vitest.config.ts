@@ -206,6 +206,8 @@ export default defineConfig({
       "apps/mobile/navigation/**/*.test.ts",
       "apps/mobile/components/scanner/*.test.tsx",
       "apps/mobile/components/ui/PinPad.test.tsx",
+      // The branded confirm/notice dialog (founder, 2026-11-27).
+      "apps/mobile/components/ui/AppAlert.test.tsx",
       // Auth parity: the shared auth primitives (shell, notices, buttons, the
       // +880 phone field, status/loader screens, the logout sheet) and the
       // PinPad/OtpInput visual variants.

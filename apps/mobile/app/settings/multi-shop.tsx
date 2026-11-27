@@ -1,7 +1,8 @@
 import Feather from '@expo/vector-icons/Feather';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { appAlert } from '../../components/ui/AppAlert';
 import { AppTextInput as TextInput } from '../../components/ui/AppTextInput';
 import { AccessDenied } from '../../components/ui/AccessDenied';
 import { PremiumLock } from '../../components/ui/PremiumLock';
@@ -84,7 +85,7 @@ export default function MultiShopScreen() {
     sales: sum.sales + item.salesPaisa, credit: sum.credit + item.outstandingCreditPaisa,
     low: sum.low + item.lowStockCount, expiring: sum.expiring + item.expiringCount,
   }), { sales: 0, credit: 0, low: 0, expiring: 0 });
-  const mutate = (shopId: string, operation: 'archive'|'restore') => Alert.alert(
+  const mutate = (shopId: string, operation: 'archive'|'restore') => appAlert(
     operation === 'archive' ? (bn ? 'দোকান আর্কাইভ করবেন?' : 'Archive shop?') : (bn ? 'দোকান ফিরিয়ে আনবেন?' : 'Restore shop?'),
     bn ? 'কোনো তথ্য মুছে যাবে না।' : 'No data will be deleted.',
     [
@@ -97,7 +98,7 @@ export default function MultiShopScreen() {
       },
     ],
   );
-  return <View className="flex-1 bg-brand-softGreen"><StandardHeader title={bn ? 'একাধিক দোকান' : 'Multi-Shop'} onBackPress={() => router.back()} rightAccessory={<Pressable accessibilityRole="button" accessibilityLabel={bn ? 'নতুন দোকান' : 'Add shop'} onPress={() => setEditor({ mode: 'add', name: '', nameEn: '' })} className="flex-row items-center gap-1 rounded-full bg-white px-3 py-1.5"><Feather name="plus" size={16} color="#065F46" /><Text className="font-sans-bold text-xs text-brand-deepGreen">{bn ? 'নতুন' : 'Add'}</Text></Pressable>} /><ScrollView contentContainerClassName="gap-4 p-4 pb-28">
+  return <View className="flex-1 bg-brand-softGreen"><StandardHeader title={bn ? 'একাধিক দোকান' : 'Multi-Shop'} onBackPress={() => router.back()} rightAccessory={<Pressable accessibilityRole="button" accessibilityLabel={bn ? 'নতুন দোকান' : 'Add shop'} onPress={() => setEditor({ mode: 'add', name: '', nameEn: '' })} className="flex-row items-center gap-1 rounded-full bg-white px-3 py-1.5"><Feather name="plus" size={16} color="#065F46" /><Text className="font-sans-bold text-xs text-brand-deepGreen">{bn ? 'নতুন' : 'Add'}</Text></Pressable>} /><ScrollView contentContainerClassName="gap-4 p-4 pb-8">
     {error ? <View className="rounded-xl bg-[#FEE2E2] p-3"><Text className="font-sans text-xs text-error">{error}</Text></View> : null}
     {!accountLoading && !billingAccountId ? <View className="items-center gap-2 rounded-2xl border border-[#FDE68A] bg-[#FEF3C7] p-5"><Feather name="wifi" size={24} color="#92400E" /><Text className="text-center font-sans-bold text-sm text-[#92400E]">{bn ? 'দোকানের সদস্যপদ যাচাই করা যায়নি' : 'Shop membership is not verified'}</Text><Text className="text-center font-sans text-xs text-[#92400E]">{bn ? 'অনলাইনে সিঙ্ক করে আবার চেষ্টা করুন।' : 'Sync online, then try again.'}</Text></View> : null}
     {success ? <Pressable onPress={() => setSuccess(null)} className="flex-row items-center gap-2 rounded-xl bg-[#D1FAE5] p-3"><Feather name="check-circle" size={16} color="#059669" /><Text className="flex-1 font-sans text-xs text-brand-deepGreen">{success}</Text><Feather name="x" size={14} color="#065F46" /></Pressable> : null}

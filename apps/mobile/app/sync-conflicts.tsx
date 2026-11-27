@@ -223,7 +223,7 @@ export default function SyncConflictsScreen() {
           message={t('syncConflictsEmptyBody')}
         />
       ) : (
-        <ScrollView contentContainerClassName="gap-3 p-4 pb-28">
+        <ScrollView contentContainerClassName="gap-3 p-4 pb-8">
           <Text className="font-sans text-sm text-midGray">{t('syncConflictsIntro')}</Text>
 
           {isOffline ? (

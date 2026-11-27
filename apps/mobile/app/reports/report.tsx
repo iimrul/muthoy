@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { AppTextInput as TextInput } from '../../components/ui/AppTextInput';
 import Feather from '@expo/vector-icons/Feather';
 import { router } from 'expo-router';
 import { asPaisa } from '@muthoy/types';
@@ -118,7 +117,7 @@ export default function ReportScreen() {
       <StandardHeader title={bn ? 'রিপোর্ট' : 'Report'} onBackPress={() => router.back()} rightAccessory={canExternalize ? (
         <View className="flex-row"><ActionIcon name="download" label={exporting ? 'Exporting' : 'Download'} onPress={() => { if (!exporting) void download(); }} /><ActionIcon name="share-2" label="Share" onPress={() => { if (!exporting) void share(); }} /></View>
       ) : null} />
-      <ScrollView contentContainerClassName="gap-4 p-4 pb-28" keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerClassName="gap-4 p-4 pb-8" keyboardShouldPersistTaps="handled">
         <View className="gap-4 rounded-3xl bg-white p-5">
           <Text className="font-sans-bold text-sm text-richBlack">{bn ? 'রিপোর্ট পিরিয়ড' : 'Report Period'}</Text>
           <View className="flex-row gap-2">
@@ -129,8 +128,24 @@ export default function ReportScreen() {
             ))}
           </View>
           <View className="flex-row gap-3">
-            {[{ label: bn ? 'শুরুর তারিখ' : 'Start', value: startDate, set: setStartDate }, { label: bn ? 'শেষের তারিখ' : 'End', value: endDate, set: setEndDate }].map((field) => (
-              <View key={field.label} className="flex-1 gap-2"><Text className="font-sans-semibold text-xs text-midGray">{field.label}</Text><TextInput value={field.value} onChangeText={(value) => { requestRef.current += 1; setReport(null); setError(null); field.set(value); }} maxLength={10} className="h-12 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] px-3 font-mono text-sm text-richBlack" /></View>
+            {/* Picked from the calendar, never typed (founder, 2026-11-27). The
+                start can never pass the end, and neither can be in the future. */}
+            {[
+              { label: bn ? 'শুরুর তারিখ' : 'Start', value: startDate, set: setStartDate, minDate: undefined, maxDate: endDate || today },
+              { label: bn ? 'শেষের তারিখ' : 'End', value: endDate, set: setEndDate, minDate: startDate || undefined, maxDate: today },
+            ].map((field) => (
+              <View key={field.label} className="flex-1 gap-2">
+                <Text className="font-sans-semibold text-xs text-midGray">{field.label}</Text>
+                <DateField
+                  value={field.value}
+                  onChange={(value) => { requestRef.current += 1; setReport(null); setError(null); field.set(value); }}
+                  accessibilityLabel={field.label}
+                  minDate={field.minDate}
+                  maxDate={field.maxDate}
+                  className="h-12 justify-center rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] px-3"
+                  textClassName="font-sans text-sm text-richBlack"
+                />
+              </View>
             ))}
           </View>
         </View>

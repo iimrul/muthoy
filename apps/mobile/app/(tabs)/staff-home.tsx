@@ -286,7 +286,7 @@ export default function StaffHomeScreen() {
 
   return (
     <View className="flex-1" style={styles.canvas}>
-      <ScrollView contentContainerClassName="pb-32">
+      <ScrollView contentContainerClassName="pb-8">
         {/* Brand hero — the owner dashboard's green, rounded at the foot. */}
         <View className="rounded-b-[18px] bg-auth-heroEnd px-5 pb-20" style={{ paddingTop: topInset + 20 }}>
           <View className="flex-row items-start justify-between gap-3">

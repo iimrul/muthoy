@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, FlatList, Pressable, Text, View } from "react-native";
+import { FlatList, Pressable, Text, View } from "react-native";
+import { appAlert } from "../../components/ui/AppAlert";
 import { router } from "expo-router";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { StandardHeader } from "../../components/ui/StandardHeader";
@@ -87,7 +88,7 @@ export default function HeldSalesScreen() {
       setResumedDraft(draftId, getDeviceId());
       router.replace("/sale/cart");
     } catch (caught) {
-      Alert.alert(
+      appAlert(
         t("resumeSaleFailedTitle"),
         userFacingError(caught, "pleaseTryAgain", t),
       );
@@ -108,7 +109,7 @@ export default function HeldSalesScreen() {
       await guard.ifLiveAsync(reload);
     } catch (caught) {
       if (!guard.isStale())
-        Alert.alert(
+        appAlert(
           t("cancelSaleFailedTitle"),
           userFacingError(caught, "pleaseTryAgain", t),
         );

@@ -1,15 +1,16 @@
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import {
-  Alert,
   Animated,
   BackHandler,
   Easing,
+  Keyboard,
   Modal,
   Pressable,
   StatusBar,
   Text,
   View,
 } from "react-native";
+import { AppAlertHost, appAlert } from "../ui/AppAlert";
 import { router, usePathname } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import { colors } from "@muthoy/constants";
@@ -21,12 +22,38 @@ import { useMultiShopAccess } from "../../state/useMultiShopAccess";
 import { authenticatedHome, visibleMoreRoutes } from "../../navigation/routes";
 import { DeviceRelinkBanner } from "../auth/DeviceRelinkBanner";
 
-const MORE_ICONS: Readonly<Record<string, ComponentProps<typeof Feather>["name"]>> = {
-  history: "clock", expiry: "calendar", cash: "dollar-sign", eod: "sunset",
+// Every More entry has its OWN icon: a missing key fell back to "grid", so
+// Credit Sales and Multi-Shop looked identical (founder, 2026-11-27).
+export const MORE_ICONS: Readonly<Record<string, ComponentProps<typeof Feather>["name"]>> = {
+  history: "clock", credit: "book-open", expiry: "calendar", cash: "dollar-sign", eod: "sunset",
   report: "bar-chart-2", expense: "credit-card", invoices: "file-text",
   suppliers: "truck", staff: "users", "staff-sales": "trending-up",
   "multi-shop": "grid", devices: "smartphone", "sync-conflicts": "alert-triangle",
 };
+
+// The bottom bar is `h-20` and the Scan button rises `-top-7` above it. The
+// bar is drawn OVER the screens, so the screens' own area stops above both:
+// before, each screen had to remember its own bottom padding, and the ones
+// that forgot lost their last buttons under the bar (founder, 2026-11-27:
+// the Suppliers "+" button, the cart's "held sales" link, checkout's
+// confirm button under the Scan circle).
+export const TAB_BAR_HEIGHT = 80;
+export const SCAN_BUTTON_RISE = 28;
+export const TAB_BAR_CLEARANCE = TAB_BAR_HEIGHT + SCAN_BUTTON_RISE;
+
+/** True while the on-screen keyboard is up. */
+function useKeyboardOpen(): boolean {
+  const [isOpen, setIsOpen] = useState(false);
+  useEffect(() => {
+    const shown = Keyboard.addListener("keyboardDidShow", () => setIsOpen(true));
+    const hidden = Keyboard.addListener("keyboardDidHide", () => setIsOpen(false));
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
+  return isOpen;
+}
 
 /** The screens kept mounted in app/(tabs)/_layout.tsx — reached by navigate, not replace. */
 export const TAB_ROUTES: ReadonlySet<string> = new Set(["/dashboard", "/staff-home", "/sale", "/inventory"]);
@@ -191,6 +218,7 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
   const session = useSessionStore((state) => state.session);
   const multiShop = useMultiShopAccess();
   const pathname = usePathname();
+  const isKeyboardOpen = useKeyboardOpen();
   useEffect(() => {
     StatusBar?.setBarStyle(LIGHT_STATUS_ROUTES.has(pathname) ? "light-content" : "dark-content");
   }, [pathname]);
@@ -252,7 +280,7 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
     "credit_view",
     session.permissions,
   );
-  const deny = () => Alert.alert(t("accessDenied"), t("askOwner"));
+  const deny = () => appAlert(t("accessDenied"), t("askOwner"));
   // The primary screens are kept mounted in app/(tabs)/_layout.tsx's Tabs
   // navigator; every other screen sits ON TOP of that tab group in the root
   // Stack, at most one page deep:
@@ -286,9 +314,20 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
 
   return (
     <View className="flex-1">
-      {children}
+      {/* The screens end above the bar and the Scan button's rise, so nothing
+          a screen draws is ever under them. With the keyboard up the bar is
+          hidden (below) and the space is given back: otherwise the bar rides
+          on top of the keyboard and covers the very field being typed in. */}
+      <View
+        testID="tab-bar-clearance"
+        style={{ flex: 1, paddingBottom: isKeyboardOpen ? 0 : TAB_BAR_CLEARANCE }}
+      >
+        {children}
+      </View>
       {/* A2.3: only renders when sync refused this installation as unbound. */}
       <DeviceRelinkBanner />
+      {/* The one branded confirm/notice dialog every screen raises (appAlert). */}
+      <AppAlertHost />
       <Modal
         visible={moreOpen}
         transparent
@@ -333,7 +372,9 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
           </View>
         </Pressable>
       </Modal>
+      {isKeyboardOpen ? null : (
       <View
+        testID="bottom-tab-bar"
         className="absolute bottom-0 left-0 right-0 h-20 flex-row border-t border-[#E5E7EB] bg-white"
         style={{
           shadowColor: "#000000",
@@ -392,6 +433,7 @@ export function AppNavigationShell({ children }: { children: ReactNode }) {
           />
         )}
       </View>
+      )}
     </View>
   );
 }

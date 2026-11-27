@@ -120,7 +120,7 @@ export default function AddMedicineScreen() {
         </View>
       </View>
       <ScrollView
-        contentContainerClassName="gap-4 p-4 pb-32"
+        contentContainerClassName="gap-4 p-4 pb-8"
         keyboardShouldPersistTaps="handled"
       >
         {tab === "existing" ? <ExistingMedicinePicker key={`${session.shopId}:${session.userId}`} shopId={session.shopId} onSelect={(medicineId) => {

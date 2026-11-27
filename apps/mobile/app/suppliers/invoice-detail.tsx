@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { appAlert } from '../../components/ui/AppAlert';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ZERO_PAISA } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
@@ -93,7 +94,7 @@ export default function InvoiceDetailScreen() {
 
   const handleVoid = useCallback(() => {
     if (!session || !isAllowed || !purchaseId) return;
-    Alert.alert(
+    appAlert(
       t('voidInvoiceTitle'),
       t('voidInvoiceBody'),
       [

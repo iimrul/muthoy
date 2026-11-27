@@ -23,6 +23,21 @@ const animated = vi.hoisted(() => ({
   timing: vi.fn((_value: unknown, config: unknown) => config),
 }));
 
+// The on-screen keyboard, driven by hand: the bar hides while it is up.
+const keyboard = vi.hoisted(() => {
+  const listeners = new Map<string, Set<() => void>>();
+  return {
+    listeners,
+    addListener: (event: string, listener: () => void) => {
+      const set = listeners.get(event) ?? new Set<() => void>();
+      set.add(listener);
+      listeners.set(event, set);
+      return { remove: () => set.delete(listener) };
+    },
+    emit: (event: string) => listeners.get(event)?.forEach((listener) => listener()),
+  };
+});
+
 vi.mock("react-native", () => {
   class Value {
     interpolate() {
@@ -30,7 +45,13 @@ vi.mock("react-native", () => {
     }
   }
   return {
-    View: ({ children }: StubProps) => createElement("div", null, children),
+    Keyboard: { addListener: keyboard.addListener },
+    View: ({ children, testID, style }: StubProps & { testID?: string; style?: { paddingBottom?: number } }) =>
+      createElement(
+        "div",
+        { "data-testid": testID, "data-padding-bottom": style?.paddingBottom },
+        children,
+      ),
     Text: ({ children }: StubProps) => createElement("span", null, children),
     Pressable: ({ children, onPress, accessibilityLabel }: StubProps) =>
       createElement(
@@ -107,9 +128,41 @@ vi.mock("../state/sessionStore", () => ({
 }));
 
 const { StatusBar: awaitedStatusBar } = await import("react-native");
-const { AppNavigationShell } = await import(
+const { AppNavigationShell, MORE_ICONS, TAB_BAR_CLEARANCE } = await import(
   "../components/navigation/AppNavigationShell"
 );
+const { act } = await import("@testing-library/react");
+
+describe("the bottom bar never covers a screen (founder, 2026-11-27)", () => {
+  it("ends every screen above the bar and the Scan button's rise", () => {
+    render(createElement(AppNavigationShell, null, createElement("main", null, "content")));
+    const area = screen.getByTestId("tab-bar-clearance");
+    expect(area.textContent).toContain("content");
+    expect(Number(area.getAttribute("data-padding-bottom"))).toBe(TAB_BAR_CLEARANCE);
+    expect(TAB_BAR_CLEARANCE).toBe(80 + 28);
+    expect(screen.getByTestId("bottom-tab-bar")).toBeTruthy();
+  });
+
+  it("hides the bar while the keyboard is up and gives its space back", () => {
+    render(createElement(AppNavigationShell, null, createElement("main", null, "content")));
+    act(() => keyboard.emit("keyboardDidShow"));
+    expect(screen.queryByTestId("bottom-tab-bar")).toBeNull();
+    expect(Number(screen.getByTestId("tab-bar-clearance").getAttribute("data-padding-bottom"))).toBe(0);
+    act(() => keyboard.emit("keyboardDidHide"));
+    expect(screen.getByTestId("bottom-tab-bar")).toBeTruthy();
+    expect(Number(screen.getByTestId("tab-bar-clearance").getAttribute("data-padding-bottom"))).toBe(TAB_BAR_CLEARANCE);
+  });
+});
+
+describe("every More entry has its own icon (founder, 2026-11-27)", () => {
+  it("covers every More route and repeats no icon", async () => {
+    const { MORE_ROUTES } = await vi.importActual<typeof import("../navigation/routes")>("../navigation/routes");
+    for (const route of MORE_ROUTES) expect(MORE_ICONS[route.key], route.key).toBeDefined();
+    const icons = MORE_ROUTES.map((route) => MORE_ICONS[route.key]);
+    expect(new Set(icons).size).toBe(icons.length);
+    expect(MORE_ICONS.credit).not.toBe(MORE_ICONS["multi-shop"]);
+  });
+});
 
 afterEach(() => {
   cleanup();

@@ -6211,3 +6211,40 @@ the low-stock card only counts medicines with some stock left, so it said
   - Mutation run: 12 of 13 caught. The one survivor is the `created` guard
     on the banner, which only matters if two checks race; the check queue
     already prevents that.
+
+## 2026-11-27 — The bottom bar never covers a screen; one branded dialog; report dates from the calendar
+
+Founder items 5, 6, 7 and the "hidden behind the nav bar" report.
+
+- **Bottom bar.**
+  - The bar is drawn over the screens (`absolute bottom-0 h-20`), and the
+    Scan button rises 28 px above it. Each screen had to remember its own
+    bottom padding, and the ones that forgot lost their last controls under
+    the bar:
+    - the Suppliers "+" button;
+    - purchase review/confirm's save bar;
+    - the cart's "held sales" link;
+    - checkout's confirm button, under the Scan circle.
+  - `AppNavigationShell` now ends every screen above the bar and the rise
+    (`TAB_BAR_CLEARANCE` = 80 + 28). The per-screen `pb-20`/`pb-24`/`pb-28`/
+    `pb-32` hacks that existed only for the bar are trimmed, so there is no
+    double gap.
+  - While the keyboard is up the bar is hidden and the space is given back.
+    Otherwise the bar rides on the keyboard and covers the field being typed.
+- **Icons.** Credit Sales had no More icon and fell back to the same "grid"
+  as Multi-Shop. It is now "book-open". A test pins one distinct icon per More
+  route.
+- **Dialogs.** All 20 system `Alert.alert` calls (14 files) are now `appAlert`,
+  which keeps the same call shape and renders one branded dialog:
+  - a white card with a round icon: red for a destructive action, amber for a
+    notice, green otherwise;
+  - Bangla text, and the action button on the right;
+  - Back, the backdrop and Cancel all cancel;
+  - requests queue, and the dialog closes before the action runs.
+  - Staff deactivate, activate and remove now say plainly what happens:
+    sign-in stops, past sales stay, and remove cannot be undone (it is a soft
+    delete with no restore in the app).
+  - A source test forbids `Alert.alert` in app/ and components/.
+- **Report dates.** The custom range on Reports was two typed "YYYY-MM-DD"
+  boxes. It now uses the existing calendar `DateField`: the start cannot pass
+  the end, and neither can be in the future.

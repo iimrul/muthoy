@@ -488,7 +488,7 @@ export default function MorningDashboardScreen() {
           </View>
         </View>
 
-      <ScrollView contentContainerClassName="pb-28">
+      <ScrollView contentContainerClassName="pb-8">
         {/* Hero: greeting + plan badge, date, shop switcher, KPI carousel.
             Prototype MorningDashboard order — the badge sits inline with the
             greeting and the shop pill sits under the date, both inside the
@@ -806,7 +806,7 @@ export default function MorningDashboardScreen() {
         </View>
 
         {/* Recent activity */}
-        <View className="gap-3 px-4 pb-24">
+        <View className="gap-3 px-4 pb-8">
           <SectionHeader
             title={t("recentActivity")}
             actionLabel={t("viewAll")}
