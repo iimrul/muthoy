@@ -6336,3 +6336,42 @@ Founder item 2 ("Inventory তে prototype web এ একটা সিস্ট
   - Barcodes: 10 unit cases plus one real-SQLite case (rounded refused,
     UPC-A zero restored, `="…"` kept).
   - Mutation run: 10 of 10 caught, then 6 of 6 for the barcode rules.
+
+### 2026-11-28 — CSV: the right medicine, one company however spelled, and a findable error list
+
+Founder: "দুটোই করো এবং কয়টা ঔষধের কি কি ইনপুট পড়ে নি সব ভুলের তালিকা দেখা
+যাওয়া উচিত, আর না হলে ইউজারের অনেক কষ্ট হয়ে যাবে খুঁজতে কোথায় আসলেই ভুল
+ছিল".
+
+- **Tablet vs capsule** (`domain/inventoryCsvMatch.ts`). Before this, a row
+  joined an existing medicine on name + generic + company alone, so a
+  Telmepress 20 capsule row became a batch of the Telmepress 20 tablet. Now:
+  - a row that names a form joins a medicine of that form, else one with no
+    form recorded, and never one of another form;
+  - a row with no form, where the shop has both forms of that name, is
+    refused with "type কলামে ধরন লিখুন";
+  - a tablet and a capsule of one name in the same file are two medicines.
+- **Company spelling** (`domain/manufacturerName.ts`).
+  - "Square", "Square Pharmaceuticals" and "SQUARE PHARMACEUTICALS LTD." are
+    one company: words that only say "drug company" are dropped.
+  - A near miss ("Sqaure", a typo within one or two letters) is never merged
+    and never refused. It is shown as a warning, so the owner decides before
+    importing. Merging two real companies would put one company's stock
+    under another's medicine.
+- **The error list** (`components/inventory/CsvImportIssues.tsx`):
+  - a summary: "৪৫টা ওষুধের সারির মধ্যে ১২টায় ভুল — এখনো কিছুই যোগ হয়নি";
+  - one card per sheet row, headed by the row number and the medicine's name;
+  - one line per problem: the column in Bangla, the exact value the cell
+    held, and what it needs ("মেয়াদ: “31/12/2027” — তারিখ YYYY-MM-DD আকারে
+    লিখুন");
+  - whole-file problems first;
+  - no cut-off: every bad row is shown, where it used to stop at 50 and say
+    "+N more".
+- **Tests.**
+  - Real SQLite (20): tablet row onto a capsule, capsule onto a capsule, the
+    same company spelled three ways, the near-miss warning, both forms
+    without a type, two forms in one file, the medicine name and value on
+    each problem, and the row count.
+  - Screen (11): the grouped Bangla cards, 80 bad rows all shown, and the
+    warning beside a still-enabled Import.
+  - Mutation run: 8 of 8 caught.
