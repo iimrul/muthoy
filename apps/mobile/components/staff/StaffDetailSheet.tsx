@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
   Text,
   View,
 } from "react-native";
+import { appAlert } from "../ui/AppAlert";
+import { fillTemplate } from "../../i18n/display";
 import { formatMoney } from "@muthoy/utils";
 import { ZERO_PAISA } from "@muthoy/types";
 import { PinPad, useConfirmedPinEntry } from "../ui/PinPad";
@@ -133,11 +134,20 @@ export function StaffDetailSheet({
     setResetOpen(false);
     setError(null);
   };
-  const confirmAction = (label: string, action: () => void) =>
-    Alert.alert(label, staff.name, [
+  // Founder, 2026-11-27: say plainly what happens to this person, in the
+  // app's own dialog — not the bare name under a system Alert.
+  const STAFF_CONFIRM = {
+    deactivate: { title: "staffDeactivateTitle", body: "staffDeactivateBody", label: "deactivate", destructive: true },
+    activate: { title: "staffActivateTitle", body: "staffActivateBody", label: "activate", destructive: false },
+    remove: { title: "staffRemoveTitle", body: "staffRemoveBody", label: "removeStaff", destructive: true },
+  } as const;
+  const confirmAction = (kind: keyof typeof STAFF_CONFIRM, action: () => void) => {
+    const copy = STAFF_CONFIRM[kind];
+    appAlert(t(copy.title), fillTemplate(t(copy.body), { name: staff.name }), [
       { text: t("cancel"), style: "cancel" },
-      { text: label, style: "destructive", onPress: action },
+      { text: t(copy.label), style: copy.destructive ? "destructive" : "default", onPress: action },
     ]);
+  };
   return (
     <Modal visible animationType="slide" onRequestClose={onClose}>
       <View className="flex-1 bg-brand-softGreen">
@@ -232,7 +242,7 @@ export function StaffDetailSheet({
                 disabled={saving}
                 onPress={() =>
                   confirmAction(
-                    staff.isActive ? t("deactivate") : t("activate"),
+                    staff.isActive ? "deactivate" : "activate",
                     () =>
                       void mutate((live) =>
                         staff.isActive
@@ -251,7 +261,7 @@ export function StaffDetailSheet({
                 disabled={saving}
                 onPress={() =>
                   confirmAction(
-                    t("removeStaff"),
+                    "remove",
                     () =>
                       void mutate((live) =>
                         removeStaff(staff.id, session.userId, live),

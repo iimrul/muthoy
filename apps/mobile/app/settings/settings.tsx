@@ -195,9 +195,9 @@ export default function SettingsScreen() {
   // asked "Shift Summary" as its question.
   const logout = () => setLogoutOpen(true);
   return (
-    <View className="flex-1 bg-brand-softGreen pb-20">
+    <View className="flex-1 bg-brand-softGreen">
       <StandardHeader title={t("settings")} onBackPress={() => router.back()} />
-      <ScrollView contentContainerClassName="gap-4 p-4 pb-28">
+      <ScrollView contentContainerClassName="gap-4 p-4 pb-8">
         <SyncExposureStatus key={session.shopId + ":" + session.userId} session={session} />
         <RecoveryBackupSetup key={"recovery:" + session.shopId + ":" + session.userId} session={session} />
         {error ? <Text className="text-error">{error}</Text> : null}

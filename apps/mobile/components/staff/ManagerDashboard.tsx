@@ -239,7 +239,7 @@ export function ManagerDashboard() {
 
   return (
     <View className="flex-1 bg-brand-softGreen">
-      <ScrollView contentContainerClassName="gap-4 p-4 pb-28">
+      <ScrollView contentContainerClassName="gap-4 p-4 pb-8">
         <View className="-m-4 mb-0 gap-2 bg-brand-green p-5 pb-8" style={{ paddingTop: topInset + 20 }}>
           <View className="flex-row items-start justify-between">
             <View className="flex-1">

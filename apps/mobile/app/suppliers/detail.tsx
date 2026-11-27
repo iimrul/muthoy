@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { appAlert } from '../../components/ui/AppAlert';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -175,7 +176,7 @@ export default function SupplierDetailScreen() {
 
   const handleArchive = useCallback(() => {
     if (!session || !isAllowed || !supplierId) return;
-    Alert.alert(t('archiveSupplierTitle'), t('archiveSupplierBody'), [
+    appAlert(t('archiveSupplierTitle'), t('archiveSupplierBody'), [
       { text: t('cancel'), style: 'cancel' },
       {
         text: t('archiveLabel'), style: 'destructive', onPress: () => {

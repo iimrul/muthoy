@@ -1,7 +1,8 @@
 import { usePlan } from "../../state/usePlan";
 import { canUseFeature } from "../../domain/entitlements";
 import { useCallback, useState } from "react";
-import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { appAlert } from "../../components/ui/AppAlert";
 import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { medicineMetadataSchema } from "@muthoy/validation";
@@ -78,7 +79,7 @@ export default function EditMedicineScreen() {
       guard.ifLive(() => router.back());
     } catch (caught) {
       if (!guard.isStale())
-        Alert.alert(
+        appAlert(
           t("updateMedicineFailedLabel"),
           caught instanceof Error ? caught.message : t("tryAgainLabel"),
         );
@@ -100,7 +101,7 @@ export default function EditMedicineScreen() {
       guard.ifLive(() => router.dismissTo("/inventory"));
     } catch (caught) {
       if (!guard.isStale())
-        Alert.alert(
+        appAlert(
           t("medicineArchiveFailedTitle"),
           caught instanceof Error
             ? caught.message
@@ -114,7 +115,7 @@ export default function EditMedicineScreen() {
         title={t("editMedicineTitle")}
         onBackPress={() => router.back()}
       />
-      <ScrollView contentContainerClassName="gap-4 p-4 pb-32">
+      <ScrollView contentContainerClassName="gap-4 p-4 pb-8">
         {isAllowed ? <Pressable onPress={() => router.push({ pathname: "/inventory/add-batch" as never, params: { medicineId } })}
           accessibilityRole="button" accessibilityLabel={t("addBatchLabel")} className="rounded-xl bg-brand-green p-4">
           <Text className="font-sans-semibold text-white">{t("addBatchLabel")}</Text>
@@ -273,11 +274,11 @@ export default function EditMedicineScreen() {
           accessibilityRole="button"
           accessibilityLabel={t("archiveMedicineLabel")}
           onPress={() =>
-            Alert.alert(
+            appAlert(
               t("archiveMedicineTitle"),
               t("medicineArchiveRequirementsLabel"),
               [
-                { text: t("cancelLabel") },
+                { text: t("cancelLabel"), style: "cancel" },
                 {
                   text: t("archiveLabel"),
                   style: "destructive",

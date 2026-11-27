@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { appAlert } from '../../components/ui/AppAlert';
 import Feather from '@expo/vector-icons/Feather';
 import { router } from 'expo-router';
 import { AccessDenied } from '../../components/ui/AccessDenied';
@@ -143,7 +144,7 @@ export default function DevicesScreen() {
 
   const confirm = useCallback(
     (title: string, body: string, run: () => void, confirmLabel?: string) => {
-      Alert.alert(title, body, [
+      appAlert(title, body, [
         { text: t('cancel'), style: 'cancel' },
         {
           text: confirmLabel ?? t('devicesRevokeBinding'),
@@ -163,7 +164,7 @@ export default function DevicesScreen() {
   return (
     <View className="flex-1 bg-brand-softGreen">
       <StandardHeader title={t('devicesTitle')} onBackPress={() => router.back()} />
-      <ScrollView contentContainerClassName="gap-3 p-4 pb-28">
+      <ScrollView contentContainerClassName="gap-3 p-4 pb-8">
         <View className="rounded-2xl border border-[#FCD34D] bg-[#FEF3C7] p-3">
           <Text className="font-sans text-xs text-[#92400E]">{t('devicesSubtitle')}</Text>
         </View>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { appAlert } from "../../components/ui/AppAlert";
 import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
@@ -404,7 +405,7 @@ export default function CheckoutScreen() {
       router.dismissTo("/sale");
     } catch {
       if (!guard.isStale())
-        Alert.alert(
+        appAlert(
           t("couldNotHoldSaleLabel"),
           t("tryAgainLabel"),
         );
@@ -460,7 +461,7 @@ export default function CheckoutScreen() {
       router.dismissTo("/sale");
     } catch {
       if (!guard.isStale())
-        Alert.alert(
+        appAlert(
           t("couldNotCancelSaleLabel"),
           t("tryAgainLabel"),
         );

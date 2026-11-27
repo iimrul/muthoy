@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
+import { appAlert } from "../../components/ui/AppAlert";
 import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router, useLocalSearchParams } from "expo-router";
 import { parseTakaTextToPaisa } from "@muthoy/utils";
@@ -66,7 +67,7 @@ export default function EditBatchScreen() {
       guard.ifLive(() => router.back());
     } catch (caught) {
       if (!guard.isStale())
-        Alert.alert(
+        appAlert(
           t("updateBatchFailedLabel"),
           caught instanceof Error ? caught.message : t("tryAgainLabel"),
         );
@@ -80,7 +81,7 @@ export default function EditBatchScreen() {
         title={t("editBatchTitle")}
         onBackPress={() => router.back()}
       />
-      <ScrollView contentContainerClassName="gap-4 p-4 pb-32">
+      <ScrollView contentContainerClassName="gap-4 p-4 pb-8">
         <View className="gap-4 rounded-2xl bg-white p-4 shadow-sm">
           <View className="flex-row items-center gap-2">
             <View className="h-9 w-9 items-center justify-center rounded-lg bg-brand-softGreen">
@@ -293,11 +294,11 @@ export default function EditBatchScreen() {
           accessibilityRole="button"
           accessibilityLabel={t("archiveBatchLabel")}
           onPress={() =>
-            Alert.alert(
+            appAlert(
               t("archiveBatchTitle"),
               t("medicineArchiveRequirementsLabel"),
               [
-                { text: t("cancelLabel") },
+                { text: t("cancelLabel"), style: "cancel" },
                 {
                   text: t("archiveLabel"),
                   style: "destructive",

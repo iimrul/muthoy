@@ -23,7 +23,7 @@ export default function AddBatchScreen() {
     return <AccessDenied />;
   return <View className="flex-1 bg-brand-softGreen">
     <StandardHeader title={t(receipt ? "supplierReceiptLabel" : "addBatchLabel")} onBackPress={() => router.back()} />
-    <ScrollView contentContainerClassName="gap-4 p-4 pb-32" keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerClassName="gap-4 p-4 pb-8" keyboardShouldPersistTaps="handled">
       {receipt
         ? <ManualEntryForm key={session.shopId + ":" + session.userId + ":" + medicineId} session={session}
           existingMedicineId={medicineId} onSaved={() => router.back()} />

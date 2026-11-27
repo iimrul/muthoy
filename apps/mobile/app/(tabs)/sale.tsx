@@ -470,7 +470,7 @@ export default function SaleEntryScreen() {
       {cartCount > 0 ? (
         <Pressable
           onPress={() => router.push("/sale/checkout")}
-          className="absolute bottom-24 right-4 items-center gap-1 rounded-2xl border-2 border-brand-deepGreen bg-white px-4 py-3"
+          className="absolute bottom-4 right-4 items-center gap-1 rounded-2xl border-2 border-brand-deepGreen bg-white px-4 py-3"
         >
           <View className="flex-row items-center gap-1.5">
             <Feather name="shopping-cart" size={14} color="#006948" />

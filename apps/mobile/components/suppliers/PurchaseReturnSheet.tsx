@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { appAlert } from '../ui/AppAlert';
 import { AppTextInput as TextInput } from '../ui/AppTextInput';
 import { ZERO_PAISA } from '@muthoy/types';
 import { formatMoney } from '@muthoy/utils';
@@ -16,8 +17,8 @@ import { useI18n } from '../../state/localeStore';
 // SupplierPaymentSheet.tsx (the only real precedent for a supplier-money
 // bottom sheet in this codebase — see the approved Group 7 UI/UX spec):
 // same Modal/backdrop/rounded-t-3xl shell, same font-mono-for-money and
-// raw-glyph conventions, same inline-error-never-Alert rule for validation.
-// Alert.alert is reserved for the final destructive confirm, mirroring Void
+// raw-glyph conventions, same inline-error-never-dialog rule for validation.
+// appAlert (the branded dialog) is reserved for the final destructive confirm, mirroring Void
 // (invoice-detail.tsx) and Archive (detail.tsx) exactly — a return is just
 // as irreversible as those two.
 
@@ -125,7 +126,7 @@ export function PurchaseReturnSheet({
       setError(t('reasonRequiredLabel'));
       return;
     }
-    Alert.alert(
+    appAlert(
       t('confirmReturnTitle'),
       t('confirmReturnBody'),
       [

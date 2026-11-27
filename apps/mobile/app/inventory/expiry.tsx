@@ -1,7 +1,6 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   SectionList,
@@ -9,6 +8,7 @@ import {
   View,
   type ViewStyle,
 } from "react-native";
+import { appAlert } from "../../components/ui/AppAlert";
 import { router } from "expo-router";
 import Feather from "@expo/vector-icons/Feather";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
@@ -464,7 +464,7 @@ function DiscountSheet({ target, onClose, onDone }: {
       reset();
       onDone();
     } catch (caught) {
-      Alert.alert(t(failureTitle), userFacingError(caught, "pleaseTryAgain", t));
+      appAlert(t(failureTitle), userFacingError(caught, "pleaseTryAgain", t));
     } finally {
       setIsBusy(false);
     }

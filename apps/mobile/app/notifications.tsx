@@ -1,13 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
   Text,
   View,
 } from "react-native";
+import { appAlert } from "../components/ui/AppAlert";
 import { router, type Href, useFocusEffect } from "expo-router";
 import { EmptyState } from "../components/ui/EmptyState";
 import { StandardHeader } from "../components/ui/StandardHeader";
@@ -135,7 +135,7 @@ export default function NotificationCenterScreen() {
     }
   };
   const dismiss = (item: Notification) =>
-    Alert.alert(t("delete"), localizeStoredText(item.title, locale), [
+    appAlert(t("delete"), localizeStoredText(item.title, locale), [
       { text: t("cancel"), style: "cancel" },
       {
         text: t("delete"),
@@ -170,7 +170,7 @@ export default function NotificationCenterScreen() {
   const unread = items.filter((item) => !item.isRead).length;
 
   return (
-    <View className="flex-1 bg-brand-softGreen pb-20">
+    <View className="flex-1 bg-brand-softGreen">
       <StandardHeader
         title={t("notifications")}
         onBackPress={() => router.back()}
@@ -209,7 +209,7 @@ export default function NotificationCenterScreen() {
               onRefresh={() => void reload()}
             />
           }
-          contentContainerClassName="flex-grow gap-4 p-4 pb-28"
+          contentContainerClassName="flex-grow gap-4 p-4 pb-8"
         >
           {!items.length ? (
             <EmptyState

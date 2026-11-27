@@ -65,6 +65,8 @@ vi.mock('react-native', () => {
     }
   }
   return {
+    // The shell hides its bar while the keyboard is up.
+    Keyboard: { addListener: () => ({ remove: () => undefined }) },
     StyleSheet: { absoluteFill: { position: 'absolute' }, create: (styles: unknown) => styles },
     View: ({ children, pointerEvents, importantForAccessibility, accessibilityElementsHidden }: StubProps) =>
       createElement(

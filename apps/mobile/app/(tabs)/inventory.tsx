@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { createLatestRequestGuard } from "../../domain/latestRequestGuard";
-import { Alert, FlatList, Pressable, ScrollView, Text, View } from "react-native";
+import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
+import { appAlert } from "../../components/ui/AppAlert";
 import { AppTextInput as TextInput } from "../../components/ui/AppTextInput";
 import { router } from "expo-router";
 import { useFocusRefresh } from "../../navigation/useFocusRefresh";
@@ -137,7 +138,7 @@ export default function InventoryScreen() {
   };
 
   const handleDelete = (medicine: MedicineListRow) => {
-    Alert.alert(
+    appAlert(
       t("deleteLabel") + "?",
       medicine.name,
       [
@@ -157,7 +158,7 @@ export default function InventoryScreen() {
               .then(() => guard.ifLive(reloadMedicines))
               .catch((caught: unknown) =>
                 guard.ifLive(() =>
-                  Alert.alert(
+                  appAlert(
                     t("medicineArchiveFailedTitle"),
                     userFacingError(
                       caught,
@@ -288,7 +289,7 @@ export default function InventoryScreen() {
         data={visible}
         keyExtractor={(item) => item.medicineId}
         className="flex-1"
-        contentContainerClassName="flex-grow gap-4 px-4 pb-24 pt-0"
+        contentContainerClassName="flex-grow gap-4 px-4 pb-8 pt-0"
         onRefresh={reloadMedicines}
         refreshing={false}
         ListEmptyComponent={

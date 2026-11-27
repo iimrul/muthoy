@@ -192,4 +192,13 @@ describe('B3 report/export/printer final states',()=>{
     fireEvent.click(screen.getByText('Retry'));await waitFor(()=>expect(state.scan).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('No BLE printers found')).toBeTruthy();
   });
+
+  // Founder, 2026-11-27: the custom range was typed as "YYYY-MM-DD" text.
+  it('picks the custom range from the calendar, never a typed field', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync('apps/mobile/app/reports/report.tsx', 'utf8');
+    expect(source).not.toMatch(/<TextInput\b/);
+    expect(source).toMatch(/<DateField\b/);
+    expect(source).toMatch(/maxDate=\{field\.maxDate\}/);
+  });
 });
