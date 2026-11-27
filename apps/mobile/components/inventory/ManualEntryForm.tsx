@@ -235,12 +235,6 @@ export function ManualEntryForm({
         setErrorMessage(t("fillRequiredFieldsLabel"));
         return;
       }
-      // Item 12: the Owner may leave the supplier out (opening stock). A staff
-      // member still needs one until the server accepts their supplier-less add.
-      if (!supplierId && session.role !== "owner") {
-        setErrorMessage(t("staffNeedsSupplierLabel"));
-        return;
-      }
       if (
         !Number.isInteger(input.firstBatch.quantity) ||
         input.firstBatch.quantity < 1
@@ -578,10 +572,13 @@ export function ManualEntryForm({
           session.role === "owner" ? handleCreateSupplier : undefined
         }
         loadManufacturerSuggestions={(query) => listManufacturerSuggestions(session.shopId, query)}
-        isOptional={session.role === "owner"}
+        // Item 12 / decision B2: optional for the Owner AND for a staff member
+        // with inventory_add (this form's own gate); without a supplier the
+        // stock is opening stock (server: migration 45 for Staff).
+        isOptional
       />
 
-      {!supplierId && session.role === "owner" ? (
+      {!supplierId ? (
         <View className="flex-row gap-2 rounded-xl bg-brand-softGreen p-3">
           <Feather name="info" size={16} color={colors.brandGreen} />
           <Text className="flex-1 font-sans text-xs text-richBlack">{t("openingStockHint")}</Text>

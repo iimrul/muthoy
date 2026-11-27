@@ -360,12 +360,16 @@ describe("The supplier is optional when the Owner adds a medicine (item 12, 2026
     expect(deps.addBatchWithPurchase).not.toHaveBeenCalled();
   });
 
-  it("still asks a staff member to choose a supplier, and writes nothing", async () => {
+  it("lets a staff member with Add Medicine save without a supplier too (decision B2)", async () => {
     renderManualForRestock("staff");
     await fillNewMedicineWithoutSupplier();
+    expect(screen.getByText("Supplier (optional)")).toBeTruthy();
+    expect(screen.getByText(/added as opening stock/)).toBeTruthy();
     await act(async () => { fireEvent.click(screen.getByLabelText("Save")); });
-    expect(await screen.findByText(/adding stock without one is for the owner/i)).toBeTruthy();
-    expect(openingDeps.createOpeningStock).not.toHaveBeenCalled();
+    expect(openingDeps.createOpeningStock).toHaveBeenCalledWith(expect.objectContaining({
+      actorUserId: SESSION.userId,
+      medicine: expect.objectContaining({ name: "Telmepress 20" }),
+    }));
     expect(deps.createMedicineWithPurchase).not.toHaveBeenCalled();
   });
 
