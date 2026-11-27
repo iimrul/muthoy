@@ -180,6 +180,7 @@ vi.mock('../../db/saleDrafts', () => ({
 vi.mock('../../native/notifications', () => ({
   runNotificationChecks: deps.runNotificationChecks,
 }));
+vi.mock('../../native/scanSound', () => ({ playSaleBeep: vi.fn(), playScanBeep: vi.fn() }));
 vi.mock('../../sync', () => ({
   triggerSyncNow: deps.triggerSyncNow,
   stopSyncEngine: deps.stopSyncEngine,

@@ -378,6 +378,14 @@ export interface SaleQuoteAllocation {
   batchId: string;
   quantity: number;
   unitPrice: Paisa;
+  /**
+   * Which medicine the units are. When every quoted row carries it, a quote
+   * is compared the way the customer sees it — how many of each medicine at
+   * which unit price — so FEFO drawing the same units from a second batch at
+   * the same price is not a "change" (see customerQuoteDiffers). Older
+   * callers omit it and keep the exact per-batch comparison.
+   */
+  medicineId?: string;
 }
 
 export interface SaleTransactionResult {
@@ -403,10 +411,44 @@ export class SaleQuoteChangedError extends Error {
   }
 }
 
+/** The exact per-batch quote. `medicineId` is deliberately left out so a row
+ *  that carries it compares equal to the same row from an older caller. */
 function quoteIdentity(rows: readonly SaleQuoteAllocation[]): string {
   return JSON.stringify(
-    [...rows].sort((a, b) => a.batchId.localeCompare(b.batchId)),
+    [...rows]
+      .sort((a, b) => a.batchId.localeCompare(b.batchId))
+      .map(({ batchId, quantity, unitPrice }) => ({ batchId, quantity, unitPrice })),
   );
+}
+
+/**
+ * Did the quote change in a way the CUSTOMER would notice?
+ *
+ * Device test 2026-11-27: the cart quoted 12 units on the FEFO batch, which
+ * held 1; the sale correctly drew 1 + 11 from two batches at the same price
+ * and the same total — and still forced "price or stock changed, confirm
+ * again" on every such sale. What the customer is quoted is the quantity of
+ * each medicine at each unit price; which batch supplies it is not. A real
+ * change (a different price, a promotion that ended, fewer units available)
+ * still differs here, and the total is compared separately as before.
+ */
+function customerQuoteDiffers(
+  quoted: readonly SaleQuoteAllocation[],
+  refreshed: readonly SaleQuoteAllocation[],
+): boolean {
+  if (quoted.some((row) => !row.medicineId)) {
+    return quoteIdentity(quoted) !== quoteIdentity(refreshed);
+  }
+  return customerQuote(quoted) !== customerQuote(refreshed);
+}
+
+function customerQuote(rows: readonly SaleQuoteAllocation[]): string {
+  const quantities = new Map<string, number>();
+  for (const row of rows) {
+    const key = `${row.medicineId ?? `batch:${row.batchId}`}|${row.unitPrice}`;
+    quantities.set(key, (quantities.get(key) ?? 0) + row.quantity);
+  }
+  return JSON.stringify([...quantities].sort(([a], [b]) => a.localeCompare(b)));
 }
 
 function lineQuantity(line: SaleTransactionInput["lines"][number]): number {
@@ -647,12 +689,12 @@ export async function createSaleTransaction(
         batchId: item.batchId,
         quantity: item.qty,
         unitPrice: item.unitPrice,
+        medicineId: item.medicineId,
       }));
       const quoteChanged =
         (input.quotedTotal !== undefined && input.quotedTotal !== total) ||
         (input.quotedAllocation !== undefined &&
-          quoteIdentity(input.quotedAllocation) !==
-            quoteIdentity(refreshedAllocation));
+          customerQuoteDiffers(input.quotedAllocation, refreshedAllocation));
       const confirmedQuoteMatches =
         input.confirmedQuote?.total === total &&
         quoteIdentity(input.confirmedQuote.allocation) ===

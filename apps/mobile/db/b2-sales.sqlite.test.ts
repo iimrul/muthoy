@@ -335,6 +335,112 @@ describe("B2 sale transaction", () => {
       .run(batchId);
   });
 
+  describe("a FEFO spill is not a quote change the customer would notice (G4, 2026-11-27)", () => {
+    function seedMedicine(id: string, batches: { id: string; expiry: string; price: number; stock: number }[]): void {
+      const timestamp = now();
+      db.insert(schema.medicines)
+        .values({ id, shopId: "shop", name: id, createdAt: timestamp, updatedAt: timestamp })
+        .run();
+      for (const batch of batches) {
+        db.insert(schema.batches)
+          .values({
+            id: batch.id, batchNo: batch.id, expiryDate: batch.expiry,
+            purchasePrice: asPaisa(100), salePrice: asPaisa(batch.price), stock: 0,
+            shopId: "shop", medicineId: id, createdAt: timestamp, updatedAt: timestamp,
+          })
+          .run();
+        db.insert(schema.inventoryMovements)
+          .values({
+            id: `${batch.id}-opening`, shopId: "shop", batchId: batch.id, changeQty: batch.stock,
+            reason: "purchase", createdBy: "owner", createdAt: timestamp, updatedAt: timestamp,
+          })
+          .run();
+      }
+    }
+    const far = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+    it("sells 12 quoted on the 1-left batch as 1 + 11 at the same price without a re-confirm", async () => {
+      seedMedicine("same-price", [
+        { id: "sp-early", expiry: far(400), price: 200, stock: 1 },
+        { id: "sp-late", expiry: far(500), price: 200, stock: 20 },
+      ]);
+      const result = await createSaleTransaction({
+        shopId: "shop",
+        staffId: "owner",
+        isStillActive: ALWAYS_LIVE,
+        payment: { type: "cash", tendered: asPaisa(5000) },
+        quotedTotal: asPaisa(2400),
+        // Exactly what the cart sends: one line on the FEFO batch.
+        quotedAllocation: [{ batchId: "sp-early", quantity: 12, unitPrice: asPaisa(200), medicineId: "same-price" }],
+        lines: [{ medicineId: "same-price", quantity: 12 }],
+      });
+      expect(result.total).toBe(2400);
+      const items = sqlite
+        .prepare("SELECT batch_id AS batch, qty FROM sale_items WHERE sale_id = ? ORDER BY qty")
+        .all(result.saleId);
+      expect(items).toEqual([{ batch: "sp-early", qty: 1 }, { batch: "sp-late", qty: 11 }]);
+    });
+
+    it("still asks again when the second batch costs the customer more", async () => {
+      seedMedicine("dear-late", [
+        { id: "dl-early", expiry: far(400), price: 200, stock: 1 },
+        { id: "dl-late", expiry: far(500), price: 250, stock: 20 },
+      ]);
+      const salesBefore = (sqlite.prepare("SELECT count(*) AS n FROM sales").get() as { n: number }).n;
+      await expect(createSaleTransaction({
+        shopId: "shop",
+        staffId: "owner",
+        isStillActive: ALWAYS_LIVE,
+        payment: { type: "cash", tendered: asPaisa(5000) },
+        quotedAllocation: [{ batchId: "dl-early", quantity: 12, unitPrice: asPaisa(200), medicineId: "dear-late" }],
+        lines: [{ medicineId: "dear-late", quantity: 12 }],
+      })).rejects.toBeInstanceOf(SaleQuoteChangedError);
+      expect((sqlite.prepare("SELECT count(*) AS n FROM sales").get() as { n: number }).n).toBe(salesBefore);
+    });
+
+    it("keeps the exact per-batch check for a caller that sends no medicineId", async () => {
+      seedMedicine("legacy-caller", [
+        { id: "lc-early", expiry: far(400), price: 200, stock: 1 },
+        { id: "lc-late", expiry: far(500), price: 200, stock: 20 },
+      ]);
+      await expect(createSaleTransaction({
+        shopId: "shop",
+        staffId: "owner",
+        isStillActive: ALWAYS_LIVE,
+        payment: { type: "cash", tendered: asPaisa(5000) },
+        quotedAllocation: [{ batchId: "lc-early", quantity: 12, unitPrice: asPaisa(200) }],
+        lines: [{ medicineId: "legacy-caller", quantity: 12 }],
+      })).rejects.toBeInstanceOf(SaleQuoteChangedError);
+      // …and its exact per-batch quote still goes through unchanged.
+      const exact = await createSaleTransaction({
+        shopId: "shop",
+        staffId: "owner",
+        isStillActive: ALWAYS_LIVE,
+        payment: { type: "cash", tendered: asPaisa(5000) },
+        quotedAllocation: [
+          { batchId: "lc-early", quantity: 1, unitPrice: asPaisa(200) },
+          { batchId: "lc-late", quantity: 11, unitPrice: asPaisa(200) },
+        ],
+        lines: [{ medicineId: "legacy-caller", quantity: 12 }],
+      });
+      expect(exact.total).toBe(2400);
+    });
+
+    it("still asks again when the quantity differs from the quote", async () => {
+      seedMedicine("short-now", [
+        { id: "sn-only", expiry: far(400), price: 200, stock: 3 },
+      ]);
+      await expect(createSaleTransaction({
+        shopId: "shop",
+        staffId: "owner",
+        isStillActive: ALWAYS_LIVE,
+        payment: { type: "cash", tendered: asPaisa(5000) },
+        quotedAllocation: [{ batchId: "sn-only", quantity: 2, unitPrice: asPaisa(200), medicineId: "short-now" }],
+        lines: [{ medicineId: "short-now", quantity: 3 }],
+      })).rejects.toBeInstanceOf(SaleQuoteChangedError);
+    });
+  });
+
   it("restores prescription requirements from a held cart", async () => {
     sqlite
       .prepare("UPDATE medicines SET requires_prescription = 1 WHERE id = 'medicine'")
